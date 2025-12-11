@@ -43,7 +43,7 @@ class CPSATSolver:
             - log_progress: bool, whether to log progress (default False)
             - log_subsolvers: bool, whether to log subsolver statistics (default False)
             - guaranteed_tier_fraction: float in [0.0, 1.0], fraction of time guaranteed for all tiers (default 0.6)
-            - disr_fraction_of_tier: float in [0.0, 1.0], fraction of tier time for moves (default 0.5)
+            - move_fraction_of_tier: float in [0.0, 1.0], fraction of tier time for moves (default 0.5)
             - gap_limit: float in [0.0, 1.0], relative gap limit (default 0.00)
             - num_lower_priorities: int >= 0, number of *lowest* distinct priorities to optimize over (0 = all priorities, default)
         Returns a dict with keys:
@@ -71,7 +71,7 @@ class CPSATSolver:
         ignore_affinity          = bool(instance.get("ignore_affinity", True)) # TODO: consider to use this
         log_progress             = bool(instance.get("log_progress", False))
         guaranteed_tier_fraction = float(instance.get("guaranteed_tier_fraction", 0.6)) # guaranteed fraction of total time for all tiers. 0.50 means 50% of total time is guaranteed for all tiers (divided equally), the rest is unreserved and can be used greedily by higher tiers. Default value of 0.6 is estimated through experiments.
-        disr_fraction_of_tier    = float(instance.get("disr_fraction_of_tier", 0.5)) # of a tier's budget: 30% disruption, 70% placement. If you want to let placement stage use all time, set to 0.0 -- the rest is then for moves. Default value of 0.5 is estimated through experiments.
+        move_fraction_of_tier    = float(instance.get("move_fraction_of_tier", 0.5)) # of a tier's budget: 30% disruption, 70% placement. If you want to let placement stage use all time, set to 0.0 -- the rest is then for moves. Default value of 0.5 is estimated through experiments.
 
         #################################################
         # --- Solver setup ------------------------------
@@ -418,7 +418,7 @@ class CPSATSolver:
             if tier_cap <= 1e-3:
                 remaining_tiers = max(0, remaining_tiers - 1)
                 continue
-            place_cap = tier_cap * (1.0 - disr_fraction_of_tier) # split priority budget into place/moves by MOVES_SHARE
+            place_cap = tier_cap * (1.0 - move_fraction_of_tier) # split priority budget into place/moves by MOVES_SHARE
 
             # --- PLACEMENT stage ---
             # Objective:
