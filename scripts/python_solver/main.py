@@ -118,7 +118,7 @@ class CPSATSolver:
             - log_progress: bool, whether to log progress (default False)
             - log_subsolvers: bool, whether to log subsolver statistics (default False)
             - guaranteed_tier_fraction: float in [0.0, 1.0], fraction of time guaranteed for all tiers (default 0.6)
-            - disr_fraction_of_tier: float in [0.0, 1.0], fraction of tier time for moves (default 0.5)
+            - move_fraction_of_tier: float in [0.0, 1.0], fraction of tier time for moves (default 0.5)
             - gap_limit: float in [0.0, 1.0], relative gap limit (default 0.00)
             - num_lower_priorities: int >= 0, number of *lowest* distinct priorities to optimize over (0 = all priorities, default)
         Returns a dict with keys:
