@@ -1,3 +1,4 @@
+// common_helpers.go
 package mypriorityoptimizer
 
 import (
@@ -8,7 +9,7 @@ import (
 )
 
 // -------------------------
-// Hooks
+// Test Hooks
 // -------------------------
 
 var nowUnixNano = func() int64 { return time.Now().UnixNano() }

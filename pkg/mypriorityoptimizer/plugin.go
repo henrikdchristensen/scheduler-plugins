@@ -66,7 +66,7 @@ func newFromHandle(
 	pl := &SharedState{
 		Handle:             fullHandle,
 		Client:             client,
-		BlockedWhileActive: newSafePodSet("BlockedWhileActive"),
+		BlockedWhileActive: newPodSet("BlockedWhileActive"),
 	}
 
 	// Ensure at least one solver is enabled

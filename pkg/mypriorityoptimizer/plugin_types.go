@@ -22,7 +22,7 @@ type SharedState struct {
 	// Whether optimization is in progress
 	OptimizationInProgress atomic.Bool
 	// Set of blocked pods
-	BlockedWhileActive *SafePodSet
+	BlockedWhileActive *PodSet
 	// Whether the plugin is ready (caches warmed up and usable node found)
 	PluginReady atomic.Bool
 }

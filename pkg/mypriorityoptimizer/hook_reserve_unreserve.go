@@ -57,8 +57,8 @@ func (pl *SharedState) Reserve(ctx context.Context, st fwk.CycleState, pending *
 		return fwk.NewStatus(fwk.Unschedulable, msg(stage, "node not tracked"))
 	}
 
-	// Try to consume workload quota for this pod on this node.
-	// We continue to try until we succeed or the quota is exhausted.
+	// Try to consume workload quota for this pod on this node. We continue to
+	// try until we succeed or the quota is exhausted.
 	for {
 		currentCnt := workloadCntForNode.Load()
 		if currentCnt <= 0 {
@@ -77,8 +77,9 @@ func (pl *SharedState) Reserve(ctx context.Context, st fwk.CycleState, pending *
 // Unreserve
 // -------------------------
 
-// Unreserve is called to release any reserved resources for a pod on a specific node.
-// It is used, here, to return workload quota if the pod could not be scheduled.
+// Unreserve is called to release any reserved resources for a pod on a specific
+// node. It is used, here, to return workload quota if the pod could not be
+// scheduled.
 // CHECKED
 func (pl *SharedState) Unreserve(ctx context.Context, st fwk.CycleState, pending *v1.Pod, _ string) {
 	stage := "Unreserve"

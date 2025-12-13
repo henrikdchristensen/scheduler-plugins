@@ -72,7 +72,6 @@ func (m ModeType) String() string {
 	case ModeManualBlocking:
 		return "ManualBlocking"
 	default:
-		// Preserve previous behavior (unknown -> "Periodic") to avoid changing logs/tests.
 		return "Periodic"
 	}
 }

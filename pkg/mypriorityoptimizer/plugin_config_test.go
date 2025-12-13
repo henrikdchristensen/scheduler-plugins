@@ -32,7 +32,7 @@ func TestPersistPluginConfig_CreatesAndUpdatesConfigMap(t *testing.T) {
 
 	pl := &SharedState{
 		Client:             client,
-		BlockedWhileActive: newSafePodSet("test"),
+		BlockedWhileActive: newPodSet("test"),
 	}
 
 	// First call should create the ConfigMap.

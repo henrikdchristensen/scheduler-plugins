@@ -1,0 +1,127 @@
+// pod_set_helpers.go
+package mypriorityoptimizer
+
+import (
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
+)
+
+// -------------------------
+// newPodSet
+// -------------------------
+
+// newPodSet creates a new PodSet.
+// CHECKED
+func newPodSet(name string) *PodSet {
+	return &PodSet{Name: name, m: make(map[types.UID]SolverPod)}
+}
+
+// -------------------------
+// doesPodSetExist
+// -------------------------
+
+// doesPodSetExist returns true if pod set is non-nil and has at least one pod.
+// CHECKED
+func doesPodSetExist(podSet *PodSet) bool {
+	if podSet == nil {
+		return false
+	}
+	return podSet.Size() > 0
+}
+
+// -------------------------
+// prunePodSet
+// -------------------------
+
+// prunePending removes from `set` any pod that is no longer pending. It returns
+// the number of removed pods.
+// CHECKED
+func (pl *SharedState) prunePodSet(podSet *PodSet) int {
+	if !doesPodSetExist(podSet) {
+		return 0
+	}
+	snap := podSet.Snapshot()
+	removed := 0
+	for uid, key := range snap {
+		cur, err := pl.getPodByName(key.Namespace, key.Name)
+		switch {
+		case apierrors.IsNotFound(err):
+			podSet.RemovePod(uid)
+			removed++
+		case err != nil:
+			// conservatively keep on lister error
+		default:
+			// drop if recreated, terminating, or not pending anymore
+			if !isSamePodUID(cur.UID, uid) || isPodDeleted(cur) || getPodAssignedNodeName(cur) != "" {
+				podSet.RemovePod(uid)
+				removed++
+			}
+		}
+	}
+	if removed > 0 {
+		klog.V(MyV).InfoS("pruned stale entries", "set", podSet.Name, "removed", removed)
+	}
+	return removed
+}
+
+// -------------------------
+// AddPod
+// -------------------------
+
+// AddPod adds a pod to the set. Use mutex to protect the map such that only one
+// goroutine can modify the map at a time.
+// CHECKED
+func (s *PodSet) AddPod(p *v1.Pod) {
+	if p == nil {
+		return
+	}
+	s.mu.Lock()
+	s.m[p.UID] = SolverPod{UID: p.UID, Namespace: p.Namespace, Name: p.Name}
+	s.mu.Unlock()
+}
+
+// -------------------------
+// RemovePod
+// -------------------------
+
+// RemovePod removes a pod from the set. Use mutex to protect the map such that
+// only one goroutine can modify the map at a time.
+// CHECKED
+func (s *PodSet) RemovePod(uid types.UID) {
+	s.mu.Lock()
+	delete(s.m, uid)
+	s.mu.Unlock()
+}
+
+// -------------------------
+// Size
+// -------------------------
+
+// Size returns the number of pods in the set. Use mutex so that we can read the
+// map safely.
+// CHECKED
+func (s *PodSet) Size() int {
+	s.mu.RLock()
+	n := len(s.m)
+	s.mu.RUnlock()
+	return n
+}
+
+// -------------------------
+// Snapshot
+// -------------------------
+
+// Snapshot returns a snapshot of the current pods in the set. Use mutex so that
+// we can read the map safely.
+// CHECKED
+func (s *PodSet) Snapshot() map[types.UID]SolverPod {
+	s.mu.RLock()
+	out := make(map[types.UID]SolverPod, len(s.m))
+	for k, v := range s.m {
+		out[k] = v
+	}
+	s.mu.RUnlock()
+	return out
+}

@@ -103,7 +103,7 @@ func TestPostFilter(t *testing.T) {
 				postFilterRunOptimization = origRun
 			})
 
-			pl := &SharedState{BlockedWhileActive: newSafePodSet("blocked")}
+			pl := &SharedState{BlockedWhileActive: newPodSet("blocked")}
 			if tt.setupPL != nil {
 				tt.setupPL(pl)
 			}

@@ -25,7 +25,7 @@ func (pl *SharedState) PreEnqueue(ctx context.Context, pending *v1.Pod) *fwk.Sta
 
 	// 2) If caches are not warm, block the pod. It will be re-queued when ready.
 	if !pl.PluginReady.Load() {
-		pl.BlockedWhileActive.AddPodSafely(pending)
+		pl.BlockedWhileActive.AddPod(pending)
 		klog.V(MyV).Info(msg(stage, "caches not warmed up yet; waiting"))
 		return fwk.NewStatus(fwk.Pending, msg(stage, "caches not warmed up yet; waiting"))
 	}
@@ -34,7 +34,7 @@ func (pl *SharedState) PreEnqueue(ctx context.Context, pending *v1.Pod) *fwk.Sta
 	if ap := pl.getActivePlan(); ap != nil {
 		if !pl.isPodAllowedByPlan(pending) {
 			// Plan exists and pod is NOT allowed by the plan -> block.
-			pl.BlockedWhileActive.AddPodSafely(pending)
+			pl.BlockedWhileActive.AddPod(pending)
 			klog.V(MyV).InfoS(
 				msg(stage, InfoActivePlanInProgress+"; "+InfoBlockPod),
 				"pod", klog.KObj(pending),

@@ -217,7 +217,7 @@ func TestSortPodSetItemsByPriorityAndCreation_PriorityDominates(t *testing.T) {
 		Spec: v1.PodSpec{Priority: &pHighPrio},
 	}
 
-	items := []SafePodSetItem{
+	items := []PodSetItem{
 		{p: pLow},
 		{p: pHigh},
 	}
@@ -249,7 +249,7 @@ func TestSortPodSetItemsByPriorityAndCreation_TimestampThenName(t *testing.T) {
 		Spec: v1.PodSpec{Priority: &prio},
 	}
 
-	items := []SafePodSetItem{
+	items := []PodSetItem{
 		{p: pNew},
 		{p: pOld},
 	}
@@ -279,7 +279,7 @@ func TestSortPodSetItemsByPriorityAndCreation_NameFallbackOnZeroTimestamp(t *tes
 		Spec: v1.PodSpec{Priority: &prio},
 	}
 
-	items := []SafePodSetItem{
+	items := []PodSetItem{
 		{p: pC},
 		{p: pA},
 	}
@@ -1178,7 +1178,7 @@ func TestActivatePods_NoPodSetDoesNothing(t *testing.T) {
 
 func TestActivatePods_EmptySet_DoesNothing(t *testing.T) {
 	pl := &SharedState{}
-	set := newSafePodSet("blocked")
+	set := newPodSet("blocked")
 
 	called := false
 	orig := activatePods
@@ -1196,7 +1196,7 @@ func TestActivatePods_EmptySet_DoesNothing(t *testing.T) {
 
 func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 	pl := &SharedState{}
-	set := newSafePodSet("blocked")
+	set := newPodSet("blocked")
 
 	now := metav1.Now()
 	older := metav1.NewTime(now.Add(-1 * time.Minute))
@@ -1232,9 +1232,9 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 		Spec: v1.PodSpec{Priority: &prioLow},
 	}
 
-	set.AddPodSafely(pOld)
-	set.AddPodSafely(pHigh)
-	set.AddPodSafely(pKeep)
+	set.AddPod(pOld)
+	set.AddPod(pHigh)
+	set.AddPod(pKeep)
 
 	store := map[string]map[string]*v1.Pod{
 		"default": {
@@ -1277,14 +1277,14 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 
 func TestActivatePods_PruneRemovesNotFound_ActivatesRemaining(t *testing.T) {
 	pl := &SharedState{}
-	set := newSafePodSet("blocked")
+	set := newPodSet("blocked")
 
 	prio := int32(1)
 	pOK := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-ok", UID: types.UID("uid-ok")}, Spec: v1.PodSpec{Priority: &prio}}
 	pGone := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-gone", UID: types.UID("uid-gone")}, Spec: v1.PodSpec{Priority: &prio}}
 
-	set.AddPodSafely(pOK)
-	set.AddPodSafely(pGone)
+	set.AddPod(pOK)
+	set.AddPod(pGone)
 
 	store := map[string]map[string]*v1.Pod{
 		"default": {
@@ -1326,11 +1326,11 @@ func TestActivatePods_PruneRemovesNotFound_ActivatesRemaining(t *testing.T) {
 
 func TestActivatePods_ListerError_SkipsAll_NoActivation(t *testing.T) {
 	pl := &SharedState{}
-	set := newSafePodSet("blocked")
+	set := newPodSet("blocked")
 
 	prio := int32(1)
 	p1 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p1", UID: types.UID("uid1")}, Spec: v1.PodSpec{Priority: &prio}}
-	set.AddPodSafely(p1)
+	set.AddPod(p1)
 
 	called := false
 	orig := activatePods

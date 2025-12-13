@@ -159,7 +159,7 @@ func sortNewPlacementsByPod(pls []SolverPod) {
 //  1. priority (higher first)
 //  2. creation timestamp (older first)
 //  3. name (for zero/identical timestamps)
-func sortPodSetItemsByPriorityAndCreation(items []SafePodSetItem) {
+func sortPodSetItemsByPriorityAndCreation(items []PodSetItem) {
 	sort.Slice(items, func(i, j int) bool {
 		pi := getPodPriority(items[i].p)
 		pj := getPodPriority(items[j].p)
@@ -443,22 +443,22 @@ var activatePods = func(pl *SharedState, toAct map[string]*v1.Pod) {
 // activateBlockedPods activates up to 'max' pods from the blocked set; clear only the ones activated.
 // It returns the UIDs of the pods that were attempted to be activated (in priority/time order).
 // if max <= 0, all pods are activated.
-func (pl *SharedState) activatePods(podSet *SafePodSet, removeActivated bool, max int) (tried []types.UID) {
+func (pl *SharedState) activatePods(podSet *PodSet, removeActivated bool, max int) (tried []types.UID) {
 	// Prune stale entries first
-	_ = pl.pruneSafePodSet(podSet)
+	_ = pl.prunePodSet(podSet)
 
 	// If no blocked pods, nothing to do
-	if !doesSafePodSetExist(podSet) {
+	if !doesPodSetExist(podSet) {
 		return
 	}
 
 	// Snapshot and resolve current Pod objects
-	blockedPods := podSet.SnapshotSafely()
-	items := make([]SafePodSetItem, 0, len(blockedPods))
+	blockedPods := podSet.Snapshot()
+	items := make([]PodSetItem, 0, len(blockedPods))
 	// Get current Pod objects so that we don't return stale/deleted ones.
 	for _, k := range blockedPods {
 		if p, err := pl.getPodByName(k.Namespace, k.Name); err == nil && p != nil {
-			items = append(items, SafePodSetItem{p: p, key: k})
+			items = append(items, PodSetItem{p: p, key: k})
 		}
 	}
 	if len(items) == 0 {
@@ -487,7 +487,7 @@ func (pl *SharedState) activatePods(podSet *SafePodSet, removeActivated bool, ma
 		if removeActivated {
 			// Remove only the ones we just activated
 			for _, it := range items[:limit] {
-				podSet.RemovePodSafely(it.key.UID)
+				podSet.RemovePod(it.key.UID)
 			}
 		}
 	}

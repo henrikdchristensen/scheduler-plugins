@@ -35,7 +35,7 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 	ap := pl.getActivePlan()
 	if ap != nil {
 		klog.V(MyV).InfoS(msg(stage, InfoActivePlanInProgress+"; "+InfoBlockPod), "pod", klog.KObj(pending))
-		pl.BlockedWhileActive.AddPodSafely(pending)
+		pl.BlockedWhileActive.AddPod(pending)
 		return nil, fwk.NewStatus(fwk.Unschedulable, msg(stage, InfoActivePlanInProgress))
 	}
 
@@ -46,7 +46,7 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 	if err != nil {
 		switch err {
 		case ErrActiveInProgress:
-			pl.BlockedWhileActive.AddPodSafely(pending)
+			pl.BlockedWhileActive.AddPod(pending)
 			return nil, fwk.NewStatus(fwk.Unschedulable, msg(stage, InfoActivePlanInProgress))
 		default:
 			return nil, fwk.NewStatus(fwk.Unschedulable, msg(stage, InfoPlanRegistrationFailed))

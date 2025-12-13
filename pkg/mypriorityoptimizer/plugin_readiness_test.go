@@ -152,7 +152,7 @@ func TestWaitForUsableNode_EventuallyFindsUsableNode(t *testing.T) {
 
 func TestPluginReadiness_InformerSyncCanceled_DoesNotMarkReady(t *testing.T) {
 	pl := &SharedState{}
-	pl.BlockedWhileActive = newSafePodSet("blocked")
+	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
 
 	inf := newTestPodInformer()
@@ -168,7 +168,7 @@ func TestPluginReadiness_InformerSyncCanceled_DoesNotMarkReady(t *testing.T) {
 
 func TestPluginReadiness_WarmupCanceled_DoesNotMarkReady(t *testing.T) {
 	pl := &SharedState{}
-	pl.BlockedWhileActive = newSafePodSet("blocked")
+	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
 
 	// Ensure isCacheReady passes (no informers), but warmup delay gets canceled.
@@ -196,7 +196,7 @@ func TestPluginReadiness_WarmupCanceled_DoesNotMarkReady(t *testing.T) {
 
 func TestPluginReadiness_UsableNodeNeverFound_DoesNotMarkReady(t *testing.T) {
 	pl := &SharedState{}
-	pl.BlockedWhileActive = newSafePodSet("blocked")
+	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
 
 	oldDelay := cacheWarmupDelay
@@ -222,7 +222,7 @@ func TestPluginReadiness_UsableNodeNeverFound_DoesNotMarkReady(t *testing.T) {
 
 func TestPluginReadiness_Success_MarksReady(t *testing.T) {
 	pl := &SharedState{}
-	pl.BlockedWhileActive = newSafePodSet("blocked")
+	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
 
 	// Avoid starting background loops in this test.

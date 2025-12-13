@@ -91,7 +91,7 @@ func TestPreEnqueue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pl := &SharedState{BlockedWhileActive: newSafePodSet("blocked")}
+			pl := &SharedState{BlockedWhileActive: newPodSet("blocked")}
 			pl.PluginReady.Store(tt.pluginReady)
 
 			if tt.activePlan != nil {

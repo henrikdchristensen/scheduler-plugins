@@ -14,10 +14,10 @@ import (
 // PreFilter
 // -------------------------
 
-// PreFilter is called at the beginning of scheduling cycle.
-// It is used, here, to filter the node(s) that the pod can be (tried) scheduled on.
-// If a pod part of a plan was scheduled on a wrong node due to workload quotas,
-// it is determined in Reserve plugin and will be retried again.
+// PreFilter is called at the beginning of scheduling cycle. It is used, here,
+// to filter the node(s) that the pod can be (tried) scheduled on. If a pod part
+// of a plan was scheduled on a wrong node due to workload quotas, it is
+// determined in Reserve plugin and will be retried again.
 // CHECKED
 func (pl *SharedState) PreFilter(ctx context.Context, st fwk.CycleState, pending *v1.Pod, nodes []fwk.NodeInfo) (*framework.PreFilterResult, *fwk.Status) {
 
@@ -66,7 +66,7 @@ func (pl *SharedState) PreFilter(ctx context.Context, st fwk.CycleState, pending
 			"pod", klog.KObj(pending),
 			"reason", filterMsg,
 		)
-		pl.BlockedWhileActive.AddPodSafely(pending)
+		pl.BlockedWhileActive.AddPod(pending)
 		return nil, fwk.NewStatus(fwk.Unschedulable, msg(stage, filterMsg))
 	}
 }
