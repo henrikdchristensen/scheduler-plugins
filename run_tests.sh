@@ -109,7 +109,7 @@ fi
 
 if "$RUN_UNIT_GO"; then
   echo "=== Running Go unit tests (pkg/mypriorityoptimizer) ==="
-  go test ./pkg/mypriorityoptimizer -coverprofile=coverage/go/go_coverage.out
+  go test ./pkg/mypriorityoptimizer -v -coverprofile=coverage/go/go_coverage.out
   go tool cover -func=coverage/go/go_coverage.out
   go tool cover -html=coverage/go/go_coverage.out -o coverage/go/coverage.html
   echo "Go coverage reports generated in coverage/go/"

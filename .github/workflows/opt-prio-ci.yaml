@@ -12,6 +12,7 @@ jobs:
   # -------------------------------------------------------
   unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
 
     steps:
       - name: Checkout code
@@ -67,7 +68,7 @@ jobs:
 
       - name: Run go unit tests
         run: |
-          go test ./pkg/mypriorityoptimizer \
+          go test ./pkg/mypriorityoptimizer -v \
             -coverprofile=coverage/go/go_coverage.out
           go tool cover \
             -func=coverage/go/go_coverage.out
@@ -89,6 +90,7 @@ jobs:
   integration-tests:
     needs: ["unit-tests"]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout code

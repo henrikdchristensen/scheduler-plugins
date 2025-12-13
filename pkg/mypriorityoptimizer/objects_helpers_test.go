@@ -428,8 +428,8 @@ func TestIsNodeReady(t *testing.T) {
 func TestPodLookup(t *testing.T) {
 	pl := &SharedState{}
 
-	pName := pod("ns", "p")
-	pOther := pod("other-ns", "other")
+	pName := pod("ns", "p", withUID("uid-1"))
+	pOther := pod("other-ns", "other", withUID("uid-target"))
 
 	t.Run("getPodByName success + per-key error", func(t *testing.T) {
 		withPodLister(&fakePodLister{store: storeFromPods(pName)}, func() {

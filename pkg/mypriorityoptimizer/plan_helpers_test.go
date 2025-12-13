@@ -1119,15 +1119,15 @@ func TestWaitPodsGone_TreatsUidChangeOrTerminatingAsGone(t *testing.T) {
 	ctx := context.Background()
 
 	// Original pod identity (UID + ns + name)
-	orig := pod("ns", "p")
+	orig := pod("ns", "p", withUID("u1"))
 
 	// In the store we simulate the "same" pod name but:
 	//  - different UID (u2)
 	//  - or terminating
 	// Either should make the entry be considered "gone".
-	changedUID := pod("ns", "p")
+	changedUID := pod("ns", "p", withUID("u2"))
 	now := metav1.Now()
-	terminating := pod("ns", "p-term")
+	terminating := pod("ns", "p-term", withUID("u3"))
 	terminating.DeletionTimestamp = &now
 
 	store := map[string]map[string]*v1.Pod{
