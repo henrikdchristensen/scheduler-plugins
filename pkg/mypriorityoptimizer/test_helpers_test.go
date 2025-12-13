@@ -9,6 +9,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -80,6 +81,35 @@ func newWorkloadPod(name string) *v1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
+		},
+	}
+}
+
+// newUsableNode creates a ready, schedulable node with allocatable resources.
+func newUsableNode(name string, cpuMilli, memoryMi int64) *v1.Node {
+	return &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: v1.NodeStatus{
+			Conditions: []v1.NodeCondition{
+				{Type: v1.NodeReady, Status: v1.ConditionTrue},
+			},
+			Allocatable: v1.ResourceList{
+				v1.ResourceCPU:    *resource.NewMilliQuantity(cpuMilli, resource.DecimalSI),
+				v1.ResourceMemory: *resource.NewQuantity(memoryMi*1024*1024, resource.BinarySI),
+			},
+		},
+	}
+}
+
+// newUnschedulableNode creates a node marked as unschedulable.
+func newUnschedulableNode(name string) *v1.Node {
+	return &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1.NodeSpec{Unschedulable: true},
+		Status: v1.NodeStatus{
+			Conditions: []v1.NodeCondition{
+				{Type: v1.NodeReady, Status: v1.ConditionTrue},
+			},
 		},
 	}
 }

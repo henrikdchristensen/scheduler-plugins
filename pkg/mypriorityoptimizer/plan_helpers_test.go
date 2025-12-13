@@ -5,6 +5,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -904,5 +905,110 @@ func TestMarkPlanStatusToConfigMap_UsesHook(t *testing.T) {
 	}
 	if gotPl != pl || gotCtx != ctx || gotCM != "cm-name" || gotStatus != PlanStatusFailed {
 		t.Fatalf("hook args mismatch")
+	}
+}
+
+// ----------------------------------------------------------------------
+// increaseWorkloadQuota
+// ----------------------------------------------------------------------
+
+func TestIncreaseWorkloadQuota(t *testing.T) {
+	wq := WorkloadQuotas{}
+	wk := WorkloadKey{Namespace: "ns", Name: "wk"}
+
+	// First call should create the map for this workload
+	increaseWorkloadQuota(wq, wk, "node1")
+	if got := wq[wk.String()]["node1"]; got != 1 {
+		t.Fatalf("increaseWorkloadQuota() first call = %v, want 1", got)
+	}
+
+	// Second call to same node should increment
+	increaseWorkloadQuota(wq, wk, "node1")
+	if got := wq[wk.String()]["node1"]; got != 2 {
+		t.Fatalf("increaseWorkloadQuota() second call = %v, want 2", got)
+	}
+
+	// Call to different node should create separate counter
+	increaseWorkloadQuota(wq, wk, "node2")
+	if got := wq[wk.String()]["node2"]; got != 1 {
+		t.Fatalf("increaseWorkloadQuota() different node = %v, want 1", got)
+	}
+	if got := wq[wk.String()]["node1"]; got != 2 {
+		t.Fatalf("increaseWorkloadQuota() node1 should still be 2, got %v", got)
+	}
+}
+
+// ----------------------------------------------------------------------
+// sortPodSetItemsByPriorityAndCreation
+// ----------------------------------------------------------------------
+
+func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
+	now := metav1.Now()
+	later := metav1.NewTime(now.Add(1 * time.Hour))
+
+	lowPrio := int32(1)
+	highPrio := int32(10)
+
+	items := []PodSetItem{
+		{p: &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "low-old", CreationTimestamp: now},
+			Spec:       v1.PodSpec{Priority: &lowPrio},
+		}},
+		{p: &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "high-new", CreationTimestamp: later},
+			Spec:       v1.PodSpec{Priority: &highPrio},
+		}},
+		{p: &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "high-old", CreationTimestamp: now},
+			Spec:       v1.PodSpec{Priority: &highPrio},
+		}},
+		{p: &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "low-new", CreationTimestamp: later},
+			Spec:       v1.PodSpec{Priority: &lowPrio},
+		}},
+	}
+
+	sortPodSetItemsByPriorityAndCreation(items)
+
+	// Expected order:
+	// 1. high-old (priority 10, older timestamp)
+	// 2. high-new (priority 10, newer timestamp)
+	// 3. low-old (priority 1, older timestamp)
+	// 4. low-new (priority 1, newer timestamp)
+	expected := []string{"high-old", "high-new", "low-old", "low-new"}
+	for i, item := range items {
+		if item.p.Name != expected[i] {
+			t.Errorf("sortPodSetItemsByPriorityAndCreation() position %d = %s, want %s", i, item.p.Name, expected[i])
+		}
+	}
+}
+
+func TestSortPodSetItemsByPriorityAndCreation_NoTimestamp(t *testing.T) {
+	// Test fallback to name sorting when timestamps are missing
+	prio := int32(5)
+
+	items := []PodSetItem{
+		{p: &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-c"},
+			Spec:       v1.PodSpec{Priority: &prio},
+		}},
+		{p: &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-a"},
+			Spec:       v1.PodSpec{Priority: &prio},
+		}},
+		{p: &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-b"},
+			Spec:       v1.PodSpec{Priority: &prio},
+		}},
+	}
+
+	sortPodSetItemsByPriorityAndCreation(items)
+
+	// Should be sorted alphabetically by name
+	expected := []string{"pod-a", "pod-b", "pod-c"}
+	for i, item := range items {
+		if item.p.Name != expected[i] {
+			t.Errorf("sortPodSetItemsByPriorityAndCreation() position %d = %s, want %s", i, item.p.Name, expected[i])
+		}
 	}
 }
