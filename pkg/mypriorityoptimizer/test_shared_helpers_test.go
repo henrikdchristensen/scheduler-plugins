@@ -49,7 +49,6 @@ func pod(ns, name string, opts ...PodOpt) *v1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: ns,
 			Name:      name,
-			UID:       types.UID(name), // default: stable & unique-ish for tests
 		},
 		Spec: v1.PodSpec{
 			Priority: &prio,
@@ -100,6 +99,17 @@ func withReqs(cpuReq, memReq string) PodOpt {
 
 func withPhase(ph v1.PodPhase) PodOpt {
 	return func(p *v1.Pod) { p.Status.Phase = ph }
+}
+
+func withCreationTimestamp(ts metav1.Time) PodOpt {
+	return func(p *v1.Pod) { p.CreationTimestamp = ts }
+}
+
+func withDeletionTimestamp(ts metav1.Time) PodOpt {
+	return func(p *v1.Pod) {
+		t := ts // ensure a unique address per pod
+		p.DeletionTimestamp = &t
+	}
 }
 
 // -------------------------

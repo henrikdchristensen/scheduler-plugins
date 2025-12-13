@@ -111,7 +111,7 @@ fi
 
 if "$RUN_UNIT_GO"; then
   echo "=== Running Go unit tests (pkg/mypriorityoptimizer) ==="
-  go test ./pkg/mypriorityoptimizer -v -timeout 3s -coverprofile=coverage/go/go_coverage.out
+  go test ./pkg/mypriorityoptimizer -timeout 3s -coverprofile=coverage/go/go_coverage.out
   go tool cover -func=coverage/go/go_coverage.out
   go tool cover -html=coverage/go/go_coverage.out -o coverage/go/coverage.html
   # Enforce minimum total coverage threshold

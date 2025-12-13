@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sort"
-	"strconv"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -798,20 +797,30 @@ func computePlanPodCounts(out *SolverOutput, pods []*v1.Pod) (
 		return 0, 0, 0
 	}
 
-	// Quick index: UID -> live pod
-	pUID := podsByUID(pods)
+	// Build UID sets from the current pod list.
+	runningUIDs := make(map[types.UID]struct{}, len(pods))
+	pendingUIDs := make(map[types.UID]struct{}, len(pods))
 
-	// Count currently running (assigned + alive) pods.
 	for _, p := range pods {
-		if isPodAssignedAndAlive(p) {
-			runningBefore++
+		if isPodDeleted(p) {
+			continue
 		}
+		if isPodAssigned(p) {
+			// assigned + alive => counts as running
+			if isPodAssignedAndAlive(p) {
+				runningBefore++
+				runningUIDs[p.UID] = struct{}{}
+			}
+			continue
+		}
+		// alive + unassigned => pending
+		pendingUIDs[p.UID] = struct{}{}
 	}
 
 	// Count evicted running pods.
 	evictedRunning := 0
 	for _, e := range out.Evictions {
-		if p := pUID[e.UID]; isPodAssignedAndAlive(p) {
+		if _, ok := runningUIDs[e.UID]; ok {
 			evictedRunning++
 		}
 	}
@@ -821,7 +830,7 @@ func computePlanPodCounts(out *SolverOutput, pods []*v1.Pod) (
 		if isPlanPodUnscheduled(plm.Node) {
 			continue
 		}
-		if p := pUID[plm.UID]; p != nil && !isPodDeleted(p) && !isPodAssigned(p) {
+		if _, ok := pendingUIDs[plm.UID]; ok {
 			pendingScheduled++
 		}
 	}
@@ -916,93 +925,86 @@ func (pl *SharedState) setPlanStatusInConfigMap(ctx context.Context, planCM stri
 	})
 }
 
-// clusterFingerprint builds a stable hash of the "cluster state" that matters
-// for the solver baseline:
+// clusterFingerprint returns a deterministic fingerprint of the "relevant"
+// cluster state for scheduling/plan-cancellation purposes.
 //
-//   - all usable nodes (name + allocatable CPU/MEM)
-//   - all RUNNING (non-terminating) pods bound to usable nodes
-//     (UID + node + CPU/MEM + priority)
-//
-// Pending pods are explicitly *not* included here, since we track them via the
-// pending UID set separately. We only use this to decide whether the cluster
-// is "the same" baseline for a previously-solved pending set.
-//
-// The fingerprint is cheap to compute for small clusters and stable across
-// map-iteration nondeterminism thanks to sorting.
+// Contract (required by tests):
+// - Deterministic across input ordering
+// - Excludes pending/unassigned pods
+// - Excludes unusable nodes and pods scheduled on them
+// - Includes running pod resource requests (cpu/mem) so changes affect the fp
 func clusterFingerprint(nodes []*v1.Node, pods []*v1.Pod) string {
+	// 1) Keep only usable nodes; sort for determinism.
+	usable := make(map[string]*v1.Node, len(nodes))
+	nodeNames := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if !isNodeUsable(n) {
+			continue
+		}
+		if _, exists := usable[n.Name]; exists {
+			continue
+		}
+		usable[n.Name] = n
+		nodeNames = append(nodeNames, n.Name)
+	}
+	sort.Strings(nodeNames)
+
+	// 2) Keep only assigned+alive pods on usable nodes; sort for determinism.
+	type podEntry struct {
+		node string
+		ns   string
+		name string
+		uid  string
+		cpu  int64
+		mem  int64
+		prio int32
+	}
+	entries := make([]podEntry, 0, len(pods))
+	for _, p := range pods {
+		if !isPodAssignedAndAlive(p) {
+			continue // excludes nil, terminating, and pending/unassigned
+		}
+		node := getPodAssignedNodeName(p)
+		if _, ok := usable[node]; !ok {
+			continue // pod is on an unusable/ignored node
+		}
+		entries = append(entries, podEntry{
+			node: node,
+			ns:   p.Namespace,
+			name: p.Name,
+			uid:  string(p.UID),
+			cpu:  getPodCPURequest(p),
+			mem:  getPodMemoryRequest(p),
+			prio: getPodPriority(p),
+		})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.node != b.node {
+			return a.node < b.node
+		}
+		if a.ns != b.ns {
+			return a.ns < b.ns
+		}
+		if a.name != b.name {
+			return a.name < b.name
+		}
+		return a.uid < b.uid
+	})
+
+	// 3) Hash a stable textual representation.
 	h := fnv.New64a()
 
-	// Filter usable nodes and sort them by name for determinism.
-	usable := make([]*v1.Node, 0, len(nodes))
-	for _, n := range nodes {
-		if n == nil {
-			continue
-		}
-		if isNodeUsable(n) {
-			usable = append(usable, n)
-		}
-	}
-	sort.Slice(usable, func(i, j int) bool {
-		return usable[i].Name < usable[j].Name
-	})
-
-	// Node capacities.
-	for _, n := range usable {
-		cpu := getNodeCPUAllocatable(n)
-		mem := getNodeMemoryAllocatable(n)
-		_, _ = h.Write([]byte("N:"))
-		_, _ = h.Write([]byte(n.Name))
-		_, _ = h.Write([]byte(":"))
-		_, _ = h.Write([]byte(strconv.FormatInt(cpu, 10)))
-		_, _ = h.Write([]byte("/"))
-		_, _ = h.Write([]byte(strconv.FormatInt(mem, 10)))
-		_, _ = h.Write([]byte(";"))
+	for _, name := range nodeNames {
+		n := usable[name]
+		// Include allocatable to detect node capacity changes.
+		fmt.Fprintf(h, "N:%s:%d:%d|", name, getNodeCPUAllocatable(n), getNodeMemoryAllocatable(n))
 	}
 
-	usableNames := make(map[string]struct{}, len(usable))
-	for _, n := range usable {
-		usableNames[n.Name] = struct{}{}
-	}
-	keys := make([]SolverPod, 0, len(pods))
-	for _, p := range pods {
-		if isPodDeleted(p) || !isPodAssigned(p) {
-			continue
-		}
-		if _, ok := usableNames[getPodAssignedNodeName(p)]; !ok {
-			continue
-		}
-		keys = append(keys, SolverPod{Node: getPodAssignedNodeName(p), UID: p.UID})
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].Node != keys[j].Node {
-			return keys[i].Node < keys[j].Node
-		}
-		return keys[i].UID < keys[j].UID
-	})
-
-	byUID := podsByUID(pods)
-
-	for _, k := range keys {
-		p := byUID[k.UID]
-		if p == nil {
-			continue
-		}
-		cpu := getPodCPURequest(p)
-		mem := getPodMemoryRequest(p)
-		prio := getPodPriority(p)
-		nodeName := getPodAssignedNodeName(p)
-
-		_, _ = h.Write([]byte("P:"))
-		_, _ = h.Write([]byte(string(p.UID)))
-		_, _ = h.Write([]byte("@"))
-		_, _ = h.Write([]byte(nodeName))
-		_, _ = h.Write([]byte(":"))
-		_, _ = h.Write([]byte(strconv.FormatInt(cpu, 10)))
-		_, _ = h.Write([]byte("/"))
-		_, _ = h.Write([]byte(strconv.FormatInt(mem, 10)))
-		_, _ = h.Write([]byte("#"))
-		_, _ = h.Write([]byte(strconv.Itoa(int(prio))))
-		_, _ = h.Write([]byte(";"))
+	for _, e := range entries {
+		// Include cpu/mem/prio so “relevant scheduling state” changes affect fp.
+		fmt.Fprintf(h, "P:%s:%s/%s:%s:%d:%d:%d|", e.node, e.ns, e.name, e.uid, e.cpu, e.mem, e.prio)
 	}
 
 	return fmt.Sprintf("%x", h.Sum64())

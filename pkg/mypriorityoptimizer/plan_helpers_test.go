@@ -29,6 +29,7 @@ import (
 // Test Helpers
 // -------------------------
 
+// must fails if cond is false.
 func must(t *testing.T, cond bool, msg string, args ...any) {
 	t.Helper()
 	if !cond {
@@ -36,6 +37,14 @@ func must(t *testing.T, cond bool, msg string, args ...any) {
 	}
 }
 
+func mustNoErr(t *testing.T, err error, msg string, args ...any) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf(msg+": %v", append(args, err)...)
+	}
+}
+
+// mustEq uses reflect.DeepEqual (good for tests).
 func mustEq[T any](t *testing.T, got, want T, msg string, args ...any) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
@@ -50,7 +59,7 @@ func mustContains(t *testing.T, s, sub string) {
 	}
 }
 
-func keysOf(m map[string]*v1.Pod) []string {
+func keysOfPods(m map[string]*v1.Pod) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
@@ -165,8 +174,8 @@ func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 	now := metav1.Now()
 	older := metav1.NewTime(now.Add(-time.Minute))
 
-	pLow := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "low", CreationTimestamp: older}, Spec: v1.PodSpec{Priority: &prioLow}}
-	pHigh := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "high", CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prioHigh}}
+	pLow := pod("ns", "low", withPrio(prioLow), withCreationTimestamp(older))
+	pHigh := pod("ns", "high", withPrio(prioHigh), withCreationTimestamp(now))
 
 	items := []PodSetItem{{p: pLow}, {p: pHigh}}
 	sortPodSetItemsByPriorityAndCreation(items)
@@ -174,16 +183,15 @@ func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 
 	// same prio, timestamp => older first
 	prio := int32(5)
-	pOld := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "old", CreationTimestamp: older}, Spec: v1.PodSpec{Priority: &prio}}
-	pNew := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "new", CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prio}}
+	pOld := pod("ns", "old", withPrio(prio), withCreationTimestamp(older))
+	pNew := pod("ns", "new", withPrio(prio), withCreationTimestamp(now))
 	items = []PodSetItem{{p: pNew}, {p: pOld}}
 	sortPodSetItemsByPriorityAndCreation(items)
 	mustEq(t, items[0].p.Name, "old", "timestamp sort wrong")
 
-	// zero timestamps => name fallback
-	zeroTS := metav1.Time{}
-	pA := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a", CreationTimestamp: zeroTS}, Spec: v1.PodSpec{Priority: &prio}}
-	pC := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "c", CreationTimestamp: zeroTS}, Spec: v1.PodSpec{Priority: &prio}}
+	// zero timestamps => name fallback (just don't set CreationTimestamp)
+	pA := pod("ns", "a", withPrio(prio))
+	pC := pod("ns", "c", withPrio(prio))
 	items = []PodSetItem{{p: pC}, {p: pA}}
 	sortPodSetItemsByPriorityAndCreation(items)
 	mustEq(t, items[0].p.Name, "a", "name fallback sort wrong")
@@ -344,11 +352,11 @@ func TestEvictTargets_UsesHook(t *testing.T) {
 	targets := []*v1.Pod{pod("ns", "p1"), pod("ns", "p2")}
 
 	var called bool
-	withVar(t, &evictTargetsHook, func(pl *SharedState, ctx context.Context, targets []*v1.Pod) error {
+	withVar(t, &evictTargetsHook, func(hpl *SharedState, hctx context.Context, htargets []*v1.Pod) error {
 		called = true
-		must(t, pl == pl, "pl mismatch")
-		must(t, ctx == ctx, "ctx mismatch")
-		mustEq(t, targets, targets, "targets mismatch")
+		must(t, hpl == pl, "pl mismatch")
+		must(t, hctx == ctx, "ctx mismatch")
+		mustEq(t, htargets, targets, "targets mismatch")
 		return nil
 	})
 
@@ -392,11 +400,11 @@ func TestWaitPodsGone_UsesHookWhenNonEmpty(t *testing.T) {
 	p := pod("ns", "p")
 
 	var called bool
-	withVar(t, &waitPodsGoneHook, func(pl *SharedState, ctx context.Context, pods []*v1.Pod) error {
+	withVar(t, &waitPodsGoneHook, func(hpl *SharedState, hctx context.Context, hpods []*v1.Pod) error {
 		called = true
-		must(t, pl == pl, "pl mismatch")
-		must(t, ctx == ctx, "ctx mismatch")
-		mustEq(t, pods, []*v1.Pod{p}, "pods mismatch")
+		must(t, hpl == pl, "pl mismatch")
+		must(t, hctx == ctx, "ctx mismatch")
+		mustEq(t, hpods, []*v1.Pod{p}, "pods mismatch")
 		return nil
 	})
 
@@ -475,9 +483,21 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 	prioLow := int32(1)
 	prioHigh := int32(10)
 
-	pHigh := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-high", UID: types.UID("uid-high"), CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prioHigh}}
-	pOld := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-old", UID: types.UID("uid-old"), CreationTimestamp: older}, Spec: v1.PodSpec{Priority: &prioLow}}
-	pKeep := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-keep", UID: types.UID("uid-keep"), CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prioLow}}
+	pHigh := pod("default", "p-high",
+		withUID("uid-high"),
+		withPrio(prioHigh),
+		withCreationTimestamp(now),
+	)
+	pOld := pod("default", "p-old",
+		withUID("uid-old"),
+		withPrio(prioLow),
+		withCreationTimestamp(older),
+	)
+	pKeep := pod("default", "p-keep",
+		withUID("uid-keep"),
+		withPrio(prioLow),
+		withCreationTimestamp(now),
+	)
 
 	set.AddPod(pOld)
 	set.AddPod(pHigh)
@@ -490,7 +510,7 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 		tried := pl.activatePods(set, true, 2)
 		mustEq(t, tried, []types.UID{pHigh.UID, pOld.UID}, "tried order mismatch")
 		must(t, got != nil, "expected activation set")
-		mustEq(t, keysOf(got), []string{"default/p-high", "default/p-old"}, "activation keys mismatch")
+		mustEq(t, keysOfPods(got), []string{"default/p-high", "default/p-old"}, "activation keys mismatch")
 		mustEq(t, set.Size(), 1, "set size after removeActivated mismatch")
 	})
 }
@@ -500,8 +520,8 @@ func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 	set := newPodSet("blocked")
 
 	prio := int32(1)
-	pOK := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-ok", UID: types.UID("uid-ok")}, Spec: v1.PodSpec{Priority: &prio}}
-	pGone := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-gone", UID: types.UID("uid-gone")}, Spec: v1.PodSpec{Priority: &prio}}
+	pOK := pod("default", "p-ok", withUID("uid-ok"), withPrio(prio))
+	pGone := pod("default", "p-gone", withUID("uid-gone"), withPrio(prio))
 
 	set.AddPod(pOK)
 	set.AddPod(pGone)
@@ -513,7 +533,7 @@ func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 	withPodLister(&fakePodLister{store: storeFromPods(pOK)}, func() {
 		tried := pl.activatePods(set, false, -1)
 		mustEq(t, tried, []types.UID{pOK.UID}, "tried mismatch")
-		mustEq(t, keysOf(got), []string{"default/p-ok"}, "activation keys mismatch")
+		mustEq(t, keysOfPods(got), []string{"default/p-ok"}, "activation keys mismatch")
 		mustEq(t, set.Size(), 1, "set should still contain p-ok only")
 	})
 
@@ -536,19 +556,19 @@ func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 func TestActivatePlannedPods_HookAndGlobalPaths(t *testing.T) {
 	pl := &SharedState{}
 
-	uidAllowed := types.UID("u-allowed")
-	uidMove := types.UID("u-move")
+	uidAllowed := "u-allowed"
+	uidMove := "u-move"
 
 	plan := &Plan{
 		NewPlacements: []SolverPod{
-			{UID: uidAllowed, OldNode: "", Node: "n1"}, // pending->node => activate
-			{UID: uidMove, OldNode: "n0", Node: "n2"},  // move => not activate
+			{UID: types.UID(uidAllowed), OldNode: "", Node: "n1"}, // pending->node => activate
+			{UID: types.UID(uidMove), OldNode: "n0", Node: "n2"},  // move => not activate
 		},
 	}
 
-	pending := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p-allowed", UID: uidAllowed}}
-	running := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p-running", UID: uidMove}, Spec: v1.PodSpec{NodeName: "n0"}}
-	deleted := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p-del", UID: uidAllowed, DeletionTimestamp: &metav1.Time{Time: time.Now()}}}
+	pending := pod("ns", "p-allowed", withUID(uidAllowed))
+	running := pod("ns", "p-running", withUID(uidMove), onNode("n0"))
+	deleted := pod("ns", "p-del", withUID(uidAllowed), withDeletionTimestamp(metav1.Now()))
 
 	// Hook path
 	var hookGot map[string]*v1.Pod
@@ -556,14 +576,14 @@ func TestActivatePlannedPods_HookAndGlobalPaths(t *testing.T) {
 		hookGot = toAct
 	})
 	pl.activatePlannedPods(plan, []*v1.Pod{pending, running, deleted})
-	mustEq(t, keysOf(hookGot), []string{"ns/p-allowed"}, "hook activation mismatch")
+	mustEq(t, keysOfPods(hookGot), []string{"ns/p-allowed"}, "hook activation mismatch")
 
 	// Global path
 	activatePlannedPodsHook = nil // explicitly drop hook for this subcase
 	var globalGot map[string]*v1.Pod
 	withVar(t, &activatePlannedPodsHook, func(_ *SharedState, toAct map[string]*v1.Pod) { globalGot = toAct })
 	pl.activatePlannedPods(plan, []*v1.Pod{pending, running})
-	mustEq(t, keysOf(globalGot), []string{"ns/p-allowed"}, "global activation mismatch")
+	mustEq(t, keysOfPods(globalGot), []string{"ns/p-allowed"}, "global activation mismatch")
 }
 
 func TestActivatePlannedPods_Guards(t *testing.T) {
@@ -963,13 +983,10 @@ func TestComputePlanPodCounts(t *testing.T) {
 	// nil output
 	a, b, c := computePlanPodCounts(nil, nil)
 	mustEq(t, []int{a, b, c}, []int{0, 0, 0}, "nil out mismatch")
-
-	now := metav1.Now()
 	run1 := pod("ns", "run1", onNode("n1"))
 	run2 := pod("ns", "run2", onNode("n2"))
 	pend := pod("ns", "pend")
-	del := pod("ns", "del", onNode("n1"))
-	del.DeletionTimestamp = &now
+	del := pod("ns", "del", onNode("n1"), withDeletionTimestamp(metav1.Now()))
 
 	out := &SolverOutput{
 		Placements: []SolverPod{

@@ -201,7 +201,7 @@ func TestCountPendingPods(t *testing.T) {
 
 func TestEvictPod(t *testing.T) {
 	pl := &SharedState{}
-	p := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns", UID: types.UID("uid-1")}}
+	p := pod("ns", "p", withUID("uid-1"))
 
 	t.Run("success captures eviction body", func(t *testing.T) {
 		var gotEv *policyv1.Eviction
@@ -521,7 +521,7 @@ func TestPodResourceAndPredicateHelpers(t *testing.T) {
 
 	t.Run("priority + assigned node", func(t *testing.T) {
 		pr := int32(10)
-		p := &v1.Pod{Spec: v1.PodSpec{Priority: &pr, NodeName: "n1"}}
+		p := pod("ns", "p", withPrio(pr), onNode("n1"))
 		if getPodPriority(p) != 10 {
 			t.Fatalf("priority wrong")
 		}
@@ -587,9 +587,9 @@ func TestPodResourceAndPredicateHelpers(t *testing.T) {
 
 	t.Run("podsByUID skips deleted/nil and overwrites by UID", func(t *testing.T) {
 		now := metav1.NewTime(time.Now())
-		p1 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "ns", UID: types.UID("u1")}}
-		p2 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: "ns", UID: types.UID("u2"), DeletionTimestamp: &now}}
-		p3 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p3", Namespace: "ns", UID: types.UID("u1")}}
+		p1 := pod("ns", "p1", withUID("u1"))
+		p2 := pod("ns", "p2", withUID("u2"), withDeletionTimestamp(now))
+		p3 := pod("ns", "p3", withUID("u1"))
 		m := podsByUID([]*v1.Pod{p1, p2, nil, p3})
 		if len(m) != 1 || m[types.UID("u1")].Name != "p3" {
 			t.Fatalf("map=%#v", m)
@@ -598,7 +598,7 @@ func TestPodResourceAndPredicateHelpers(t *testing.T) {
 }
 
 // -------------------------
-// clusterFingerprint (kept compact, still hits branches)
+// clusterFingerprint
 // -------------------------
 
 func TestClusterFingerprint_CoreProperties(t *testing.T) {
