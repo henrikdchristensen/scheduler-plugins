@@ -1,4 +1,4 @@
-// pkg/mypriorityoptimizer/plan_helpers_test.go
+// plan_helpers_test.go
 package mypriorityoptimizer
 
 import (
@@ -21,11 +21,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 )
 
 // -------------------------
-// tiny test helpers
+// Test Helpers
 // -------------------------
 
 func must(t *testing.T, cond bool, msg string, args ...any) {
@@ -56,57 +57,6 @@ func keysOf(m map[string]*v1.Pod) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// hook helpers (avoid leaking hooks across tests)
-func withEvictTargetsHook(t *testing.T, h func(pl *SharedState, ctx context.Context, targets []*v1.Pod) error) {
-	t.Helper()
-	orig := evictTargetsHook
-	evictTargetsHook = h
-	t.Cleanup(func() { evictTargetsHook = orig })
-}
-func withWaitPodsGoneHook(t *testing.T, h func(pl *SharedState, ctx context.Context, pods []*v1.Pod) error) {
-	t.Helper()
-	orig := waitPodsGoneHook
-	waitPodsGoneHook = h
-	t.Cleanup(func() { waitPodsGoneHook = orig })
-}
-func withActivatePlannedPodsHook(t *testing.T, h func(pl *SharedState, toActivate map[string]*v1.Pod)) {
-	t.Helper()
-	orig := activatePlannedPodsHook
-	activatePlannedPodsHook = h
-	t.Cleanup(func() { activatePlannedPodsHook = orig })
-}
-func withIsPlanCompletedHook(t *testing.T, h func(pl *SharedState, ap *ActivePlan) (bool, error)) {
-	t.Helper()
-	orig := isPlanCompletedHook
-	isPlanCompletedHook = h
-	t.Cleanup(func() { isPlanCompletedHook = orig })
-}
-func withOnPlanCompletedHook(t *testing.T, h func(pl *SharedState, status PlanStatus, ap *ActivePlan)) {
-	t.Helper()
-	orig := onPlanCompletedHook
-	onPlanCompletedHook = h
-	t.Cleanup(func() { onPlanCompletedHook = orig })
-}
-func withExportPlanHook(t *testing.T, h func(pl *SharedState, ctx context.Context, name string, sp *StoredPlan) error) {
-	t.Helper()
-	orig := exportPlanToConfigMapHook
-	exportPlanToConfigMapHook = h
-	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
-}
-func withMarkPlanStatusHook(t *testing.T, h func(pl *SharedState, ctx context.Context, planCM string, status PlanStatus) bool) {
-	t.Helper()
-	orig := markPlanStatusToConfigMapHook
-	markPlanStatusToConfigMapHook = h
-	t.Cleanup(func() { markPlanStatusToConfigMapHook = orig })
-}
-
-func withActivatePodsStub(t *testing.T, f func(pl *SharedState, toAct map[string]*v1.Pod)) {
-	t.Helper()
-	orig := activatePods
-	activatePods = f
-	t.Cleanup(func() { activatePods = orig })
 }
 
 // -------------------------
@@ -394,11 +344,11 @@ func TestEvictTargets_UsesHook(t *testing.T) {
 	targets := []*v1.Pod{pod("ns", "p1"), pod("ns", "p2")}
 
 	var called bool
-	withEvictTargetsHook(t, func(hpl *SharedState, hctx context.Context, htargets []*v1.Pod) error {
+	withVar(t, &evictTargetsHook, func(pl *SharedState, ctx context.Context, targets []*v1.Pod) error {
 		called = true
-		must(t, hpl == pl, "pl mismatch")
-		must(t, hctx == ctx, "ctx mismatch")
-		mustEq(t, htargets, targets, "targets mismatch")
+		must(t, pl == pl, "pl mismatch")
+		must(t, ctx == ctx, "ctx mismatch")
+		mustEq(t, targets, targets, "targets mismatch")
 		return nil
 	})
 
@@ -442,10 +392,10 @@ func TestWaitPodsGone_UsesHookWhenNonEmpty(t *testing.T) {
 	p := pod("ns", "p")
 
 	var called bool
-	withWaitPodsGoneHook(t, func(hpl *SharedState, hctx context.Context, pods []*v1.Pod) error {
+	withVar(t, &waitPodsGoneHook, func(pl *SharedState, ctx context.Context, pods []*v1.Pod) error {
 		called = true
-		must(t, hpl == pl, "pl mismatch")
-		must(t, hctx == ctx, "ctx mismatch")
+		must(t, pl == pl, "pl mismatch")
+		must(t, ctx == ctx, "ctx mismatch")
 		mustEq(t, pods, []*v1.Pod{p}, "pods mismatch")
 		return nil
 	})
@@ -503,7 +453,7 @@ func TestActivatePods_NilOrEmptySetDoesNothing(t *testing.T) {
 	pl := &SharedState{}
 
 	var called bool
-	withActivatePodsStub(t, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
+	withVar(t, &activatePlannedPodsHook, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
 
 	tried := pl.activatePods(nil, true, -1)
 	mustEq(t, tried, []types.UID(nil), "tried mismatch for nil set")
@@ -534,7 +484,7 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 	set.AddPod(pKeep)
 
 	var got map[string]*v1.Pod
-	withActivatePodsStub(t, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
+	withVar(t, &activatePods, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
 
 	withPodLister(&fakePodLister{store: storeFromPods(pOld, pHigh, pKeep)}, func() {
 		tried := pl.activatePods(set, true, 2)
@@ -557,7 +507,7 @@ func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 	set.AddPod(pGone)
 
 	var got map[string]*v1.Pod
-	withActivatePodsStub(t, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
+	withVar(t, &activatePods, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
 
 	// NotFound pruning for p-gone
 	withPodLister(&fakePodLister{store: storeFromPods(pOK)}, func() {
@@ -602,7 +552,7 @@ func TestActivatePlannedPods_HookAndGlobalPaths(t *testing.T) {
 
 	// Hook path
 	var hookGot map[string]*v1.Pod
-	withActivatePlannedPodsHook(t, func(_ *SharedState, toAct map[string]*v1.Pod) {
+	withVar(t, &activatePods, func(_ *SharedState, toAct map[string]*v1.Pod) {
 		hookGot = toAct
 	})
 	pl.activatePlannedPods(plan, []*v1.Pod{pending, running, deleted})
@@ -611,7 +561,7 @@ func TestActivatePlannedPods_HookAndGlobalPaths(t *testing.T) {
 	// Global path
 	activatePlannedPodsHook = nil // explicitly drop hook for this subcase
 	var globalGot map[string]*v1.Pod
-	withActivatePodsStub(t, func(_ *SharedState, toAct map[string]*v1.Pod) { globalGot = toAct })
+	withVar(t, &activatePlannedPodsHook, func(_ *SharedState, toAct map[string]*v1.Pod) { globalGot = toAct })
 	pl.activatePlannedPods(plan, []*v1.Pod{pending, running})
 	mustEq(t, keysOf(globalGot), []string{"ns/p-allowed"}, "global activation mismatch")
 }
@@ -634,7 +584,7 @@ func TestActivatePlannedPods_NoNewlyScheduledPlacements_NoActivation(t *testing.
 	}
 
 	called := false
-	withActivatePlannedPodsHook(t, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
+	withVar(t, &activatePlannedPodsHook, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
 
 	pl.activatePlannedPods(plan, []*v1.Pod{pod("ns", "p", withUID("u1"))})
 	must(t, !called, "expected no activation when no newly-scheduled placements exist")
@@ -657,7 +607,7 @@ func TestActivatePlannedPods_AllowButNoMatchingPending_NoActivation(t *testing.T
 	pDeleted.DeletionTimestamp = &now
 
 	called := false
-	withActivatePlannedPodsHook(t, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
+	withVar(t, &activatePlannedPodsHook, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
 
 	pl.activatePlannedPods(plan, []*v1.Pod{pAssigned, pDeleted})
 	must(t, !called, "expected no activation when no matching *pending* pods exist")
@@ -672,7 +622,7 @@ func TestIsPlanCompleted_UsesHook(t *testing.T) {
 	ap := &ActivePlan{ID: PlanConfigMapNamePrefix + "1"}
 
 	var called bool
-	withIsPlanCompletedHook(t, func(hpl *SharedState, hap *ActivePlan) (bool, error) {
+	withVar(t, &isPlanCompletedHook, func(hpl *SharedState, hap *ActivePlan) (bool, error) {
 		called = true
 		must(t, hpl == pl, "pl mismatch")
 		must(t, hap == ap, "ap mismatch")
@@ -880,7 +830,7 @@ func TestOnPlanCompleted_HookAndDefaultPaths(t *testing.T) {
 		cancelled = false
 
 		var called bool
-		withOnPlanCompletedHook(t, func(hpl *SharedState, status PlanStatus, hap *ActivePlan) {
+		withVar(t, &onPlanCompletedHook, func(hpl *SharedState, status PlanStatus, hap *ActivePlan) {
 			called = true
 			must(t, hpl == pl, "pl mismatch")
 			must(t, status == PlanStatusCompleted, "status mismatch")
@@ -904,7 +854,7 @@ func TestOnPlanCompleted_HookAndDefaultPaths(t *testing.T) {
 		cancelled = false
 
 		var statusCalled bool
-		withMarkPlanStatusHook(t, func(hpl *SharedState, _ context.Context, planCM string, status PlanStatus) bool {
+		withVar(t, &markPlanStatusToConfigMapHook, func(hpl *SharedState, _ context.Context, planCM string, status PlanStatus) bool {
 			statusCalled = true
 			must(t, hpl == pl, "pl mismatch")
 			mustEq(t, planCM, ap.ID, "planCM mismatch")
@@ -924,6 +874,23 @@ func TestOnPlanCompleted_HookAndDefaultPaths(t *testing.T) {
 		pl2 := &SharedState{}
 		must(t, !pl2.onPlanCompleted(PlanStatusCompleted), "expected false")
 	})
+}
+
+func TestOnPlanCompleted_CASFail_ReturnsFalseAndKeepsState(t *testing.T) {
+	pl := &SharedState{}
+	pl.ActivePlanInProgress.Store(true)
+
+	ap := &ActivePlan{ID: "cm-1"}
+	pl.ActivePlan.Store(ap)
+
+	withVar(t, &activePlanCompareAndSwap, func(_ *SharedState, _, _ *ActivePlan) bool {
+		return false // simulate someone else winning the race
+	})
+
+	ok := pl.onPlanCompleted(PlanStatusCompleted)
+	must(t, !ok, "want ok=false when CAS fails")
+	must(t, pl.getActivePlan() == ap, "active plan should remain when CAS fails")
+	must(t, pl.ActivePlanInProgress.Load(), "active flag should remain true when CAS fails")
 }
 
 // -------------------------
@@ -972,6 +939,20 @@ func TestIsPodAllowedByPlan_AndFilterNodes(t *testing.T) {
 	pOther := pod("ns", "other", withOwner("ReplicaSet", "rs-other"))
 	_, _, ok = pl.filterNodes(pOther)
 	must(t, !ok, "expected block for workload not in plan")
+
+	// node-selected path (NodeName set)
+	pOwnedOnN1 := pod("ns", "owned-n1", withOwner("ReplicaSet", "rs-1"), onNode("n1"))
+	must(t, pl.isPodAllowedByPlan(pOwnedOnN1), "expected allowed when bound to node with remaining quota")
+
+	pOwnedOnN2 := pod("ns", "owned-n2", withOwner("ReplicaSet", "rs-1"), onNode("n2"))
+	must(t, !pl.isPodAllowedByPlan(pOwnedOnN2), "expected blocked when bound to node with NO remaining quota")
+
+	// quotas exhausted => block
+	ap.WorkloadQuotas = buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 0, "n2": 0}})
+	_, reason, ok = pl.filterNodes(pOwned)
+	must(t, !ok, "expected block when quotas exhausted")
+	mustContains(t, reason, "quotas exhausted")
+
 }
 
 // -------------------------
@@ -1033,6 +1014,19 @@ func TestComputePlanPodCounts_IgnoresPendingEvictions_AndRunningPlacements(t *te
 	mustEq(t, post, 2, "runningAfter wrong")
 }
 
+func TestComputePlanPodCounts_ClampsNegative(t *testing.T) {
+	run := pod("ns", "run", withUID("u-run"), onNode("n1"))
+
+	out := &SolverOutput{
+		// Duplicate eviction entries => evictedRunning > runningBefore
+		Evictions: []SolverPod{{UID: run.UID}, {UID: run.UID}},
+	}
+	_, pre, post := computePlanPodCounts(out, []*v1.Pod{run})
+
+	mustEq(t, pre, 1, "runningBefore wrong")
+	mustEq(t, post, 0, "runningAfter should clamp to 0")
+}
+
 // -------------------------
 // exportPlanToConfigMap + setPlanStatusInConfigMap
 // (kept mostly like your original, but with cleaner hook usage)
@@ -1045,7 +1039,7 @@ func TestExportPlanToConfigMap_UsesHook(t *testing.T) {
 	name := PlanConfigMapNamePrefix + "cm"
 
 	var called bool
-	withExportPlanHook(t, func(hpl *SharedState, hctx context.Context, hname string, hsp *StoredPlan) error {
+	withVar(t, &exportPlanToConfigMapHook, func(hpl *SharedState, hctx context.Context, hname string, hsp *StoredPlan) error {
 		called = true
 		must(t, hpl == pl, "pl mismatch")
 		must(t, hctx == ctx, "ctx mismatch")
@@ -1115,7 +1109,7 @@ func TestSetPlanStatusInConfigMap_UsesHook(t *testing.T) {
 	ctx := context.Background()
 
 	var called bool
-	withMarkPlanStatusHook(t, func(hpl *SharedState, hctx context.Context, planCM string, status PlanStatus) bool {
+	withVar(t, &markPlanStatusToConfigMapHook, func(hpl *SharedState, hctx context.Context, planCM string, status PlanStatus) bool {
 		called = true
 		must(t, hpl == pl, "pl mismatch")
 		must(t, hctx == ctx, "ctx mismatch")
@@ -1247,4 +1241,136 @@ func TestClusterFingerprint_IgnoresDeletedPods_AndNilNodes(t *testing.T) {
 	fp1 := clusterFingerprint([]*v1.Node{nil, n1}, []*v1.Pod{pRun, pDel})
 	fp2 := clusterFingerprint([]*v1.Node{n1}, []*v1.Pod{pRun})
 	mustEq(t, fp1, fp2, "deleted pods and nil nodes must not affect fingerprint")
+}
+
+func TestCollectEvictions_NilOrEmpty(t *testing.T) {
+	byUID := map[types.UID]*v1.Pod{
+		types.UID("u1"): pod("ns", "p1", withUID("u1"), onNode("n1")),
+	}
+
+	mustEq(t, collectEvictions(nil, byUID), []SolverPod(nil), "nil out should return nil")
+	mustEq(t, collectEvictions(&SolverOutput{Evictions: nil}, byUID), []SolverPod(nil), "empty evictions should return nil")
+	mustEq(t, collectEvictions(&SolverOutput{Evictions: []SolverPod{}}, byUID), []SolverPod(nil), "empty evictions slice should return nil")
+}
+
+func TestCollectEvictions_SkipsMissingPendingAndDeleting(t *testing.T) {
+	pRun := pod("ns", "run", withUID("u-run"), onNode("n1"))
+	pPend := pod("ns", "pend", withUID("u-pend")) // pending (no node)
+	pDel := pod("ns", "del", withUID("u-del"), onNode("n2"))
+	now := metav1.Now()
+	pDel.DeletionTimestamp = &now // terminating => not alive
+
+	byUID := map[types.UID]*v1.Pod{
+		pRun.UID:  pRun,
+		pPend.UID: pPend,
+		pDel.UID:  pDel,
+		// note: no entry for "u-missing"
+	}
+
+	out := &SolverOutput{
+		Evictions: []SolverPod{
+			{UID: pRun.UID},               // included
+			{UID: pPend.UID},              // skipped (not assigned)
+			{UID: pDel.UID},               // skipped (terminating)
+			{UID: types.UID("u-missing")}, // skipped (unknown UID)
+		},
+	}
+
+	ev := collectEvictions(out, byUID)
+	mustEq(t, len(ev), 1, "only running+alive should be evicted")
+	mustEq(t, ev[0].UID, pRun.UID, "wrong evicted UID")
+	mustEq(t, ev[0].Node, "n1", "wrong node for evicted placement")
+}
+
+func TestIsPodAllowedByPlan_MissingWorkload_QuotaZero_NodeNotInQuota(t *testing.T) {
+	pl := &SharedState{}
+
+	// Set an active plan with quotas only for rs-1
+	pOwned := pod("ns", "owned", withOwner("ReplicaSet", "rs-1"))
+	wk, _ := getTopWorkload(pOwned)
+	wkStr := wk.String()
+
+	ap := &ActivePlan{
+		ID:              "plan",
+		PlacementByName: map[string]string{},
+		WorkloadQuotas:  buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 1}}),
+	}
+	pl.ActivePlan.Store(ap)
+
+	// (A) workload not present in plan => false
+	pOther := pod("ns", "other", withOwner("ReplicaSet", "rs-other"))
+	must(t, !pl.isPodAllowedByPlan(pOther), "expected false for workload not in plan")
+
+	// (B) node is set, but NOT present in quota map => false (hits `exists == false`)
+	pOnNX := pod("ns", "owned-nx", withOwner("ReplicaSet", "rs-1"), onNode("nx"))
+	must(t, !pl.isPodAllowedByPlan(pOnNX), "expected false when node not present in perNode quotas")
+
+	// (C) no node selected, but all quotas are 0 => false (hits the final loop-return false)
+	ap.WorkloadQuotas = buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 0}})
+	pPending := pod("ns", "owned-pend", withOwner("ReplicaSet", "rs-1")) // pending
+	must(t, !pl.isPodAllowedByPlan(pPending), "expected false when all quotas exhausted and pod has no node")
+}
+
+func TestExportPlanToConfigMap_DefaultPath_CreateErrorPropagates(t *testing.T) {
+	orig := exportPlanToConfigMapHook
+	exportPlanToConfigMapHook = nil
+	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
+
+	ctx := context.Background()
+	pl, cleanup := newSharedStateWithConfigMapInformer(t)
+	defer cleanup()
+
+	// Make ConfigMap create fail inside ensureJson()
+	client := pl.Client.(*fake.Clientset)
+	client.PrependReactor("create", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("create boom")
+	})
+
+	name := fmt.Sprintf("%s%s", PlanConfigMapNamePrefix, "unit-create-fail")
+	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
+
+	err := pl.exportPlanToConfigMap(ctx, name, sp)
+	must(t, err != nil, "expected error")
+	mustContains(t, err.Error(), "create boom")
+}
+
+func TestExportPlanToConfigMap_DefaultPath_PruneDeleteErrorPropagates(t *testing.T) {
+	orig := exportPlanToConfigMapHook
+	exportPlanToConfigMapHook = nil
+	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
+
+	// Create enough existing plan CMs so pruneConfigMaps tries to delete at least one.
+	var objs []runtime.Object
+	for i := 0; i < PlansToRetain+2; i++ {
+		cm := &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         SystemNamespace,
+				Name:              fmt.Sprintf("%sold-%02d", PlanConfigMapNamePrefix, i),
+				Labels:            map[string]string{PlanConfigMapLabelKey: "true"},
+				CreationTimestamp: metav1.NewTime(time.Unix(int64(i+1), 0).UTC()),
+			},
+			Data: map[string]string{PlanConfigMapLabelKey + ".json": `{}`},
+		}
+		objs = append(objs, cm)
+	}
+
+	ctx := context.Background()
+	pl, cleanup := newSharedStateWithConfigMapInformer(t, objs...)
+	defer cleanup()
+
+	// Make delete fail during pruning.
+	client := pl.Client.(*fake.Clientset)
+	client.PrependReactor("delete", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("delete boom")
+	})
+	client.PrependReactor("delete-collection", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("delete boom")
+	})
+
+	name := fmt.Sprintf("%s%s", PlanConfigMapNamePrefix, "unit-prune-fail")
+	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
+
+	err := pl.exportPlanToConfigMap(ctx, name, sp)
+	must(t, err != nil, "expected error")
+	mustContains(t, err.Error(), "delete boom")
 }

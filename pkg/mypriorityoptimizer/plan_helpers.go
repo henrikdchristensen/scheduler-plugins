@@ -50,12 +50,17 @@ func (pl *SharedState) getActivePlan() *ActivePlan {
 	return pl.ActivePlan.Load()
 }
 
+// test hook: override in unit tests to simulate CAS failure deterministically.
+var activePlanCompareAndSwap = func(pl *SharedState, old, new *ActivePlan) bool {
+	return pl.ActivePlan.CompareAndSwap(old, new)
+}
+
 // clearActivePlan clears the currently active plan, if any.
 func (pl *SharedState) tryClearActivePlan(ap *ActivePlan) bool {
 	if ap == nil {
 		return false
 	}
-	return pl.ActivePlan.CompareAndSwap(ap, nil)
+	return activePlanCompareAndSwap(pl, ap, nil)
 }
 
 func (pl *SharedState) tryEnterOptimizationFlow() bool {
@@ -209,7 +214,11 @@ func collectEvictions(out *SolverOutput, byUID map[types.UID]*v1.Pod) []SolverPo
 	}
 	evicts := make([]SolverPod, 0, len(out.Evictions))
 	for _, e := range out.Evictions {
-		if p := byUID[e.UID]; isPodAssignedAndAlive(p) {
+		p := byUID[e.UID]
+		if p == nil {
+			continue
+		}
+		if isPodAssignedAndAlive(p) {
 			evicts = append(evicts, makePlacement(p, getPodAssignedNodeName(p)))
 		}
 	}
@@ -252,6 +261,10 @@ func (pl *SharedState) buildPlan(out *SolverOutput, preemptor *v1.Pod, pods []*v
 		}
 
 		p := byUID[plm.UID]
+		if p == nil {
+			// Solver referenced a pod we don't know about (stale output); ignore.
+			continue
+		}
 		if isPodDeleted(p) {
 			continue
 		}

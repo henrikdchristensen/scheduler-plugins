@@ -102,13 +102,6 @@ func withPhase(ph v1.PodPhase) PodOpt {
 	return func(p *v1.Pod) { p.Status.Phase = ph }
 }
 
-func withDeletionTimestamp() PodOpt {
-	return func(p *v1.Pod) {
-		now := metav1.NewTime(time.Now())
-		p.DeletionTimestamp = &now
-	}
-}
-
 // -------------------------
 // node
 // -------------------------
@@ -142,23 +135,8 @@ func withAllocatable(cpu, mem string) NodeOpt {
 	}
 }
 
-func withLabel(k, v string) NodeOpt {
-	return func(n *v1.Node) {
-		if n.Labels == nil {
-			n.Labels = map[string]string{}
-		}
-		n.Labels[k] = v
-	}
-}
-
 func unschedulable() NodeOpt {
 	return func(n *v1.Node) { n.Spec.Unschedulable = true }
-}
-
-func withTaint(key string, effect v1.TaintEffect) NodeOpt {
-	return func(n *v1.Node) {
-		n.Spec.Taints = append(n.Spec.Taints, v1.Taint{Key: key, Effect: effect})
-	}
 }
 
 func notReady() NodeOpt {

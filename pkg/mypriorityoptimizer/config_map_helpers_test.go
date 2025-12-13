@@ -216,6 +216,66 @@ func TestPruneConfigMaps(t *testing.T) {
 	}
 }
 
+func TestPruneConfigMaps_ListErrorPropagates(t *testing.T) {
+	ctx := context.Background()
+	ns := "ns-prune-listerr"
+	labelKey := "lk"
+
+	cli := fake.NewSimpleClientset()
+	cms := cli.CoreV1().ConfigMaps(ns)
+
+	lister := cmNSLister{
+		listFn: func() ([]*v1.ConfigMap, error) { return nil, fmt.Errorf("boom") },
+		getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
+	}
+
+	err := pruneConfigMaps(ctx, cms, lister, labelKey, 1)
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected error containing %q, got %v", "boom", err)
+	}
+}
+
+func TestPruneConfigMaps_DeleteNotFoundIsIgnored(t *testing.T) {
+	ctx := context.Background()
+	ns := "ns-prune-notfound"
+	labelKey := "lk"
+	now := time.Now()
+
+	// Lister sees 3 labeled CMs (so prune will attempt deletes of 2).
+	cmNew := makeCm(ns, "cm-new", map[string]string{labelKey: "true"}, nil, now)
+	cmOld1 := makeCm(ns, "cm-old1", map[string]string{labelKey: "true"}, nil, now.Add(-1*time.Hour))
+	cmOld2 := makeCm(ns, "cm-old2", map[string]string{labelKey: "true"}, nil, now.Add(-2*time.Hour))
+	lister := nsLister(ns, cmNew, cmOld1, cmOld2)
+
+	// Client only has the newest CM. Deleting the old ones will return NotFound,
+	// which pruneConfigMaps must ignore.
+	cli := fake.NewSimpleClientset(cmNew)
+	cms := cli.CoreV1().ConfigMaps(ns)
+
+	err := pruneConfigMaps(ctx, cms, lister, labelKey, 1)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	// Sanity: newest still exists
+	if _, err := cms.Get(ctx, "cm-new", metav1.GetOptions{}); err != nil {
+		t.Fatalf("expected cm-new to exist, got %v", err)
+	}
+
+	// Ensure we actually executed the delete path (2 delete actions attempted).
+	seen := map[string]bool{}
+	for _, a := range cli.Actions() {
+		if a.GetVerb() == "delete" && a.GetResource().Resource == "configmaps" {
+			if da, ok := a.(k8stesting.DeleteAction); ok {
+				seen[da.GetName()] = true
+			}
+		}
+	}
+	if !seen["cm-old1"] || !seen["cm-old2"] {
+		t.Fatalf("expected delete attempts for cm-old1 and cm-old2, seen=%v", seen)
+	}
+}
+
 // -------------------------
 // marshalJsonIndented
 // -------------------------

@@ -62,8 +62,14 @@ func pruneConfigMaps(
 	if err != nil || len(items) <= keep {
 		return err
 	}
+
 	for i := keep; i < len(items); i++ {
-		_ = cms.Delete(ctx, items[i].Name, metav1.DeleteOptions{})
+		if err := cms.Delete(ctx, items[i].Name, metav1.DeleteOptions{}); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
 	}
 	return nil
 }
