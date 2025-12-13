@@ -450,9 +450,7 @@ type SolverNode struct {
     Name        string            `json:"name"`
     CapCPUm     int64             `json:"cap_cpu_m"`
     CapMemBytes int64             `json:"cap_mem_bytes"`
-    Labels      map[string]string `json:"labels,omitempty"` // Already exists
-    // NEW: Add topology domain
-    TopologyDomain map[string]string `json:"topology_domain,omitempty"` // e.g., {"zone": "us-west-1a", "region": "us-west"}
+    Labels      map[string]string `json:"labels,omitempty"` // Already exists - contains topology info
 }
 
 type SolverPod struct {
@@ -537,7 +535,28 @@ def node_matches_selector(node_idx, selector):
         elif operator == "DoesNotExist":
             if key in node_labels:
                 return False
-        # ... handle Gt, Lt
+        elif operator == "Gt":
+            # Greater than - for numeric comparisons
+            if key not in node_labels or len(values) == 0:
+                return False
+            try:
+                node_value = float(node_labels[key])
+                threshold = float(values[0])
+                if node_value <= threshold:
+                    return False
+            except (ValueError, TypeError):
+                return False
+        elif operator == "Lt":
+            # Less than - for numeric comparisons
+            if key not in node_labels or len(values) == 0:
+                return False
+            try:
+                node_value = float(node_labels[key])
+                threshold = float(values[0])
+                if node_value >= threshold:
+                    return False
+            except (ValueError, TypeError):
+                return False
     return True
 
 # Helper: Get pods matching label selector
@@ -639,7 +658,7 @@ def nodes_in_topology(node_idx, topology_key):
                # Check if any target pod is assigned to topo_nodes
                can_assign = model.NewBoolVar(f"can_assign_{i}_{j}_affinity")
                
-               # can_assign == 1 iff exists target pod on same topology
+               # Build list of assignment variables for target pods in same topology
                clauses = []
                for target_i in target_pods:
                    for target_j in topo_nodes:
@@ -647,8 +666,11 @@ def nodes_in_topology(node_idx, topology_key):
                            pos = eligible_pos[target_i][target_j]
                            clauses.append(assign[target_i][pos])
                
+               # can_assign == 1 iff at least one target pod is on same topology
+               # Use AddBoolOr to create logical OR constraint
                if clauses:
-                   model.Add(can_assign == max(clauses))  # At least one must be true
+                   model.AddBoolOr(clauses).OnlyEnforceIf(can_assign)
+                   model.AddBoolAnd([c.Not() for c in clauses]).OnlyEnforceIf(can_assign.Not())
                else:
                    model.Add(can_assign == 0)
                
@@ -993,8 +1015,8 @@ type ResourceRatios struct {
 
 2. **Field accessors** (lines 152-165):
    ```python
-   def p_lim_cpu_m(i):     return int(pods[i].get("lim_cpu_m", pods[i]["req_cpu_m"]))
-   def p_lim_mem_bytes(i): return int(pods[i].get("lim_mem_bytes", pods[i]["req_mem_bytes"]))
+   def p_lim_cpu_m(i):     return int(pods[i].get("lim_cpu_m", pods[i].get("req_cpu_m", 0)))
+   def p_lim_mem_bytes(i): return int(pods[i].get("lim_mem_bytes", pods[i].get("req_mem_bytes", 0)))
    def p_qos_class(i):     return pods[i].get("qos_class", "Guaranteed")
    def p_labels(i):        return pods[i].get("labels") or {}
    def p_affinity(i):      return pods[i].get("affinity") or {}
