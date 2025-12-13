@@ -52,7 +52,7 @@ func TestDoesSafePodSetExist(t *testing.T) {
 
 	// set with one pod -> true
 	ps := newSafePodSet("blocked")
-	pod := makePod("ns1", "pod1", "uid-1", "", "", "", 5)
+	pod := pod("ns1", "pod1")
 	ps.AddPodSafely(pod)
 	if got := doesSafePodSetExist(ps); !got {
 		t.Fatalf("doesSafePodSetExist(non-empty) = %v, want true", got)
@@ -67,18 +67,18 @@ func TestPruneSet_RemovesStaleAndKeepsPending(t *testing.T) {
 	pl := &SharedState{}
 	ps := newSafePodSet("blocked")
 
-	pGone := makePod("ns", "gone", "uid-gone", "", "", "", 0)
-	pRecreatedOld := makePod("ns", "recreated", "uid-recreated-old", "", "", "", 0)
+	pGone := pod("ns", "gone")
+	pRecreatedOld := pod("ns", "recreated")
 
 	now := metav1.Now()
-	pTerminating := makePod("ns", "term", "uid-term", "", "", "", 0)
+	pTerminating := pod("ns", "term")
 	pTerminating.DeletionTimestamp = &now
 
-	pBound := makePod("ns", "bound", "uid-bound", "", "", "", 0)
+	pBound := pod("ns", "bound")
 	pBound.Spec.NodeName = "node1"
 
-	pErr := makePod("ns", "err", "uid-err", "", "", "", 0)
-	pKeep := makePod("ns", "keep", "uid-keep", "", "", "", 0)
+	pErr := pod("ns", "err")
+	pKeep := pod("ns", "keep")
 
 	ps.AddPodSafely(pGone)
 	ps.AddPodSafely(pRecreatedOld)
@@ -158,7 +158,7 @@ func TestPruneSafePodSet_EmptyOrNil(t *testing.T) {
 
 func TestSafePodSet_AddRemoveAndSnapshot(t *testing.T) {
 	ps := newSafePodSet("blocked")
-	pod := makePod("ns1", "pod1", "uid-1", "", "", "", 5)
+	pod := pod("ns1", "pod1")
 
 	// Add
 	ps.AddPodSafely(pod)
@@ -200,7 +200,7 @@ func TestSafePodSet_AddPod_NilNoOp(t *testing.T) {
 
 func TestSafePodSet_SnapshotIsCopy(t *testing.T) {
 	ps := newSafePodSet("blocked")
-	pod := makePod("ns1", "pod1", "uid-1", "", "", "", 5)
+	pod := pod("ns1", "pod1")
 	ps.AddPodSafely(pod)
 
 	snap := ps.SnapshotSafely()

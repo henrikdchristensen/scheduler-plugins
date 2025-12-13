@@ -58,7 +58,7 @@ func TestPreFilter(t *testing.T) {
 	tests := []tc{
 		{
 			name:        "kube-system always allowed (ignores plan)",
-			pod:         makePod(SystemNamespace, "sys-pod", "", "", "", "", 0),
+			pod:         pod(SystemNamespace, "sys-pod"),
 			activePlan:  &ActivePlan{ID: "ap1", PlacementByName: map[string]string{}},
 			wantCode:    fwk.Success,
 			wantNodes:   nil,
@@ -66,7 +66,7 @@ func TestPreFilter(t *testing.T) {
 		},
 		{
 			name:        "no active plan allows pod",
-			pod:         makePod("default", "work-pod", "", "", "", "", 0),
+			pod:         pod("default", "work-pod"),
 			activePlan:  nil,
 			wantCode:    fwk.Success,
 			wantNodes:   nil,
@@ -74,14 +74,14 @@ func TestPreFilter(t *testing.T) {
 		},
 		{
 			name:       "active plan: standalone allowed on all nodes",
-			pod:        makePod("default", "p1", "", "", "", "", 0),
+			pod:        pod("default", "p1"),
 			activePlan: &ActivePlan{ID: "ap1", PlacementByName: map[string]string{"default/p1": ""}},
 			wantCode:   fwk.Success,
 			wantNodes:  nil, // nil => allowed everywhere returns nil result
 		},
 		{
 			name:       "active plan: standalone pinned returns node set",
-			pod:        makePod("default", "p1", "", "", "", "", 0),
+			pod:        pod("default", "p1"),
 			activePlan: &ActivePlan{ID: "ap1", PlacementByName: map[string]string{"default/p1": "nodeA"}},
 			wantCode:   fwk.Success,
 			wantNodes:  []string{"nodeA"},
@@ -89,8 +89,7 @@ func TestPreFilter(t *testing.T) {
 		{
 			name: "active plan: workload quota allows subset of nodes",
 			setup: func(pl *SharedState) *v1.Pod {
-				prio := int32(0)
-				pod := makePod("default", "p1", "uid1", "", "ReplicaSet", "rs1", prio)
+				pod := pod("default", "p1", withOwner("ReplicaSet", "rs1"))
 				wk, ok := getTopWorkload(pod)
 				if !ok {
 					t.Fatalf("expected workload pod")
@@ -117,7 +116,7 @@ func TestPreFilter(t *testing.T) {
 		},
 		{
 			name:        "active plan blocks pod not in plan",
-			pod:         makePod("default", "p1", "", "", "", "", 0),
+			pod:         pod("default", "p1"),
 			activePlan:  &ActivePlan{ID: "ap1", PlacementByName: map[string]string{}},
 			wantCode:    fwk.Unschedulable,
 			wantNodes:   nil,

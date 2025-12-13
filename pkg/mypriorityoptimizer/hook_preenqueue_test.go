@@ -29,7 +29,7 @@ func TestPreEnqueue(t *testing.T) {
 	tests := []tc{
 		{
 			name:        "kube-system always allowed",
-			pod:         makePod(SystemNamespace, "sys-pod", "", "", "", "", 0),
+			pod:         pod(SystemNamespace, "sys-pod"),
 			pluginReady: false, // doesn't matter
 			mode:        ModeManualBlocking,
 			synch:       true,
@@ -38,7 +38,7 @@ func TestPreEnqueue(t *testing.T) {
 		},
 		{
 			name:        "caches not ready blocks pod",
-			pod:         makePod("default", "p1", "", "", "", "", 0),
+			pod:         pod("default", "p1"),
 			pluginReady: false,
 			mode:        ModePeriodic,
 			synch:       true,
@@ -47,7 +47,7 @@ func TestPreEnqueue(t *testing.T) {
 		},
 		{
 			name:        "manual blocking mode blocks when no active plan",
-			pod:         makePod("default", "work-pod", "", "", "", "", 0),
+			pod:         pod("default", "work-pod"),
 			pluginReady: true,
 			mode:        ModeManualBlocking,
 			synch:       true,
@@ -56,7 +56,7 @@ func TestPreEnqueue(t *testing.T) {
 		},
 		{
 			name:        "default-like mode pass-through when no active plan",
-			pod:         makePod("default", "work-pod", "", "", "", "", 0),
+			pod:         pod("default", "work-pod"),
 			pluginReady: true,
 			mode:        ModePeriodic,
 			synch:       true,
@@ -65,7 +65,7 @@ func TestPreEnqueue(t *testing.T) {
 		},
 		{
 			name:        "active plan blocks pod not allowed by plan",
-			pod:         makePod("default", "p1", "", "", "", "", 0),
+			pod:         pod("default", "p1"),
 			pluginReady: true,
 			mode:        ModePeriodic,
 			synch:       true,
@@ -76,7 +76,7 @@ func TestPreEnqueue(t *testing.T) {
 		},
 		{
 			name:        "active plan allows pinned pod",
-			pod:         makePod("default", "p1", "", "", "", "", 0),
+			pod:         pod("default", "p1"),
 			pluginReady: true,
 			mode:        ModePeriodic,
 			synch:       true,

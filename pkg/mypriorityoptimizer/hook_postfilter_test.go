@@ -108,7 +108,7 @@ func TestPostFilter(t *testing.T) {
 				tt.setupPL(pl)
 			}
 
-			res, st := pl.PostFilter(context.Background(), nil, makePod("default", "p1", "", "", "", "", 0), nil)
+			res, st := pl.PostFilter(context.Background(), nil, pod("default", "p1"), nil)
 
 			if tt.wantResIsNil && res != nil {
 				t.Fatalf("PostFilter() result = %#v, want nil", res)

@@ -52,31 +52,61 @@ func writeFakeSolverScript(t *testing.T, dir, body string) string {
 // makePod
 // -------------------------
 
-// makePod creates a pod with the specified attributes.
-func makePod(ns, name, uid, node, ownerKind, ownerName string, prio int32) *v1.Pod {
-	var ownerRefs []metav1.OwnerReference
-	if ownerKind != "" && ownerName != "" {
-		controller := true
-		ownerRefs = []metav1.OwnerReference{
-			{
-				APIVersion: "apps/v1",
-				Kind:       ownerKind,
-				Name:       ownerName,
-				Controller: &controller,
-			},
-		}
-	}
-	return &v1.Pod{
+type PodOpt func(*v1.Pod)
+
+func pod(ns, name string, opts ...PodOpt) *v1.Pod {
+	// sensible defaults for tests
+	prio := int32(0)
+	p := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       ns,
-			Name:            name,
-			UID:             types.UID(uid),
-			OwnerReferences: ownerRefs,
+			Namespace: ns,
+			Name:      name,
+			UID:       types.UID(name), // default: stable & unique-ish for tests
 		},
 		Spec: v1.PodSpec{
-			NodeName: node,
 			Priority: &prio,
 		},
+	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
+}
+
+func withUID(uid string) PodOpt {
+	return func(p *v1.Pod) { p.UID = types.UID(uid) }
+}
+
+func onNode(node string) PodOpt {
+	return func(p *v1.Pod) { p.Spec.NodeName = node }
+}
+
+func withPrio(prio int32) PodOpt {
+	return func(p *v1.Pod) { p.Spec.Priority = &prio }
+}
+
+func withOwner(kind, name string) PodOpt {
+	return func(p *v1.Pod) {
+		controller := true
+		p.OwnerReferences = append(p.OwnerReferences, metav1.OwnerReference{
+			APIVersion: "apps/v1",
+			Kind:       kind,
+			Name:       name,
+			Controller: &controller,
+		})
+	}
+}
+
+func withReqs(cpuReq, memReq string) PodOpt {
+	return func(p *v1.Pod) {
+		p.Spec.Containers = []v1.Container{{
+			Resources: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse(cpuReq),
+					v1.ResourceMemory: resource.MustParse(memReq),
+				},
+			},
+		}}
 	}
 }
 
@@ -84,19 +114,57 @@ func makePod(ns, name, uid, node, ownerKind, ownerName string, prio int32) *v1.P
 // makeNode
 // -------------------------
 
-// makeNode creates a node with the specified name.
-func makeNode(name string) *v1.Node {
-	return &v1.Node{
+type NodeOpt func(*v1.Node)
+
+func node(name string, opts ...NodeOpt) *v1.Node {
+	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Status: v1.NodeStatus{
-			Conditions: []v1.NodeCondition{
-				{Type: v1.NodeReady, Status: v1.ConditionTrue},
-			},
+			Conditions: []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionTrue}},
 			Allocatable: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("1000m"),
 				v1.ResourceMemory: resource.MustParse("1Gi"),
 			},
 		},
+	}
+	for _, o := range opts {
+		o(n)
+	}
+	return n
+}
+
+func withAllocatable(cpu, mem string) NodeOpt {
+	return func(n *v1.Node) {
+		if n.Status.Allocatable == nil {
+			n.Status.Allocatable = v1.ResourceList{}
+		}
+		n.Status.Allocatable[v1.ResourceCPU] = resource.MustParse(cpu)
+		n.Status.Allocatable[v1.ResourceMemory] = resource.MustParse(mem)
+	}
+}
+
+func withLabel(k, v string) NodeOpt {
+	return func(n *v1.Node) {
+		if n.Labels == nil {
+			n.Labels = map[string]string{}
+		}
+		n.Labels[k] = v
+	}
+}
+
+func unschedulable() NodeOpt {
+	return func(n *v1.Node) { n.Spec.Unschedulable = true }
+}
+
+func withTaint(key string, effect v1.TaintEffect) NodeOpt {
+	return func(n *v1.Node) {
+		n.Spec.Taints = append(n.Spec.Taints, v1.Taint{Key: key, Effect: effect})
+	}
+}
+
+func notReady() NodeOpt {
+	return func(n *v1.Node) {
+		n.Status.Conditions = []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionFalse}}
 	}
 }
 

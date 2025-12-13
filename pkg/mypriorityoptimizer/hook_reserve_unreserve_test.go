@@ -44,7 +44,7 @@ func TestReserve(t *testing.T) {
 					PlacementByName: map[string]string{},
 					WorkloadQuotas:  WorkloadQuotasAtomics{},
 				})
-				pod := makePod(SystemNamespace, "sys-pod", "", "", "", "", 0)
+				pod := pod(SystemNamespace, "sys-pod")
 				return pl, pod, framework.NewCycleState(), "node1"
 			},
 			wantCode: fwk.Success,
@@ -53,7 +53,7 @@ func TestReserve(t *testing.T) {
 			name: "no active plan allows pod",
 			setup: func(t *testing.T) (*SharedState, *v1.Pod, *framework.CycleState, string) {
 				pl := &SharedState{}
-				pod := makePod("default", "work-pod", "", "", "", "", 0)
+				pod := pod("default", "work-pod")
 				return pl, pod, framework.NewCycleState(), "node1"
 			},
 			wantCode: fwk.Success,
@@ -69,7 +69,7 @@ func TestReserve(t *testing.T) {
 					},
 					WorkloadQuotas: WorkloadQuotasAtomics{}, // should not be touched
 				})
-				pod := makePod("default", "p1", "", "", "", "", 0)
+				pod := pod("default", "p1")
 				return pl, pod, framework.NewCycleState(), "node1"
 			},
 			wantCode: fwk.Success,
@@ -83,7 +83,7 @@ func TestReserve(t *testing.T) {
 					PlacementByName: map[string]string{},
 					WorkloadQuotas:  WorkloadQuotasAtomics{},
 				})
-				pod := makePod("default", "p1", "", "", "", "", 0)
+				pod := pod("default", "p1")
 				return pl, pod, framework.NewCycleState(), "node1"
 			},
 			wantCode: fwk.Success,
@@ -97,7 +97,7 @@ func TestReserve(t *testing.T) {
 					PlacementByName: map[string]string{},
 					WorkloadQuotas:  WorkloadQuotasAtomics{}, // missing workload key
 				})
-				pod := makePod("default", "p1", "uid1", "", "ReplicaSet", "rs1", 0)
+				pod := pod("default", "p1", withOwner("ReplicaSet", "rs1"))
 				return pl, pod, framework.NewCycleState(), "node1"
 			},
 			wantCode:   fwk.Unschedulable,
@@ -106,7 +106,7 @@ func TestReserve(t *testing.T) {
 		{
 			name: "node not tracked -> Unschedulable",
 			setup: func(t *testing.T) (*SharedState, *v1.Pod, *framework.CycleState, string) {
-				pod := makePod("default", "p1", "uid1", "", "ReplicaSet", "rs1", 0)
+				pod := pod("default", "p1", withOwner("ReplicaSet", "rs1"))
 				wk, ok := getTopWorkload(pod)
 				if !ok {
 					t.Fatalf("expected workload pod")
@@ -129,7 +129,7 @@ func TestReserve(t *testing.T) {
 		{
 			name: "workload node quota exhausted -> Unschedulable",
 			setup: func(t *testing.T) (*SharedState, *v1.Pod, *framework.CycleState, string) {
-				pod := makePod("default", "p1", "uid1", "", "ReplicaSet", "rs1", 0)
+				pod := pod("default", "p1", withOwner("ReplicaSet", "rs1"))
 				wk, ok := getTopWorkload(pod)
 				if !ok {
 					t.Fatalf("expected workload pod")
@@ -152,7 +152,7 @@ func TestReserve(t *testing.T) {
 		{
 			name: "consumes quota and writes reservation state",
 			setup: func(t *testing.T) (*SharedState, *v1.Pod, *framework.CycleState, string) {
-				pod := makePod("default", "p1", "uid1", "", "ReplicaSet", "rs1", 0)
+				pod := pod("default", "p1", withOwner("ReplicaSet", "rs1"))
 				wk, ok := getTopWorkload(pod)
 				if !ok {
 					t.Fatalf("expected workload pod")
@@ -318,7 +318,7 @@ func TestUnreserve(t *testing.T) {
 				cs.Write(rsReservationKey, tt.cycleWrite)
 			}
 
-			pod := makePod("default", "p1", "", "", "", "", 0)
+			pod := pod("default", "p1")
 			pl.Unreserve(context.Background(), cs, pod, "node1")
 
 			if tt.wantQuota {

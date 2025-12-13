@@ -17,7 +17,7 @@ import (
 // Test Helpers
 // -------------------------
 
-func call(t *testing.T, pl *SharedState, h func(http.ResponseWriter, *http.Request), method, path string) *httptest.ResponseRecorder {
+func call(t *testing.T, h func(http.ResponseWriter, *http.Request), method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, nil)
@@ -77,7 +77,7 @@ func TestHTTP_Healthz(t *testing.T) {
 			pl := &SharedState{}
 			pl.PluginReady.Store(tt.ready)
 
-			rr := call(t, pl, pl.httpHealthzHandler, http.MethodGet, "/healthz")
+			rr := call(t, pl.httpHealthzHandler, http.MethodGet, "/healthz")
 			mustCode(t, rr, tt.wantCode)
 			if tt.checkBody {
 				mustBody(t, rr, tt.wantBody)
@@ -108,7 +108,7 @@ func TestHTTP_Active(t *testing.T) {
 			pl := &SharedState{}
 			pl.ActivePlanInProgress.Store(tt.active)
 
-			rr := call(t, pl, pl.httpActiveHandler, tt.method, "/active")
+			rr := call(t, pl.httpActiveHandler, tt.method, "/active")
 			mustCode(t, rr, tt.wantCode)
 
 			if tt.wantJSON {
@@ -127,7 +127,7 @@ func TestHTTP_Active(t *testing.T) {
 
 func TestHTTP_Solve_MethodNotAllowed(t *testing.T) {
 	pl := &SharedState{}
-	rr := call(t, pl, pl.httpSolveHandler, http.MethodGet, "/solve")
+	rr := call(t, pl.httpSolveHandler, http.MethodGet, "/solve")
 	mustCode(t, rr, http.StatusMethodNotAllowed)
 }
 
@@ -136,7 +136,7 @@ func TestHTTP_Solve_NotReady(t *testing.T) {
 	pl.ActivePlanInProgress.Store(true) // ensure propagated
 	pl.PluginReady.Store(false)
 
-	rr := call(t, pl, pl.httpSolveHandler, http.MethodPost, "/solve")
+	rr := call(t, pl.httpSolveHandler, http.MethodPost, "/solve")
 	mustCode(t, rr, http.StatusPreconditionFailed)
 
 	resp := decodeHTTP(t, rr)
@@ -154,9 +154,9 @@ func TestHTTP_Solve_NotReady(t *testing.T) {
 
 func TestHTTP_Solve_Ready_StatusVariants(t *testing.T) {
 	// Two pending + one running => PendingBefore should be 2.
-	p1 := makePod("ns", "p1", "u1", "", "", "", 0)
-	p2 := makePod("ns", "p2", "u2", "", "", "", 0)
-	p3 := makePod("ns", "p3", "u3", "n1", "", "", 0)
+	p1 := pod("ns", "p1")
+	p2 := pod("ns", "p2")
+	p3 := pod("ns", "p3", onNode("n1"))
 
 	store := map[string]map[string]*v1.Pod{
 		"ns": {"p1": p1, "p2": p2, "p3": p3},
@@ -190,7 +190,7 @@ func TestHTTP_Solve_Ready_StatusVariants(t *testing.T) {
 				withRunOptFlow(t, func(*SharedState, context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
 					return nil, &SolverScore{Evicted: 1}, "solverB", nil, attempts, tt.err
 				}, func() {
-					rr := call(t, pl, pl.httpSolveHandler, http.MethodPost, "/solve")
+					rr := call(t, pl.httpSolveHandler, http.MethodPost, "/solve")
 					mustCode(t, rr, http.StatusOK)
 
 					resp := decodeHTTP(t, rr)

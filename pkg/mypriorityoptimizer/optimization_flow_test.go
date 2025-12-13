@@ -125,7 +125,7 @@ func TestRunOptimizationFlow_NoImprovingSolution(t *testing.T) {
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		// Include at least one pending pod so the flow proceeds past the
 		// "no pending pods" precondition.
-		pods := []*v1.Pod{makePod("default", "p-pending", "u-pending", "", "", "", 0)}
+		pods := []*v1.Pod{pod("default", "p-pending")}
 		return nil, pods, dummySolverInput(baseline.Evicted), nil
 	}
 
@@ -217,7 +217,7 @@ func TestRunOptimizationFlow_PlanNotApplicable(t *testing.T) {
 
 	baseline := SolverScore{Evicted: 7}
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{makePod("default", "p-pending", "u-pending", "", "", "", 0)}
+		pods := []*v1.Pod{pod("default", "p-pending")}
 		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
 	}
 
@@ -302,7 +302,7 @@ func TestRunOptimizationFlow_NoPendingScheduled(t *testing.T) {
 
 	baseline := SolverScore{Evicted: 10}
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{makePod("default", "p-pending", "u-pending", "", "", "", 0)}
+		pods := []*v1.Pod{pod("default", "p-pending")}
 		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
 	}
 
@@ -396,7 +396,7 @@ func TestRunOptimizationFlow_SuccessfulPlan(t *testing.T) {
 
 	baseline := SolverScore{Evicted: 0}
 	nodes := []*v1.Node{}
-	pods := []*v1.Pod{makePod("default", "p-pending", "u-pending", "", "", "", 0)}
+	pods := []*v1.Pod{pod("default", "p-pending")}
 
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		return nodes, pods, dummySolverInput(baseline.Evicted), nil
@@ -547,7 +547,7 @@ func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 
 	baseline := SolverScore{Evicted: 11}
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{makePod("default", "p-pending", "u-pending", "", "", "", 0)}
+		pods := []*v1.Pod{pod("default", "p-pending")}
 		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
 	}
 
@@ -650,7 +650,7 @@ func TestRunOptimizationFlow_PlanRegistrationError(t *testing.T) {
 
 	baseline := SolverScore{Evicted: 5}
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{makePod("default", "p-pending", "u-pending", "", "", "", 0)}
+		pods := []*v1.Pod{pod("default", "p-pending")}
 		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
 	}
 
@@ -752,7 +752,7 @@ func TestRunOptimizationFlow_PlanActivationError(t *testing.T) {
 
 	baseline := SolverScore{Evicted: 2}
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{makePod("default", "p-pending", "u-pending", "", "", "", 0)}
+		pods := []*v1.Pod{pod("default", "p-pending")}
 		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
 	}
 
