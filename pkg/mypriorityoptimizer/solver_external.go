@@ -14,8 +14,6 @@ import (
 
 var (
 	execCommandContext = exec.CommandContext
-	solverBinary       = SolverPythonBin
-	solverScriptPath   = SolverPythonScriptPath
 	readAllStdout      = io.ReadAll
 )
 

@@ -2,10 +2,13 @@
 package mypriorityoptimizer
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -31,21 +34,6 @@ func withMode(mode ModeType, synch bool, fn func()) {
 		OptimizeSolveSynch = oldSynch
 	}()
 	fn()
-}
-
-// -------------------------
-// writeFakeSolverScript
-// -------------------------
-
-// writeFakeSolverScript writes a fake solver script to the specified directory
-// with the specified body, and returns the full path to the script.
-func writeFakeSolverScript(t *testing.T, dir, body string) string {
-	t.Helper()
-	path := filepath.Join(dir, "fake_solver.sh")
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatalf("failed to write fake solver script: %v", err)
-	}
-	return path
 }
 
 // -------------------------
@@ -107,6 +95,17 @@ func withReqs(cpuReq, memReq string) PodOpt {
 				},
 			},
 		}}
+	}
+}
+
+func withPhase(ph v1.PodPhase) PodOpt {
+	return func(p *v1.Pod) { p.Status.Phase = ph }
+}
+
+func withDeletionTimestamp() PodOpt {
+	return func(p *v1.Pod) {
+		now := metav1.NewTime(time.Now())
+		p.DeletionTimestamp = &now
 	}
 }
 
@@ -203,4 +202,47 @@ func storeFromPods(pods ...*v1.Pod) map[string]map[string]*v1.Pod {
 		out[p.Namespace][p.Name] = p
 	}
 	return out
+}
+
+// withVar temporarily sets a package-level var and restores it.
+func withVar[T any](t *testing.T, ptr *T, v T) {
+	t.Helper()
+	old := *ptr
+	*ptr = v
+	t.Cleanup(func() { *ptr = old })
+}
+
+// -------------------------
+// writeFakeSolverScript
+// -------------------------
+
+// writeFakeSolverScript writes a fake solver script to the specified directory
+// with the specified body, and returns the full path to the script.
+func writeFakeSolverScript(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, "fake_solver.sh")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("failed to write fake solver script: %v", err)
+	}
+	return path
+}
+
+// requireBash skips the test if bash is not available.
+func requireBash(t *testing.T) {
+	t.Helper()
+	requireNonWindows(t)
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found on PATH")
+	}
+}
+
+// testCtx returns a context that will be cancelled before the test's deadline
+// (if one exists), otherwise uses a short timeout.
+func testCtx(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+
+	if dl, ok := t.Deadline(); ok {
+		return context.WithDeadline(context.Background(), dl.Add(-200*time.Millisecond))
+	}
+	return context.WithTimeout(context.Background(), 1*time.Second)
 }

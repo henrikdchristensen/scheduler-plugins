@@ -28,11 +28,15 @@ jobs:
           # Fail-fast checks
           : "${PYTHON_VERSION:?PYTHON_VERSION missing in env file}"
           : "${GO_VERSION:?GO_VERSION missing in env file}"
+          : "${PYTHON_COVERAGE_FAIL_UNDER:?PYTHON_COVERAGE_FAIL_UNDER missing in env file}"
+          : "${GO_COVERAGE_FAIL_UNDER:?GO_COVERAGE_FAIL_UNDER missing in env file}"
 
           # Expose as step outputs to avoid "context access might be invalid"
           {
             echo "PYTHON_VERSION=${PYTHON_VERSION}"
             echo "GO_VERSION=${GO_VERSION}"
+            echo "PYTHON_COVERAGE_FAIL_UNDER=${PYTHON_COVERAGE_FAIL_UNDER}"
+            echo "GO_COVERAGE_FAIL_UNDER=${GO_COVERAGE_FAIL_UNDER}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
@@ -59,23 +63,28 @@ jobs:
 
       - name: Run python unit tests
         run: |
-          python -m pytest \
+          python -m pytest -v \
             scripts/test \
             --cov=scripts \
             --cov-config=pytest-cfg.coveragerc \
             --cov-report=xml:coverage/python/coverage.xml \
             --cov-report=html:coverage/python/html \
+            --cov-fail-under=${{ steps.load-env.outputs.PYTHON_COVERAGE_FAIL_UNDER }} \
             --timeout=1
-
       - name: Run go unit tests
         run: |
-          go test ./pkg/mypriorityoptimizer -timeout 3s -v \
+          go test ./pkg/mypriorityoptimizer -v \
+            -timeout 3s \
             -coverprofile=coverage/go/go_coverage.out
           go tool cover \
             -func=coverage/go/go_coverage.out
           go tool cover \
             -html=coverage/go/go_coverage.out \
             -o coverage/go/coverage.html
+          THRESHOLD="${{ steps.load-env.outputs.GO_COVERAGE_FAIL_UNDER }}"
+          TOTAL=$(go tool cover -func=coverage/go/go_coverage.out | awk '/total:/ {print $3}' | sed 's/%//')
+          echo "Go total coverage: ${TOTAL}% (threshold: ${THRESHOLD}%)"
+          awk -v t="$THRESHOLD" -v c="$TOTAL" 'BEGIN { if (c+0 < t+0) { print "Go coverage below threshold"; exit 1 } }'
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4

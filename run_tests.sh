@@ -104,15 +104,21 @@ if "$RUN_UNIT_PY"; then
     --cov-report=term \
     --cov-report=html:coverage/python \
     --cov-report=term-missing \
+    --cov-fail-under="${PYTHON_COVERAGE_FAIL_UNDER}" \
     --timeout=1
   echo "Python tests completed. Coverage HTML: coverage/python/index.html"
 fi
 
 if "$RUN_UNIT_GO"; then
   echo "=== Running Go unit tests (pkg/mypriorityoptimizer) ==="
-  go test ./pkg/mypriorityoptimizer -timeout 3s -v -coverprofile=coverage/go/go_coverage.out
+  go test ./pkg/mypriorityoptimizer -v -timeout 3s -coverprofile=coverage/go/go_coverage.out
   go tool cover -func=coverage/go/go_coverage.out
   go tool cover -html=coverage/go/go_coverage.out -o coverage/go/coverage.html
+  # Enforce minimum total coverage threshold
+  THRESHOLD="${GO_COVERAGE_FAIL_UNDER}"
+  TOTAL=$(go tool cover -func=coverage/go/go_coverage.out | awk '/total:/ {print $3}' | sed 's/%//')
+  echo "Go total coverage: ${TOTAL}% (threshold: ${THRESHOLD}%)"
+  awk -v t="$THRESHOLD" -v c="$TOTAL" 'BEGIN { if (c+0 < t+0) { print "Go coverage below threshold"; exit 1 } }'
   echo "Go coverage reports generated in coverage/go/"
 fi
 

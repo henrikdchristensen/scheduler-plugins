@@ -17,6 +17,7 @@ import (
 // -------------------------
 
 // isAnySolverEnabled checks if any solver is enabled.
+// CHECKED
 func (pl *SharedState) isAnySolverEnabled() bool {
 	return SolverPythonEnabled // add more using ORs as needed
 }
@@ -25,7 +26,9 @@ func (pl *SharedState) isAnySolverEnabled() bool {
 // buildSolverInput
 // -------------------------
 
-// buildSolverInput builds the solver input from live nodes/pods (and optional preemptor)
+// buildSolverInput builds the solver input from live nodes/pods (and optional
+// preemptor)
+// CHECKED
 func (pl *SharedState) buildSolverInput(
 	nodes []*v1.Node,
 	pods []*v1.Pod,
@@ -38,7 +41,7 @@ func (pl *SharedState) buildSolverInput(
 		Pods:           make([]SolverPod, 0, len(pods)),
 	}
 
-	// ------------------------- Nodes: keep only usable -----
+	// Nodes: keep only usable
 	usable := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
 		if !isNodeUsable(n) {
@@ -55,7 +58,7 @@ func (pl *SharedState) buildSolverInput(
 		return SolverInput{}, ErrNoUsableNodes
 	}
 
-	// ------------------------- Preemptor: include as pending (not in Pods list) -----
+	// Preemptor: include as pending (not in Pods list)
 	preUID := ""
 	if preemptor != nil {
 		pre := toSolverPod(preemptor, "")
@@ -63,43 +66,22 @@ func (pl *SharedState) buildSolverInput(
 		preUID = string(preemptor.UID)
 	}
 
-	// ------------------------- Pods: add running-on-usable + all pending, skip preemptor -----
+	// Pods: add running-on-usable + all pending, skip preemptor
 	seen := make(map[types.UID]bool, len(pods))
 	for _, p := range pods {
 		if p == nil {
 			continue
 		}
 		if string(p.UID) == preUID {
-			// preemptor is represented via in.Preemptor, never duplicated in Pods
 			continue
 		}
-
 		where := getPodAssignedNodeName(p)
-		switch {
-		case where == "":
-			// pending -> always include
-			sp := toSolverPod(p, "")
-			if isPodProtected(p) {
-				sp.Protected = true
-			}
-			if !seen[sp.UID] {
-				in.Pods = append(in.Pods, sp)
-				seen[sp.UID] = true
-			}
-
-		default:
-			// running -> include only if bound to a usable node
-			if !usable[where] {
-				continue
-			}
-			sp := toSolverPod(p, where)
-			if isPodProtected(p) {
-				sp.Protected = true
-			}
-			if !seen[sp.UID] {
-				in.Pods = append(in.Pods, sp)
-				seen[sp.UID] = true
-			}
+		if where == "" {
+			addUniqueSolverPod(&in, seen, p, "")
+			continue
+		}
+		if usable[where] {
+			addUniqueSolverPod(&in, seen, p, where)
 		}
 	}
 
@@ -113,6 +95,7 @@ func (pl *SharedState) buildSolverInput(
 // -------------------------
 
 // buildBaselineScore computes the baseline score from the solver input.
+// CHECKED
 func buildBaselineScore(pods []*v1.Pod) SolverScore {
 	placedByPri := map[string]int{}
 	for _, p := range pods {
@@ -133,7 +116,9 @@ func buildBaselineScore(pods []*v1.Pod) SolverScore {
 // solverConfigArgs
 // -------------------------
 
-// solverConfigArgs builds a list of key-value pairs representing the active solver configuration.
+// solverConfigArgs builds a list of key-value pairs representing the active
+// solver configuration.
+// CHECKED
 func solverConfigArgs() []any {
 	args := make([]any, 0, 10)
 	if SolverPythonEnabled {
@@ -162,6 +147,7 @@ func solverConfigArgs() []any {
 //
 // Returns 1 if suggested is better, -1 if worse, 0 if equal.
 // Returns as soon as a difference is found.
+// CHECKED
 func isSolutionBetter(old, new *SolverScore) int {
 	// 1) Placed-by-priority (more is better)
 	if cmp := cmpLexi(new.PlacedByPriority, old.PlacedByPriority); cmp != 0 {
@@ -193,10 +179,12 @@ func isSolutionBetter(old, new *SolverScore) int {
 // isSolutionUsable
 // -------------------------
 
-// isSolutionUsable checks if the solver output status indicates a usable result.
-// OPTIMAL means the solution is perfect and meets all constraints
-// (there can be multiple optimal solutions and the solver is non-deterministic).
-// FEASIBLE means the solution is not optimal but still meets all constraints.
+// isSolutionUsable checks if the solver output status indicates a usable
+// result. OPTIMAL means the solution is perfect and meets all constraints
+// (there can be multiple optimal solutions and the solver is
+// non-deterministic). FEASIBLE means the solution is not optimal but still
+// meets all constraints.
+// CHECKED
 func isSolutionUsable(status string) bool {
 	return status != "" && (status == "OPTIMAL" || status == "FEASIBLE")
 }
@@ -208,6 +196,7 @@ func isSolutionUsable(status string) bool {
 // isSolutionApplicable checks whether a SolverOutput can still be safely
 // applied on the current cluster state. It allows unrelated drift and only
 // insists that the concrete preconditions for the plan still hold.
+// CHECKED
 func (pl *SharedState) isSolutionApplicable(
 	out *SolverOutput,
 	nodes []*v1.Node,
@@ -322,6 +311,7 @@ func (pl *SharedState) isSolutionApplicable(
 // logLeaderboard prints a compact solver leaderboard relative to baseline.
 // It groups attempts as better/equal/worse vs baseline and tags adjacent ties.
 // If best is nil, it logs only the baseline row.
+// CHECKED
 func logLeaderboard(
 	label string,
 	attempts []SolverResult,
@@ -417,6 +407,8 @@ func logLeaderboard(
 //   - placed_by_priority: number of pods that were placed for each priority
 //   - evicted:            number of pods that were evicted
 //   - moved:              number of pods that were moved to a different node
+//
+// CHECKED
 func scoreSolution(in SolverInput, out *SolverOutput) SolverScore {
 	if out == nil {
 		return SolverScore{}
@@ -492,6 +484,7 @@ func scoreSolution(in SolverInput, out *SolverOutput) SolverScore {
 // -------------------------
 
 // toSolverPod converts a Pod to a SolverPod.
+// CHECKED
 func toSolverPod(p *v1.Pod, node string) SolverPod {
 	return SolverPod{
 		UID:         p.UID,
@@ -505,11 +498,29 @@ func toSolverPod(p *v1.Pod, node string) SolverPod {
 }
 
 // -------------------------
+// addUniqueSolverPod
+// -------------------------
+
+// addUniqueSolverPod adds a SolverPod to the SolverInput if not already present.
+// CHECKED
+func addUniqueSolverPod(in *SolverInput, seen map[types.UID]bool, p *v1.Pod, node string) {
+	sp := toSolverPod(p, node)
+	if isPodProtected(p) {
+		sp.Protected = true
+	}
+	if !seen[sp.UID] {
+		in.Pods = append(in.Pods, sp)
+		seen[sp.UID] = true
+	}
+}
+
+// -------------------------
 // exportSolverStatsToConfigMap
 // -------------------------
 
-// exportSolverStatsToConfigMap exports a compact run record to the stats ConfigMap.
-// Only runs when `hadFeasible` is true.
+// exportSolverStatsToConfigMap exports a compact run record to the stats
+// ConfigMap. Only runs when `hadFeasible` is true.
+// CHECKED
 func (pl *SharedState) exportSolverStatsToConfigMap(
 	ctx context.Context,
 	strategy string,
@@ -539,6 +550,8 @@ func (pl *SharedState) exportSolverStatsToConfigMap(
 
 var appendSolverStatsCMHook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)
 
+// appendSolverStatsCM appends an entry to the solver stats ConfigMap.
+// CHECKED
 func (pl *SharedState) appendSolverStatsCM(ctx context.Context, entry ExportedSolverStats) error {
 	// Allow unit tests to intercept ConfigMap writes and avoid real K8s clients.
 	if appendSolverStatsCMHook != nil {

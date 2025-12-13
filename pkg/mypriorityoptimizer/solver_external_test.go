@@ -10,38 +10,17 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 // -------------------------
 // Test Helpers
 // -------------------------
 
-// testCtx returns a context that will be cancelled before the test's deadline
-// (if one exists), otherwise uses a short timeout.
-func testCtx(t *testing.T) (context.Context, context.CancelFunc) {
-	t.Helper()
-
-	if dl, ok := t.Deadline(); ok {
-		return context.WithDeadline(context.Background(), dl.Add(-200*time.Millisecond))
-	}
-	return context.WithTimeout(context.Background(), 1*time.Second)
-}
-
 // requireNonWindows skips the test if running on Windows.
 func requireNonWindows(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows (shell scripts / /dev/zero assumptions)")
-	}
-}
-
-// requireBash skips the test if bash is not available.
-func requireBash(t *testing.T) {
-	t.Helper()
-	requireNonWindows(t)
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not found on PATH")
 	}
 }
 
