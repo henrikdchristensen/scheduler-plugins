@@ -52,6 +52,8 @@ Moreover, the optimization is running in either **sync** or **async mode**:
 - *Sync* – the scheduling of new pods is blocked while the solver is running and while the plan is being applied.
 - *Async* – the scheduling of new pods is not blocked while the solver is running, only while the plan is being applied. When the solver completes, the cluster state is re-checked to ensure the plan is still valid before applying it; otherwise, the plan is discarded.
 
+For a detailed explanation of each mode, the differences between sync and async solving, and how concurrency is handled correctly, see [MODES.md](./MODES.md).
+
 The following sections describe how to **build, run, and test** the scheduler with the plugin.
 For [result replication](#result-replication-and-running-test-jobs) from the paper, read the provided instructions.
 
