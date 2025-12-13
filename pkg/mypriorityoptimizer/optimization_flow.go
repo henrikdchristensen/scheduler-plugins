@@ -1,5 +1,4 @@
 // optimization_flow.go
-
 package mypriorityoptimizer
 
 import (
@@ -45,13 +44,6 @@ var (
 func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Pod) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
 	strategy := getModeCombinedAsString()
 
-	// Ensure only one optimization flow at a time.
-	if !pl.tryEnterOptimizationFlow() {
-		klog.InfoS(msg(strategy, InfoOptimizationInProgress))
-		return nil, nil, "", nil, nil, ErrOptimizationInProgress
-	}
-	defer pl.tryLeaveOptimizationFlow()
-
 	// Periodic-sync/Per-pod: take PlanActive early.
 	// Async modes: take PlanActive later.
 	if !isAsyncSolvingFn() {
@@ -60,6 +52,13 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 			return nil, nil, "", nil, nil, ErrActiveInProgress
 		}
 	}
+
+	// Ensure only one optimization flow at a time.
+	if !pl.tryEnterOptimizationFlow() {
+		klog.InfoS(msg(strategy, InfoOptimizationInProgress))
+		return nil, nil, "", nil, nil, ErrOptimizationInProgress
+	}
+	defer pl.tryLeaveOptimizationFlow()
 
 	start := time.Now()
 
@@ -71,10 +70,12 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 		return nil, nil, "", nil, nil, err
 	}
 	baselineScore := inp.BaselineScore
-	
+
 	// Only proceed if there are pending pods to schedule.
 	pendingPrePlan := countPendingPods(pods)
 	if pendingPrePlan == 0 {
+		klog.InfoS(msg(strategy, InfoNoPendingPods))
+		pl.tryLeaveActivePlan()
 		return nil, &baselineScore, "", nil, nil, ErrNoPendingPods
 	}
 

@@ -8,191 +8,63 @@ import (
 	"time"
 )
 
-// -------------------------
-// planComputation
-// -------------------------
+func withPythonAttemptConfig(t *testing.T, enabled bool, timeout time.Duration, graceMs int) {
+	t.Helper()
+	withVar(t, &SolverPythonEnabled, enabled)
+	withVar(t, &SolverPythonTimeout, timeout)
+	withVar(t, &SolverPythonGraceMs, graceMs)
+}
 
-// No solvers enabled -> no attempts, no usable result, no best result.
 func TestPlanComputation_NoEnabledSolvers(t *testing.T) {
 	pl := &SharedState{}
 
-	origPyEnabled := SolverPythonEnabled
-	origHook := runPythonSolverHook
-	defer func() {
-		SolverPythonEnabled = origPyEnabled
-		runPythonSolverHook = origHook
-	}()
+	withPythonAttemptConfig(t, false, 10*time.Millisecond, 0)
+	withVar(t, &runPythonSolverHook, (func(*SharedState, context.Context, SolverInput, PythonSolverOptions) (*SolverOutput, error))(nil))
+	withVar(t, &runPythonSolverFn, func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
+		t.Fatalf("runPythonSolverFn should not be called when solver disabled")
+		return nil, nil
+	})
 
-	SolverPythonEnabled = false
-	runPythonSolverHook = nil
+	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), SolverInput{})
 
-	in := SolverInput{
-		BaselineScore: SolverScore{},
-	}
-
-	ctx := context.Background()
-	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(ctx, in)
-
-	if hadUsable {
-		t.Fatalf("hadUsableResult = true, want false when no solvers are enabled")
-	}
-	if bestName != "" {
-		t.Fatalf("bestName = %q, want empty", bestName)
-	}
-	if bestAttempt != nil {
-		t.Fatalf("bestAttempt = %#v, want nil", bestAttempt)
-	}
-	if bestOutput != nil {
-		t.Fatalf("bestOutput = %#v, want nil", bestOutput)
-	}
-	if len(attempts) != 0 {
-		t.Fatalf("len(attempts) = %d, want 0 when no solvers are enabled", len(attempts))
-	}
+	must(t, !hadUsable, "hadUsable want false")
+	mustEq(t, bestName, "", "bestName")
+	mustEq(t, bestAttempt, (*SolverResult)(nil), "bestAttempt")
+	mustEq(t, bestOutput, (*SolverOutput)(nil), "bestOutput")
+	mustEq(t, len(attempts), 0, "attempts len")
 }
 
-// Solver enabled, but hook returns an error -> one FAILED attempt, no usable result.
-func TestPlanComputation_SolverError(t *testing.T) {
+func TestPlanComputation_NilOutputNoError_IsFailedAttempt(t *testing.T) {
 	pl := &SharedState{}
 
-	origPyEnabled := SolverPythonEnabled
-	origTimeout := SolverPythonTimeout
-	origGrace := SolverPythonGraceMs
-	origHook := runPythonSolverHook
-	defer func() {
-		SolverPythonEnabled = origPyEnabled
-		SolverPythonTimeout = origTimeout
-		SolverPythonGraceMs = origGrace
-		runPythonSolverHook = origHook
-	}()
+	withPythonAttemptConfig(t, true, 10*time.Millisecond, 7)
 
-	SolverPythonEnabled = true
-	SolverPythonTimeout = 10 * time.Millisecond
-	SolverPythonGraceMs = 0
+	var gotTimeoutMs int64
+	withVar(t, &runPythonSolverHook, func(_ *SharedState, _ context.Context, in SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
+		gotTimeoutMs = in.TimeoutMs
+		return nil, nil // nil output, nil error
+	})
 
-	runPythonSolverHook = func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
-		return nil, errors.New("boom")
-	}
+	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), SolverInput{})
 
-	in := SolverInput{
-		BaselineScore: SolverScore{},
-	}
+	must(t, !hadUsable, "hadUsable want false")
+	mustEq(t, bestName, "", "bestName")
+	mustEq(t, bestAttempt, (*SolverResult)(nil), "bestAttempt")
+	mustEq(t, bestOutput, (*SolverOutput)(nil), "bestOutput")
 
-	ctx := context.Background()
-	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(ctx, in)
+	mustEq(t, len(attempts), 1, "attempts len")
+	mustEq(t, attempts[0].Name, "python", "attempt name")
+	mustEq(t, attempts[0].Status, "FAILED", "attempt status")
+	mustEq(t, attempts[0].Score, (SolverScore{}), "attempt score should be zero")
 
-	if hadUsable {
-		t.Fatalf("hadUsableResult = true, want false on solver error")
-	}
-	if bestName != "" {
-		t.Fatalf("bestName = %q, want empty on solver error", bestName)
-	}
-	if bestAttempt != nil {
-		t.Fatalf("bestAttempt = %#v, want nil on solver error", bestAttempt)
-	}
-	if bestOutput != nil {
-		t.Fatalf("bestOutput = %#v, want nil on solver error", bestOutput)
-	}
-
-	if len(attempts) != 1 {
-		t.Fatalf("len(attempts) = %d, want 1", len(attempts))
-	}
-	a := attempts[0]
-	if a.Name != "python" {
-		t.Fatalf("attempt Name = %q, want %q", a.Name, "python")
-	}
-	if a.Status != "FAILED" {
-		t.Fatalf("attempt Status = %q, want %q", a.Status, "FAILED")
-	}
+	// TimeoutMs should include grace (10ms + 7ms = 17ms).
+	mustEq(t, gotTimeoutMs, int64(17), "TimeoutMs should include grace")
 }
 
-// Solver enabled, hook returns OPTIMAL but score == baseline ->
-// usable but NOT improving -> no best result, but attempt recorded.
-func TestPlanComputation_UsableButNotImproving(t *testing.T) {
+func TestPlanComputation_ErrorWithNonNilOutput_RecordsStatusAndScore(t *testing.T) {
 	pl := &SharedState{}
 
-	origPyEnabled := SolverPythonEnabled
-	origTimeout := SolverPythonTimeout
-	origGrace := SolverPythonGraceMs
-	origHook := runPythonSolverHook
-	defer func() {
-		SolverPythonEnabled = origPyEnabled
-		SolverPythonTimeout = origTimeout
-		SolverPythonGraceMs = origGrace
-		runPythonSolverHook = origHook
-	}()
-
-	SolverPythonEnabled = true
-	SolverPythonTimeout = 10 * time.Millisecond
-	SolverPythonGraceMs = 0
-
-	// Hook: just return an OPTIMAL plan with no placements/evictions.
-	// scoreSolution(in, out) will be zero, equal to baseline.
-	runPythonSolverHook = func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
-		return &SolverOutput{
-			Status:     "OPTIMAL",
-			Placements: nil,
-			Evictions:  nil,
-		}, nil
-	}
-
-	zero := SolverScore{}
-	in := SolverInput{
-		BaselineScore: zero,
-		// No Pods / Preemptor -> scoreSolution also yields zero.
-	}
-
-	ctx := context.Background()
-	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(ctx, in)
-
-	// Plan is usable but not strictly better than baseline.
-	if hadUsable {
-		t.Fatalf("hadUsableResult = true, want false when solution is usable but not improving")
-	}
-	if bestName != "" {
-		t.Fatalf("bestName = %q, want empty when not improving", bestName)
-	}
-	if bestAttempt != nil {
-		t.Fatalf("bestAttempt = %#v, want nil when not improving", bestAttempt)
-	}
-	if bestOutput != nil {
-		t.Fatalf("bestOutput = %#v, want nil when not improving", bestOutput)
-	}
-
-	if len(attempts) != 1 {
-		t.Fatalf("len(attempts) = %d, want 1", len(attempts))
-	}
-	a := attempts[0]
-	if a.Name != "python" {
-		t.Fatalf("attempt Name = %q, want %q", a.Name, "python")
-	}
-	if a.Status != "OPTIMAL" {
-		t.Fatalf("attempt Status = %q, want %q", a.Status, "OPTIMAL")
-	}
-	// Score should still be zero (equal to baseline).
-	if a.Score.Evicted != 0 || a.Score.Moved != 0 || len(a.Score.PlacedByPriority) != 0 {
-		t.Fatalf("attempt Score = %#v, want zero score", a.Score)
-	}
-}
-
-// Solver enabled, hook returns OPTIMAL and strictly improves over baseline.
-// Here we model a preemptor that gets placed.
-func TestPlanComputation_UsableAndImproving(t *testing.T) {
-	pl := &SharedState{}
-
-	origPyEnabled := SolverPythonEnabled
-	origTimeout := SolverPythonTimeout
-	origGrace := SolverPythonGraceMs
-	origHook := runPythonSolverHook
-	defer func() {
-		SolverPythonEnabled = origPyEnabled
-		SolverPythonTimeout = origTimeout
-		SolverPythonGraceMs = origGrace
-		runPythonSolverHook = origHook
-	}()
-
-	SolverPythonEnabled = true
-	SolverPythonTimeout = 10 * time.Millisecond
-	SolverPythonGraceMs = 0
+	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)
 
 	pre := &SolverPod{
 		UID:       "u-pre",
@@ -202,63 +74,102 @@ func TestPlanComputation_UsableAndImproving(t *testing.T) {
 		Node:      "", // pending
 	}
 
-	// Hook: return a plan that places the preemptor on node n1.
-	runPythonSolverHook = func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
+	withVar(t, &runPythonSolverHook, func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
 		return &SolverOutput{
 			Status: "OPTIMAL",
 			Placements: []SolverPod{
-				{
-					UID:       pre.UID,
-					Namespace: pre.Namespace,
-					Name:      pre.Name,
-					Node:      "n1",
-				},
+				{UID: pre.UID, Namespace: pre.Namespace, Name: pre.Name, Node: "n1"},
 			},
-			Evictions: nil,
+		}, errors.New("boom")
+	})
+
+	in := SolverInput{Preemptor: pre, BaselineScore: SolverScore{}}
+
+	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), in)
+
+	// Error path never selects a best result.
+	must(t, !hadUsable, "hadUsable want false on error path")
+	mustEq(t, bestName, "", "bestName")
+	mustEq(t, bestAttempt, (*SolverResult)(nil), "bestAttempt")
+	mustEq(t, bestOutput, (*SolverOutput)(nil), "bestOutput")
+
+	mustEq(t, len(attempts), 1, "attempts len")
+	mustEq(t, attempts[0].Status, "OPTIMAL", "status should come from out.Status even on error")
+	mustEq(t, attempts[0].Score.PlacedByPriority["5"], 1, "score should be computed when out != nil")
+}
+
+func TestPlanComputation_NotUsableStatus_AttemptRecorded_NoBest(t *testing.T) {
+	pl := &SharedState{}
+
+	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)
+
+	withVar(t, &runPythonSolverHook, func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
+		return &SolverOutput{Status: "INFEASIBLE"}, nil
+	})
+
+	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), SolverInput{})
+
+	must(t, !hadUsable, "hadUsable want false when not usable")
+	mustEq(t, bestName, "", "bestName")
+	mustEq(t, bestAttempt, (*SolverResult)(nil), "bestAttempt")
+	mustEq(t, bestOutput, (*SolverOutput)(nil), "bestOutput")
+
+	mustEq(t, len(attempts), 1, "attempts len")
+	mustEq(t, attempts[0].Status, "INFEASIBLE", "attempt status")
+}
+
+func TestPlanComputation_UsableButNotImproving_NoBest(t *testing.T) {
+	pl := &SharedState{}
+
+	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)
+
+	withVar(t, &runPythonSolverHook, func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
+		return &SolverOutput{Status: "OPTIMAL"}, nil // no placements/evicts => zero score
+	})
+
+	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), SolverInput{
+		BaselineScore: SolverScore{}, // equal to produced score
+	})
+
+	must(t, !hadUsable, "hadUsable want false when not improving")
+	mustEq(t, bestName, "", "bestName")
+	mustEq(t, bestAttempt, (*SolverResult)(nil), "bestAttempt")
+	mustEq(t, bestOutput, (*SolverOutput)(nil), "bestOutput")
+	mustEq(t, len(attempts), 1, "attempts len")
+	mustEq(t, attempts[0].Status, "OPTIMAL", "attempt status")
+}
+
+func TestPlanComputation_UsesRunPythonSolverFnWhenHookNil_AndImproves(t *testing.T) {
+	pl := &SharedState{}
+
+	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)
+	withVar(t, &runPythonSolverHook, (func(*SharedState, context.Context, SolverInput, PythonSolverOptions) (*SolverOutput, error))(nil))
+
+	pre := &SolverPod{
+		UID:       "u-pre",
+		Namespace: "ns",
+		Name:      "pre",
+		Priority:  5,
+		Node:      "",
+	}
+
+	withVar(t, &runPythonSolverFn, func(_ *SharedState, _ context.Context, _ SolverInput, _ PythonSolverOptions) (*SolverOutput, error) {
+		return &SolverOutput{
+			Status: "OPTIMAL",
+			Placements: []SolverPod{
+				{UID: pre.UID, Namespace: pre.Namespace, Name: pre.Name, Node: "n1"},
+			},
 		}, nil
-	}
+	})
 
-	in := SolverInput{
-		Preemptor:     pre,
-		Pods:          nil,
-		BaselineScore: SolverScore{}, // nothing placed initially
-	}
+	in := SolverInput{Preemptor: pre, BaselineScore: SolverScore{}}
 
-	ctx := context.Background()
-	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(ctx, in)
+	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), in)
 
-	if !hadUsable {
-		t.Fatalf("hadUsableResult = false, want true when solution is usable and improving")
-	}
-	if bestName != "python" {
-		t.Fatalf("bestName = %q, want %q", bestName, "python")
-	}
-	if bestAttempt == nil {
-		t.Fatalf("bestAttempt is nil, want non-nil")
-	}
-	if bestOutput == nil {
-		t.Fatalf("bestOutput is nil, want non-nil")
-	}
-
-	if len(attempts) != 1 {
-		t.Fatalf("len(attempts) = %d, want 1", len(attempts))
-	}
-	a := attempts[0]
-	if a.Name != "python" {
-		t.Fatalf("attempt Name = %q, want %q", a.Name, "python")
-	}
-	if a.Status != "OPTIMAL" {
-		t.Fatalf("attempt Status = %q, want %q", a.Status, "OPTIMAL")
-	}
-	if got := a.Score.PlacedByPriority["5"]; got != 1 {
-		t.Fatalf("placedByPriority[\"5\"] = %d, want 1", got)
-	}
-	if a.Score.Evicted != 0 || a.Score.Moved != 0 {
-		t.Fatalf("Evicted/Moved = (%d,%d), want (0,0)", a.Score.Evicted, a.Score.Moved)
-	}
-
-	// bestAttempt should match the only attempt
-	if bestAttempt.Name != a.Name || bestAttempt.Status != a.Status {
-		t.Fatalf("bestAttempt mismatch: got %#v, want %#v", bestAttempt, a)
-	}
+	must(t, hadUsable, "hadUsable want true")
+	mustEq(t, bestName, "python", "bestName")
+	must(t, bestAttempt != nil, "bestAttempt want non-nil")
+	must(t, bestOutput != nil, "bestOutput want non-nil")
+	mustEq(t, len(attempts), 1, "attempts len")
+	mustEq(t, attempts[0].Score.PlacedByPriority["5"], 1, "placedByPriority")
 }

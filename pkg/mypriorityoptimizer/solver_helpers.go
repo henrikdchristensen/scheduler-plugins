@@ -9,6 +9,8 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -550,6 +552,17 @@ func (pl *SharedState) exportSolverStatsToConfigMap(
 
 var appendSolverStatsCMHook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)
 
+var solverStatsConfigMapsFor = func(pl *SharedState) corev1client.ConfigMapInterface {
+	return pl.Handle.ClientSet().CoreV1().ConfigMaps(SystemNamespace)
+}
+
+var solverStatsConfigMapNsListerFor = func(pl *SharedState) corev1listers.ConfigMapNamespaceLister {
+	return pl.Handle.SharedInformerFactory().
+		Core().V1().ConfigMaps().
+		Lister().
+		ConfigMaps(SystemNamespace)
+}
+
 // appendSolverStatsCM appends an entry to the solver stats ConfigMap.
 // CHECKED
 func (pl *SharedState) appendSolverStatsCM(ctx context.Context, entry ExportedSolverStats) error {
@@ -571,12 +584,9 @@ func (pl *SharedState) appendSolverStatsCM(ctx context.Context, entry ExportedSo
 		DataKey:   SolverStatsConfigMapLabelKey + ".json",
 	}
 
-	// Namespaced ConfigMap client + namespace lister (new helper signatures expect these)
-	cms := cli.CoreV1().ConfigMaps(SystemNamespace)
-	nsLister := pl.Handle.SharedInformerFactory().
-		Core().V1().ConfigMaps().
-		Lister().
-		ConfigMaps(SystemNamespace)
+	// Namespaced ConfigMap client + namespace lister (use indirection for unit-test injection)
+	cms := solverStatsConfigMapsFor(pl)
+	nsLister := solverStatsConfigMapNsListerFor(pl)
 
 	// Create-on-missing (new mutateJson returns nil on missing, so we must handle it explicitly).
 	_, found, err := doc.readJson(nsLister)

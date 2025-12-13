@@ -18,6 +18,17 @@ var runPythonSolverHook func(
 	opts PythonSolverOptions,
 ) (*SolverOutput, error)
 
+// Indirection to allow unit tests to cover the "no hook" path without
+// invoking the real external solver.
+var runPythonSolverFn = func(
+	pl *SharedState,
+	ctx context.Context,
+	in SolverInput,
+	opts PythonSolverOptions,
+) (*SolverOutput, error) {
+	return pl.runPythonSolver(ctx, in, opts)
+}
+
 // planComputation tries enabled solvers in order, keeping the best attempt.
 // Returns the name of the best solver, whether any usable result was found,
 // the best attempt details, the best output, and all attempts.
@@ -49,7 +60,7 @@ func (pl *SharedState) planComputation(
 				if runPythonSolverHook != nil {
 					return runPythonSolverHook(pl, ctx, in, pyOpts)
 				}
-				return pl.runPythonSolver(ctx, in, pyOpts)
+				return runPythonSolverFn(pl, ctx, in, pyOpts)
 			},
 		},
 	}

@@ -1,10 +1,10 @@
+// pkg/mypriorityoptimizer/optimization_flow_test.go
 // optimization_flow_test.go
 package mypriorityoptimizer
 
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
@@ -17,9 +17,176 @@ import (
 // dummySolverInput returns a minimal SolverInput with a specific baseline.
 func dummySolverInput(evicted int) SolverInput {
 	return SolverInput{
-		BaselineScore: SolverScore{
-			Evicted: evicted,
-		},
+		BaselineScore: SolverScore{Evicted: evicted},
+	}
+}
+
+type flowCaptures struct {
+	exportCalled bool
+	export       struct {
+		strategy string
+		baseline SolverScore
+		bestName string
+		attempts []SolverResult
+		errMsg   string
+	}
+	watchCalled bool
+	watchAP     *ActivePlan
+
+	completedCalled bool
+	completedStatus PlanStatus
+	completedAP     *ActivePlan
+}
+
+type flowHarness struct {
+	t  *testing.T
+	pl *SharedState
+
+	async bool
+
+	// planContextFn
+	nodes         []*v1.Node
+	pods          []*v1.Pod
+	baselineEvict int
+	planCtxErr    error
+
+	// planComputationFn
+	bestName       string
+	hadImprovement bool
+	bestAttempt    *SolverResult
+	bestOut        *SolverOutput
+	attempts       []SolverResult
+
+	// isSolutionApplicableFn
+	applicable    bool
+	applicableWhy string
+
+	// computePlanPodCountsFn
+	pendingScheduled int
+	totalPrePlan     int
+	totalPostPlan    int
+
+	// planRegistrationFn / planActivationFn
+	regErr error
+	actErr error
+	plan   *Plan
+	ap     *ActivePlan
+}
+
+func (h *flowHarness) install(t *testing.T) *flowCaptures {
+	t.Helper()
+
+	// Save originals and restore on cleanup.
+	origAsync := isAsyncSolvingFn
+	origPlanCtx := planContextFn
+	origPlanComp := planComputationFn
+	origApplicable := isSolutionApplicableFn
+	origCounts := computePlanPodCountsFn
+	origReg := planRegistrationFn
+	origAct := planActivationFn
+	origWatch := startPlanCompletionWatchFn
+	origExport := exportSolverStatsFn
+	origOnCompleted := onPlanCompletedHook
+
+	t.Cleanup(func() {
+		isAsyncSolvingFn = origAsync
+		planContextFn = origPlanCtx
+		planComputationFn = origPlanComp
+		isSolutionApplicableFn = origApplicable
+		computePlanPodCountsFn = origCounts
+		planRegistrationFn = origReg
+		planActivationFn = origAct
+		startPlanCompletionWatchFn = origWatch
+		exportSolverStatsFn = origExport
+		onPlanCompletedHook = origOnCompleted
+	})
+
+	caps := &flowCaptures{}
+
+	// Hooks
+	isAsyncSolvingFn = func() bool { return h.async }
+
+	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
+		if h.planCtxErr != nil {
+			return nil, nil, SolverInput{}, h.planCtxErr
+		}
+		return h.nodes, h.pods, dummySolverInput(h.baselineEvict), nil
+	}
+
+	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
+		return h.bestName, h.hadImprovement, h.bestAttempt, h.bestOut, h.attempts
+	}
+
+	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
+		return h.applicable, h.applicableWhy
+	}
+
+	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
+		return h.pendingScheduled, h.totalPrePlan, h.totalPostPlan
+	}
+
+	planRegistrationFn = func(pl *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
+		// If registration fails, some implementations still want to mark an already-created
+		// ActivePlan as failed. Your onPlanCompletedHook may only fire when ActivePlan != nil,
+		// so allow tests to seed one via h.ap.
+		if h.regErr != nil {
+			if h.ap != nil {
+				pl.ActivePlan.Store(h.ap)
+			}
+			return nil, nil, h.regErr
+		}
+
+		if h.plan == nil {
+			h.plan = &Plan{}
+		}
+		if h.ap == nil {
+			h.ap = &ActivePlan{ID: "ap-1"}
+		}
+
+		// Mimic production: registration makes ActivePlan visible.
+		pl.ActivePlan.Store(h.ap)
+		return h.plan, h.ap, nil
+	}
+
+	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
+		return h.actErr
+	}
+
+	startPlanCompletionWatchFn = func(_ *SharedState, ap *ActivePlan) {
+		caps.watchCalled = true
+		caps.watchAP = ap
+	}
+
+	exportSolverStatsFn = func(_ *SharedState, strategy string, baseline SolverScore, bestName string, attempts []SolverResult, errMsg string) {
+		caps.exportCalled = true
+		caps.export.strategy = strategy
+		caps.export.baseline = baseline
+		caps.export.bestName = bestName
+		caps.export.attempts = attempts
+		caps.export.errMsg = errMsg
+	}
+
+	onPlanCompletedHook = func(_ *SharedState, status PlanStatus, ap *ActivePlan) {
+		caps.completedCalled = true
+		caps.completedStatus = status
+		caps.completedAP = ap
+	}
+
+	return caps
+}
+
+func assertZeroReturns(t *testing.T, plan *Plan, baseline *SolverScore, bestName string, bestAttempt *SolverResult, attempts []SolverResult) {
+	t.Helper()
+	if plan != nil || baseline != nil || bestName != "" || bestAttempt != nil || attempts != nil {
+		t.Fatalf("expected all return values to be zero (plan=%v baseline=%v bestName=%q bestAttempt=%v attempts=%v)",
+			plan, baseline, bestName, bestAttempt, attempts)
+	}
+}
+
+func assertPlanActiveReleased(t *testing.T, pl *SharedState) {
+	t.Helper()
+	if !pl.tryEnterActivePlan() {
+		t.Fatalf("expected ActivePlan gate to be released")
 	}
 }
 
@@ -29,479 +196,422 @@ func dummySolverInput(evicted int) SolverInput {
 
 func TestRunOptimizationFlow_OptimizationInProgress(t *testing.T) {
 	pl := &SharedState{}
+	h := &flowHarness{
+		t:  t,
+		pl: pl,
+
+		async: false,
+
+		// Should never be used:
+		planCtxErr: errors.New("must-not-be-called"),
+	}
+	caps := h.install(t)
 
 	// First caller "owns" optimization.
 	if !pl.tryEnterOptimizationFlow() {
 		t.Fatalf("precondition: tryEnterOptimizationFlow() should succeed on fresh SharedState")
 	}
-	// Ensure we don't actually hit any heavy logic.
-	origAsync := isAsyncSolvingFn
-	isAsyncSolvingFn = func() bool { return false }
-	defer func() { isAsyncSolvingFn = origAsync }()
 
 	plan, baseline, bestName, bestAttempt, attempts, err :=
 		pl.runOptimizationFlow(context.Background(), nil)
 
 	if !errors.Is(err, ErrOptimizationInProgress) {
-		t.Fatalf("err = %v, want ErrOptimizationInProgress", err)
+		t.Fatalf("err=%v, want ErrOptimizationInProgress", err)
 	}
-	if plan != nil || baseline != nil || bestName != "" || bestAttempt != nil || attempts != nil {
-		t.Fatalf("expected all return values to be zero when optimization is already in progress")
-	}
-}
+	assertZeroReturns(t, plan, baseline, bestName, bestAttempt, attempts)
 
-// -------------------------
-// 2) Non-async: planContext error -> leave PlanActive and propagate error
-// -------------------------
-
-func TestRunOptimizationFlow_PlanContextError(t *testing.T) {
-	pl := &SharedState{}
-
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		exportSolverStatsFn = origExportStats
-	}()
-
-	// Non-async mode -> we take PlanActive early.
-	isAsyncSolvingFn = func() bool { return false }
-
-	// planContext fails.
-	wantErr := errors.New("boom-plancontext")
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		return nil, nil, SolverInput{}, wantErr
-	}
-
-	// We should NOT export stats on this early failure.
-	calledExport := atomic.Bool{}
-	exportSolverStatsFn = func(_ *SharedState, _ string, _ SolverScore, _ string, _ []SolverResult, _ string) {
-		calledExport.Store(true)
-	}
-
-	plan, baseline, bestName, bestAttempt, attempts, err :=
-		pl.runOptimizationFlow(context.Background(), nil)
-
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("err = %v, want %v", err, wantErr)
-	}
-	if plan != nil || baseline != nil || bestName != "" || bestAttempt != nil || attempts != nil {
-		t.Fatalf("expected all return values to be zero when planContext fails")
-	}
-	if calledExport.Load() {
-		t.Fatalf("exportSolverStatsFn should NOT be called on planContext error")
-	}
-
-	// Verify that PlanActive was released again (non-async path).
-	if !pl.tryEnterActivePlan() {
-		t.Fatalf("expected tryLeaveActivePlan to be called on planContext error")
+	if caps.exportCalled {
+		t.Fatalf("exportSolverStatsFn must not be called on optimization-in-progress early return")
 	}
 }
 
 // -------------------------
-// 3) Non-async: no improving solution -> ErrNoImprovingSolutionFromAnySolver
+// Main non-async scenarios (table-driven)
 // -------------------------
 
-func TestRunOptimizationFlow_NoImprovingSolution(t *testing.T) {
-	pl := &SharedState{}
+func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
+	type want struct {
+		err error
 
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		exportSolverStatsFn = origExportStats
-	}()
+		// Returned values
+		planNonNil     bool
+		baselineEvict  *int // nil means baseline ptr expected to be nil
+		bestName       string
+		bestAttemptPtr *SolverResult
+		attemptsLen    int
 
-	isAsyncSolvingFn = func() bool { return false }
-
-	// Baseline score we expect to be threaded through.
-	baseline := SolverScore{Evicted: 42}
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		// Include at least one pending pod so the flow proceeds past the
-		// "no pending pods" precondition.
-		pods := []*v1.Pod{pod("default", "p-pending")}
-		return nil, pods, dummySolverInput(baseline.Evicted), nil
+		// Side-effects
+		exportCalled        bool
+		exportErrMsg        string
+		watchCalled         bool
+		completedCalled     bool
+		completedStatus     PlanStatus
+		checkActiveReleased bool
 	}
 
-	// No improving solution from any solver.
-	bestAttempt := &SolverResult{Name: "attempt-1"}
-	attempts := []SolverResult{
-		{Name: "solverA", Status: "FEASIBLE"},
-		{Name: "solverB", Status: "OPTIMAL"},
-	}
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return "solverB", false /* hadImprovement */, bestAttempt, nil, attempts
+	mkPendingPods := func() []*v1.Pod {
+		return []*v1.Pod{pod("default", "p-pending")}
 	}
 
-	// Capture exported stats.
-	calledExport := atomic.Bool{}
-	var gotBaseline SolverScore
-	var gotBestName string
-	var gotErrMsg string
+	tests := []struct {
+		name string
+		h    flowHarness
+		want want
+	}{
+		{
+			name: "planContext_error",
+			h: flowHarness{
+				async:      false,
+				planCtxErr: errors.New("boom-plancontext"),
+			},
+			want: want{
+				err:                 errors.New("boom-plancontext"), // compared via errors.Is below with a separate handle
+				exportCalled:        false,
+				watchCalled:         false,
+				completedCalled:     false,
+				checkActiveReleased: true,
+			},
+		},
+		{
+			name: "no_pending_pods",
+			h: flowHarness{
+				async:         false,
+				nodes:         []*v1.Node{},
+				pods:          []*v1.Pod{}, // <-- this makes pendingPrePlan == 0
+				baselineEvict: 99,
+			},
+			want: want{
+				err:             ErrNoPendingPods,
+				planNonNil:      false,
+				baselineEvict:   ptrInt(99), // function returns &baselineScore on this path
+				bestName:        "",
+				attemptsLen:     0,
+				exportCalled:    false,
+				watchCalled:     false,
+				completedCalled: false,
 
-	exportSolverStatsFn = func(_ *SharedState, _ string, baselineScore SolverScore, bestName string, att []SolverResult, errMsg string) {
-		calledExport.Store(true)
-		gotBaseline = baselineScore
-		gotBestName = bestName
-		gotErrMsg = errMsg
+				// See note below
+				checkActiveReleased: true,
+			},
+		},
+		{
+			name: "no_improving_solution",
+			h: flowHarness{
+				async:          false,
+				nodes:          nil,
+				pods:           mkPendingPods(),
+				baselineEvict:  42,
+				bestName:       "solverB",
+				hadImprovement: false,
+				bestAttempt:    &SolverResult{Name: "attempt-1"},
+				bestOut:        nil,
+				attempts: []SolverResult{
+					{Name: "solverA", Status: "FEASIBLE"},
+					{Name: "solverB", Status: "OPTIMAL"},
+				},
+			},
+			want: want{
+				err:                 ErrNoImprovingSolutionFromAnySolver,
+				planNonNil:          false,
+				baselineEvict:       ptrInt(42),
+				bestName:            "solverB",
+				bestAttemptPtr:      &SolverResult{Name: "attempt-1"}, // pointer equality checked separately below
+				attemptsLen:         2,
+				exportCalled:        true,
+				exportErrMsg:        ErrNoImprovingSolutionFromAnySolver.Error(),
+				watchCalled:         false,
+				completedCalled:     false,
+				checkActiveReleased: true,
+			},
+		},
+		{
+			name: "plan_not_applicable",
+			h: flowHarness{
+				async:          false,
+				nodes:          []*v1.Node{},
+				pods:           mkPendingPods(),
+				baselineEvict:  7,
+				bestName:       "solverX",
+				hadImprovement: true,
+				bestAttempt:    &SolverResult{Name: "attempt-2"},
+				bestOut:        &SolverOutput{Status: "OPTIMAL"},
+				attempts:       []SolverResult{{Name: "solverX"}},
+				applicable:     false,
+				applicableWhy:  "stale-cluster",
+			},
+			want: want{
+				err:                 ErrPlanNotApplicable,
+				planNonNil:          false,
+				baselineEvict:       ptrInt(7),
+				bestName:            "solverX",
+				attemptsLen:         1,
+				exportCalled:        true,
+				exportErrMsg:        ErrPlanNotApplicable.Error(),
+				watchCalled:         false,
+				completedCalled:     false,
+				checkActiveReleased: true,
+			},
+		},
+		{
+			name: "no_pending_scheduled",
+			h: flowHarness{
+				async:            false,
+				nodes:            []*v1.Node{},
+				pods:             mkPendingPods(),
+				baselineEvict:    10,
+				bestName:         "solverY",
+				hadImprovement:   true,
+				bestAttempt:      &SolverResult{Name: "attempt-3"},
+				bestOut:          &SolverOutput{Status: "OPTIMAL"},
+				attempts:         []SolverResult{{Name: "solverY"}},
+				applicable:       true,
+				pendingScheduled: 0,
+				totalPrePlan:     5,
+				totalPostPlan:    5,
+			},
+			want: want{
+				err:                 ErrNoPendingPodsScheduled,
+				planNonNil:          false,
+				baselineEvict:       ptrInt(10),
+				bestName:            "solverY",
+				attemptsLen:         1,
+				exportCalled:        true,
+				exportErrMsg:        ErrNoPendingPodsScheduled.Error(),
+				watchCalled:         false,
+				completedCalled:     false,
+				checkActiveReleased: true,
+			},
+		},
+		{
+			name: "plan_registration_error_calls_onPlanCompleted",
+			h: flowHarness{
+				async:            false,
+				nodes:            []*v1.Node{},
+				pods:             mkPendingPods(),
+				baselineEvict:    5,
+				bestName:         "solverReg",
+				hadImprovement:   true,
+				bestAttempt:      &SolverResult{Name: "attempt-regerr"},
+				bestOut:          &SolverOutput{Status: "OPTIMAL"},
+				attempts:         []SolverResult{{Name: "solverReg"}},
+				applicable:       true,
+				pendingScheduled: 2,
+				totalPrePlan:     4,
+				totalPostPlan:    6,
+				regErr:           errors.New("boom-planreg"),
+
+				// Seed an active plan so onPlanCompletedHook is expected to fire
+				ap: &ActivePlan{ID: "ap-regerr"},
+			},
+			want: want{
+				err:                 ErrPlanRegistration,
+				planNonNil:          false,
+				baselineEvict:       ptrInt(5),
+				bestName:            "solverReg",
+				attemptsLen:         1,
+				exportCalled:        true,
+				exportErrMsg:        ErrPlanRegistration.Error(),
+				watchCalled:         false,
+				completedCalled:     true,
+				completedStatus:     PlanStatusFailed,
+				checkActiveReleased: true,
+			},
+		},
+		{
+			name: "plan_activation_error_calls_onPlanCompleted",
+			h: flowHarness{
+				async:            false,
+				nodes:            []*v1.Node{},
+				pods:             mkPendingPods(),
+				baselineEvict:    2,
+				bestName:         "solverAct",
+				hadImprovement:   true,
+				bestAttempt:      &SolverResult{Name: "attempt-acterr"},
+				bestOut:          &SolverOutput{Status: "OPTIMAL"},
+				attempts:         []SolverResult{{Name: "solverAct"}},
+				applicable:       true,
+				pendingScheduled: 1,
+				totalPrePlan:     3,
+				totalPostPlan:    4,
+				actErr:           errors.New("boom-activation"),
+				ap:               &ActivePlan{ID: "plan-activation"},
+			},
+			want: want{
+				err:                 ErrPlanActivationFailed,
+				planNonNil:          false,
+				baselineEvict:       ptrInt(2),
+				bestName:            "solverAct",
+				attemptsLen:         1,
+				exportCalled:        true,
+				exportErrMsg:        ErrPlanActivationFailed.Error(),
+				watchCalled:         false,
+				completedCalled:     true,
+				completedStatus:     PlanStatusFailed,
+				checkActiveReleased: true, // onPlanCompleted should release
+			},
+		},
+		{
+			name: "success",
+			h: flowHarness{
+				async:            false,
+				nodes:            []*v1.Node{},
+				pods:             mkPendingPods(),
+				baselineEvict:    0,
+				bestName:         "solverZ",
+				hadImprovement:   true,
+				bestAttempt:      &SolverResult{Name: "attempt-best"},
+				bestOut:          &SolverOutput{Status: "OPTIMAL"},
+				attempts:         []SolverResult{{Name: "solverZ"}},
+				applicable:       true,
+				pendingScheduled: 2,
+				totalPrePlan:     5,
+				totalPostPlan:    7,
+				plan:             &Plan{},
+				ap:               &ActivePlan{ID: "plan-123"},
+			},
+			want: want{
+				err:                 nil,
+				planNonNil:          true,
+				baselineEvict:       ptrInt(0),
+				bestName:            "solverZ",
+				attemptsLen:         1,
+				exportCalled:        true,
+				exportErrMsg:        "",
+				watchCalled:         true,
+				completedCalled:     false,
+				checkActiveReleased: false, // success keeps plan active
+			},
+		},
 	}
 
-	plan, bPtr, bestName, gotBestAttempt, gotAttempts2, err :=
-		pl.runOptimizationFlow(context.Background(), nil)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			pl := &SharedState{}
+			tc.h.t = t
+			tc.h.pl = pl
 
-	if !errors.Is(err, ErrNoImprovingSolutionFromAnySolver) {
-		t.Fatalf("err = %v, want ErrNoImprovingSolutionFromAnySolver", err)
-	}
-	if plan != nil {
-		t.Fatalf("plan = %#v, want nil", plan)
-	}
-	if bPtr == nil || (*bPtr).Evicted != baseline.Evicted {
-		t.Fatalf("baseline = %#v, want %#v", bPtr, baseline)
-	}
-	if bestName != "solverB" {
-		t.Fatalf("bestName = %q, want %q", bestName, "solverB")
-	}
-	if gotBestAttempt != bestAttempt {
-		t.Fatalf("bestAttempt pointer mismatch")
-	}
-	if len(gotAttempts2) != len(attempts) {
-		t.Fatalf("attempts length = %d, want %d", len(gotAttempts2), len(attempts))
-	}
+			caps := tc.h.install(t)
 
-	if !calledExport.Load() {
-		t.Fatalf("exportSolverStatsFn was not called on no-improvement path")
-	}
-	if gotBaseline.Evicted != baseline.Evicted {
-		t.Fatalf("exported baseline = %#v, want %#v", gotBaseline, baseline)
-	}
-	if gotBestName != "solverB" {
-		t.Fatalf("exported bestName = %q, want %q", gotBestName, "solverB")
-	}
-	if gotErrMsg != ErrNoImprovingSolutionFromAnySolver.Error() {
-		t.Fatalf("exported errMsg = %q, want %q", gotErrMsg, ErrNoImprovingSolutionFromAnySolver.Error())
-	}
+			plan, baselinePtr, bestName, bestAttemptOut, attemptsOut, err :=
+				pl.runOptimizationFlow(context.Background(), nil)
 
-	// PlanActive should have been released.
-	if !pl.tryEnterActivePlan() {
-		t.Fatalf("expected tryLeaveActivePlan to be called on no-improvement path")
+			// Error checking
+			if tc.want.err == nil {
+				if err != nil {
+					t.Fatalf("err=%v, want nil", err)
+				}
+			} else {
+				// Special-case the planContext error test: we need the exact error instance.
+				if tc.name == "planContext_error" {
+					if tc.h.planCtxErr == nil {
+						t.Fatalf("test bug: missing planCtxErr")
+					}
+					if !errors.Is(err, tc.h.planCtxErr) {
+						t.Fatalf("err=%v, want %v", err, tc.h.planCtxErr)
+					}
+				} else if !errors.Is(err, tc.want.err) {
+					t.Fatalf("err=%v, want %v", err, tc.want.err)
+				}
+			}
+
+			// Return values
+			if tc.want.planNonNil {
+				if plan == nil {
+					t.Fatalf("plan=nil, want non-nil")
+				}
+			} else if plan != nil {
+				t.Fatalf("plan=%v, want nil", plan)
+			}
+
+			if tc.want.baselineEvict == nil {
+				if baselinePtr != nil {
+					t.Fatalf("baseline=%v, want nil", baselinePtr)
+				}
+			} else {
+				if baselinePtr == nil || baselinePtr.Evicted != *tc.want.baselineEvict {
+					t.Fatalf("baseline=%v, want Evicted=%d", baselinePtr, *tc.want.baselineEvict)
+				}
+			}
+
+			if bestName != tc.want.bestName {
+				t.Fatalf("bestName=%q, want %q", bestName, tc.want.bestName)
+			}
+
+			if tc.h.bestAttempt != nil && tc.want.bestAttemptPtr != nil {
+				// Pointer identity: must match the exact object returned by planComputationFn.
+				if bestAttemptOut != tc.h.bestAttempt {
+					t.Fatalf("bestAttempt pointer mismatch: got=%p want=%p", bestAttemptOut, tc.h.bestAttempt)
+				}
+			} else {
+				// Otherwise just ensure nilness is sensible.
+				if tc.h.bestAttempt == nil && bestAttemptOut != nil {
+					t.Fatalf("bestAttempt=%v, want nil", bestAttemptOut)
+				}
+			}
+
+			if tc.want.attemptsLen == 0 {
+				if attemptsOut != nil && len(attemptsOut) != 0 {
+					t.Fatalf("attempts len=%d, want 0 (or nil)", len(attemptsOut))
+				}
+			} else {
+				if len(attemptsOut) != tc.want.attemptsLen {
+					t.Fatalf("attempts len=%d, want %d", len(attemptsOut), tc.want.attemptsLen)
+				}
+			}
+
+			// Side-effects
+			if caps.exportCalled != tc.want.exportCalled {
+				t.Fatalf("exportCalled=%v, want %v", caps.exportCalled, tc.want.exportCalled)
+			}
+			if tc.want.exportCalled && caps.export.errMsg != tc.want.exportErrMsg {
+				t.Fatalf("export errMsg=%q, want %q", caps.export.errMsg, tc.want.exportErrMsg)
+			}
+
+			if caps.watchCalled != tc.want.watchCalled {
+				t.Fatalf("watchCalled=%v, want %v", caps.watchCalled, tc.want.watchCalled)
+			}
+			if tc.want.watchCalled && tc.h.ap != nil && caps.watchAP != tc.h.ap {
+				t.Fatalf("watch ap=%#v, want %#v", caps.watchAP, tc.h.ap)
+			}
+
+			if caps.completedCalled != tc.want.completedCalled {
+				t.Fatalf("completedCalled=%v, want %v", caps.completedCalled, tc.want.completedCalled)
+			}
+			if tc.want.completedCalled && caps.completedStatus != tc.want.completedStatus {
+				t.Fatalf("completedStatus=%v, want %v", caps.completedStatus, tc.want.completedStatus)
+			}
+
+			if tc.want.checkActiveReleased {
+				assertPlanActiveReleased(t, pl)
+			}
+		})
 	}
 }
 
 // -------------------------
-// 4) Non-async: plan not applicable -> ErrPlanNotApplicable
-// -------------------------
-
-func TestRunOptimizationFlow_PlanNotApplicable(t *testing.T) {
-	pl := &SharedState{}
-
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origIsApplicable := isSolutionApplicableFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		isSolutionApplicableFn = origIsApplicable
-		exportSolverStatsFn = origExportStats
-	}()
-
-	isAsyncSolvingFn = func() bool { return false }
-
-	baseline := SolverScore{Evicted: 7}
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{pod("default", "p-pending")}
-		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
-	}
-
-	bestAttempt := &SolverResult{Name: "attempt-2"}
-	bestOut := &SolverOutput{Status: "OPTIMAL"}
-	attempts := []SolverResult{{Name: "solverX"}}
-
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return "solverX", true, bestAttempt, bestOut, attempts
-	}
-
-	// Plan not applicable anymore.
-	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
-		return false, "stale-cluster"
-	}
-
-	calledExport := atomic.Bool{}
-	var gotErrMsg string
-	exportSolverStatsFn = func(_ *SharedState, _ string, _ SolverScore, _ string, _ []SolverResult, errMsg string) {
-		calledExport.Store(true)
-		gotErrMsg = errMsg
-	}
-
-	plan, bPtr, bestName, gotBestAttempt, gotAttempts2, err :=
-		pl.runOptimizationFlow(context.Background(), nil)
-
-	if !errors.Is(err, ErrPlanNotApplicable) {
-		t.Fatalf("err = %v, want ErrPlanNotApplicable", err)
-	}
-	if plan != nil {
-		t.Fatalf("plan = %#v, want nil", plan)
-	}
-	if bPtr == nil || (*bPtr).Evicted != baseline.Evicted {
-		t.Fatalf("baseline = %#v, want %#v", bPtr, baseline)
-	}
-	if bestName != "solverX" {
-		t.Fatalf("bestName = %q, want %q", bestName, "solverX")
-	}
-	if gotBestAttempt != bestAttempt {
-		t.Fatalf("bestAttempt = %#v, want %#v", gotBestAttempt, bestAttempt)
-	}
-	if len(gotAttempts2) != len(attempts) {
-		t.Fatalf("attempts length = %d, want %d", len(gotAttempts2), len(attempts))
-	}
-
-	if !calledExport.Load() {
-		t.Fatalf("exportSolverStatsFn was not called on plan-not-applicable path")
-	}
-	if gotErrMsg != ErrPlanNotApplicable.Error() {
-		t.Fatalf("exported errMsg = %q, want %q", gotErrMsg, ErrPlanNotApplicable.Error())
-	}
-
-	// PlanActive should have been released.
-	if !pl.tryEnterActivePlan() {
-		t.Fatalf("expected tryLeaveActivePlan to be called on plan-not-applicable path")
-	}
-}
-
-// -------------------------
-// 5) Non-async: pendingScheduled == 0 -> ErrNoPendingPodsScheduled
-// -------------------------
-
-func TestRunOptimizationFlow_NoPendingScheduled(t *testing.T) {
-	pl := &SharedState{}
-
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origIsApplicable := isSolutionApplicableFn
-	origComputeCounts := computePlanPodCountsFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		isSolutionApplicableFn = origIsApplicable
-		computePlanPodCountsFn = origComputeCounts
-		exportSolverStatsFn = origExportStats
-	}()
-
-	isAsyncSolvingFn = func() bool { return false }
-
-	baseline := SolverScore{Evicted: 10}
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{pod("default", "p-pending")}
-		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
-	}
-
-	bestAttempt := &SolverResult{Name: "attempt-3"}
-	bestOut := &SolverOutput{Status: "OPTIMAL"}
-	attempts := []SolverResult{{Name: "solverY"}}
-
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return "solverY", true, bestAttempt, bestOut, attempts
-	}
-
-	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
-		return true, ""
-	}
-
-	// No pending pods scheduled.
-	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
-		return 0, 5, 5
-	}
-
-	calledExport := atomic.Bool{}
-	var gotErrMsg string
-	exportSolverStatsFn = func(_ *SharedState, _ string, _ SolverScore, _ string, _ []SolverResult, errMsg string) {
-		calledExport.Store(true)
-		gotErrMsg = errMsg
-	}
-
-	plan, bPtr, bestName, gotBestAttempt, gotAttempts2, err :=
-		pl.runOptimizationFlow(context.Background(), nil)
-
-	if !errors.Is(err, ErrNoPendingPodsScheduled) {
-		t.Fatalf("err = %v, want ErrNoPendingPodsScheduled", err)
-	}
-	if plan != nil {
-		t.Fatalf("plan = %#v, want nil", plan)
-	}
-	if bPtr == nil || (*bPtr).Evicted != baseline.Evicted {
-		t.Fatalf("baseline = %#v, want %#v", bPtr, baseline)
-	}
-	if bestName != "solverY" {
-		t.Fatalf("bestName = %q, want %q", bestName, "solverY")
-	}
-	if gotBestAttempt != bestAttempt {
-		t.Fatalf("bestAttempt = %#v, want %#v", gotBestAttempt, bestAttempt)
-	}
-	if len(gotAttempts2) != len(attempts) {
-		t.Fatalf("attempts length = %d, want %d", len(gotAttempts2), len(attempts))
-	}
-
-	if !calledExport.Load() {
-		t.Fatalf("exportSolverStatsFn was not called on no-pending-scheduled path")
-	}
-	if gotErrMsg != ErrNoPendingPodsScheduled.Error() {
-		t.Fatalf("exported errMsg = %q, want %q", gotErrMsg, ErrNoPendingPodsScheduled.Error())
-	}
-
-	if !pl.tryEnterActivePlan() {
-		t.Fatalf("expected tryLeaveActivePlan to be called on no-pending-scheduled path")
-	}
-}
-
-// -------------------------
-// 6) Non-async: happy path -> success, watcher started, stats exported with no error
-// -------------------------
-
-func TestRunOptimizationFlow_SuccessfulPlan(t *testing.T) {
-	pl := &SharedState{}
-
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origIsApplicable := isSolutionApplicableFn
-	origComputeCounts := computePlanPodCountsFn
-	origPlanReg := planRegistrationFn
-	origPlanAct := planActivationFn
-	origStartWatch := startPlanCompletionWatchFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		isSolutionApplicableFn = origIsApplicable
-		computePlanPodCountsFn = origComputeCounts
-		planRegistrationFn = origPlanReg
-		planActivationFn = origPlanAct
-		startPlanCompletionWatchFn = origStartWatch
-		exportSolverStatsFn = origExportStats
-	}()
-
-	isAsyncSolvingFn = func() bool { return false }
-
-	baseline := SolverScore{Evicted: 0}
-	nodes := []*v1.Node{}
-	pods := []*v1.Pod{pod("default", "p-pending")}
-
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		return nodes, pods, dummySolverInput(baseline.Evicted), nil
-	}
-
-	bestAttempt := &SolverResult{Name: "attempt-best"}
-	bestOut := &SolverOutput{Status: "OPTIMAL"}
-	attempts := []SolverResult{{Name: "solverZ"}}
-
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return "solverZ", true, bestAttempt, bestOut, attempts
-	}
-
-	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
-		return true, ""
-	}
-
-	// Some positive number of pendingScheduled.
-	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
-		return 2, 5, 7
-	}
-
-	dummyPlan := &Plan{}
-	dummyAP := &ActivePlan{ID: "plan-123"}
-
-	planRegistrationFn = func(_ *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
-		return dummyPlan, dummyAP, nil
-	}
-
-	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
-		return nil
-	}
-
-	watchCalled := atomic.Bool{}
-	startPlanCompletionWatchFn = func(_ *SharedState, ap *ActivePlan) {
-		if ap != dummyAP {
-			t.Fatalf("startPlanCompletionWatchFn got ap=%#v, want %#v", ap, dummyAP)
-		}
-		watchCalled.Store(true)
-	}
-
-	exportCalled := atomic.Bool{}
-	var exportErrMsg string
-	exportSolverStatsFn = func(_ *SharedState, _ string, _ SolverScore, _ string, _ []SolverResult, errMsg string) {
-		exportCalled.Store(true)
-		exportErrMsg = errMsg
-	}
-
-	plan, bPtr, bestName, gotBestAttempt, gotAttempts2, err :=
-		pl.runOptimizationFlow(context.Background(), nil)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if plan != dummyPlan {
-		t.Fatalf("plan = %#v, want %#v", plan, dummyPlan)
-	}
-	if bPtr == nil || (*bPtr).Evicted != baseline.Evicted {
-		t.Fatalf("baseline = %#v, want %#v", bPtr, baseline)
-	}
-	if bestName != "solverZ" {
-		t.Fatalf("bestName = %q, want %q", bestName, "solverZ")
-	}
-	if gotBestAttempt != bestAttempt {
-		t.Fatalf("bestAttempt = %#v, want %#v", gotBestAttempt, bestAttempt)
-	}
-	if len(gotAttempts2) != len(attempts) {
-		t.Fatalf("attempts length = %d, want %d", len(gotAttempts2), len(attempts))
-	}
-
-	if !watchCalled.Load() {
-		t.Fatalf("startPlanCompletionWatchFn was not called on success path")
-	}
-	if !exportCalled.Load() {
-		t.Fatalf("exportSolverStatsFn was not called on success path")
-	}
-	if exportErrMsg != "" {
-		t.Fatalf("exportSolverStatsFn errMsg = %q, want empty", exportErrMsg)
-	}
-}
-
 // 7) Non-async: Active plan already in progress -> ErrActiveInProgress
+// -------------------------
+
 func TestRunOptimizationFlow_ActivePlanAlreadyInProgress_NonAsync(t *testing.T) {
 	pl := &SharedState{}
-	// Simulate an already-active plan.
 	pl.ActivePlanInProgress.Store(true)
 
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		exportSolverStatsFn = origExportStats
-	}()
+	h := &flowHarness{
+		t:     t,
+		pl:    pl,
+		async: false,
 
-	isAsyncSolvingFn = func() bool { return false }
+		// If planContext is called, the test should fail (must return early).
+		planCtxErr: errors.New("must-not-be-called"),
+	}
+	caps := h.install(t)
 
-	// If planContext is ever called, the test should fail -> early return expected.
+	// Hard fail if any of the heavy hooks are reached.
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		t.Fatalf("planContextFn must not be called when ActivePlan is already in progress")
 		return nil, nil, SolverInput{}, nil
 	}
-
-	// We should not export stats on this early ActivePlan conflict.
 	exportSolverStatsFn = func(_ *SharedState, _ string, _ SolverScore, _ string, _ []SolverResult, _ string) {
 		t.Fatalf("exportSolverStatsFn must not be called on early ActivePlan conflict")
 	}
@@ -510,68 +620,49 @@ func TestRunOptimizationFlow_ActivePlanAlreadyInProgress_NonAsync(t *testing.T) 
 		pl.runOptimizationFlow(context.Background(), nil)
 
 	if !errors.Is(err, ErrActiveInProgress) {
-		t.Fatalf("err = %v, want ErrActiveInProgress", err)
+		t.Fatalf("err=%v, want ErrActiveInProgress", err)
 	}
-	if plan != nil || baseline != nil || bestName != "" || bestAttempt != nil || attempts != nil {
-		t.Fatalf("expected all return values to be zero when ActivePlan is already in progress")
+	assertZeroReturns(t, plan, baseline, bestName, bestAttempt, attempts)
+
+	if caps.exportCalled || caps.watchCalled || caps.completedCalled {
+		t.Fatalf("unexpected side-effects on early ActivePlan conflict: export=%v watch=%v completed=%v",
+			caps.exportCalled, caps.watchCalled, caps.completedCalled)
 	}
 }
 
-// 8) Async: Active plan in progress at apply-time -> ErrActiveInProgress
+// -------------------------
+// 8) Async: Active plan in progress at apply-time -> ErrActiveInProgress (and stats exported)
+// -------------------------
+
 func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 	pl := &SharedState{}
 
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origIsApplicable := isSolutionApplicableFn
-	origComputeCounts := computePlanPodCountsFn
-	origPlanReg := planRegistrationFn
-	origPlanAct := planActivationFn
-	origStartWatch := startPlanCompletionWatchFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		isSolutionApplicableFn = origIsApplicable
-		computePlanPodCountsFn = origComputeCounts
-		planRegistrationFn = origPlanReg
-		planActivationFn = origPlanAct
-		startPlanCompletionWatchFn = origStartWatch
-		exportSolverStatsFn = origExportStats
-	}()
+	h := &flowHarness{
+		t:     t,
+		pl:    pl,
+		async: true,
 
-	// Async mode: skip early PlanActive and only take it after plan is validated.
-	isAsyncSolvingFn = func() bool { return true }
+		nodes:         []*v1.Node{},
+		pods:          []*v1.Pod{pod("default", "p-pending")},
+		baselineEvict: 11,
 
-	baseline := SolverScore{Evicted: 11}
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{pod("default", "p-pending")}
-		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
+		bestName:       "solverAsync",
+		hadImprovement: true,
+		bestAttempt:    &SolverResult{Name: "attempt-async"},
+		bestOut:        &SolverOutput{Status: "OPTIMAL"},
+		attempts:       []SolverResult{{Name: "solverAsync"}},
+		applicable:     true,
+
+		pendingScheduled: 1,
+		totalPrePlan:     4,
+		totalPostPlan:    5,
 	}
-
-	bestAttempt := &SolverResult{Name: "attempt-async"}
-	bestOut := &SolverOutput{Status: "OPTIMAL"}
-	attempts := []SolverResult{{Name: "solverAsync"}}
-
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return "solverAsync", true, bestAttempt, bestOut, attempts
-	}
-
-	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
-		return true, ""
-	}
-
-	// pendingScheduled > 0 so we reach the async PlanActive branch.
-	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
-		return 1, 4, 5
-	}
+	caps := h.install(t)
 
 	// Simulate that an Active plan is already in progress at apply-time.
 	pl.ActivePlanInProgress.Store(true)
 
-	// None of these should be reached if we fail at async tryEnterActivePlan.
+	// These must not be reached if async tryEnterActivePlan fails.
 	planRegistrationFn = func(_ *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
 		t.Fatalf("planRegistrationFn must not be called when async tryEnterActivePlan fails")
 		return nil, nil, nil
@@ -584,261 +675,30 @@ func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 		t.Fatalf("startPlanCompletionWatchFn must not be called when async tryEnterActivePlan fails")
 	}
 
-	exportCalled := atomic.Bool{}
-	var gotBaseline SolverScore
-	var gotBestName string
-	var gotErrMsg string
-	exportSolverStatsFn = func(_ *SharedState, _ string, baselineScore SolverScore, bestName string, _ []SolverResult, errMsg string) {
-		exportCalled.Store(true)
-		gotBaseline = baselineScore
-		gotBestName = bestName
-		gotErrMsg = errMsg
-	}
-
 	plan, baselinePtr, bestName, bestAttemptOut, attemptsOut, err :=
 		pl.runOptimizationFlow(context.Background(), nil)
 
 	if !errors.Is(err, ErrActiveInProgress) {
-		t.Fatalf("err = %v, want ErrActiveInProgress", err)
+		t.Fatalf("err=%v, want ErrActiveInProgress", err)
 	}
-	// Async ErrActiveInProgress returns nils for everything.
-	if plan != nil || baselinePtr != nil || bestName != "" || bestAttemptOut != nil || attemptsOut != nil {
-		t.Fatalf("expected all return values to be zero on async ActiveInProgress")
-	}
+	assertZeroReturns(t, plan, baselinePtr, bestName, bestAttemptOut, attemptsOut)
 
-	if !exportCalled.Load() {
+	if !caps.exportCalled {
 		t.Fatalf("exportSolverStatsFn must be called on async ActiveInProgress path")
 	}
-	if gotBaseline.Evicted != baseline.Evicted {
-		t.Fatalf("exported baseline = %#v, want %#v", gotBaseline, baseline)
+	if caps.export.baseline.Evicted != 11 {
+		t.Fatalf("exported baseline Evicted=%d, want %d", caps.export.baseline.Evicted, 11)
 	}
-	if gotBestName != "solverAsync" {
-		t.Fatalf("exported bestName = %q, want %q", gotBestName, "solverAsync")
+	if caps.export.bestName != "solverAsync" {
+		t.Fatalf("exported bestName=%q, want %q", caps.export.bestName, "solverAsync")
 	}
-	if gotErrMsg != ErrActiveInProgress.Error() {
-		t.Fatalf("exported errMsg = %q, want %q", gotErrMsg, ErrActiveInProgress.Error())
-	}
-}
-
-// 9) Non-async: planRegistration fails -> ErrPlanRegistration
-func TestRunOptimizationFlow_PlanRegistrationError(t *testing.T) {
-	pl := &SharedState{}
-
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origIsApplicable := isSolutionApplicableFn
-	origComputeCounts := computePlanPodCountsFn
-	origPlanReg := planRegistrationFn
-	origPlanAct := planActivationFn
-	origStartWatch := startPlanCompletionWatchFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		isSolutionApplicableFn = origIsApplicable
-		computePlanPodCountsFn = origComputeCounts
-		planRegistrationFn = origPlanReg
-		planActivationFn = origPlanAct
-		startPlanCompletionWatchFn = origStartWatch
-		exportSolverStatsFn = origExportStats
-		onPlanCompletedHook = nil
-	}()
-
-	isAsyncSolvingFn = func() bool { return false }
-
-	baseline := SolverScore{Evicted: 5}
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{pod("default", "p-pending")}
-		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
-	}
-
-	bestAttempt := &SolverResult{Name: "attempt-regerr"}
-	bestOut := &SolverOutput{Status: "OPTIMAL"}
-	attempts := []SolverResult{{Name: "solverReg"}}
-
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return "solverReg", true, bestAttempt, bestOut, attempts
-	}
-
-	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
-		return true, ""
-	}
-
-	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
-		return 2, 4, 6
-	}
-
-	wantErr := errors.New("boom-planreg")
-	planRegistrationFn = func(_ *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
-		return nil, nil, wantErr
-	}
-
-	// PlanActivation should not be reached.
-	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
-		t.Fatalf("planActivationFn must not be called when planRegistration fails")
-		return nil
-	}
-	startPlanCompletionWatchFn = func(_ *SharedState, _ *ActivePlan) {
-		t.Fatalf("startPlanCompletionWatchFn must not be called when planRegistration fails")
-	}
-
-	// Only check stats export here.
-	exportCalled := atomic.Bool{}
-	var gotErrMsg string
-	exportSolverStatsFn = func(_ *SharedState, _ string, _ SolverScore, _ string, _ []SolverResult, errMsg string) {
-		exportCalled.Store(true)
-		gotErrMsg = errMsg
-	}
-
-	plan, bPtr, bestName, gotBestAttempt, gotAttempts2, err :=
-		pl.runOptimizationFlow(context.Background(), nil)
-
-	if !errors.Is(err, ErrPlanRegistration) {
-		t.Fatalf("err = %v, want ErrPlanRegistration", err)
-	}
-	if plan != nil {
-		t.Fatalf("plan = %#v, want nil", plan)
-	}
-	if bPtr == nil || (*bPtr).Evicted != baseline.Evicted {
-		t.Fatalf("baseline = %#v, want %#v", bPtr, baseline)
-	}
-	if bestName != "solverReg" {
-		t.Fatalf("bestName = %q, want %q", bestName, "solverReg")
-	}
-	if gotBestAttempt != bestAttempt {
-		t.Fatalf("bestAttempt = %#v, want %#v", gotBestAttempt, bestAttempt)
-	}
-	if len(gotAttempts2) != len(attempts) {
-		t.Fatalf("attempts length = %d, want %d", len(gotAttempts2), len(attempts))
-	}
-
-	if !exportCalled.Load() {
-		t.Fatalf("exportSolverStatsFn must be called on planRegistration error")
-	}
-	if gotErrMsg != ErrPlanRegistration.Error() {
-		t.Fatalf("exported errMsg = %q, want %q", gotErrMsg, ErrPlanRegistration.Error())
+	if caps.export.errMsg != ErrActiveInProgress.Error() {
+		t.Fatalf("exported errMsg=%q, want %q", caps.export.errMsg, ErrActiveInProgress.Error())
 	}
 }
 
-// 10) Non-async: planActivation fails -> ErrPlanActivationFailed and onPlanCompleted
-func TestRunOptimizationFlow_PlanActivationError(t *testing.T) {
-	pl := &SharedState{}
+// -------------------------
+// small helper to avoid &int literals in table
+// -------------------------
 
-	origAsync := isAsyncSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origIsApplicable := isSolutionApplicableFn
-	origComputeCounts := computePlanPodCountsFn
-	origPlanReg := planRegistrationFn
-	origPlanAct := planActivationFn
-	origStartWatch := startPlanCompletionWatchFn
-	origExportStats := exportSolverStatsFn
-	defer func() {
-		isAsyncSolvingFn = origAsync
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		isSolutionApplicableFn = origIsApplicable
-		computePlanPodCountsFn = origComputeCounts
-		planRegistrationFn = origPlanReg
-		planActivationFn = origPlanAct
-		startPlanCompletionWatchFn = origStartWatch
-		exportSolverStatsFn = origExportStats
-		onPlanCompletedHook = nil
-	}()
-
-	isAsyncSolvingFn = func() bool { return false }
-
-	baseline := SolverScore{Evicted: 2}
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		pods := []*v1.Pod{pod("default", "p-pending")}
-		return []*v1.Node{}, pods, dummySolverInput(baseline.Evicted), nil
-	}
-
-	bestAttempt := &SolverResult{Name: "attempt-acterr"}
-	bestOut := &SolverOutput{Status: "OPTIMAL"}
-	attempts := []SolverResult{{Name: "solverAct"}}
-
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return "solverAct", true, bestAttempt, bestOut, attempts
-	}
-
-	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
-		return true, ""
-	}
-
-	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
-		return 1, 3, 4
-	}
-
-	dummyPlan := &Plan{}
-	dummyAP := &ActivePlan{ID: "plan-activation"}
-
-	// Simulate that planRegistration would have set an active plan.
-	pl.ActivePlan.Store(dummyAP)
-
-	planRegistrationFn = func(_ *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
-		return dummyPlan, dummyAP, nil
-	}
-
-	wantErr := errors.New("boom-activation")
-	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
-		return wantErr
-	}
-
-	// We should not start watcher if planActivation fails.
-	startPlanCompletionWatchFn = func(_ *SharedState, _ *ActivePlan) {
-		t.Fatalf("startPlanCompletionWatchFn must not be called when planActivation fails")
-	}
-
-	planCompleted := atomic.Bool{}
-	var completedStatus PlanStatus
-	onPlanCompletedHook = func(_ *SharedState, status PlanStatus, _ *ActivePlan) {
-		planCompleted.Store(true)
-		completedStatus = status
-	}
-
-	exportCalled := atomic.Bool{}
-	var gotErrMsg string
-	exportSolverStatsFn = func(_ *SharedState, _ string, _ SolverScore, _ string, _ []SolverResult, errMsg string) {
-		exportCalled.Store(true)
-		gotErrMsg = errMsg
-	}
-
-	plan, bPtr, bestName, gotBestAttempt, gotAttempts2, err :=
-		pl.runOptimizationFlow(context.Background(), nil)
-
-	if !errors.Is(err, ErrPlanActivationFailed) {
-		t.Fatalf("err = %v, want ErrPlanActivationFailed", err)
-	}
-	if plan != nil {
-		t.Fatalf("plan = %#v, want nil", plan)
-	}
-	if bPtr == nil || (*bPtr).Evicted != baseline.Evicted {
-		t.Fatalf("baseline = %#v, want %#v", bPtr, baseline)
-	}
-	if bestName != "solverAct" {
-		t.Fatalf("bestName = %q, want %q", bestName, "solverAct")
-	}
-	if gotBestAttempt != bestAttempt {
-		t.Fatalf("bestAttempt = %#v, want %#v", gotBestAttempt, bestAttempt)
-	}
-	if len(gotAttempts2) != len(attempts) {
-		t.Fatalf("attempts length = %d, want %d", len(gotAttempts2), len(attempts))
-	}
-
-	if !planCompleted.Load() {
-		t.Fatalf("onPlanCompletedHook must be called when planActivation fails and an ActivePlan exists")
-	}
-	if completedStatus != PlanStatusFailed {
-		t.Fatalf("onPlanCompletedHook status = %v, want %v", completedStatus, PlanStatusFailed)
-	}
-
-	if !exportCalled.Load() {
-		t.Fatalf("exportSolverStatsFn must be called on planActivation error")
-	}
-	if gotErrMsg != ErrPlanActivationFailed.Error() {
-		t.Fatalf("exported errMsg = %q, want %q", gotErrMsg, ErrPlanActivationFailed.Error())
-	}
-}
+func ptrInt(v int) *int { return &v }

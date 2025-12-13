@@ -11,9 +11,46 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/informers"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes/fake"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 )
+
+func statsCMWithRaw(t *testing.T, raw string) *v1.ConfigMap {
+	t.Helper()
+	key := SolverStatsConfigMapLabelKey + ".json"
+	return &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      SolverStatsConfigMapName,
+			Namespace: SystemNamespace,
+			Labels:    map[string]string{SolverStatsConfigMapLabelKey: "true"},
+		},
+		Data: map[string]string{key: raw},
+	}
+}
+
+func statsCMWithEntries(t *testing.T, entries []ExportedSolverStats) *v1.ConfigMap {
+	t.Helper()
+	b, err := json.MarshalIndent(entries, "", "  ")
+	mustNoErr(t, err, "marshal entries")
+	return statsCMWithRaw(t, string(b))
+}
+
+func readStatsArr(t *testing.T, ctx context.Context, pl *SharedState) []ExportedSolverStats {
+	t.Helper()
+	key := SolverStatsConfigMapLabelKey + ".json"
+	cm, err := pl.Handle.ClientSet().CoreV1().ConfigMaps(SystemNamespace).
+		Get(ctx, SolverStatsConfigMapName, metav1.GetOptions{})
+	mustNoErr(t, err, "get stats CM")
+
+	raw := cm.Data[key]
+	must(t, raw != "", "expected non-empty json payload at %q", key)
+
+	var arr []ExportedSolverStats
+	mustNoErr(t, json.Unmarshal([]byte(raw), &arr), "unmarshal stats json (raw=%q)", raw)
+	return arr
+}
 
 // -------------------------
 // isAnySolverEnabled
@@ -200,6 +237,26 @@ func TestIsSolutionUsable(t *testing.T) {
 func TestIsSolutionApplicable(t *testing.T) {
 	pl := &SharedState{}
 
+	// Local helper: keeps each subtest to ~1 line of intent.
+	mustApplicable := func(t *testing.T, out *SolverOutput, nodes []*v1.Node, pods []*v1.Pod, wantOK bool, wantSubstr string) {
+		t.Helper()
+		ok, reason := pl.isSolutionApplicable(out, nodes, pods)
+
+		if ok != wantOK {
+			t.Fatalf("ok=%v, want %v (reason=%q)", ok, wantOK, reason)
+		}
+		if wantOK {
+			if reason != "" {
+				t.Fatalf("reason=%q, want empty on success", reason)
+			}
+			return
+		}
+		if wantSubstr != "" && !strings.Contains(reason, wantSubstr) {
+			t.Fatalf("reason=%q, want contains %q", reason, wantSubstr)
+		}
+	}
+
+	// Shared fixtures
 	n1 := node("n1", withAllocatable("1000m", "1Gi"))
 	n2Bad := node("n2", unschedulable())
 
@@ -207,20 +264,14 @@ func TestIsSolutionApplicable(t *testing.T) {
 	pOnN2 := pod("ns", "p2", withUID("u2"), onNode("n2"), withReqs("100m", "128Mi"))
 
 	t.Run("nil_plan", func(t *testing.T) {
-		ok, reason := pl.isSolutionApplicable(nil, nil, nil)
-		if ok || reason != "nil plan" {
-			t.Fatalf("ok=%v reason=%q, want false/'nil plan'", ok, reason)
-		}
+		mustApplicable(t, nil, nil, nil, false, "nil plan")
 	})
 
 	t.Run("pod_vanished", func(t *testing.T) {
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "missing", Namespace: "ns", Name: "missing", OldNode: "", Node: "n1"}},
 		}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{n1}, []*v1.Pod{pOnN1})
-		if ok || !strings.Contains(reason, "pod vanished") {
-			t.Fatalf("ok=%v reason=%q, want pod vanished", ok, reason)
-		}
+		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{pOnN1}, false, "pod vanished")
 	})
 
 	t.Run("dest_node_now_unusable", func(t *testing.T) {
@@ -229,10 +280,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u3", Namespace: "ns", Name: "p3", OldNode: "", Node: "n2"}},
 		}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{n1, n2Bad}, []*v1.Pod{pPending})
-		if ok || !strings.Contains(reason, "dest node now unusable") {
-			t.Fatalf("ok=%v reason=%q, want dest node now unusable", ok, reason)
-		}
+		mustApplicable(t, out, []*v1.Node{n1, n2Bad}, []*v1.Pod{pPending}, false, "dest node now unusable")
 	})
 
 	t.Run("move_precondition_changed", func(t *testing.T) {
@@ -240,10 +288,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u2", Namespace: "ns", Name: "p2", OldNode: "n1", Node: "n1"}},
 		}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{n1, node("n2")}, []*v1.Pod{pOnN2})
-		if ok || !strings.Contains(reason, "move precondition changed") {
-			t.Fatalf("ok=%v reason=%q, want move precondition changed", ok, reason)
-		}
+		mustApplicable(t, out, []*v1.Node{n1, node("n2")}, []*v1.Pod{pOnN2}, false, "move precondition changed")
 	})
 
 	t.Run("success_move_branch", func(t *testing.T) {
@@ -251,20 +296,13 @@ func TestIsSolutionApplicable(t *testing.T) {
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u1", Namespace: "ns", Name: "p1", OldNode: "n1", Node: "n1"}},
 		}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{n1}, []*v1.Pod{pOnN1})
-		if !ok {
-			t.Fatalf("want ok=true, reason=%q", reason)
-		}
+		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{pOnN1}, true, "")
 	})
-	t.Run("evict_node_now_unusable", func(t *testing.T) {
-		n2Bad := node("n2", unschedulable())
-		p := pod("ns", "p", withUID("u-ev"), onNode("n2"), withReqs("100m", "128Mi"), withPhase(v1.PodRunning))
 
+	t.Run("evict_node_now_unusable", func(t *testing.T) {
+		p := pod("ns", "p", withUID("u-ev"), onNode("n2"), withReqs("100m", "128Mi"), withPhase(v1.PodRunning))
 		out := &SolverOutput{Evictions: []SolverPod{{UID: "u-ev"}}}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{n1, n2Bad}, []*v1.Pod{p})
-		if ok || !strings.Contains(reason, "evict node now unusable") {
-			t.Fatalf("ok=%v reason=%q, want evict node now unusable", ok, reason)
-		}
+		mustApplicable(t, out, []*v1.Node{n1, n2Bad}, []*v1.Pod{p}, false, "evict node now unusable")
 	})
 
 	t.Run("pending_precondition_changed", func(t *testing.T) {
@@ -273,10 +311,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u-bind", Namespace: "ns", Name: "p", OldNode: "", Node: "n1"}},
 		}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{n1}, []*v1.Pod{p})
-		if ok || !strings.Contains(reason, "pending precondition changed") {
-			t.Fatalf("ok=%v reason=%q, want pending precondition changed", ok, reason)
-		}
+		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{p}, false, "pending precondition changed")
 	})
 
 	t.Run("capacity_exceeded", func(t *testing.T) {
@@ -288,22 +323,14 @@ func TestIsSolutionApplicable(t *testing.T) {
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u-pend", Namespace: "ns", Name: "pend", OldNode: "", Node: "n1"}},
 		}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{nSmall}, []*v1.Pod{pRun, pPend})
-		if ok || !strings.Contains(reason, "capacity exceeded") {
-			t.Fatalf("ok=%v reason=%q, want capacity exceeded", ok, reason)
-		}
+		mustApplicable(t, out, []*v1.Node{nSmall}, []*v1.Pod{pRun, pPend}, false, "capacity exceeded")
 	})
 
 	t.Run("eviction_pending_is_ignored", func(t *testing.T) {
 		// Eviction entry for a pod that is already pending should just be skipped.
 		pPending := pod("ns", "p", withUID("u-pend"), withReqs("10m", "8Mi"), withPhase(v1.PodPending))
-		out := &SolverOutput{
-			Evictions: []SolverPod{{UID: "u-pend"}},
-		}
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{n1}, []*v1.Pod{pPending})
-		if !ok {
-			t.Fatalf("want ok=true, reason=%q", reason)
-		}
+		out := &SolverOutput{Evictions: []SolverPod{{UID: "u-pend"}}}
+		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{pPending}, true, "")
 	})
 
 	t.Run("eviction_frees_capacity_for_placement", func(t *testing.T) {
@@ -332,10 +359,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 			Placements: []SolverPod{{UID: "u-pend", Namespace: "ns", Name: "pend", OldNode: "", Node: "n1"}},
 		}
 
-		ok, reason := pl.isSolutionApplicable(out, []*v1.Node{nSmall}, []*v1.Pod{pRun, pPend})
-		if !ok {
-			t.Fatalf("want ok=true, reason=%q", reason)
-		}
+		mustApplicable(t, out, []*v1.Node{nSmall}, []*v1.Pod{pRun, pPend}, true, "")
 	})
 }
 
@@ -343,35 +367,31 @@ func TestIsSolutionApplicable(t *testing.T) {
 // logLeaderboard
 // -------------------------
 
-func TestLogLeaderboard_CoversNilBestAndTiePath(t *testing.T) {
+func TestLogLeaderboard(t *testing.T) {
 	baseline := SolverScore{PlacedByPriority: map[string]int{"1": 1}, Evicted: 0, Moved: 0}
 
 	// best == nil branch
 	logLeaderboard("label", nil, baseline, nil)
 
-	// tie-tagging path: adjacent tied scores
-	attempts := []SolverResult{
-		{Name: "a", Status: "OPTIMAL", DurationMs: 1, Score: baseline},
-		{Name: "b", Status: "FEASIBLE", DurationMs: 2, Score: baseline}, // tie with a
-	}
-	best := attempts[0]
-	logLeaderboard("label", attempts, baseline, &best)
-}
-
-func TestLogLeaderboard_AttemptsEmptyButBestNonNil(t *testing.T) {
-	baseline := SolverScore{PlacedByPriority: map[string]int{"1": 1}, Evicted: 0, Moved: 0}
+	// attempts empty but best non-nil branch
 	best := SolverResult{Name: "baseline", Status: "BASELINE", DurationMs: 0, Score: baseline}
 	logLeaderboard("label", []SolverResult{}, baseline, &best)
-}
 
-func TestLogLeaderboard_BetterEqualWorseAndBestNotBaseline(t *testing.T) {
-	baseline := SolverScore{PlacedByPriority: map[string]int{"1": 1}, Evicted: 0, Moved: 0}
-	better := SolverResult{Name: "better", Status: "OPTIMAL", DurationMs: 1, Score: SolverScore{PlacedByPriority: map[string]int{"1": 2}, Evicted: 0, Moved: 0}}
+	// tie tagging + better/equal/worse + best != baseline placed-map selection
+	better := SolverResult{Name: "better", Status: "OPTIMAL", DurationMs: 1, Score: SolverScore{PlacedByPriority: map[string]int{"1": 2}}}
 	equal := SolverResult{Name: "equal", Status: "FEASIBLE", DurationMs: 2, Score: baseline}
-	worse := SolverResult{Name: "worse", Status: "FEASIBLE", DurationMs: 3, Score: SolverScore{PlacedByPriority: map[string]int{"1": 1}, Evicted: 0, Moved: 1}}
+	worse := SolverResult{Name: "worse", Status: "FEASIBLE", DurationMs: 3, Score: SolverScore{PlacedByPriority: map[string]int{"1": 1}, Moved: 1}}
 
-	best := better
-	logLeaderboard("label", []SolverResult{worse, equal, better}, baseline, &best)
+	// tie: adjacent equal scores
+	attempts := []SolverResult{
+		{Name: "a", Status: "OPTIMAL", DurationMs: 1, Score: baseline},
+		{Name: "b", Status: "FEASIBLE", DurationMs: 2, Score: baseline},
+	}
+	best2 := attempts[0]
+	logLeaderboard("label", attempts, baseline, &best2)
+
+	best3 := better
+	logLeaderboard("label", []SolverResult{worse, equal, better}, baseline, &best3)
 }
 
 // -------------------------
@@ -505,97 +525,93 @@ func TestAppendSolverStatsCM_NoClientset(t *testing.T) {
 	}
 }
 
-func TestAppendSolverStatsCM_CreateOnMissing(t *testing.T) {
+func TestAppendSolverStatsCM_UpsertAndAppend(t *testing.T) {
 	ctx := context.Background()
-	client := fake.NewSimpleClientset()
-	factory := informers.NewSharedInformerFactory(client, 0)
-	pl := &SharedState{Handle: &fakeHandle{client: client, factory: factory}}
 
-	// make sure hook is off
-	withAppendStatsHook(t, nil)
-
-	stopCh := make(chan struct{})
-	t.Cleanup(func() { close(stopCh) })
-	_ = factory.Core().V1().ConfigMaps().Informer()
-	factory.Start(stopCh)
-	factory.WaitForCacheSync(stopCh)
-
-	e1 := ExportedSolverStats{BestName: "first"}
-	if err := pl.appendSolverStatsCM(ctx, e1); err != nil {
-		t.Fatalf("append err=%v", err)
+	cases := []struct {
+		name     string
+		initial  *v1.ConfigMap // nil => missing
+		entry    ExportedSolverStats
+		wantBest []string
+	}{
+		{
+			name:     "create_on_missing",
+			initial:  nil,
+			entry:    ExportedSolverStats{BestName: "first"},
+			wantBest: []string{"first"},
+		},
+		{
+			name:     "append_when_found",
+			initial:  statsCMWithEntries(t, []ExportedSolverStats{{BestName: "first"}}),
+			entry:    ExportedSolverStats{BestName: "second"},
+			wantBest: []string{"first", "second"},
+		},
+		{
+			name:     "append_when_found_empty_payload",
+			initial:  statsCMWithRaw(t, ""), // key exists but empty
+			entry:    ExportedSolverStats{BestName: "only"},
+			wantBest: []string{"only"},
+		},
 	}
 
-	cm, err := client.CoreV1().ConfigMaps(SystemNamespace).
-		Get(ctx, SolverStatsConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get cm err=%v", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withAppendStatsHook(t, nil) // ensure hook is off
 
-	key := SolverStatsConfigMapLabelKey + ".json"
-	raw := cm.Data[key]
-	if raw == "" {
-		t.Fatalf("expected json payload at %q", key)
-	}
+			var pl *SharedState
+			var cleanup func()
+			if tc.initial == nil {
+				pl, cleanup = newSharedStateWithConfigMapInformer(t /* no objects */)
+			} else {
+				pl, cleanup = newSharedStateWithConfigMapInformer(t, tc.initial)
+			}
+			defer cleanup()
 
-	var arr []ExportedSolverStats
-	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
-		t.Fatalf("unmarshal err=%v (raw=%q)", err, raw)
-	}
-	if len(arr) != 1 || arr[0].BestName != "first" {
-		t.Fatalf("arr=%+v, want [{BestName:first}]", arr)
+			mustNoErr(t, pl.appendSolverStatsCM(ctx, tc.entry), "append err")
+
+			arr := readStatsArr(t, ctx, pl)
+			got := make([]string, 0, len(arr))
+			for _, e := range arr {
+				got = append(got, e.BestName)
+			}
+			mustEq(t, got, tc.wantBest, "bestName sequence mismatch")
+		})
 	}
 }
 
-func TestAppendSolverStatsCM_AppendWhenFound(t *testing.T) {
+type errConfigMapNamespaceLister struct{ err error }
+
+func (e errConfigMapNamespaceLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) {
+	return nil, e.err
+}
+
+func (e errConfigMapNamespaceLister) Get(_ string) (*v1.ConfigMap, error) {
+	return nil, e.err
+}
+
+func TestAppendSolverStatsCM_ReadJsonError(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
-	factory := informers.NewSharedInformerFactory(client, 0)
-	pl := &SharedState{Handle: &fakeHandle{client: client, factory: factory}}
+	pl := &SharedState{Handle: &fakeHandle{client: client, factory: nil}}
 
-	// make sure hook is off
 	withAppendStatsHook(t, nil)
 
-	// Pre-create CM BEFORE informer starts, so lister sees it on initial LIST.
-	doc := ConfigMapDoc{
-		Namespace: SystemNamespace,
-		Name:      SolverStatsConfigMapName,
-		LabelKey:  SolverStatsConfigMapLabelKey,
-		DataKey:   SolverStatsConfigMapLabelKey + ".json",
+	origCmsFor := solverStatsConfigMapsFor
+	origNsListerFor := solverStatsConfigMapNsListerFor
+	t.Cleanup(func() {
+		solverStatsConfigMapsFor = origCmsFor
+		solverStatsConfigMapNsListerFor = origNsListerFor
+	})
+
+	solverStatsConfigMapsFor = func(_ *SharedState) corev1client.ConfigMapInterface {
+		return client.CoreV1().ConfigMaps(SystemNamespace)
 	}
-	cms := client.CoreV1().ConfigMaps(SystemNamespace)
-
-	if err := doc.ensureJson(ctx, cms, []ExportedSolverStats{{BestName: "first"}}); err != nil {
-		t.Fatalf("ensureJson err=%v", err)
-	}
-
-	stopCh := make(chan struct{})
-	t.Cleanup(func() { close(stopCh) })
-	_ = factory.Core().V1().ConfigMaps().Informer()
-	factory.Start(stopCh)
-	factory.WaitForCacheSync(stopCh)
-
-	// Now the lister should reliably report "found", so we hit mutateJson append path.
-	if err := pl.appendSolverStatsCM(ctx, ExportedSolverStats{BestName: "second"}); err != nil {
-		t.Fatalf("append err=%v", err)
+	solverStatsConfigMapNsListerFor = func(_ *SharedState) corev1listers.ConfigMapNamespaceLister {
+		return errConfigMapNamespaceLister{err: errors.New("boom")}
 	}
 
-	cm, err := client.CoreV1().ConfigMaps(SystemNamespace).
-		Get(ctx, SolverStatsConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get cm err=%v", err)
-	}
-
-	key := SolverStatsConfigMapLabelKey + ".json"
-	raw := cm.Data[key]
-
-	var arr []ExportedSolverStats
-	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
-		t.Fatalf("unmarshal err=%v (raw=%q)", err, raw)
-	}
-	if len(arr) != 2 {
-		t.Fatalf("want 2 entries, got %d (arr=%+v)", len(arr), arr)
-	}
-	if arr[0].BestName != "first" || arr[1].BestName != "second" {
-		t.Fatalf("arr=%+v, want first then second", arr)
+	err := pl.appendSolverStatsCM(ctx, ExportedSolverStats{BestName: "x"})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err=%v, want contains 'boom'", err)
 	}
 }
