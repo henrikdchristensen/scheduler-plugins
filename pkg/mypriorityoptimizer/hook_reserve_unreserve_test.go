@@ -5,20 +5,13 @@ import (
 	"context"
 	"testing"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
 // kube-system pods should always pass Reserve without touching workload quotas.
 func TestReserve_KubeSystemAlwaysAllowed(t *testing.T) {
 	pl := &SharedState{}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sys-pod",
-			Namespace: SystemNamespace,
-		},
-	}
+	pod := newSystemPod("sys-pod")
 
 	st := pl.Reserve(context.Background(), framework.NewCycleState(), pod, "node1")
 	if st == nil {
@@ -32,12 +25,7 @@ func TestReserve_KubeSystemAlwaysAllowed(t *testing.T) {
 // With no active plan, non-system pods should also pass Reserve.
 func TestReserve_NoActivePlan_AllowsPod(t *testing.T) {
 	pl := &SharedState{}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
+	pod := newWorkloadPod("work-pod")
 
 	st := pl.Reserve(context.Background(), framework.NewCycleState(), pod, "node1")
 	if st == nil {
@@ -51,12 +39,7 @@ func TestReserve_NoActivePlan_AllowsPod(t *testing.T) {
 // Unreserve with no reservation state present should be a no-op (no panic).
 func TestUnreserve_NoReservationState_NoPanic(t *testing.T) {
 	pl := &SharedState{}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
+	pod := newWorkloadPod("work-pod")
 	st := framework.NewCycleState()
 
 	// No state written → Read() will fail, and Unreserve should just log & return.
@@ -67,12 +50,7 @@ func TestUnreserve_NoReservationState_NoPanic(t *testing.T) {
 // after logging InfoNoActivePlan (no counter changes / panics).
 func TestUnreserve_NoActivePlan_NoPanic(t *testing.T) {
 	pl := &SharedState{}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
+	pod := newWorkloadPod("work-pod")
 	st := framework.NewCycleState()
 
 	// Simulate that Reserve wrote a reservation state.

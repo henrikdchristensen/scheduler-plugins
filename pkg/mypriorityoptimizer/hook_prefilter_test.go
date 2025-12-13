@@ -5,20 +5,13 @@ import (
 	"context"
 	"testing"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
 // kube-system pods should always be allowed and not constrained by any active plan.
 func TestPreFilter_KubeSystemAlwaysAllowed(t *testing.T) {
 	pl := &SharedState{}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sys-pod",
-			Namespace: SystemNamespace,
-		},
-	}
+	pod := newSystemPod("sys-pod")
 
 	res, st := pl.PreFilter(context.Background(), framework.NewCycleState(), pod)
 	if st == nil {
@@ -35,12 +28,7 @@ func TestPreFilter_KubeSystemAlwaysAllowed(t *testing.T) {
 // When there is no active plan, regular pods should pass through PreFilter unmodified.
 func TestPreFilter_NoActivePlan_AllowsPod(t *testing.T) {
 	pl := &SharedState{}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
+	pod := newWorkloadPod("work-pod")
 
 	res, st := pl.PreFilter(context.Background(), framework.NewCycleState(), pod)
 	if st == nil {

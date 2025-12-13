@@ -5,8 +5,6 @@ import (
 	"context"
 	"testing"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
@@ -26,12 +24,7 @@ func TestPreEnqueue_KubeSystemAlwaysAllowed(t *testing.T) {
 	// Make sure we don't accidentally trip the "caches not warmed" branch.
 	pl.PluginReady.Store(true)
 
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sys-pod",
-			Namespace: SystemNamespace,
-		},
-	}
+	pod := newSystemPod("sys-pod")
 
 	st := pl.PreEnqueue(context.Background(), pod)
 	if st == nil {
@@ -48,12 +41,7 @@ func TestPreEnqueue_ManualBlockingModeBlocks(t *testing.T) {
 	pl := &SharedState{}
 	pl.PluginReady.Store(true) // skip cache-not-ready branch
 
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
+	pod := newWorkloadPod("work-pod")
 
 	withOptimizeModeStage("manual_blocking", func() {
 		st := pl.PreEnqueue(context.Background(), pod)
@@ -72,12 +60,7 @@ func TestPreEnqueue_DefaultModePassThrough(t *testing.T) {
 	pl := &SharedState{}
 	pl.PluginReady.Store(true)
 
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
+	pod := newWorkloadPod("work-pod")
 
 	withOptimizeModeStage("periodic", func() {
 		st := pl.PreEnqueue(context.Background(), pod)
