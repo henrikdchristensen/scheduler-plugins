@@ -89,7 +89,7 @@ Kubernetes assigns QoS classes to pods based on their resource requests and limi
   - Burstable: Uses requests for scheduling, but can burst to limits
   - BestEffort: Uses zero for scheduling but consumes actual resources
 
-**Reference**: [Kubernetes QoS Classes Guide](https://medium.com/@muppedaanvesh/a-hands-on-guide-to-kubernetes-qos-classes-%EF%B8%8F-571b5f8f7e58)
+**Reference**: [Kubernetes QoS Classes Guide](https://medium.com/@muppedaanvesh/a-hands-on-guide-to-kubernetes-qos-classes-571b5f8f7e58)
 
 ### Affinity and Anti-Affinity
 
@@ -1251,7 +1251,12 @@ if __name__ == "__main__":
 
 2. **Solver Timeout**:
    - May need to increase `SOLVER_PYTHON_TIMEOUT` when affinity is enabled
-   - Consider adaptive timeout based on cluster size and affinity complexity
+   - Recommended timeouts based on cluster size:
+     - Small clusters (< 50 pods): 5-10s
+     - Medium clusters (50-200 pods): 10-30s
+     - Large clusters (> 200 pods): 30-60s
+   - Add 50-100% more time when complex affinity rules are present
+   - Consider adaptive timeout: `base_timeout + (num_pods × 0.05s) + (num_affinity_rules × 1s)`
 
 3. **Incremental Updates**:
    - Cache affinity rules and quota information
@@ -1262,8 +1267,12 @@ if __name__ == "__main__":
    - Allow solver to trade off affinity satisfaction for other goals
 
 5. **Parallelization**:
-   - CP-SAT already uses multi-threading
-   - Ensure `num_search_workers = 0` (all cores)
+   - CP-SAT solver supports parallel search using multiple threads
+   - The `num_search_workers` parameter controls parallelization:
+     - `0` = use all available CPU cores (recommended for production)
+     - `1` = single-threaded (useful for debugging)
+     - `n` = use exactly n worker threads
+   - Current implementation uses `num_search_workers = 0` for maximum performance
 
 ---
 
@@ -1280,7 +1289,7 @@ if __name__ == "__main__":
 
 ### External Articles
 
-- [A Hands-On Guide to Kubernetes QoS Classes](https://medium.com/@muppedaanvesh/a-hands-on-guide-to-kubernetes-qos-classes-%EF%B8%8F-571b5f8f7e58)
+- [A Hands-On Guide to Kubernetes QoS Classes](https://medium.com/@muppedaanvesh/a-hands-on-guide-to-kubernetes-qos-classes-571b5f8f7e58)
 - [Debug a Preempted Pod on Kubernetes](https://medium.com/codex/what-you-need-to-know-to-debug-a-preempted-pod-on-kubernetes-1c956eec3f35)
 
 ### Code References
