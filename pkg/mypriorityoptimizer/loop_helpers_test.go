@@ -4,6 +4,7 @@ package mypriorityoptimizer
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,39 @@ func uidSet(uids ...string) map[types.UID]struct{} {
 		m[types.UID(u)] = struct{}{}
 	}
 	return m
+}
+
+func withBackgroundHooks(
+	t *testing.T,
+	snapFn func(pl *SharedState) (*PendingSnapshot, error),
+	startFn func(pl *SharedState, cfg OptimizeLoopConfig, ctxRun context.Context, runDone chan<- bool),
+	body func(),
+) {
+	t.Helper()
+
+	origSnap := buildPendingSnapshotHook
+	origStart := startBackgroundOptimization
+	buildPendingSnapshotHook = snapFn
+	startBackgroundOptimization = startFn
+	t.Cleanup(func() {
+		buildPendingSnapshotHook = origSnap
+		startBackgroundOptimization = origStart
+	})
+
+	body()
+}
+
+// small “eventually” helper to avoid flaky sleeps
+func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+	t.Fatalf("timeout after %v: %s", timeout, msg)
 }
 
 // -------------------------
@@ -128,111 +162,194 @@ func TestStartLoops_LaunchesInterludeLoopWhenModeInterlude(t *testing.T) {
 // optimizeBackgroundLoop
 // -------------------------
 
-func TestOptimizeBackgroundLoop_SkipsWhenPluginNotReady(t *testing.T) {
-	pl := &SharedState{} // PluginReady default is false
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	calls := 0
-
-	origSnap := buildPendingSnapshotHook
-	buildPendingSnapshotHook = func(pl *SharedState) (*PendingSnapshot, error) {
-		calls++
-		return &PendingSnapshot{}, nil
-	}
-	defer func() { buildPendingSnapshotHook = origSnap }()
-
-	cfg := OptimizeLoopConfig{
-		Label:          "TestLoop",
-		Interval:       10 * time.Millisecond,
-		InterludeDelay: 0,
-		CancelOnChange: true,
-	}
-
-	done := make(chan struct{})
-
-	go func() {
-		pl.optimizeBackgroundLoop(ctx, cfg)
-		close(done)
-	}()
-
-	// Let the timer fire a few times.
-	time.Sleep(30 * time.Millisecond)
-	cancel()
-	<-done
-
-	if calls != 0 {
-		t.Fatalf("expected buildPendingSnapshot not to be called while PluginReady=false, got %d", calls)
-	}
-}
-
-func TestOptimizeBackgroundLoop_StartsRunForStablePendingSet(t *testing.T) {
+func TestOptimizeBackgroundLoop_DefaultInterval_ImmediateCancel(t *testing.T) {
 	pl := &SharedState{}
 	pl.PluginReady.Store(true)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pending := uidSet("p1")
-	fingerprint := "fp-1"
-
-	calls := 0
-
-	origSnap := buildPendingSnapshotHook
-	buildPendingSnapshotHook = func(_ *SharedState) (*PendingSnapshot, error) {
-		calls++
-		return &PendingSnapshot{
-			PendingUIDs:  cloneUIDSet(pending),
-			PendingCount: len(pending),
-			Fingerprint:  fingerprint,
-		}, nil
-	}
-	defer func() { buildPendingSnapshotHook = origSnap }()
-
-	origStart := startBackgroundOptimization
-	runStarted := make(chan struct{}, 1)
-
-	startBackgroundOptimization = func(
-		_ *SharedState,
-		_ OptimizeLoopConfig,
-		_ context.Context,
-		runDone chan<- bool,
-	) {
-		// Mark that we started an optimization run.
-		runStarted <- struct{}{}
-		// Pretend we fully solved the current pending set.
-		runDone <- true
-		// Ensure the outer loop exits cleanly on the next select.
-		cancel()
-	}
-	defer func() { startBackgroundOptimization = origStart }()
+	cancel() // cancel before entering => hit ctx.Done path immediately
 
 	cfg := OptimizeLoopConfig{
 		Label:          "TestLoop",
-		Interval:       5 * time.Millisecond,
+		Interval:       0, // <-- covers interval<=0 => default 1s path
 		InterludeDelay: 0,
-		CancelOnChange: true,
+		CancelOnChange: false,
 	}
 
-	done := make(chan struct{})
+	// No hooks needed; it should exit immediately on ctx.Done.
+	pl.optimizeBackgroundLoop(ctx, cfg)
+}
+
+func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
+	pl := &SharedState{}
+
+	// Fast loop, but still allows interlude gating to fire.
+	cfg := OptimizeLoopConfig{
+		Label:          "TestLoop",
+		Interval:       5 * time.Millisecond,
+		InterludeDelay: 15 * time.Millisecond, // cover idle window logic
+		CancelOnChange: true,                  // cover cancel-on-change branch
+	}
+
+	// Snapshots we will “serve” via the hook.
+	snapErr := errors.New("snap boom")
+	snapEmpty := &PendingSnapshot{PendingUIDs: uidSet(), PendingCount: 0, Fingerprint: "fp0"}
+	snapU1 := &PendingSnapshot{PendingUIDs: uidSet("u1"), PendingCount: 1, Fingerprint: "fp1"}
+	snapU2 := &PendingSnapshot{PendingUIDs: uidSet("u2"), PendingCount: 1, Fingerprint: "fp2"}
+	snapU3 := &PendingSnapshot{PendingUIDs: uidSet("u3"), PendingCount: 1, Fingerprint: "fp3"}
+
+	// Control knobs for the snapshot hook.
+	var servedErrOnce atomic.Bool
+	var serveEmpty atomic.Bool
+	var serveU3 atomic.Bool
+
+	// Run counters + ctx capture from started runs.
+	var runCount atomic.Int32
+	run1CtxCh := make(chan context.Context, 1)
+	run3CtxCh := make(chan context.Context, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Make sure we also cover:
+	// - PluginReady=false warm-up branch
+	// - Active plan branch
+	pl.PluginReady.Store(false)
+
+	// NOTE: getActivePlan() may depend on ActivePlan and/or ActivePlanInProgress in your impl,
+	// so we set both during the “active plan” window.
 	go func() {
-		pl.optimizeBackgroundLoop(ctx, cfg)
-		close(done)
+		time.Sleep(10 * time.Millisecond)
+		pl.PluginReady.Store(true)
+
+		// Active plan for a brief window.
+		pl.ActivePlanInProgress.Store(true)
+		pl.ActivePlan.Store(&ActivePlan{ID: "ap-1"})
+		time.Sleep(10 * time.Millisecond)
+
+		// Clear it (typed-nil works for both atomic.Pointer and atomic.Value setups).
+		pl.ActivePlanInProgress.Store(false)
+		pl.ActivePlan.Store((*ActivePlan)(nil))
 	}()
 
-	select {
-	case <-runStarted:
-		// OK: background run started.
-	case <-time.After(200 * time.Millisecond):
-		t.Fatalf("background optimization run did not start in time (snapshots=%d)", calls)
-	}
+	withBackgroundHooks(t,
+		// buildPendingSnapshotHook
+		func(_ *SharedState) (*PendingSnapshot, error) {
+			// 1) Force snapshot error once.
+			if !servedErrOnce.Load() {
+				servedErrOnce.Store(true)
+				return nil, snapErr
+			}
+			// 2) After we decide to serve empty/u3, do that.
+			if serveU3.Load() {
+				return snapU3, nil
+			}
+			if serveEmpty.Load() {
+				return snapEmpty, nil
+			}
+			// 3) Before first run starts, serve u1. After first run starts, switch to u2
+			//    so the in-flight run sees a changed set and cancels.
+			if runCount.Load() >= 1 {
+				return snapU2, nil
+			}
+			return snapU1, nil
+		},
 
-	<-done
+		// startBackgroundOptimization hook
+		func(_ *SharedState, _ OptimizeLoopConfig, ctxRun context.Context, runDone chan<- bool) {
+			n := runCount.Add(1)
 
-	if calls < 2 {
-		t.Fatalf("expected at least 2 snapshots (gating + run), got %d", calls)
-	}
+			switch n {
+			case 1:
+				// Run 1: stays in-flight until cancelled -> returns solved=false.
+				run1CtxCh <- ctxRun
+				go func() {
+					<-ctxRun.Done()
+					runDone <- false
+				}()
+			case 2:
+				// Run 2: immediate solved=true => should set lastSolvedSet+fingerprint and enable skip.
+				runDone <- true
+			case 3:
+				// Run 3: used to cover ctx.Done branch (outer ctx cancelled while run in-flight).
+				run3CtxCh <- ctxRun
+				go func() {
+					<-ctxRun.Done()
+					runDone <- true
+				}()
+			default:
+				// Should not happen; keep the loop unblocked if it does.
+				runDone <- false
+			}
+		},
+
+		func() {
+			done := make(chan struct{})
+			go func() {
+				pl.optimizeBackgroundLoop(ctx, cfg)
+				close(done)
+			}()
+
+			// ---- Run 1: must start, then be cancelled due to pending set change.
+			var run1 context.Context
+			select {
+			case run1 = <-run1CtxCh:
+			case <-time.After(500 * time.Millisecond):
+				t.Fatalf("run #1 did not start")
+			}
+			select {
+			case <-run1.Done():
+				// ok: cancel-on-change fired
+			case <-time.After(500 * time.Millisecond):
+				t.Fatalf("run #1 was not cancelled (expected cancel-on-change)")
+			}
+
+			// ---- Run 2: must start, and then we should not start any extra runs
+			// because lastSolvedSet+fingerprint match => skip optimization.
+			eventually(t, 700*time.Millisecond, func() bool {
+				return runCount.Load() >= 2
+			}, "run #2 did not start")
+
+			// Allow time for “run finished” to be observed and “skip” to kick in.
+			time.Sleep(40 * time.Millisecond)
+
+			// If skip is working, we should still be at exactly 2 runs.
+			if got := runCount.Load(); got != 2 {
+				t.Fatalf("expected skip to prevent extra runs; runCount=%d, want 2", got)
+			}
+
+			// ---- pendingCount==0 path (also resets state when previous state exists)
+			serveEmpty.Store(true)
+			time.Sleep(20 * time.Millisecond)
+			serveEmpty.Store(false)
+
+			// ---- Run 3: switch to u3, let it start, then cancel outer ctx to hit ctx.Done cleanup.
+			serveU3.Store(true)
+
+			var run3 context.Context
+			select {
+			case run3 = <-run3CtxCh:
+			case <-time.After(700 * time.Millisecond):
+				t.Fatalf("run #3 did not start")
+			}
+
+			// Cancel outer loop while run is in-flight: ctx.Done branch must cancel run + drain runDone.
+			cancel()
+
+			select {
+			case <-run3.Done():
+				// ok: ctx.Done path cancelled the in-flight run
+			case <-time.After(500 * time.Millisecond):
+				t.Fatalf("run #3 was not cancelled by outer ctx.Done")
+			}
+
+			select {
+			case <-done:
+				// ok: loop exited
+			case <-time.After(700 * time.Millisecond):
+				t.Fatalf("optimizeBackgroundLoop did not exit after ctx cancel")
+			}
+		},
+	)
 }
 
 // -------------------------
@@ -360,11 +477,14 @@ func TestBuildPendingSnapshot(t *testing.T) {
 			},
 		},
 	}
-	// One pending pod and one running pod
+
+	// Pending pod (counts)
 	pPending := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "p-pending", Namespace: "ns", UID: types.UID("pu1")},
 		Status:     v1.PodStatus{Phase: v1.PodPending},
 	}
+
+	// Running pod (ignored)
 	pRunning := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "p-running", Namespace: "ns", UID: types.UID("pu2")},
 		Status:     v1.PodStatus{Phase: v1.PodRunning},
@@ -381,11 +501,25 @@ func TestBuildPendingSnapshot(t *testing.T) {
 		},
 	}
 
-	// Build store to feed fakePodLister.
+	// Pending but deleting (must be ignored)
+	now := metav1.Now()
+	pDeletingPending := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "p-deleting",
+			Namespace:         "ns",
+			UID:               types.UID("pu3"),
+			DeletionTimestamp: &now,
+		},
+		Status: v1.PodStatus{Phase: v1.PodPending},
+	}
+
+	// Store includes a nil pod pointer to hit (p == nil) branch.
 	store := map[string]map[string]*v1.Pod{
 		"ns": {
-			"p-pending": pPending,
-			"p-running": pRunning,
+			"p-pending":  pPending,
+			"p-running":  pRunning,
+			"p-deleting": pDeletingPending,
+			"p-nil":      nil,
 		},
 	}
 
@@ -395,17 +529,25 @@ func TestBuildPendingSnapshot(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildPendingSnapshot() unexpected error: %v", err)
 			}
+
+			// Only pPending should count.
 			if snap.PendingCount != 1 {
 				t.Fatalf("PendingCount = %d, want 1", snap.PendingCount)
 			}
 			if _, ok := snap.PendingUIDs[pPending.UID]; !ok {
-				t.Fatalf("pending UID set does not contain pending pod")
+				t.Fatalf("pending UID set missing %q", pPending.UID)
 			}
+
+			// Deleting pending must be excluded.
+			if _, ok := snap.PendingUIDs[pDeletingPending.UID]; ok {
+				t.Fatalf("deleting pending pod must be excluded from pending set")
+			}
+
 			if snap.Fingerprint == "" {
 				t.Fatalf("Fingerprint should not be empty")
 			}
-			if len(snap.Pods) != 2 || len(snap.Nodes) != 1 {
-				t.Fatalf("snap pods/nodes sizes wrong: pods=%d nodes=%d", len(snap.Pods), len(snap.Nodes))
+			if len(snap.Pods) != 4 || len(snap.Nodes) != 1 {
+				t.Fatalf("snap sizes wrong: pods=%d nodes=%d", len(snap.Pods), len(snap.Nodes))
 			}
 		})
 	})

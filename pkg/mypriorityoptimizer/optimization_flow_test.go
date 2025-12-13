@@ -551,7 +551,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			}
 
 			if tc.want.attemptsLen == 0 {
-				if attemptsOut != nil && len(attemptsOut) != 0 {
+				if len(attemptsOut) != 0 {
 					t.Fatalf("attempts len=%d, want 0 (or nil)", len(attemptsOut))
 				}
 			} else {

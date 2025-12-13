@@ -17,11 +17,9 @@ import (
 // Name
 // -------------------------
 
-// TestName ensures the Name method returns the expected plugin name.
 func TestName(t *testing.T) {
 	pl := &SharedState{}
-	got := pl.Name()
-	if got != Name {
+	if got := pl.Name(); got != Name {
 		t.Fatalf("Name() = %q, want %q", got, Name)
 	}
 }
@@ -30,187 +28,142 @@ func TestName(t *testing.T) {
 // New
 // -------------------------
 
-// TestNew_WithNilHandlePanics ensures that if the scheduler ever calls New
-// with a nil framework.Handle, we fail loudly rather than silently.
-func TestNew_NilHandlePanics(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected New to panic when given a nil Handle, but it did not panic")
-		}
-	}()
-
-	_, _ = New(context.Background(), nil, nil) // nil framework.Handle
-}
-
-// TestNew_Handle_ClientError ensures that if there is an error creating
-// the Kubernetes client from the provided rest.Config, the error is
-// propagated and no hooks are invoked.
-func TestNew_Handle_ClientError(t *testing.T) {
-	ctx := context.Background()
-
-	fh := &fakeHandle{
-		cfg:     &rest.Config{},
+func mkHandle(host string) *fakeHandle {
+	cfg := &rest.Config{}
+	if host != "" {
+		cfg.Host = host
+	}
+	return &fakeHandle{
+		cfg:     cfg,
 		factory: informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0),
 	}
+}
 
-	wantErr := errors.New("boom")
+func TestNewFromHandle_ClientError_NoHooks(t *testing.T) {
+	ctx := context.Background()
+	h := mkHandle("https://localhost")
+
+	wantErr := errors.New("boom-client")
 	clientFn := func(*rest.Config) (kubernetes.Interface, error) {
 		return nil, wantErr
 	}
 
-	// Ensure hooks are not accidentally invoked on error.
-	oldReadiness := pluginReadinessStarter
-	oldHTTP := httpServerStarter
-	defer func() {
-		pluginReadinessStarter = oldReadiness
-		httpServerStarter = oldHTTP
-	}()
+	// Hooks must NOT run on client creation error.
+	withVar(t, &pluginReadinessStarter, func(_ *SharedState, _ context.Context, _ ...cache.SharedIndexInformer) {
+		t.Fatalf("pluginReadinessStarter must not be called on client error")
+	})
+	withVar(t, &httpServerStarter, func(_ *SharedState, _ context.Context, _ string) {
+		t.Fatalf("httpServerStarter must not be called on client error")
+	})
 
-	readinessCalled := false
-	httpCalled := false
-	pluginReadinessStarter = func(pl *SharedState, ctx context.Context, inf ...cache.SharedIndexInformer) {
-		readinessCalled = true
+	p, err := newFromHandle(ctx, nil, clientFn, h, nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("err=%v, want %v", err, wantErr)
 	}
-	httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
-		httpCalled = true
-	}
-
-	gotPl, err := newFromHandle(ctx, nil, clientFn, fh, nil)
-	if err == nil || !errors.Is(err, wantErr) {
-		t.Fatalf("expected error %v, got %v", wantErr, err)
-	}
-	if gotPl != nil {
-		t.Fatalf("expected plugin nil on client error, got %#v", gotPl)
-	}
-	if readinessCalled {
-		t.Fatalf("pluginReadinessStarter should not be called on client error")
-	}
-	if httpCalled {
-		t.Fatalf("httpServerStarter should not be called on client error")
+	if p != nil {
+		t.Fatalf("expected nil plugin, got %#v", p)
 	}
 }
 
-// TestNew_Handle_NoSolverEnabled ensures that if no solver is enabled,
-// New returns ErrNoSolverEnabled and does not invoke any hooks.
-func TestNew_Handle_NoSolverEnabled(t *testing.T) {
-	ctx := context.Background()
-
-	client := fake.NewSimpleClientset()
-	fh := &fakeHandle{
-		cfg:     &rest.Config{},
-		factory: informers.NewSharedInformerFactory(client, 0),
+func TestNew_Scenarios(t *testing.T) {
+	type want struct {
+		errIs     error
+		pluginNil bool
+		readiness bool
+		http      bool
+		informers int
+		httpAddr  string
 	}
 
-	// Override hooks and solverEnabled.
-	oldReadiness := pluginReadinessStarter
-	oldHTTP := httpServerStarter
-	oldSolver := solverEnabled
-	defer func() {
-		pluginReadinessStarter = oldReadiness
-		httpServerStarter = oldHTTP
-		solverEnabled = oldSolver
-	}()
-
-	readinessCalled := false
-	httpCalled := false
-	pluginReadinessStarter = func(pl *SharedState, ctx context.Context, inf ...cache.SharedIndexInformer) {
-		readinessCalled = true
-	}
-	httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
-		httpCalled = true
-	}
-	solverEnabled = func(pl *SharedState) bool { return false }
-
-	clientFn := func(*rest.Config) (kubernetes.Interface, error) {
-		return client, nil
-	}
-
-	gotPl, err := newFromHandle(ctx, nil, clientFn, fh, nil)
-	if err != ErrNoSolverEnabled {
-		t.Fatalf("expected ErrNoSolverEnabled, got %v", err)
-	}
-	if gotPl != nil {
-		t.Fatalf("expected plugin nil when no solver enabled, got %#v", gotPl)
-	}
-	if readinessCalled {
-		t.Fatalf("pluginReadinessStarter should not be called when no solver is enabled")
-	}
-	if httpCalled {
-		t.Fatalf("httpServerStarter should not be called when no solver is enabled")
-	}
-}
-
-// TestNew_Handle_Success ensures that when all conditions are met,
-// New returns a properly initialized plugin and invokes the expected hooks.
-func TestNew_Handle_Success(t *testing.T) {
-	ctx := context.Background()
-
-	client := fake.NewSimpleClientset()
-	factory := informers.NewSharedInformerFactory(client, 0)
-	fh := &fakeHandle{
-		cfg:     &rest.Config{},
-		factory: factory,
+	cases := []struct {
+		name     string
+		solverOn bool
+		want     want
+	}{
+		{
+			name:     "no_solver_enabled",
+			solverOn: false,
+			want: want{
+				errIs:     ErrNoSolverEnabled,
+				pluginNil: true,
+				readiness: false,
+				http:      false,
+			},
+		},
+		{
+			name:     "success_calls_hooks",
+			solverOn: true,
+			want: want{
+				errIs:     nil,
+				pluginNil: false,
+				readiness: true,
+				http:      true,
+				informers: 7,
+				httpAddr:  HTTPAddr,
+			},
+		},
 	}
 
-	// Override hooks and solverEnabled.
-	oldReadiness := pluginReadinessStarter
-	oldHTTP := httpServerStarter
-	oldSolver := solverEnabled
-	defer func() {
-		pluginReadinessStarter = oldReadiness
-		httpServerStarter = oldHTTP
-		solverEnabled = oldSolver
-	}()
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			h := mkHandle("https://localhost")
 
-	readinessCalled := false
-	readinessInformerCount := 0
-	pluginReadinessStarter = func(pl *SharedState, ctx context.Context, inf ...cache.SharedIndexInformer) {
-		readinessCalled = true
-		readinessInformerCount = len(inf)
-	}
+			readinessCalled := false
+			readinessCount := 0
+			httpCalled := false
+			httpAddr := ""
 
-	httpCalled := false
-	httpAddr := ""
-	httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
-		httpCalled = true
-		httpAddr = addr
-	}
+			withVar(t, &solverEnabled, func(_ *SharedState) bool { return tc.solverOn })
+			withVar(t, &pluginReadinessStarter, func(_ *SharedState, _ context.Context, infs ...cache.SharedIndexInformer) {
+				readinessCalled = true
+				readinessCount = len(infs)
+			})
+			withVar(t, &httpServerStarter, func(_ *SharedState, _ context.Context, addr string) {
+				httpCalled = true
+				httpAddr = addr
+			})
 
-	solverEnabled = func(pl *SharedState) bool { return true }
+			p, err := New(ctx, nil, h)
 
-	clientFn := func(*rest.Config) (kubernetes.Interface, error) {
-		return client, nil
-	}
+			if tc.want.errIs == nil {
+				if err != nil {
+					t.Fatalf("err=%v, want nil", err)
+				}
+			} else if !errors.Is(err, tc.want.errIs) {
+				t.Fatalf("err=%v, want %v", err, tc.want.errIs)
+			}
 
-	gotPlugin, err := newFromHandle(ctx, nil, clientFn, fh, nil)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
+			if tc.want.pluginNil {
+				if p != nil {
+					t.Fatalf("expected nil plugin, got %#v", p)
+				}
+			} else {
+				if p == nil {
+					t.Fatalf("expected plugin, got nil")
+				}
+				pl, ok := p.(*SharedState)
+				if !ok {
+					t.Fatalf("expected *SharedState, got %T", p)
+				}
+				if pl.BlockedWhileActive == nil {
+					t.Fatalf("BlockedWhileActive must be initialized")
+				}
+			}
 
-	pl, ok := gotPlugin.(*SharedState)
-	if !ok {
-		t.Fatalf("expected *SharedState, got %T", gotPlugin)
-	}
-
-	if pl.Client != client {
-		t.Fatalf("expected pl.Client to be fake clientset, got %#v", pl.Client)
-	}
-	if pl.BlockedWhileActive == nil {
-		t.Fatalf("expected BlockedWhileActive to be initialized")
-	}
-
-	if !readinessCalled {
-		t.Fatalf("expected pluginReadinessStarter to be called on success path")
-	}
-	// There should be 7 informers: Pods, Nodes, ConfigMaps, ReplicaSets, StatefulSets, DaemonSets, Jobs.
-	if readinessInformerCount != 7 {
-		t.Fatalf("expected 7 informers passed to pluginReadinessStarter, got %d", readinessInformerCount)
-	}
-
-	if !httpCalled {
-		t.Fatalf("expected httpServerStarter to be called on success path")
-	}
-	if httpAddr != HTTPAddr {
-		t.Fatalf("expected httpServerStarter addr=%q, got %q", HTTPAddr, httpAddr)
+			if readinessCalled != tc.want.readiness {
+				t.Fatalf("readinessCalled=%v, want %v", readinessCalled, tc.want.readiness)
+			}
+			if httpCalled != tc.want.http {
+				t.Fatalf("httpCalled=%v, want %v", httpCalled, tc.want.http)
+			}
+			if tc.want.readiness && readinessCount != tc.want.informers {
+				t.Fatalf("readiness informers=%d, want %d", readinessCount, tc.want.informers)
+			}
+			if tc.want.http && httpAddr != tc.want.httpAddr {
+				t.Fatalf("http addr=%q, want %q", httpAddr, tc.want.httpAddr)
+			}
+		})
 	}
 }

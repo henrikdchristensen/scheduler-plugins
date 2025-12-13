@@ -1,4 +1,4 @@
-name: CI (Build + Unit + Integration)
+name: CI (Unit + Integration)
 
 on:
   push:

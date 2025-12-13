@@ -61,131 +61,129 @@ func TestLoopInterlude_UsesDefaultsWhenNonPositive(t *testing.T) {
 	}
 }
 
-func TestLoopInterlude_UsesConfiguredValues(t *testing.T) {
-	origDelay := OptimizeInterludeDelay
-	origCheck := OptimizeInterludeCheckInterval
-	defer func() {
-		OptimizeInterludeDelay = origDelay
-		OptimizeInterludeCheckInterval = origCheck
-	}()
+func captureLoopCfg(t *testing.T, call func()) OptimizeLoopConfig {
+	t.Helper()
 
-	OptimizeInterludeDelay = 5 * time.Second
-	OptimizeInterludeCheckInterval = 123 * time.Millisecond
+	var got OptimizeLoopConfig
+	called := false
 
-	var gotCfg OptimizeLoopConfig
-	var called bool
+	withVar(t, &optimizeBackgroundLoopFunc, func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) {
+		called = true
+		got = cfg
+	})
 
-	withOptimizeLoopFunc(t,
-		func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
-			called = true
-			gotCfg = cfg
-		},
-		func() {
-			pl := &SharedState{}
-			pl.loopInterlude(context.Background())
-		},
-	)
+	call()
 
 	if !called {
-		t.Fatalf("loopInterlude() did not call optimizeBackgroundLoopFunc")
+		t.Fatalf("expected optimizeBackgroundLoopFunc to be called")
 	}
-	if gotCfg.Label != "InterludeLoop" {
-		t.Fatalf("cfg.Label = %q, want %q", gotCfg.Label, "InterludeLoop")
+	return got
+}
+
+func assertCfg(t *testing.T, got, want OptimizeLoopConfig) {
+	t.Helper()
+	if got.Label != want.Label {
+		t.Fatalf("Label=%q, want %q", got.Label, want.Label)
 	}
-	if gotCfg.Interval != 123*time.Millisecond {
-		t.Fatalf("cfg.Interval = %v, want %v", gotCfg.Interval, 123*time.Millisecond)
+	if got.Interval != want.Interval {
+		t.Fatalf("Interval=%v, want %v", got.Interval, want.Interval)
 	}
-	if gotCfg.InterludeDelay != 5*time.Second {
-		t.Fatalf("cfg.InterludeDelay = %v, want %v", gotCfg.InterludeDelay, 5*time.Second)
+	if got.InterludeDelay != want.InterludeDelay {
+		t.Fatalf("InterludeDelay=%v, want %v", got.InterludeDelay, want.InterludeDelay)
 	}
-	if !gotCfg.CancelOnChange {
-		t.Fatalf("cfg.CancelOnChange = false, want true")
+	if got.CancelOnChange != want.CancelOnChange {
+		t.Fatalf("CancelOnChange=%v, want %v", got.CancelOnChange, want.CancelOnChange)
 	}
 }
 
-func TestLoopPeriodic_DefaultIntervalWhenTooSmall(t *testing.T) {
-	origInterval := OptimizePeriodicInterval
-	defer func() { OptimizePeriodicInterval = origInterval }()
+func TestLoopConfigs(t *testing.T) {
+	ctx := context.Background()
+	pl := &SharedState{}
 
-	// Trigger default path
-	OptimizePeriodicInterval = 0
-
-	var gotCfg OptimizeLoopConfig
-	var called bool
-
-	withOptimizeLoopFunc(t,
-		func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
-			called = true
-			gotCfg = cfg
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T)
+		call      func()
+		wantCfg   OptimizeLoopConfig
+		wantAfter func(t *testing.T) // optional checks of mutated globals
+	}{
+		{
+			name: "interlude_defaults",
+			setup: func(t *testing.T) {
+				withVar(t, &OptimizeInterludeDelay, time.Duration(0))
+				withVar(t, &OptimizeInterludeCheckInterval, time.Duration(0))
+			},
+			call: func() { pl.loopInterlude(ctx) },
+			wantCfg: OptimizeLoopConfig{
+				Label:          "InterludeLoop",
+				Interval:       250 * time.Millisecond,
+				InterludeDelay: 2 * time.Second,
+				CancelOnChange: true,
+			},
 		},
-		func() {
-			pl := &SharedState{}
-			pl.loopPeriodic(context.Background())
+		{
+			name: "interlude_configured",
+			setup: func(t *testing.T) {
+				withVar(t, &OptimizeInterludeDelay, 5*time.Second)
+				withVar(t, &OptimizeInterludeCheckInterval, 123*time.Millisecond)
+			},
+			call: func() { pl.loopInterlude(ctx) },
+			wantCfg: OptimizeLoopConfig{
+				Label:          "InterludeLoop",
+				Interval:       123 * time.Millisecond,
+				InterludeDelay: 5 * time.Second,
+				CancelOnChange: true,
+			},
 		},
-	)
-
-	if !called {
-		t.Fatalf("loopPeriodic() did not call optimizeBackgroundLoopFunc")
-	}
-
-	// loopPeriodic mutates OptimizeInterval when it is too small
-	if OptimizePeriodicInterval != 2*time.Second {
-		t.Fatalf("OptimizeInterval after loopPeriodic = %v, want %v", OptimizePeriodicInterval, 2*time.Second)
-	}
-
-	if gotCfg.Label != "PeriodicLoop" {
-		t.Fatalf("cfg.Label = %q, want %q", gotCfg.Label, "PeriodicLoop")
-	}
-	if gotCfg.Interval != 2*time.Second {
-		t.Fatalf("cfg.Interval = %v, want %v", gotCfg.Interval, 2*time.Second)
-	}
-	if gotCfg.InterludeDelay != 0 {
-		t.Fatalf("cfg.InterludeDelay = %v, want 0", gotCfg.InterludeDelay)
-	}
-	if gotCfg.CancelOnChange {
-		t.Fatalf("cfg.CancelOnChange = true, want false")
-	}
-}
-
-func TestLoopPeriodic_UsesConfiguredInterval(t *testing.T) {
-	origInterval := OptimizePeriodicInterval
-	defer func() { OptimizePeriodicInterval = origInterval }()
-
-	OptimizePeriodicInterval = 5 * time.Second
-
-	var gotCfg OptimizeLoopConfig
-	var called bool
-
-	withOptimizeLoopFunc(t,
-		func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
-			called = true
-			gotCfg = cfg
+		{
+			name: "periodic_default_interval_when_too_small",
+			setup: func(t *testing.T) {
+				withVar(t, &OptimizePeriodicInterval, time.Duration(0))
+			},
+			call: func() { pl.loopPeriodic(ctx) },
+			wantCfg: OptimizeLoopConfig{
+				Label:          "PeriodicLoop",
+				Interval:       2 * time.Second,
+				InterludeDelay: 0,
+				CancelOnChange: false,
+			},
+			wantAfter: func(t *testing.T) {
+				// loopPeriodic mutates OptimizePeriodicInterval when too small
+				if OptimizePeriodicInterval != 2*time.Second {
+					t.Fatalf("OptimizePeriodicInterval=%v, want %v", OptimizePeriodicInterval, 2*time.Second)
+				}
+			},
 		},
-		func() {
-			pl := &SharedState{}
-			pl.loopPeriodic(context.Background())
+		{
+			name: "periodic_configured",
+			setup: func(t *testing.T) {
+				withVar(t, &OptimizePeriodicInterval, 5*time.Second)
+			},
+			call: func() { pl.loopPeriodic(ctx) },
+			wantCfg: OptimizeLoopConfig{
+				Label:          "PeriodicLoop",
+				Interval:       5 * time.Second,
+				InterludeDelay: 0,
+				CancelOnChange: false,
+			},
+			wantAfter: func(t *testing.T) {
+				if OptimizePeriodicInterval != 5*time.Second {
+					t.Fatalf("OptimizePeriodicInterval=%v, want %v", OptimizePeriodicInterval, 5*time.Second)
+				}
+			},
 		},
-	)
-
-	if !called {
-		t.Fatalf("loopPeriodic() did not call optimizeBackgroundLoopFunc")
 	}
 
-	// Should not have been overwritten
-	if OptimizePeriodicInterval != 5*time.Second {
-		t.Fatalf("OptimizeInterval after loopPeriodic = %v, want %v", OptimizePeriodicInterval, 5*time.Second)
-	}
-
-	if gotCfg.Label != "PeriodicLoop" {
-		t.Fatalf("cfg.Label = %q, want %q", gotCfg.Label, "PeriodicLoop")
-	}
-	if gotCfg.Interval != 5*time.Second {
-		t.Fatalf("cfg.Interval = %v, want %v", gotCfg.Interval, 5*time.Second)
-	}
-	if gotCfg.InterludeDelay != 0 {
-		t.Fatalf("cfg.InterludeDelay = %v, want 0", gotCfg.InterludeDelay)
-	}
-	if gotCfg.CancelOnChange {
-		t.Fatalf("cfg.CancelOnChange = true, want false")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setup != nil {
+				tc.setup(t)
+			}
+			got := captureLoopCfg(t, tc.call)
+			assertCfg(t, got, tc.wantCfg)
+			if tc.wantAfter != nil {
+				tc.wantAfter(t)
+			}
+		})
 	}
 }
