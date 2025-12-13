@@ -65,7 +65,7 @@ func newPod(ns, name, uid, node string, prio int32) *v1.Pod {
 	}
 }
 
-// newSystemPod creates a pod in the kube-system namespace for testing.
+// newSystemPod creates a pod in the kube-system namespace (SystemNamespace constant) for testing.
 func newSystemPod(name string) *v1.Pod {
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -75,12 +75,15 @@ func newSystemPod(name string) *v1.Pod {
 	}
 }
 
+// DefaultNamespace is the default namespace used for test workload pods.
+const DefaultNamespace = "default"
+
 // newWorkloadPod creates a pod in the default namespace for testing.
 func newWorkloadPod(name string) *v1.Pod {
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: "default",
+			Namespace: DefaultNamespace,
 		},
 	}
 }

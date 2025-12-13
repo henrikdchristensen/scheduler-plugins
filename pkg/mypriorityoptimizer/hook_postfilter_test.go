@@ -14,6 +14,7 @@ import (
 func TestPostFilter_NoPerPod_NoNomination(t *testing.T) {
 	// Force a non-PerPod mode with a non-PostFilter hook to guarantee
 	// !(optimizePerPod() && hookAtPostFilter()) is true.
+	// The second parameter (false) sets OptimizeSolveSynch=false for sync mode.
 	withMode(parseOptimizeMode("periodic"), false, func() {
 		pl := &SharedState{}
 		pod := newWorkloadPod("p1")

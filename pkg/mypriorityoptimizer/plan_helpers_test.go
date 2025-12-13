@@ -946,25 +946,25 @@ func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 	now := metav1.Now()
 	later := metav1.NewTime(now.Add(1 * time.Hour))
 
-	lowPrio := int32(1)
-	highPrio := int32(10)
+	lowPriority := int32(1)
+	highPriority := int32(10)
 
 	items := []PodSetItem{
 		{p: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "low-old", CreationTimestamp: now},
-			Spec:       v1.PodSpec{Priority: &lowPrio},
+			Spec:       v1.PodSpec{Priority: &lowPriority},
 		}},
 		{p: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "high-new", CreationTimestamp: later},
-			Spec:       v1.PodSpec{Priority: &highPrio},
+			Spec:       v1.PodSpec{Priority: &highPriority},
 		}},
 		{p: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "high-old", CreationTimestamp: now},
-			Spec:       v1.PodSpec{Priority: &highPrio},
+			Spec:       v1.PodSpec{Priority: &highPriority},
 		}},
 		{p: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "low-new", CreationTimestamp: later},
-			Spec:       v1.PodSpec{Priority: &lowPrio},
+			Spec:       v1.PodSpec{Priority: &lowPriority},
 		}},
 	}
 
@@ -985,20 +985,20 @@ func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 
 func TestSortPodSetItemsByPriorityAndCreation_NoTimestamp(t *testing.T) {
 	// Test fallback to name sorting when timestamps are missing
-	prio := int32(5)
+	priority := int32(5)
 
 	items := []PodSetItem{
 		{p: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-c"},
-			Spec:       v1.PodSpec{Priority: &prio},
+			Spec:       v1.PodSpec{Priority: &priority},
 		}},
 		{p: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-a"},
-			Spec:       v1.PodSpec{Priority: &prio},
+			Spec:       v1.PodSpec{Priority: &priority},
 		}},
 		{p: &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-b"},
-			Spec:       v1.PodSpec{Priority: &prio},
+			Spec:       v1.PodSpec{Priority: &priority},
 		}},
 	}
 
