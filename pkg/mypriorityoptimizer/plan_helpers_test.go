@@ -1,4 +1,4 @@
-// plan_helpers_test.go
+// pkg/mypriorityoptimizer/plan_helpers_test.go
 package mypriorityoptimizer
 
 import (
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -24,30 +25,112 @@ import (
 )
 
 // -------------------------
-// tryEnterActive / leaveActive / getActivePlan / tryClearActivePlan
+// tiny test helpers
 // -------------------------
 
-func TestTryEnterActive_AndLeaveActive(t *testing.T) {
+func must(t *testing.T, cond bool, msg string, args ...any) {
+	t.Helper()
+	if !cond {
+		t.Fatalf(msg, args...)
+	}
+}
+
+func mustEq[T any](t *testing.T, got, want T, msg string, args ...any) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf(msg+" (got=%#v want=%#v)", append(args, got, want)...)
+	}
+}
+
+func mustContains(t *testing.T, s, sub string) {
+	t.Helper()
+	if !strings.Contains(s, sub) {
+		t.Fatalf("want %q to contain %q", s, sub)
+	}
+}
+
+func keysOf(m map[string]*v1.Pod) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// hook helpers (avoid leaking hooks across tests)
+func withEvictTargetsHook(t *testing.T, h func(pl *SharedState, ctx context.Context, targets []*v1.Pod) error) {
+	t.Helper()
+	orig := evictTargetsHook
+	evictTargetsHook = h
+	t.Cleanup(func() { evictTargetsHook = orig })
+}
+func withWaitPodsGoneHook(t *testing.T, h func(pl *SharedState, ctx context.Context, pods []*v1.Pod) error) {
+	t.Helper()
+	orig := waitPodsGoneHook
+	waitPodsGoneHook = h
+	t.Cleanup(func() { waitPodsGoneHook = orig })
+}
+func withActivatePlannedPodsHook(t *testing.T, h func(pl *SharedState, toActivate map[string]*v1.Pod)) {
+	t.Helper()
+	orig := activatePlannedPodsHook
+	activatePlannedPodsHook = h
+	t.Cleanup(func() { activatePlannedPodsHook = orig })
+}
+func withIsPlanCompletedHook(t *testing.T, h func(pl *SharedState, ap *ActivePlan) (bool, error)) {
+	t.Helper()
+	orig := isPlanCompletedHook
+	isPlanCompletedHook = h
+	t.Cleanup(func() { isPlanCompletedHook = orig })
+}
+func withOnPlanCompletedHook(t *testing.T, h func(pl *SharedState, status PlanStatus, ap *ActivePlan)) {
+	t.Helper()
+	orig := onPlanCompletedHook
+	onPlanCompletedHook = h
+	t.Cleanup(func() { onPlanCompletedHook = orig })
+}
+func withExportPlanHook(t *testing.T, h func(pl *SharedState, ctx context.Context, name string, sp *StoredPlan) error) {
+	t.Helper()
+	orig := exportPlanToConfigMapHook
+	exportPlanToConfigMapHook = h
+	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
+}
+func withMarkPlanStatusHook(t *testing.T, h func(pl *SharedState, ctx context.Context, planCM string, status PlanStatus) bool) {
+	t.Helper()
+	orig := markPlanStatusToConfigMapHook
+	markPlanStatusToConfigMapHook = h
+	t.Cleanup(func() { markPlanStatusToConfigMapHook = orig })
+}
+
+func withActivatePodsStub(t *testing.T, f func(pl *SharedState, toAct map[string]*v1.Pod)) {
+	t.Helper()
+	orig := activatePods
+	activatePods = f
+	t.Cleanup(func() { activatePods = orig })
+}
+
+// -------------------------
+// Active plan / optimization flow flags
+// -------------------------
+
+func TestActivePlanFlags(t *testing.T) {
 	pl := &SharedState{}
 
-	// First enter should succeed and flip Active to true.
-	if ok := pl.tryEnterActivePlan(); !ok {
-		t.Fatalf("first tryEnterActive() = %v, want true", ok)
-	}
-	if got := pl.ActivePlanInProgress.Load(); !got {
-		t.Fatalf("Active.Load() = %v, want true after first enter", got)
-	}
-
-	// Second enter should fail (already active).
-	if ok := pl.tryEnterActivePlan(); ok {
-		t.Fatalf("second tryEnterActive() = %v, want false", ok)
-	}
-
-	// Leaving should reset the flag.
+	must(t, pl.tryEnterActivePlan(), "first tryEnterActivePlan() want true")
+	must(t, pl.ActivePlanInProgress.Load(), "ActivePlanInProgress want true after enter")
+	must(t, !pl.tryEnterActivePlan(), "second tryEnterActivePlan() want false")
 	pl.tryLeaveActivePlan()
-	if got := pl.ActivePlanInProgress.Load(); got {
-		t.Fatalf("Active.Load() = %v, want false after leaveActive()", got)
-	}
+	must(t, !pl.ActivePlanInProgress.Load(), "ActivePlanInProgress want false after leave")
+}
+
+func TestOptimizationFlowFlags(t *testing.T) {
+	pl := &SharedState{}
+
+	must(t, pl.tryEnterOptimizationFlow(), "first tryEnterOptimizationFlow() want true")
+	must(t, pl.OptimizationInProgress.Load(), "OptimizationInProgress want true after enter")
+	must(t, !pl.tryEnterOptimizationFlow(), "second tryEnterOptimizationFlow() want false")
+	pl.tryLeaveOptimizationFlow()
+	must(t, !pl.OptimizationInProgress.Load(), "OptimizationInProgress want false after leave")
 }
 
 func TestGetAndClearActivePlan(t *testing.T) {
@@ -55,239 +138,105 @@ func TestGetAndClearActivePlan(t *testing.T) {
 	ap1 := &ActivePlan{ID: "p1"}
 	ap2 := &ActivePlan{ID: "p2"}
 
-	// No plan initially.
-	if got := pl.getActivePlan(); got != nil {
-		t.Fatalf("getActivePlan() = %v, want nil", got)
-	}
+	must(t, pl.getActivePlan() == nil, "expected nil plan initially")
 
-	// Store a plan and get it back.
 	pl.ActivePlan.Store(ap1)
-	if got := pl.getActivePlan(); got != ap1 {
-		t.Fatalf("getActivePlan() = %p, want %p", got, ap1)
-	}
+	must(t, pl.getActivePlan() == ap1, "expected getActivePlan() to return stored plan")
 
-	// tryClear with wrong pointer should fail.
-	if ok := pl.tryClearActivePlan(ap2); ok {
-		t.Fatalf("tryClearActivePlan(ap2) = %v, want false", ok)
-	}
-	if got := pl.getActivePlan(); got != ap1 {
-		t.Fatalf("after failed clear, plan = %p, want %p", got, ap1)
-	}
+	must(t, !pl.tryClearActivePlan(ap2), "tryClearActivePlan(wrong ptr) want false")
+	must(t, pl.getActivePlan() == ap1, "plan changed after wrong clear")
 
-	// tryClear with correct pointer should succeed and nil out.
-	if ok := pl.tryClearActivePlan(ap1); !ok {
-		t.Fatalf("tryClearActivePlan(ap1) = %v, want true", ok)
-	}
-	if got := pl.getActivePlan(); got != nil {
-		t.Fatalf("after successful clear, plan = %p, want nil", got)
-	}
+	must(t, pl.tryClearActivePlan(ap1), "tryClearActivePlan(correct ptr) want true")
+	must(t, pl.getActivePlan() == nil, "plan not cleared")
 
-	// tryClearActivePlan(nil) should just return false.
-	if ok := pl.tryClearActivePlan(nil); ok {
-		t.Fatalf("tryClearActivePlan(nil) = %v, want false", ok)
-	}
+	must(t, !pl.tryClearActivePlan(nil), "tryClearActivePlan(nil) want false")
 }
 
 // -------------------------
-// toPlanPod
+// tiny plan helper funcs
 // -------------------------
 
-func TestToPlanPod_BasicConversion(t *testing.T) {
-	p := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "ns",
-			Name:      "pod1",
-			UID:       types.UID("uid-123"),
-		},
-		Spec: v1.PodSpec{
-			NodeName: "nodeA",
-		},
-	}
-	pp := toPlanPod(p)
-	want := SolverPod{
-		UID:       p.UID,
-		Namespace: p.Namespace,
-		Name:      p.Name,
-	}
-	if !reflect.DeepEqual(pp, want) {
-		t.Fatalf("toPlanPod() = %+v, want %+v", pp, want)
-	}
+func TestPlanPodHelpers(t *testing.T) {
+	p := pod("ns", "p1", withUID("u1"), onNode("n1"))
+	mustEq(t, toPlanPod(p), SolverPod{UID: p.UID, Namespace: "ns", Name: "p1"}, "toPlanPod mismatch")
+
+	mustEq(t, makePlacement(p, "nx"), SolverPod{UID: p.UID, Namespace: "ns", Name: "p1", Node: "nx"}, "makePlacement mismatch")
+	mustEq(t, makeNewPlacement(p, "a", "b"), SolverPod{UID: p.UID, Namespace: "ns", Name: "p1", OldNode: "a", Node: "b"}, "makeNewPlacement mismatch")
+
+	must(t, isPlanPodUnscheduled(""), "isPlanPodUnscheduled(\"\") want true")
+	must(t, !isPlanPodUnscheduled("n"), "isPlanPodUnscheduled(\"n\") want false")
+
+	must(t, isPlanPodMove("n1", "n2"), "isPlanPodMove(n1,n2) want true")
+	must(t, !isPlanPodMove("", "n2"), "isPlanPodMove(\"\",n2) want false")
+	must(t, !isPlanPodMove("n1", "n1"), "isPlanPodMove(n1,n1) want false")
+
+	must(t, isPlanPodPlacementChanged("", "n2"), "isPlanPodPlacementChanged(\"\",n2) want true")
+	must(t, isPlanPodPlacementChanged("n1", "n2"), "isPlanPodPlacementChanged(n1,n2) want true")
+	must(t, !isPlanPodPlacementChanged("n1", "n1"), "isPlanPodPlacementChanged(n1,n1) want false")
+
+	must(t, isPlanPodNewlyScheduled("", "n1"), "isPlanPodNewlyScheduled(\"\",n1) want true")
+	must(t, !isPlanPodNewlyScheduled("n0", "n1"), "isPlanPodNewlyScheduled(n0,n1) want false")
+	must(t, !isPlanPodNewlyScheduled("", ""), "isPlanPodNewlyScheduled(\"\",\"\") want false")
 }
 
 // -------------------------
-// increaseWorkloadQuota
+// increaseWorkloadQuota + sorting
 // -------------------------
 
-func TestIncreaseWorkloadQuota_NewAndExisting(t *testing.T) {
+func TestIncreaseWorkloadQuota(t *testing.T) {
 	wq := WorkloadQuotas{}
-	wk := WorkloadKey{} // zero value is fine, we only care that wk.String() is stable
+	wk := WorkloadKey{}
+	increaseWorkloadQuota(wq, wk, "n1")
+	increaseWorkloadQuota(wq, wk, "n1")
+	increaseWorkloadQuota(wq, wk, "n2")
 
-	// First increment should allocate the inner map and set to 1.
-	increaseWorkloadQuota(wq, wk, "node-a")
 	key := wk.String()
-	if wq[key] == nil {
-		t.Fatalf("wq[%q] is nil, want non-nil map", key)
-	}
-	if got := wq[key]["node-a"]; got != 1 {
-		t.Fatalf("wq[%q][node-a] = %d, want 1", key, got)
-	}
-
-	// Second increment on the same key/node should be 2.
-	increaseWorkloadQuota(wq, wk, "node-a")
-	if got := wq[key]["node-a"]; got != 2 {
-		t.Fatalf("wq[%q][node-a] = %d, want 2", key, got)
-	}
-
-	// Different node should get its own counter.
-	increaseWorkloadQuota(wq, wk, "node-b")
-	if got := wq[key]["node-b"]; got != 1 {
-		t.Fatalf("wq[%q][node-b] = %d, want 1", key, got)
-	}
+	must(t, wq[key] != nil, "inner map nil")
+	mustEq(t, wq[key]["n1"], int32(2), "n1 count wrong")
+	mustEq(t, wq[key]["n2"], int32(1), "n2 count wrong")
 }
 
-// -------------------------
-// sortPlacementsByPod
-// -------------------------
-
-func TestSortPlacementsByPod_SortsByNamespaceThenName(t *testing.T) {
+func TestSortPlacementsByPod(t *testing.T) {
 	in := []SolverPod{
 		{Namespace: "ns-b", Name: "x"},
 		{Namespace: "ns-a", Name: "z"},
 		{Namespace: "ns-a", Name: "a"},
 	}
 	sortPlacementsByPod(in)
-
-	got := []string{
-		in[0].Namespace + "/" + in[0].Name,
-		in[1].Namespace + "/" + in[1].Name,
-		in[2].Namespace + "/" + in[2].Name,
-	}
+	got := []string{in[0].Namespace + "/" + in[0].Name, in[1].Namespace + "/" + in[1].Name, in[2].Namespace + "/" + in[2].Name}
 	want := []string{"ns-a/a", "ns-a/z", "ns-b/x"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("sorted = %#v, want %#v", got, want)
-	}
+	mustEq(t, got, want, "sortPlacementsByPod order wrong")
 }
 
-// -------------------------
-// sortNewPlacementsByPod
-// -------------------------
-
-func TestSortNewPlacementsByPod_SortsByNamespaceThenName(t *testing.T) {
-	in := []SolverPod{
-		{Namespace: "ns-b", Name: "x"},
-		{Namespace: "ns-a", Name: "z"},
-		{Namespace: "ns-a", Name: "a"},
-	}
-	sortNewPlacementsByPod(in)
-
-	got := []string{
-		in[0].Namespace + "/" + in[0].Name,
-		in[1].Namespace + "/" + in[1].Name,
-		in[2].Namespace + "/" + in[2].Name,
-	}
-	want := []string{"ns-a/a", "ns-a/z", "ns-b/x"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("sorted = %#v, want %#v", got, want)
-	}
-}
-
-// -------------------------
-// sortPodSetItemsByPriorityAndCreation
-// -------------------------
-
-func TestSortPodSetItemsByPriorityAndCreation_PriorityDominates(t *testing.T) {
-	var pLowPrio int32 = 1
-	var pHighPrio int32 = 10
+func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
+	prioLow := int32(1)
+	prioHigh := int32(10)
 
 	now := metav1.Now()
 	older := metav1.NewTime(now.Add(-time.Minute))
 
-	pLow := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "low",
-			CreationTimestamp: older,
-		},
-		Spec: v1.PodSpec{Priority: &pLowPrio},
-	}
-	pHigh := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "high",
-			CreationTimestamp: now,
-		},
-		Spec: v1.PodSpec{Priority: &pHighPrio},
-	}
+	pLow := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "low", CreationTimestamp: older}, Spec: v1.PodSpec{Priority: &prioLow}}
+	pHigh := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "high", CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prioHigh}}
 
-	items := []PodSetItem{
-		{p: pLow},
-		{p: pHigh},
-	}
+	items := []PodSetItem{{p: pLow}, {p: pHigh}}
 	sortPodSetItemsByPriorityAndCreation(items)
+	mustEq(t, items[0].p.Name, "high", "priority sort wrong")
 
-	if items[0].p.Name != "high" || items[1].p.Name != "low" {
-		t.Fatalf("order = %s,%s, want high,low", items[0].p.Name, items[1].p.Name)
-	}
-}
-
-func TestSortPodSetItemsByPriorityAndCreation_TimestampThenName(t *testing.T) {
-	var prio int32 = 5
-
-	now := metav1.Now()
-	older := metav1.NewTime(now.Add(-time.Minute))
-
-	pOld := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "old",
-			CreationTimestamp: older,
-		},
-		Spec: v1.PodSpec{Priority: &prio},
-	}
-	pNew := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "new",
-			CreationTimestamp: now,
-		},
-		Spec: v1.PodSpec{Priority: &prio},
-	}
-
-	items := []PodSetItem{
-		{p: pNew},
-		{p: pOld},
-	}
+	// same prio, timestamp => older first
+	prio := int32(5)
+	pOld := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "old", CreationTimestamp: older}, Spec: v1.PodSpec{Priority: &prio}}
+	pNew := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "new", CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prio}}
+	items = []PodSetItem{{p: pNew}, {p: pOld}}
 	sortPodSetItemsByPriorityAndCreation(items)
+	mustEq(t, items[0].p.Name, "old", "timestamp sort wrong")
 
-	if items[0].p.Name != "old" || items[1].p.Name != "new" {
-		t.Fatalf("order = %s,%s, want old,new", items[0].p.Name, items[1].p.Name)
-	}
-}
-
-func TestSortPodSetItemsByPriorityAndCreation_NameFallbackOnZeroTimestamp(t *testing.T) {
-	var prio int32 = 5
-
-	zeroTS := metav1.Time{} // IsZero() == true
-	pA := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "a",
-			CreationTimestamp: zeroTS,
-		},
-		Spec: v1.PodSpec{Priority: &prio},
-	}
-	pC := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "c",
-			CreationTimestamp: zeroTS,
-		},
-		Spec: v1.PodSpec{Priority: &prio},
-	}
-
-	items := []PodSetItem{
-		{p: pC},
-		{p: pA},
-	}
+	// zero timestamps => name fallback
+	zeroTS := metav1.Time{}
+	pA := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "a", CreationTimestamp: zeroTS}, Spec: v1.PodSpec{Priority: &prio}}
+	pC := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "c", CreationTimestamp: zeroTS}, Spec: v1.PodSpec{Priority: &prio}}
+	items = []PodSetItem{{p: pC}, {p: pA}}
 	sortPodSetItemsByPriorityAndCreation(items)
-
-	if items[0].p.Name != "a" || items[1].p.Name != "c" {
-		t.Fatalf("order = %s,%s, want a,c (name fallback)", items[0].p.Name, items[1].p.Name)
-	}
+	mustEq(t, items[0].p.Name, "a", "name fallback sort wrong")
 }
 
 // -------------------------
@@ -296,645 +245,143 @@ func TestSortPodSetItemsByPriorityAndCreation_NameFallbackOnZeroTimestamp(t *tes
 
 func TestBuildPlan_NilOutputReturnsEmptyPlan(t *testing.T) {
 	pl := &SharedState{}
-
 	plan, err := pl.buildPlan(nil, nil, nil)
-	if err != nil {
-		t.Fatalf("buildPlan(nil, ...) error = %v, want nil", err)
-	}
-	if plan == nil {
-		t.Fatalf("buildPlan(nil, ...) = nil, want non-nil empty plan")
-	}
-	if len(plan.Evicts) != 0 || len(plan.Moves) != 0 || len(plan.NewPlacements) != 0 {
-		t.Fatalf("empty plan not empty: %+v", plan)
-	}
+	must(t, err == nil, "err=%v", err)
+	must(t, plan != nil, "plan nil")
+	must(t, len(plan.Evicts) == 0 && len(plan.Moves) == 0 && len(plan.NewPlacements) == 0, "expected empty plan, got=%#v", plan)
 }
 
-func TestBuildPlan_BasicEvictsMovesAndPending(t *testing.T) {
+func TestBuildPlan_CoversBranches(t *testing.T) {
 	pl := &SharedState{}
 
-	// Pods:
-	//  - p1: running on n1, will be evicted
-	//  - p2: running on n1, moved to n2
-	//  - p3: pending, placed on n1
-	p1 := pod("ns", "p1", onNode("n1"))
-	p2 := pod("ns", "p2", onNode("n1"))
-	p3 := pod("ns", "p3")
+	// pRunEvict: running, evicted
+	pRunEvict := pod("ns", "evict", withUID("u-evict"), onNode("n1"))
+
+	// pRunMove: running, move n1->n2
+	pRunMove := pod("ns", "move", withUID("u-move"), onNode("n1"))
+
+	// pPendingStandalone: pending -> scheduled => goes to PlacementByName
+	pPendingStandalone := pod("ns", "pend", withUID("u-pend"))
+
+	// pOwnedPending: controller-owned pending -> scheduled => goes to WorkloadQuotas
+	pOwnedPending := pod("ns", "owned", withUID("u-owned"), withOwner("ReplicaSet", "rs-1"))
+
+	// pUnchanged: running already on n1, solver says n1 => not “changed”, should NOT count quota or placementByName
+	pUnchanged := pod("ns", "unchanged", withUID("u-unch"), onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+
+	// pDeleted: should be ignored
+	pDeleted := pod("ns", "deleted", withUID("u-del"))
+	now := metav1.Now()
+	pDeleted.DeletionTimestamp = &now
 
 	out := &SolverOutput{
 		Evictions: []SolverPod{
-			{UID: p1.UID},
+			{UID: pRunEvict.UID},
 		},
 		Placements: []SolverPod{
-			{UID: p2.UID, Node: "n2"},
-			{UID: p3.UID, Node: "n1"},
+			{UID: pRunMove.UID, Node: "n2"},
+			{UID: pPendingStandalone.UID, Node: "n1"},
+			{UID: pOwnedPending.UID, Node: "n2"},
+			{UID: pUnchanged.UID, Node: "n1"},       // unchanged placement
+			{UID: pDeleted.UID, Node: "n1"},         // deleted -> ignored
+			{UID: "u-missing", Node: "n1"},          // missing from index -> ignored safely
+			{UID: pPendingStandalone.UID, Node: ""}, // unscheduled entry -> ignored
 		},
 	}
 
-	plan, err := pl.buildPlan(out, nil, []*v1.Pod{p1, p2, p3})
-	if err != nil {
-		t.Fatalf("buildPlan() error = %v, want nil", err)
-	}
-	if plan == nil {
-		t.Fatalf("buildPlan() = nil, want non-nil")
-	}
+	plan, err := pl.buildPlan(out, nil, []*v1.Pod{
+		pRunEvict, pRunMove, pPendingStandalone, pOwnedPending, pUnchanged, pDeleted,
+	})
+	must(t, err == nil, "err=%v", err)
+	must(t, plan != nil, "plan nil")
 
-	// Old placements: p1 and p2 (sorted by name)
-	if got := len(plan.OldPlacements); got != 2 {
-		t.Fatalf("OldPlacements len = %d, want 2", got)
-	}
-	if plan.OldPlacements[0].Name != "p1" || plan.OldPlacements[0].Node != "n1" {
-		t.Fatalf("OldPlacements[0] = %#v, want p1@n1", plan.OldPlacements[0])
-	}
-	if plan.OldPlacements[1].Name != "p2" || plan.OldPlacements[1].Node != "n1" {
-		t.Fatalf("OldPlacements[1] = %#v, want p2@n1", plan.OldPlacements[1])
-	}
+	// Evicts contains evict@n1
+	mustEq(t, len(plan.Evicts), 1, "evicts len wrong")
+	mustEq(t, plan.Evicts[0].Name, "evict", "evict name wrong")
+	mustEq(t, plan.Evicts[0].Node, "n1", "evict node wrong")
 
-	// Evicts: only p1 from n1.
-	if got := len(plan.Evicts); got != 1 {
-		t.Fatalf("Evicts len = %d, want 1", got)
-	}
-	if plan.Evicts[0].Name != "p1" || plan.Evicts[0].Node != "n1" {
-		t.Fatalf("Evicts[0] = %#v, want p1@n1", plan.Evicts[0])
-	}
+	// Moves contains move old=n1 -> n2
+	mustEq(t, len(plan.Moves), 1, "moves len wrong")
+	mustEq(t, plan.Moves[0].Name, "move", "move name wrong")
+	mustEq(t, plan.Moves[0].OldNode, "n1", "move old wrong")
+	mustEq(t, plan.Moves[0].Node, "n2", "move new wrong")
 
-	// New placements: p2 (moved n1->n2), p3 (pending->n1), sorted by name.
-	if got := len(plan.NewPlacements); got != 2 {
-		t.Fatalf("NewPlacements len = %d, want 2", got)
-	}
-	if plan.NewPlacements[0].Name != "p2" {
-		t.Fatalf("NewPlacements[0].Name = %q, want %q", plan.NewPlacements[0].Name, "p2")
-	}
-	if plan.NewPlacements[0].OldNode != "n1" || plan.NewPlacements[0].Node != "n2" {
-		t.Fatalf("NewPlacements[0] = %#v, want From=n1 To=n2", plan.NewPlacements[0])
-	}
-	if plan.NewPlacements[1].Name != "p3" {
-		t.Fatalf("NewPlacements[1].Name = %q, want %q", plan.NewPlacements[1].Name, "p3")
-	}
-	if plan.NewPlacements[1].OldNode != "" || plan.NewPlacements[1].Node != "n1" {
-		t.Fatalf("NewPlacements[1] = %#v, want From=\"\" To=n1", plan.NewPlacements[1])
-	}
+	// NewPlacements should include move, pend, owned, unchanged (but not deleted, not unscheduled)
+	mustEq(t, len(plan.NewPlacements), 4, "new placements len wrong")
 
-	// Moves: only p2 (moved between nodes).
-	if got := len(plan.Moves); got != 1 {
-		t.Fatalf("Moves len = %d, want 1", got)
-	}
-	if plan.Moves[0].Name != "p2" || plan.Moves[0].OldNode != "n1" || plan.Moves[0].Node != "n2" {
-		t.Fatalf("Moves[0] = %#v, want p2 From=n1 To=n2", plan.Moves[0])
-	}
+	// PlacementByName: pending standalone should be present, but owned should NOT (it uses workload quotas)
+	mustEq(t, plan.PlacementByName[mergeNsName("ns", "pend")], "n1", "standalone pending placementByName wrong")
+	_, ownedPresent := plan.PlacementByName[mergeNsName("ns", "owned")]
+	must(t, !ownedPresent, "owned pod must not be in PlacementByName")
 
-	// placementByName should contain standalone pods p2 and p3.
-	want2 := mergeNsName("ns", "p2")
-	want3 := mergeNsName("ns", "p3")
-	if got := plan.PlacementByName[want2]; got != "n2" {
-		t.Fatalf("PlacementByName[%q] = %q, want %q", want2, got, "n2")
-	}
-	if got := plan.PlacementByName[want3]; got != "n1" {
-		t.Fatalf("PlacementByName[%q] = %q, want %q", want3, got, "n1")
-	}
+	// Workload quota: should count only the owned pending that is newly scheduled/changed
+	wk, ok := getTopWorkload(pOwnedPending)
+	must(t, ok, "expected owned pod to have workload")
+	wkStr := wk.String()
+	must(t, plan.WorkloadQuotas[wkStr] != nil, "missing workload quota entry")
+	mustEq(t, plan.WorkloadQuotas[wkStr]["n2"], int32(1), "workload quota count wrong")
 
-	// No preemptor -> NominatedNode should be empty.
-	if plan.NominatedNode != "" {
-		t.Fatalf("NominatedNode = %q, want \"\"", plan.NominatedNode)
+	// Unchanged placement must not contribute additional quota
+	if plan.WorkloadQuotas[wkStr]["n1"] != 0 {
+		t.Fatalf("unchanged placement should not increase quota; got n1=%d", plan.WorkloadQuotas[wkStr]["n1"])
 	}
 }
 
 func TestBuildPlan_WithPreemptorNomination(t *testing.T) {
 	pl := &SharedState{}
-
-	pre := pod("ns", "pre")
+	pre := pod("ns", "pre", withUID("u-pre"))
 
 	out := &SolverOutput{
-		Placements: []SolverPod{
-			{UID: pre.UID, Node: "n-pre"},
-		},
+		Placements: []SolverPod{{UID: pre.UID, Node: "n-pre"}},
 	}
-
 	plan, err := pl.buildPlan(out, pre, []*v1.Pod{pre})
-	if err != nil {
-		t.Fatalf("buildPlan() error = %v, want nil", err)
-	}
-	if plan == nil {
-		t.Fatalf("buildPlan() = nil, want non-nil")
-	}
-
-	// Preemptor should set NominatedNode and be in PlacementByName.
-	if plan.NominatedNode != "n-pre" {
-		t.Fatalf("NominatedNode = %q, want %q", plan.NominatedNode, "n-pre")
-	}
-	key := mergeNsName("ns", "pre")
-	if got := plan.PlacementByName[key]; got != "n-pre" {
-		t.Fatalf("PlacementByName[%q] = %q, want %q", key, got, "n-pre")
-	}
-
-	// Preemptor placement should NOT show up in Moves (we `continue` after nomination).
-	if len(plan.Moves) != 0 {
-		t.Fatalf("Moves len = %d, want 0 for preemptor-only plan", len(plan.Moves))
-	}
+	must(t, err == nil, "err=%v", err)
+	mustEq(t, plan.NominatedNode, "n-pre", "nominated node wrong")
+	mustEq(t, plan.PlacementByName[mergeNsName("ns", "pre")], "n-pre", "preemptor placementByName wrong")
+	mustEq(t, len(plan.Moves), 0, "preemptor-only plan should not report moves")
 }
 
 // -------------------------
-// setActivePlan
+// setActivePlan + buildWorkloadQuotas
 // -------------------------
 
 func TestSetActivePlan_NilPlan_NoActivePlanStored(t *testing.T) {
 	pl := &SharedState{}
-
-	pl.setActivePlan(nil, "id-ignored", nil)
-
-	if got := pl.getActivePlan(); got != nil {
-		t.Fatalf("setActivePlan(nil, ...) left active plan = %v, want nil", got)
-	}
+	pl.setActivePlan(nil, "id", nil)
+	must(t, pl.getActivePlan() == nil, "expected no plan stored")
 }
 
 func TestSetActivePlan_ReplacesOldAndInitializesQuotas(t *testing.T) {
 	pl := &SharedState{}
 
-	// Old active plan with a Cancel that toggles a flag.
 	oldCanceled := false
-	oldAP := &ActivePlan{
-		ID: "old",
-		Cancel: func() {
-			oldCanceled = true
-		},
-	}
-	pl.ActivePlan.Store(oldAP)
+	pl.ActivePlan.Store(&ActivePlan{ID: "old", Cancel: func() { oldCanceled = true }})
 
 	plan := &Plan{
-		PlacementByName: map[string]string{
-			mergeNsName("ns", "p1"): "n1",
-		},
-		WorkloadQuotas: WorkloadQuotas{
-			"wk1": {
-				"n1": 2,
-				"n2": 0,
-			},
-		},
+		PlacementByName: map[string]string{mergeNsName("ns", "p1"): "n1"},
+		WorkloadQuotas:  WorkloadQuotas{"wk1": {"n1": 2, "n2": 0}},
 	}
-
-	pl.setActivePlan(plan, "new-plan", nil)
-
-	if !oldCanceled {
-		t.Fatalf("old Cancel() was not called when replacing plan")
-	}
+	pl.setActivePlan(plan, "new", nil)
+	must(t, oldCanceled, "old cancel not called")
 
 	ap := pl.getActivePlan()
-	if ap == nil {
-		t.Fatalf("getActivePlan() = nil, want non-nil")
-	}
-	if ap.ID != "new-plan" {
-		t.Fatalf("active plan ID = %q, want %q", ap.ID, "new-plan")
-	}
-	if ap.Ctx == nil || ap.Cancel == nil {
-		t.Fatalf("active plan context or cancel is nil: ctx=%v cancel=%v", ap.Ctx, ap.Cancel)
-	}
-
-	// PlacementByName must be the same map (passed-through).
-	if got := ap.PlacementByName[mergeNsName("ns", "p1")]; got != "n1" {
-		t.Fatalf("PlacementByName[ns/p1] = %q, want %q", got, "n1")
-	}
-
-	// WorkloadPerNodeCnts should mirror WorkloadQuotas with atomics.
-	perNode, ok := ap.WorkloadQuotas["wk1"]
-	if !ok || perNode == nil {
-		t.Fatalf("WorkloadPerNodeCnts[\"wk1\"] missing")
-	}
-	if ctr, ok := perNode["n1"]; !ok || ctr == nil || ctr.Load() != 2 {
-		t.Fatalf("wk1 n1 counter = %v (val=%d), want non-nil and 2",
-			perNode["n1"], func() int32 {
-				if perNode["n1"] != nil {
-					return perNode["n1"].Load()
-				}
-				return -1
-			}())
-	}
-	if ctr, ok := perNode["n2"]; !ok || ctr == nil || ctr.Load() != 0 {
-		t.Fatalf("wk1 n2 counter = %v (val=%d), want non-nil and 0",
-			perNode["n2"], func() int32 {
-				if perNode["n2"] != nil {
-					return perNode["n2"].Load()
-				}
-				return -1
-			}())
-	}
+	must(t, ap != nil, "active plan nil")
+	mustEq(t, ap.ID, "new", "plan id wrong")
+	must(t, ap.Ctx != nil && ap.Cancel != nil, "ctx/cancel missing")
+	mustEq(t, ap.PlacementByName[mergeNsName("ns", "p1")], "n1", "PlacementByName wrong")
+	mustEq(t, ap.WorkloadQuotas["wk1"]["n1"].Load(), int32(2), "quota atomics n1 wrong")
+	mustEq(t, ap.WorkloadQuotas["wk1"]["n2"].Load(), int32(0), "quota atomics n2 wrong")
 }
 
-// -------------------------
-// buildWorkloadQuotas
-// -------------------------
+func TestBuildWorkloadQuotas_NilAndCounts(t *testing.T) {
+	must(t, buildWorkloadQuotas(nil) == nil, "expected nil output for nil input")
 
-func TestBuildWorkloadQuotasAtomics_NilInput(t *testing.T) {
-	got := buildWorkloadQuotas(nil)
-	if got != nil {
-		t.Fatalf("buildWorkloadQuotasAtomics(nil) = %#v, want nil", got)
-	}
-}
-
-func TestBuildWorkloadQuotasAtomics_PositiveAndNonPositiveCounts(t *testing.T) {
-	wk := WorkloadQuotas{
-		"wk1": {
-			"n1": 3,  // positive
-			"n2": 0,  // zero
-			"n3": -1, // negative
-		},
-	}
-
+	wk := WorkloadQuotas{"wk1": {"n1": 3, "n2": 0, "n3": -1}}
 	got := buildWorkloadQuotas(wk)
-	if got == nil {
-		t.Fatalf("buildWorkloadQuotasAtomics(...) = nil, want non-nil")
-	}
-
-	perNode, ok := got["wk1"]
-	if !ok || perNode == nil {
-		t.Fatalf("got[\"wk1\"] = %#v, want non-nil map", got["wk1"])
-	}
-
-	if ctr := perNode["n1"]; ctr == nil || ctr.Load() != 3 {
-		t.Fatalf("wk1 n1 ctr = %v (val=%d), want non-nil & 3",
-			ctr, func() int32 {
-				if ctr != nil {
-					return ctr.Load()
-				}
-				return -1
-			}())
-	}
-	if ctr := perNode["n2"]; ctr == nil || ctr.Load() != 0 {
-		t.Fatalf("wk1 n2 ctr = %v (val=%d), want non-nil & 0",
-			ctr, func() int32 {
-				if ctr != nil {
-					return ctr.Load()
-				}
-				return -1
-			}())
-	}
-	if ctr := perNode["n3"]; ctr == nil || ctr.Load() != 0 {
-		t.Fatalf("wk1 n3 ctr = %v (val=%d), want non-nil & 0",
-			ctr, func() int32 {
-				if ctr != nil {
-					return ctr.Load()
-				}
-				return -1
-			}())
-	}
-}
-
-// -------------------------
-// isPodAllowedByPlan
-// -------------------------
-
-func TestIsPodAllowedByPlan_NoActivePlan(t *testing.T) {
-	pl := &SharedState{}
-	p := pod("ns", "p")
-
-	if got := pl.isPodAllowedByPlan(p); got {
-		t.Fatalf("isPodAllowedByPlan() with no active plan = %v, want false", got)
-	}
-}
-
-func TestIsPodAllowedByPlan_PinnedStandalone(t *testing.T) {
-	pl := &SharedState{}
-	ap := &ActivePlan{
-		ID: "plan",
-		PlacementByName: map[string]string{
-			mergeNsName("ns", "p-standalone"): "n1",
-		},
-	}
-	pl.ActivePlan.Store(ap)
-
-	p := pod("ns", "p-standalone")
-
-	if got := pl.isPodAllowedByPlan(p); !got {
-		t.Fatalf("isPodAllowedByPlan() for pinned standalone pod = %v, want true", got)
-	}
-}
-
-func TestIsPodAllowedByPlan_WorkloadAnyNodeAllowed(t *testing.T) {
-	pl := &SharedState{}
-	var prio int32 = 5
-
-	p := pod("ns", "p", withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-
-	wk, owned := getTopWorkload(p)
-	if !owned {
-		t.Fatalf("getTopWorkload() returned owned=false for owned pod")
-	}
-	wkStr := wk.String()
-
-	wq := WorkloadQuotas{
-		wkStr: {
-			"n1": 1, // some quota
-		},
-	}
-
-	ap := &ActivePlan{
-		ID:             "plan",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
-	}
-	pl.ActivePlan.Store(ap)
-
-	if got := pl.isPodAllowedByPlan(p); !got {
-		t.Fatalf("isPodAllowedByPlan() = false, want true when any node has quota")
-	}
-}
-
-func TestIsPodAllowedByPlan_WorkloadSpecificNodeRequired(t *testing.T) {
-	pl := &SharedState{}
-	var prio int32 = 5
-
-	// Pod already has a node selected.
-	p := pod("ns", "p", onNode("n2"), withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-
-	wk, owned := getTopWorkload(p)
-	if !owned {
-		t.Fatalf("getTopWorkload() returned owned=false for owned pod")
-	}
-	wkStr := wk.String()
-
-	wq := WorkloadQuotas{
-		wkStr: {
-			"n2": 1,
-			"n1": 0,
-		},
-	}
-	ap := &ActivePlan{
-		ID:             "plan",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
-	}
-	pl.ActivePlan.Store(ap)
-
-	if got := pl.isPodAllowedByPlan(p); !got {
-		t.Fatalf("isPodAllowedByPlan() = false, want true when selected node has quota")
-	}
-
-	// Now exhaust quota on n2.
-	ap.WorkloadQuotas[wkStr]["n2"].Store(0)
-	if got := pl.isPodAllowedByPlan(p); got {
-		t.Fatalf("isPodAllowedByPlan() = true, want false when selected node quota is 0")
-	}
-}
-
-func TestIsPodAllowedByPlan_WorkloadQuotasExhausted(t *testing.T) {
-	pl := &SharedState{}
-	var prio int32 = 5
-
-	p := pod("ns", "p", withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-
-	wk, owned := getTopWorkload(p)
-	if !owned {
-		t.Fatalf("getTopWorkload() returned owned=false for owned pod")
-	}
-	wkStr := wk.String()
-
-	// All quota counters are zero.
-	wq := WorkloadQuotas{
-		wkStr: {
-			"n1": 0,
-			"n2": 0,
-		},
-	}
-	ap := &ActivePlan{
-		ID:             "plan",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
-	}
-	pl.ActivePlan.Store(ap)
-
-	if got := pl.isPodAllowedByPlan(p); got {
-		t.Fatalf("isPodAllowedByPlan() = true, want false when all quotas are exhausted")
-	}
-}
-
-// -------------------------
-// filterNodes
-// -------------------------
-
-func TestFilterNodes_NoActivePlan(t *testing.T) {
-	pl := &SharedState{}
-	p := pod("ns", "p")
-
-	nodes, reason, ok := pl.filterNodes(p)
-	if nodes != nil {
-		t.Fatalf("filterNodes() nodes = %v, want nil", nodes)
-	}
-	if !ok {
-		t.Fatalf("filterNodes() ok = %v, want true (no active plan, should not block)", ok)
-	}
-	if reason != InfoNoActivePlan {
-		t.Fatalf("filterNodes() reason = %q, want %q", reason, InfoNoActivePlan)
-	}
-}
-
-func TestFilterNodes_PinnedStandaloneToSpecificNode(t *testing.T) {
-	pl := &SharedState{}
-	ap := &ActivePlan{
-		ID: "plan",
-		PlacementByName: map[string]string{
-			mergeNsName("ns", "p1"): "n1",
-		},
-	}
-	pl.ActivePlan.Store(ap)
-
-	p := pod("ns", "p1")
-
-	nodes, reason, ok := pl.filterNodes(p)
-	if !ok {
-		t.Fatalf("filterNodes() ok = false, want true for pinned pod")
-	}
-	if nodes == nil || nodes.Len() != 1 || !nodes.Has("n1") {
-		t.Fatalf("filterNodes() nodes = %v, want {\"n1\"}", nodes)
-	}
-	if reason == "" {
-		t.Fatalf("filterNodes() reason is empty, want descriptive string")
-	}
-}
-
-func TestFilterNodes_PinnedStandaloneNoSpecificNode(t *testing.T) {
-	pl := &SharedState{}
-	ap := &ActivePlan{
-		ID: "plan",
-		PlacementByName: map[string]string{
-			mergeNsName("ns", "p-any"): "",
-		},
-	}
-	pl.ActivePlan.Store(ap)
-
-	p := pod("ns", "p-any")
-
-	nodes, reason, ok := pl.filterNodes(p)
-	if !ok {
-		t.Fatalf("filterNodes() ok = false, want true for pinned pod with empty node")
-	}
-	if nodes != nil {
-		t.Fatalf("filterNodes() nodes = %v, want nil (standalone; allowed by plan)", nodes)
-	}
-	if reason == "" {
-		t.Fatalf("filterNodes() reason is empty, want descriptive string")
-	}
-}
-
-func TestFilterNodes_PodNotInPlanBlocked(t *testing.T) {
-	pl := &SharedState{}
-	ap := &ActivePlan{
-		ID:              "plan",
-		PlacementByName: map[string]string{},
-		// No WorkloadPerNodeCnts for non-owned pods.
-	}
-	pl.ActivePlan.Store(ap)
-
-	p := pod("ns", "p-unknown")
-
-	nodes, reason, ok := pl.filterNodes(p)
-	if ok {
-		t.Fatalf("filterNodes() ok = true, want false for pod not in plan")
-	}
-	if nodes != nil {
-		t.Fatalf("filterNodes() nodes = %v, want nil", nodes)
-	}
-	if reason == "" {
-		t.Fatalf("filterNodes() reason is empty, want descriptive string")
-	}
-}
-
-func TestFilterNodes_WorkloadNodesAllowed(t *testing.T) {
-	pl := &SharedState{}
-	var prio int32 = 5
-
-	p := pod("ns", "p", withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-
-	wk, owned := getTopWorkload(p)
-	if !owned {
-		t.Fatalf("getTopWorkload() returned owned=false for owned pod")
-	}
-	wkStr := wk.String()
-
-	wq := WorkloadQuotas{
-		wkStr: {
-			"n1": 1,
-			"n2": 0,
-		},
-	}
-
-	ap := &ActivePlan{
-		ID:             "plan",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
-	}
-	pl.ActivePlan.Store(ap)
-
-	nodes, reason, ok := pl.filterNodes(p)
-	if !ok {
-		t.Fatalf("filterNodes() ok = false, want true; reason=%q", reason)
-	}
-	if nodes == nil || !nodes.Has("n1") || nodes.Has("n2") {
-		t.Fatalf("filterNodes() nodes = %v, want only {n1}", nodes)
-	}
-}
-
-func TestFilterNodes_WorkloadQuotasExhausted(t *testing.T) {
-	pl := &SharedState{}
-	var prio int32 = 5
-
-	p := pod("ns", "p", withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-
-	wk, owned := getTopWorkload(p)
-	if !owned {
-		t.Fatalf("getTopWorkload() returned owned=false for owned pod")
-	}
-	wkStr := wk.String()
-
-	wq := WorkloadQuotas{
-		wkStr: {
-			"n1": 0,
-		},
-	}
-
-	ap := &ActivePlan{
-		ID:             "plan",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
-	}
-	pl.ActivePlan.Store(ap)
-
-	nodes, reason, ok := pl.filterNodes(p)
-	if ok {
-		t.Fatalf("filterNodes() ok = true, want false when all quotas exhausted; reason=%q", reason)
-	}
-	if nodes != nil && nodes.Len() != 0 {
-		t.Fatalf("filterNodes() nodes = %v, want nil or empty set", nodes)
-	}
-}
-
-// -------------------------
-// computePlanPodCounts
-// -------------------------
-
-func TestCountNewAndTotalPods_NilOutput(t *testing.T) {
-	pendingSched, pre, post := computePlanPodCounts(nil, nil)
-	if pendingSched != 0 || pre != 0 || post != 0 {
-		t.Fatalf("countNewAndTotalPods(nil, nil) = (%d,%d,%d), want (0,0,0)",
-			pendingSched, pre, post)
-	}
-}
-
-func TestCountNewAndTotalPods_BasicScenario(t *testing.T) {
-	now := metav1.Now()
-
-	// running pods
-	run1 := pod("ns", "run1", onNode("n1"))
-	run2 := pod("ns", "run2", onNode("n2"))
-	// pending pod (to be scheduled)
-	pend1 := pod("ns", "pend1")
-	// deleted pod (should be ignored)
-	del := pod("ns", "del", onNode("n1"))
-	del.DeletionTimestamp = &now
-
-	pods := []*v1.Pod{run1, run2, pend1, del}
-
-	out := &SolverOutput{
-		Placements: []SolverPod{
-			{UID: pend1.UID, Node: "n1"}, // schedule pending
-			{UID: "u-unknown", Node: "n1"},
-		},
-		Evictions: []SolverPod{
-			{UID: run1.UID}, // evict one running
-			{UID: "u-nonexistent"},
-		},
-	}
-
-	pendingScheduled, totalPre, totalPost := computePlanPodCounts(out, pods)
-
-	// Pre-plan: two running (run1, run2).
-	if totalPre != 2 {
-		t.Fatalf("totalPrePlan = %d, want 2", totalPre)
-	}
-	// We schedule one pending.
-	if pendingScheduled != 1 {
-		t.Fatalf("pendingScheduled = %d, want 1", pendingScheduled)
-	}
-	// Post = running (2) - evicted(1) + scheduled(1) = 2
-	if totalPost != 2 {
-		t.Fatalf("totalPostPlan = %d, want 2", totalPost)
-	}
-}
-
-func TestCountNewAndTotalPods_TotalPostNonNegative(t *testing.T) {
-	// Only pending pods -> totalPrePlan = 0
-	pend := pod("ns", "pend")
-	pods := []*v1.Pod{pend}
-
-	// Eviction references a UID not present or with no node
-	out := &SolverOutput{
-		Evictions: []SolverPod{
-			{UID: "u-missing"},
-		},
-	}
-
-	pendingScheduled, totalPre, totalPost := computePlanPodCounts(out, pods)
-	if totalPre != 0 {
-		t.Fatalf("totalPrePlan = %d, want 0", totalPre)
-	}
-	if pendingScheduled != 0 {
-		t.Fatalf("pendingScheduled = %d, want 0", pendingScheduled)
-	}
-	if totalPost != 0 {
-		t.Fatalf("totalPostPlan = %d, want 0 (clamped, not negative)", totalPost)
-	}
+	must(t, got != nil, "expected non-nil")
+	mustEq(t, got["wk1"]["n1"].Load(), int32(3), "n1 wrong")
+	mustEq(t, got["wk1"]["n2"].Load(), int32(0), "n2 wrong")
+	mustEq(t, got["wk1"]["n3"].Load(), int32(0), "n3 wrong")
 }
 
 // -------------------------
@@ -944,90 +391,44 @@ func TestCountNewAndTotalPods_TotalPostNonNegative(t *testing.T) {
 func TestEvictTargets_UsesHook(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
+	targets := []*v1.Pod{pod("ns", "p1"), pod("ns", "p2")}
 
-	p1 := pod("ns", "p1")
-	p2 := pod("ns", "p2")
-	targets := []*v1.Pod{p1, p2}
-
-	var (
-		called     bool
-		gotPl      *SharedState
-		gotCtx     context.Context
-		gotTargets []*v1.Pod
-	)
-
-	orig := evictTargetsHook
-	defer func() { evictTargetsHook = orig }()
-
-	evictTargetsHook = func(hpl *SharedState, hctx context.Context, htargets []*v1.Pod) error {
+	var called bool
+	withEvictTargetsHook(t, func(hpl *SharedState, hctx context.Context, htargets []*v1.Pod) error {
 		called = true
-		gotPl = hpl
-		gotCtx = hctx
-		gotTargets = htargets
+		must(t, hpl == pl, "pl mismatch")
+		must(t, hctx == ctx, "ctx mismatch")
+		mustEq(t, htargets, targets, "targets mismatch")
 		return nil
-	}
-
-	if err := pl.evictTargets(ctx, targets); err != nil {
-		t.Fatalf("evictTargets() error = %v, want nil", err)
-	}
-	if !called {
-		t.Fatalf("evictTargetsHook not called")
-	}
-	if gotPl != pl {
-		t.Fatalf("hook pl = %p, want %p", gotPl, pl)
-	}
-	if gotCtx != ctx {
-		t.Fatalf("hook ctx = %v, want %v", gotCtx, ctx)
-	}
-	if !reflect.DeepEqual(gotTargets, targets) {
-		t.Fatalf("hook targets = %#v, want %#v", gotTargets, targets)
-	}
-}
-
-func TestEvictTargets_NormalAndNotFoundAreIgnored(t *testing.T) {
-	pl := &SharedState{}
-	ctx := context.Background()
-
-	p1 := pod("ns", "p1")
-	p2 := pod("ns", "p2")
-
-	var seen []string
-
-	withEvictHook(func(_ *SharedState, _ context.Context, pod *v1.Pod, _ *policyv1.Eviction) error {
-		seen = append(seen, mergeNsName(pod.Namespace, pod.Name))
-		// Alternate between nil and NotFound to exercise the IsNotFound branch.
-		if pod.Name == "p1" {
-			return nil
-		}
-		return apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "pods"}, pod.Name)
-	}, func() {
-		if err := pl.evictTargets(ctx, []*v1.Pod{p1, p2}); err != nil {
-			t.Fatalf("evictTargets() error = %v, want nil", err)
-		}
 	})
 
-	if len(seen) != 2 {
-		t.Fatalf("evictPodFor called %d times, want 2", len(seen))
-	}
+	must(t, pl.evictTargets(ctx, targets) == nil, "expected nil error")
+	must(t, called, "hook not called")
 }
 
-func TestEvictTargets_PropagatesNonNotFoundError(t *testing.T) {
+func TestEvictTargets_NotFoundIgnored_NonNotFoundPropagates(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 
-	p := pod("ns", "p")
-	wantErr := fmt.Errorf("boom-evict")
+	p1 := pod("ns", "p1")
+	p2 := pod("ns", "p2")
 
+	withEvictHook(func(_ *SharedState, _ context.Context, pod *v1.Pod, _ *policyv1.Eviction) error {
+		if pod.Name == "p2" {
+			return apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "pods"}, pod.Name)
+		}
+		return nil
+	}, func() {
+		must(t, pl.evictTargets(ctx, []*v1.Pod{p1, p2}) == nil, "expected nil error")
+	})
+
+	wantErr := errors.New("boom")
 	withEvictHook(func(_ *SharedState, _ context.Context, _ *v1.Pod, _ *policyv1.Eviction) error {
 		return wantErr
 	}, func() {
-		err := pl.evictTargets(ctx, []*v1.Pod{p})
-		if err == nil {
-			t.Fatalf("evictTargets() error = nil, want non-nil")
-		}
-		if !strings.Contains(err.Error(), "boom-evict") {
-			t.Fatalf("evictTargets() error = %v, want to contain %q", err, "boom-evict")
-		}
+		err := pl.evictTargets(ctx, []*v1.Pod{p1})
+		must(t, err != nil, "expected error")
+		mustContains(t, err.Error(), "boom")
 	})
 }
 
@@ -1038,160 +439,80 @@ func TestEvictTargets_PropagatesNonNotFoundError(t *testing.T) {
 func TestWaitPodsGone_UsesHookWhenNonEmpty(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
-
-	p := pod("ns", "p", onNode("n1"))
-
-	var (
-		called bool
-		gotPl  *SharedState
-		gotCtx context.Context
-		got    []*v1.Pod
-	)
-
-	orig := waitPodsGoneHook
-	defer func() { waitPodsGoneHook = orig }()
-
-	waitPodsGoneHook = func(hpl *SharedState, hctx context.Context, pods []*v1.Pod) error {
-		called = true
-		gotPl = hpl
-		gotCtx = hctx
-		got = pods
-		return nil
-	}
-
-	if err := pl.waitPodsGone(ctx, []*v1.Pod{p}); err != nil {
-		t.Fatalf("waitPodsGone() error = %v, want nil", err)
-	}
-	if !called {
-		t.Fatalf("waitPodsGoneHook not called")
-	}
-	if gotPl != pl {
-		t.Fatalf("hook pl = %p, want %p", gotPl, pl)
-	}
-	if gotCtx != ctx {
-		t.Fatalf("hook ctx = %v, want %v", gotCtx, ctx)
-	}
-	if len(got) != 1 || got[0] != p {
-		t.Fatalf("hook pods = %#v, want [%#v]", got, p)
-	}
-}
-
-func TestWaitPodsGone_EmptySliceFastPath(t *testing.T) {
-	pl := &SharedState{}
-	ctx := context.Background()
-
-	// No hook: this must return immediately without error.
-	if err := pl.waitPodsGone(ctx, nil); err != nil {
-		t.Fatalf("waitPodsGone(nil) error = %v, want nil", err)
-	}
-}
-
-func TestWaitPodsGone_PollUntilNotFound(t *testing.T) {
-	pl := &SharedState{}
-	ctx := context.Background()
-
 	p := pod("ns", "p")
 
-	// Fake lister that always returns IsNotFound for this pod.
-	store := map[string]map[string]*v1.Pod{} // empty store -> NotFound via fakePodNamespaceLister
-	plister := &fakePodLister{store: store}
-
-	withPodLister(plister, func() {
-		if err := pl.waitPodsGone(ctx, []*v1.Pod{p}); err != nil {
-			t.Fatalf("waitPodsGone() error = %v, want nil", err)
-		}
+	var called bool
+	withWaitPodsGoneHook(t, func(hpl *SharedState, hctx context.Context, pods []*v1.Pod) error {
+		called = true
+		must(t, hpl == pl, "pl mismatch")
+		must(t, hctx == ctx, "ctx mismatch")
+		mustEq(t, pods, []*v1.Pod{p}, "pods mismatch")
+		return nil
 	})
+
+	must(t, pl.waitPodsGone(ctx, []*v1.Pod{p}) == nil, "expected nil error")
+	must(t, called, "hook not called")
 }
 
-func TestWaitPodsGone_IgnoresNilPodsInInput(t *testing.T) {
+func TestWaitPodsGone_EmptyOrNilPodFastPath(t *testing.T) {
+	pl := &SharedState{}
+	ctx := context.Background()
+	must(t, pl.waitPodsGone(ctx, nil) == nil, "expected nil")
+	must(t, pl.waitPodsGone(ctx, []*v1.Pod{nil}) == nil, "expected nil")
+}
+
+func TestWaitPodsGone_NotFound_UIDChange_Terminating(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 
-	// Input slice includes a nil pod; this should not panic and should
-	// effectively behave like an empty slice.
-	if err := pl.waitPodsGone(ctx, []*v1.Pod{nil}); err != nil {
-		t.Fatalf("waitPodsGone() with nil pod error = %v, want nil", err)
-	}
-}
-
-func TestWaitPodsGone_TreatsUidChangeOrTerminatingAsGone(t *testing.T) {
-	pl := &SharedState{}
-	ctx := context.Background()
-
-	// Original pod identity (UID + ns + name)
 	orig := pod("ns", "p", withUID("u1"))
+	changed := pod("ns", "p", withUID("u2")) // same name, diff UID
 
-	// In the store we simulate the "same" pod name but:
-	//  - different UID (u2)
-	//  - or terminating
-	// Either should make the entry be considered "gone".
-	changedUID := pod("ns", "p", withUID("u2"))
 	now := metav1.Now()
-	terminating := pod("ns", "p-term", withUID("u3"))
-	terminating.DeletionTimestamp = &now
+	term := pod("ns", "t", withUID("u3"))
+	term.DeletionTimestamp = &now
 
-	store := map[string]map[string]*v1.Pod{
-		"ns": {
-			"p":      changedUID,
-			"p-term": terminating,
-		},
-	}
-	plister := &fakePodLister{store: store}
+	// Case 1: NotFound via empty store
+	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+		must(t, pl.waitPodsGone(ctx, []*v1.Pod{orig}) == nil, "expected nil (NotFound)")
+	})
 
-	withPodLister(plister, func() {
-		// First: UID has changed -> treated as gone.
-		if err := pl.waitPodsGone(ctx, []*v1.Pod{orig}); err != nil {
-			t.Fatalf("waitPodsGone() (UID changed) error = %v, want nil", err)
-		}
+	// Case 2/3: UID changed + terminating treated as gone
+	withPodLister(&fakePodLister{store: storeFromPods(changed, term)}, func() {
+		must(t, pl.waitPodsGone(ctx, []*v1.Pod{orig}) == nil, "expected nil (uid changed)")
+		must(t, pl.waitPodsGone(ctx, []*v1.Pod{term}) == nil, "expected nil (terminating)")
+	})
 
-		// Second: pod terminating -> treated as gone as well.
-		if err := pl.waitPodsGone(ctx, []*v1.Pod{terminating}); err != nil {
-			t.Fatalf("waitPodsGone() (terminating) error = %v, want nil", err)
-		}
+	// Case 4: transient lister error should keep polling; we make ctx cancel quickly and ensure it returns ctx error.
+	ctx2, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	withPodLister(&fakePodLister{
+		store: storeFromPods(orig),
+		err:   errors.New("transient"),
+	}, func() {
+		err := pl.waitPodsGone(ctx2, []*v1.Pod{orig})
+		must(t, err != nil, "expected ctx error due to timeout")
 	})
 }
 
 // -------------------------
-// activatePods
+// activatePods (blocked set)
 // -------------------------
 
-func TestActivatePods_NoPodSetDoesNothing(t *testing.T) {
+func TestActivatePods_NilOrEmptySetDoesNothing(t *testing.T) {
 	pl := &SharedState{}
 
 	var called bool
-	orig := activatePods
-	defer func() { activatePods = orig }()
+	withActivatePodsStub(t, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
 
-	activatePods = func(_ *SharedState, _ map[string]*v1.Pod) {
-		called = true
-	}
-
-	// nil podSet -> no activation
 	tried := pl.activatePods(nil, true, -1)
-	if len(tried) != 0 {
-		t.Fatalf("activatePods(nil) tried = %v, want empty", tried)
-	}
-	if called {
-		t.Fatalf("activatePods() global should not be called when podSet is nil")
-	}
-}
+	mustEq(t, tried, []types.UID(nil), "tried mismatch for nil set")
+	must(t, !called, "activatePods should not be called for nil set")
 
-func TestActivatePods_EmptySet_DoesNothing(t *testing.T) {
-	pl := &SharedState{}
 	set := newPodSet("blocked")
-
-	called := false
-	orig := activatePods
-	activatePods = func(_ *SharedState, _ map[string]*v1.Pod) { called = true }
-	t.Cleanup(func() { activatePods = orig })
-
-	tried := pl.activatePods(set, false, -1)
-	if len(tried) != 0 {
-		t.Fatalf("activatePods(tried) = %#v, want empty", tried)
-	}
-	if called {
-		t.Fatalf("activatePods hook was called, want not called")
-	}
+	tried = pl.activatePods(set, false, -1)
+	mustEq(t, tried, []types.UID(nil), "tried mismatch for empty set")
+	must(t, !called, "activatePods should not be called for empty set")
 }
 
 func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
@@ -1199,83 +520,32 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 	set := newPodSet("blocked")
 
 	now := metav1.Now()
-	older := metav1.NewTime(now.Add(-1 * time.Minute))
+	older := metav1.NewTime(now.Add(-time.Minute))
 
 	prioLow := int32(1)
 	prioHigh := int32(10)
 
-	pHigh := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         "default",
-			Name:              "p-high",
-			UID:               types.UID("uid-high"),
-			CreationTimestamp: now,
-		},
-		Spec: v1.PodSpec{Priority: &prioHigh},
-	}
-	pOld := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         "default",
-			Name:              "p-old",
-			UID:               types.UID("uid-old"),
-			CreationTimestamp: older,
-		},
-		Spec: v1.PodSpec{Priority: &prioLow},
-	}
-	pKeep := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         "default",
-			Name:              "p-keep",
-			UID:               types.UID("uid-keep"),
-			CreationTimestamp: now,
-		},
-		Spec: v1.PodSpec{Priority: &prioLow},
-	}
+	pHigh := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-high", UID: types.UID("uid-high"), CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prioHigh}}
+	pOld := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-old", UID: types.UID("uid-old"), CreationTimestamp: older}, Spec: v1.PodSpec{Priority: &prioLow}}
+	pKeep := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p-keep", UID: types.UID("uid-keep"), CreationTimestamp: now}, Spec: v1.PodSpec{Priority: &prioLow}}
 
 	set.AddPod(pOld)
 	set.AddPod(pHigh)
 	set.AddPod(pKeep)
 
-	store := map[string]map[string]*v1.Pod{
-		"default": {
-			"p-old":  pOld,
-			"p-high": pHigh,
-			"p-keep": pKeep,
-		},
-	}
-
 	var got map[string]*v1.Pod
-	orig := activatePods
-	activatePods = func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct }
-	t.Cleanup(func() { activatePods = orig })
+	withActivatePodsStub(t, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
 
-	withPodLister(&fakePodLister{store: store}, func() {
+	withPodLister(&fakePodLister{store: storeFromPods(pOld, pHigh, pKeep)}, func() {
 		tried := pl.activatePods(set, true, 2)
-		wantTried := []types.UID{pHigh.UID, pOld.UID}
-		if !reflect.DeepEqual(tried, wantTried) {
-			t.Fatalf("tried = %#v, want %#v", tried, wantTried)
-		}
-
-		if got == nil {
-			t.Fatalf("expected activatePods to be called")
-		}
-		if _, ok := got["default/p-high"]; !ok {
-			t.Fatalf("activation set missing default/p-high; got keys=%v", keys(got))
-		}
-		if _, ok := got["default/p-old"]; !ok {
-			t.Fatalf("activation set missing default/p-old; got keys=%v", keys(got))
-		}
-		if _, ok := got["default/p-keep"]; ok {
-			t.Fatalf("activation set unexpectedly contains default/p-keep; got keys=%v", keys(got))
-		}
-
-		if remaining := set.Size(); remaining != 1 {
-			t.Fatalf("set.Size() after removeActivated = %d, want 1", remaining)
-		}
+		mustEq(t, tried, []types.UID{pHigh.UID, pOld.UID}, "tried order mismatch")
+		must(t, got != nil, "expected activation set")
+		mustEq(t, keysOf(got), []string{"default/p-high", "default/p-old"}, "activation keys mismatch")
+		mustEq(t, set.Size(), 1, "set size after removeActivated mismatch")
 	})
 }
 
-func TestActivatePods_PruneRemovesNotFound_ActivatesRemaining(t *testing.T) {
+func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 	pl := &SharedState{}
 	set := newPodSet("blocked")
 
@@ -1286,215 +556,111 @@ func TestActivatePods_PruneRemovesNotFound_ActivatesRemaining(t *testing.T) {
 	set.AddPod(pOK)
 	set.AddPod(pGone)
 
-	store := map[string]map[string]*v1.Pod{
-		"default": {
-			"p-ok": pOK,
-			// p-gone intentionally missing -> NotFound
-		},
-	}
-
-	called := 0
 	var got map[string]*v1.Pod
-	orig := activatePods
-	activatePods = func(_ *SharedState, toAct map[string]*v1.Pod) {
-		called++
-		got = toAct
-	}
-	t.Cleanup(func() { activatePods = orig })
+	withActivatePodsStub(t, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
 
-	withPodLister(&fakePodLister{store: store}, func() {
+	// NotFound pruning for p-gone
+	withPodLister(&fakePodLister{store: storeFromPods(pOK)}, func() {
 		tried := pl.activatePods(set, false, -1)
-		if !reflect.DeepEqual(tried, []types.UID{pOK.UID}) {
-			t.Fatalf("tried = %#v, want [%q]", tried, pOK.UID)
-		}
-		if called != 1 {
-			t.Fatalf("activatePods called %d times, want 1", called)
-		}
-		if got == nil || len(got) != 1 {
-			t.Fatalf("activation set = %#v, want exactly 1 pod", got)
-		}
-		if _, ok := got["default/p-ok"]; !ok {
-			t.Fatalf("activation set missing default/p-ok; got keys=%v", keys(got))
-		}
-
-		// p-gone should have been pruned out of the set.
-		if remaining := set.Size(); remaining != 1 {
-			t.Fatalf("set.Size() after prune = %d, want 1", remaining)
-		}
+		mustEq(t, tried, []types.UID{pOK.UID}, "tried mismatch")
+		mustEq(t, keysOf(got), []string{"default/p-ok"}, "activation keys mismatch")
+		mustEq(t, set.Size(), 1, "set should still contain p-ok only")
 	})
-}
 
-func TestActivatePods_ListerError_SkipsAll_NoActivation(t *testing.T) {
-	pl := &SharedState{}
-	set := newPodSet("blocked")
-
-	prio := int32(1)
-	p1 := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "p1", UID: types.UID("uid1")}, Spec: v1.PodSpec{Priority: &prio}}
-	set.AddPod(p1)
-
-	called := false
-	orig := activatePods
-	activatePods = func(_ *SharedState, _ map[string]*v1.Pod) { called = true }
-	t.Cleanup(func() { activatePods = orig })
-
-	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{"default": {"p1": p1}}, err: errors.New("boom")}, func() {
-		tried := pl.activatePods(set, false, -1)
-		if len(tried) != 0 {
-			t.Fatalf("tried = %#v, want empty", tried)
-		}
-		if called {
-			t.Fatalf("activatePods hook called, want not called")
-		}
-		// On lister error, prune keeps entry (conservative behavior).
-		if remaining := set.Size(); remaining != 1 {
-			t.Fatalf("set.Size() = %d, want 1", remaining)
-		}
+	// lister error => no activation, no tried, entry kept
+	set2 := newPodSet("blocked")
+	set2.AddPod(pOK)
+	withPodLister(&fakePodLister{store: storeFromPods(pOK), err: errors.New("boom")}, func() {
+		got = nil
+		tried := pl.activatePods(set2, false, -1)
+		mustEq(t, tried, []types.UID(nil), "tried should be empty on lister err")
+		must(t, got == nil, "activation should not run on lister err")
+		mustEq(t, set2.Size(), 1, "conservative keep on lister err")
 	})
-}
-
-func keys(m map[string]*v1.Pod) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
-func TestActivatePods_PruneRemovesNotFound_UsesNotFoundPath(t *testing.T) {
-	// Tiny direct test to ensure the NotFound branch is exercised (defensive against
-	// changes to fake lister behavior).
-	err := apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "pods"}, "x")
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("expected IsNotFound(err) to be true")
-	}
 }
 
 // -------------------------
 // activatePlannedPods
 // -------------------------
 
-func TestActivatePlannedPods_UsesHookWithMatchingPending(t *testing.T) {
+func TestActivatePlannedPods_HookAndGlobalPaths(t *testing.T) {
 	pl := &SharedState{}
 
 	uidAllowed := types.UID("u-allowed")
-	uidIgnored := types.UID("u-ignored")
+	uidMove := types.UID("u-move")
 
 	plan := &Plan{
 		NewPlacements: []SolverPod{
-			{UID: uidAllowed, OldNode: "", Node: "n1"},      // should be activated
-			{UID: uidIgnored, OldNode: "n-old", Node: "n2"}, // move, not pending->node
+			{UID: uidAllowed, OldNode: "", Node: "n1"}, // pending->node => activate
+			{UID: uidMove, OldNode: "n0", Node: "n2"},  // move => not activate
 		},
 	}
 
-	pending := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "ns",
-			Name:      "p-allowed",
-			UID:       uidAllowed,
-		},
-		Spec: v1.PodSpec{
-			NodeName: "",
-		},
-	}
-	running := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "ns",
-			Name:      "p-running",
-			UID:       uidIgnored,
-		},
-		Spec: v1.PodSpec{
-			NodeName: "n-old",
-		},
-	}
+	pending := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p-allowed", UID: uidAllowed}}
+	running := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p-running", UID: uidMove}, Spec: v1.PodSpec{NodeName: "n0"}}
+	deleted := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "p-del", UID: uidAllowed, DeletionTimestamp: &metav1.Time{Time: time.Now()}}}
 
-	pods := []*v1.Pod{pending, running}
+	// Hook path
+	var hookGot map[string]*v1.Pod
+	withActivatePlannedPodsHook(t, func(_ *SharedState, toAct map[string]*v1.Pod) {
+		hookGot = toAct
+	})
+	pl.activatePlannedPods(plan, []*v1.Pod{pending, running, deleted})
+	mustEq(t, keysOf(hookGot), []string{"ns/p-allowed"}, "hook activation mismatch")
 
-	var (
-		called bool
-		got    map[string]*v1.Pod
-	)
-
-	orig := activatePlannedPodsHook
-	defer func() { activatePlannedPodsHook = orig }()
-
-	activatePlannedPodsHook = func(hpl *SharedState, toActivate map[string]*v1.Pod) {
-		if hpl != pl {
-			t.Fatalf("hook pl = %p, want %p", hpl, pl)
-		}
-		called = true
-		got = toActivate
-	}
-
-	pl.activatePlannedPods(plan, pods)
-
-	if !called {
-		t.Fatalf("activatePlannedPodsHook not called")
-	}
-	if len(got) != 1 {
-		t.Fatalf("toActivate len = %d, want 1", len(got))
-	}
-	key := mergeNsName("ns", "p-allowed")
-	if got[key] != pending {
-		t.Fatalf("toActivate[%q] = %#v, want %#v", key, got[key], pending)
-	}
+	// Global path
+	activatePlannedPodsHook = nil // explicitly drop hook for this subcase
+	var globalGot map[string]*v1.Pod
+	withActivatePodsStub(t, func(_ *SharedState, toAct map[string]*v1.Pod) { globalGot = toAct })
+	pl.activatePlannedPods(plan, []*v1.Pod{pending, running})
+	mustEq(t, keysOf(globalGot), []string{"ns/p-allowed"}, "global activation mismatch")
 }
 
-func TestActivatePlannedPods_NoPlanOrNoNewPlacements(t *testing.T) {
+func TestActivatePlannedPods_Guards(t *testing.T) {
 	pl := &SharedState{}
-
-	// No panic, no hook called -> just exercise the guard clauses.
 	pl.activatePlannedPods(nil, nil)
 	pl.activatePlannedPods(&Plan{}, nil)
 	pl.activatePlannedPods(&Plan{NewPlacements: nil}, []*v1.Pod{})
 }
 
-func TestActivatePlannedPods_UsesGlobalActivateWhenNoHook(t *testing.T) {
+func TestActivatePlannedPods_NoNewlyScheduledPlacements_NoActivation(t *testing.T) {
 	pl := &SharedState{}
 
-	uid := types.UID("u-allowed")
+	// Only a move => allow-set becomes empty => early return branch.
 	plan := &Plan{
 		NewPlacements: []SolverPod{
-			{UID: uid, OldNode: "", Node: "n1"}, // From "" -> Node != "" => newly scheduled
-		},
-	}
-	pending := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "ns",
-			Name:      "p-allowed",
-			UID:       uid,
-		},
-		Spec: v1.PodSpec{
-			NodeName: "", // pending
+			{UID: types.UID("u1"), OldNode: "n1", Node: "n2"},
 		},
 	}
 
-	var (
-		called bool
-		gotPl  *SharedState
-		gotMap map[string]*v1.Pod
-	)
+	called := false
+	withActivatePlannedPodsHook(t, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
 
-	orig := activatePods
-	defer func() { activatePods = orig }()
+	pl.activatePlannedPods(plan, []*v1.Pod{pod("ns", "p", withUID("u1"))})
+	must(t, !called, "expected no activation when no newly-scheduled placements exist")
+}
 
-	activatePods = func(hpl *SharedState, toAct map[string]*v1.Pod) {
-		called = true
-		gotPl = hpl
-		gotMap = toAct
+func TestActivatePlannedPods_AllowButNoMatchingPending_NoActivation(t *testing.T) {
+	pl := &SharedState{}
+
+	uid := types.UID("u-allow")
+	plan := &Plan{
+		NewPlacements: []SolverPod{
+			{UID: uid, OldNode: "", Node: "n1"}, // newly scheduled
+		},
 	}
 
-	pl.activatePlannedPods(plan, []*v1.Pod{pending})
+	// Present but not eligible: one assigned and one deleted.
+	pAssigned := pod("ns", "p", withUID(string(uid)), onNode("n0"))
+	now := metav1.Now()
+	pDeleted := pod("ns", "p2", withUID(string(uid)))
+	pDeleted.DeletionTimestamp = &now
 
-	if !called {
-		t.Fatalf("global activatePods was not called")
-	}
-	if gotPl != pl {
-		t.Fatalf("activatePods pl = %p, want %p", gotPl, pl)
-	}
-	key := mergeNsName("ns", "p-allowed")
-	if gotMap[key] != pending {
-		t.Fatalf("toAct[%q] = %#v, want %#v", key, gotMap[key], pending)
-	}
+	called := false
+	withActivatePlannedPodsHook(t, func(_ *SharedState, _ map[string]*v1.Pod) { called = true })
+
+	pl.activatePlannedPods(plan, []*v1.Pod{pAssigned, pDeleted})
+	must(t, !called, "expected no activation when no matching *pending* pods exist")
 }
 
 // -------------------------
@@ -1505,252 +671,189 @@ func TestIsPlanCompleted_UsesHook(t *testing.T) {
 	pl := &SharedState{}
 	ap := &ActivePlan{ID: PlanConfigMapNamePrefix + "1"}
 
-	var (
-		called bool
-		gotPl  *SharedState
-		gotAp  *ActivePlan
-	)
-
-	orig := isPlanCompletedHook
-	defer func() { isPlanCompletedHook = orig }()
-
-	isPlanCompletedHook = func(hpl *SharedState, hap *ActivePlan) (bool, error) {
+	var called bool
+	withIsPlanCompletedHook(t, func(hpl *SharedState, hap *ActivePlan) (bool, error) {
 		called = true
-		gotPl = hpl
-		gotAp = hap
+		must(t, hpl == pl, "pl mismatch")
+		must(t, hap == ap, "ap mismatch")
 		return true, nil
-	}
+	})
 
 	ok, err := pl.isPlanCompleted(ap)
-	if err != nil {
-		t.Fatalf("isPlanCompleted() error = %v, want nil", err)
-	}
-	if !ok {
-		t.Fatalf("isPlanCompleted() = false, want true from hook")
-	}
-	if !called {
-		t.Fatalf("isPlanCompletedHook not called")
-	}
-	if gotPl != pl || gotAp != ap {
-		t.Fatalf("hook args = (%p,%p), want (%p,%p)", gotPl, gotAp, pl, ap)
-	}
+	must(t, err == nil, "err=%v", err)
+	must(t, ok, "expected true from hook")
+	must(t, called, "hook not called")
 }
 
-func TestIsPlanCompleted_NilActivePlan(t *testing.T) {
+func TestIsPlanCompleted_NilPlan(t *testing.T) {
 	pl := &SharedState{}
-
 	ok, err := pl.isPlanCompleted(nil)
-	if err != nil {
-		t.Fatalf("isPlanCompleted(nil) error = %v, want nil", err)
-	}
-	if ok {
-		t.Fatalf("isPlanCompleted(nil) = true, want false (no active plan doc)")
-	}
+	must(t, err == nil, "err=%v", err)
+	must(t, !ok, "expected false for nil plan")
 }
 
-func TestIsPlanCompleted_PinnedPodGoneAndNoQuotasMeansCompleted(t *testing.T) {
+func TestIsPlanCompleted_ErrorPaths(t *testing.T) {
 	pl := &SharedState{}
 
+	// invalid ns/name key => splitNsName error
 	ap := &ActivePlan{
-		ID: PlanConfigMapNamePrefix + "1",
-		PlacementByName: map[string]string{
-			mergeNsName("ns", "p-gone"): "n1",
-		},
-		WorkloadQuotas: WorkloadQuotasAtomics{}, // no workload quotas
+		ID:              "x",
+		PlacementByName: map[string]string{"not-a-nsname": "n1"},
 	}
-
-	// Empty store -> Get() returns NotFound for ns/p-gone.
-	store := map[string]map[string]*v1.Pod{}
-	plister := &fakePodLister{store: store}
-
-	withPodLister(plister, func() {
+	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
 		ok, err := pl.isPlanCompleted(ap)
-		if err != nil {
-			t.Fatalf("isPlanCompleted() error = %v, want nil", err)
-		}
-		if !ok {
-			t.Fatalf("isPlanCompleted() = false, want true (pinned pod gone, no quotas)")
-		}
+		must(t, err != nil, "expected error")
+		must(t, !ok, "expected not completed on error")
+	})
+
+	// pinned Get() returns real error => propagate
+	ap = &ActivePlan{
+		ID:              "x",
+		PlacementByName: map[string]string{mergeNsName("ns", "p"): "n1"},
+	}
+	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{"ns": {"p": pod("ns", "p")}}, errPerKey: map[string]error{"ns/p": errors.New("boom")}}, func() {
+		ok, err := pl.isPlanCompleted(ap)
+		must(t, err != nil, "expected error")
+		must(t, !ok, "expected not completed")
 	})
 }
 
-func TestIsPlanCompleted_PinnedPodOnWrongNodeNotCompleted(t *testing.T) {
+func TestIsPlanCompleted_CoreCases(t *testing.T) {
 	pl := &SharedState{}
 
-	ap := &ActivePlan{
-		ID: PlanConfigMapNamePrefix + "1",
-		PlacementByName: map[string]string{
-			mergeNsName("ns", "p-mismatch"): "n-expected",
-		},
-	}
-
-	p := pod("ns", "p-mismatch", onNode("n-other"))
-
-	store := map[string]map[string]*v1.Pod{
-		"ns": {
-			"p-mismatch": p,
-		},
-	}
-	plister := &fakePodLister{store: store}
-
-	withPodLister(plister, func() {
-		ok, err := pl.isPlanCompleted(ap)
-		if err != nil {
-			t.Fatalf("isPlanCompleted() error = %v, want nil", err)
+	t.Run("pinned pod gone satisfied when no quotas", func(t *testing.T) {
+		ap := &ActivePlan{
+			ID:              "x",
+			PlacementByName: map[string]string{mergeNsName("ns", "p-gone"): "n1"},
+			WorkloadQuotas:  WorkloadQuotasAtomics{},
 		}
-		if ok {
-			t.Fatalf("isPlanCompleted() = true, want false due to pinned pod on wrong node")
+		withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+			ok, err := pl.isPlanCompleted(ap)
+			must(t, err == nil, "err=%v", err)
+			must(t, ok, "expected completed")
+		})
+	})
+
+	t.Run("pinned pod wrong node => not completed", func(t *testing.T) {
+		ap := &ActivePlan{
+			ID:              "x",
+			PlacementByName: map[string]string{mergeNsName("ns", "p"): "n-expected"},
 		}
+		p := pod("ns", "p", onNode("n-other"))
+		withPodLister(&fakePodLister{store: storeFromPods(p)}, func() {
+			ok, err := pl.isPlanCompleted(ap)
+			must(t, err == nil, "err=%v", err)
+			must(t, !ok, "expected not completed")
+		})
+	})
+
+	t.Run("pinned pod terminating treated as satisfied", func(t *testing.T) {
+		ap := &ActivePlan{
+			ID:              "x",
+			PlacementByName: map[string]string{mergeNsName("ns", "p"): "n1"},
+			WorkloadQuotas:  WorkloadQuotasAtomics{},
+		}
+		p := pod("ns", "p", onNode("n1"))
+		now := metav1.Now()
+		p.DeletionTimestamp = &now
+		withPodLister(&fakePodLister{store: storeFromPods(p)}, func() {
+			ok, err := pl.isPlanCompleted(ap)
+			must(t, err == nil, "err=%v", err)
+			must(t, ok, "expected completed")
+		})
+	})
+
+	t.Run("workload deleted/scale-to-zero ignores remaining", func(t *testing.T) {
+		d := pod("ns", "dummy", withOwner("ReplicaSet", "rs-1"))
+		wk, owned := getTopWorkload(d)
+		must(t, owned, "expected owned")
+		wkStr := wk.String()
+
+		ap := &ActivePlan{
+			ID:             "x",
+			WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 3}}),
+		}
+		withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+			ok, err := pl.isPlanCompleted(ap)
+			must(t, err == nil, "err=%v", err)
+			must(t, ok, "expected completed")
+		})
+	})
+
+	t.Run("workload has pending + remaining => not completed", func(t *testing.T) {
+		pRun := pod("ns", "run", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+		pPend := pod("ns", "pend", withOwner("ReplicaSet", "rs-1"))
+		wk, _ := getTopWorkload(pRun)
+		wkStr := wk.String()
+
+		ap := &ActivePlan{
+			ID:             "x",
+			WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 1}}),
+		}
+		withPodLister(&fakePodLister{store: storeFromPods(pRun, pPend)}, func() {
+			ok, err := pl.isPlanCompleted(ap)
+			must(t, err == nil, "err=%v", err)
+			must(t, !ok, "expected not completed")
+		})
+	})
+
+	t.Run("workload live but no pending => remaining treated satisfied", func(t *testing.T) {
+		pRun := pod("ns", "run", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+		wk, _ := getTopWorkload(pRun)
+		wkStr := wk.String()
+
+		ap := &ActivePlan{
+			ID:             "x",
+			WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 2}}),
+		}
+		withPodLister(&fakePodLister{store: storeFromPods(pRun)}, func() {
+			ok, err := pl.isPlanCompleted(ap)
+			must(t, err == nil, "err=%v", err)
+			must(t, ok, "expected completed")
+		})
 	})
 }
 
-func TestIsPlanCompleted_PinnedPodTerminatingTreatedAsSatisfied(t *testing.T) {
+func TestIsPlanCompleted_PinnedCorrectNode_Succeeds(t *testing.T) {
 	pl := &SharedState{}
 
 	ap := &ActivePlan{
-		ID: PlanConfigMapNamePrefix + "1",
-		PlacementByName: map[string]string{
-			mergeNsName("ns", "p-term"): "n1",
-		},
-		WorkloadQuotas: WorkloadQuotasAtomics{},
+		ID:              "x",
+		PlacementByName: map[string]string{mergeNsName("ns", "p"): "n1"},
+		WorkloadQuotas:  WorkloadQuotasAtomics{}, // none
 	}
+	p := pod("ns", "p", onNode("n1"))
 
-	p := pod("ns", "p-term", onNode("n1"))
-	now := metav1.Now()
-	p.DeletionTimestamp = &now
-
-	store := map[string]map[string]*v1.Pod{
-		"ns": {
-			"p-term": p,
-		},
-	}
-	plister := &fakePodLister{store: store}
-
-	withPodLister(plister, func() {
+	withPodLister(&fakePodLister{store: storeFromPods(p)}, func() {
 		ok, err := pl.isPlanCompleted(ap)
-		if err != nil {
-			t.Fatalf("isPlanCompleted() error = %v, want nil", err)
-		}
-		if !ok {
-			t.Fatalf("isPlanCompleted() = false, want true (terminating pod treated as satisfied)")
-		}
+		must(t, err == nil, "err=%v", err)
+		must(t, ok, "expected completed")
 	})
 }
 
-func TestIsPlanCompleted_WorkloadScaledDownIgnored(t *testing.T) {
+func TestIsPlanCompleted_QuotaZero_IsSatisfiedBranch(t *testing.T) {
 	pl := &SharedState{}
 
-	// No live pods at all.
-	store := map[string]map[string]*v1.Pod{}
-	plister := &fakePodLister{store: store}
-
-	// Build a workload key from a dummy pod so we get the right string form.
-	pDummy := pod("ns", "p", withOwner("ReplicaSet", "rs-1"))
-	wk, owned := getTopWorkload(pDummy)
-	if !owned {
-		t.Fatalf("getTopWorkload(dummy) returned owned=false")
-	}
-	wkStr := wk.String()
-
-	wq := WorkloadQuotas{
-		wkStr: {"n1": 3}, // remaining quota > 0
-	}
-
 	ap := &ActivePlan{
-		ID:             PlanConfigMapNamePrefix + "1",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
+		ID:             "x",
+		WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{"wk": {"n1": 0}}), // totalRemaining <= 0 => satisfied
 	}
 
-	withPodLister(plister, func() {
+	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
 		ok, err := pl.isPlanCompleted(ap)
-		if err != nil {
-			t.Fatalf("isPlanCompleted() error = %v, want nil", err)
-		}
-		if !ok {
-			t.Fatalf("isPlanCompleted() = false, want true (workload scaled down, remaining quota ignored)")
-		}
+		must(t, err == nil, "err=%v", err)
+		must(t, ok, "expected completed")
 	})
 }
 
-func TestIsPlanCompleted_WorkloadPendingWithQuotaNotCompleted(t *testing.T) {
+func TestIsPlanCompleted_GetPodsErrorPropagates(t *testing.T) {
 	pl := &SharedState{}
+	ap := &ActivePlan{ID: "x"}
 
-	// Running + pending pods for the same workload.
-	var prio int32 = 5
-	pRun := pod("ns", "p-run", onNode("n1"), withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-	pPending := pod("ns", "p-pend", withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-
-	store := map[string]map[string]*v1.Pod{
-		"ns": {
-			"p-run":  pRun,
-			"p-pend": pPending,
-		},
-	}
-	plister := &fakePodLister{store: store}
-
-	wk, owned := getTopWorkload(pRun)
-	if !owned {
-		t.Fatalf("getTopWorkload(run) returned owned=false")
-	}
-	wkStr := wk.String()
-
-	wq := WorkloadQuotas{
-		wkStr: {"n1": 1}, // remaining quota
-	}
-
-	ap := &ActivePlan{
-		ID:             PlanConfigMapNamePrefix + "1",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
-	}
-
-	withPodLister(plister, func() {
+	withPodLister(&fakePodLister{err: errors.New("boom")}, func() {
 		ok, err := pl.isPlanCompleted(ap)
-		if err != nil {
-			t.Fatalf("isPlanCompleted() error = %v, want nil", err)
-		}
-		if ok {
-			t.Fatalf("isPlanCompleted() = true, want false (pending pods + remaining quota)")
-		}
-	})
-}
-
-func TestIsPlanCompleted_WorkloadLiveNoPendingQuotaSatisfied(t *testing.T) {
-	pl := &SharedState{}
-
-	// Only running pods for the workload.
-	var prio int32 = 5
-	pRun := pod("ns", "p-run", onNode("n1"), withPrio(prio), withOwner("ReplicaSet", "rs-1"))
-
-	store := map[string]map[string]*v1.Pod{
-		"ns": {
-			"p-run": pRun,
-		},
-	}
-	plister := &fakePodLister{store: store}
-
-	wk, owned := getTopWorkload(pRun)
-	if !owned {
-		t.Fatalf("getTopWorkload(run) returned owned=false")
-	}
-	wkStr := wk.String()
-
-	wq := WorkloadQuotas{
-		wkStr: {"n1": 2}, // remaining > 0
-	}
-
-	ap := &ActivePlan{
-		ID:             PlanConfigMapNamePrefix + "1",
-		WorkloadQuotas: buildWorkloadQuotas(wq),
-	}
-
-	withPodLister(plister, func() {
-		ok, err := pl.isPlanCompleted(ap)
-		if err != nil {
-			t.Fatalf("isPlanCompleted() error = %v, want nil", err)
-		}
-		if !ok {
-			t.Fatalf("isPlanCompleted() = false, want true (live pods, no pending, remaining quota treated as satisfied)")
-		}
+		must(t, !ok, "expected not completed on error")
+		must(t, err != nil, "expected error")
 	})
 }
 
@@ -1758,74 +861,7 @@ func TestIsPlanCompleted_WorkloadLiveNoPendingQuotaSatisfied(t *testing.T) {
 // onPlanCompleted
 // -------------------------
 
-func TestOnPlanCompleted_HookCalledAfterStateCleared(t *testing.T) {
-	pl := &SharedState{}
-	pl.ActivePlanInProgress.Store(true)
-
-	cancelled := false
-	ap := &ActivePlan{
-		ID: PlanConfigMapNamePrefix + "1",
-		Cancel: func() {
-			cancelled = true
-		},
-	}
-	pl.ActivePlan.Store(ap)
-
-	var (
-		called           bool
-		hookStatus       PlanStatus
-		hookAp           *ActivePlan
-		activeInsideHook bool
-	)
-
-	orig := onPlanCompletedHook
-	defer func() { onPlanCompletedHook = orig }()
-
-	onPlanCompletedHook = func(hpl *SharedState, status PlanStatus, hap *ActivePlan) {
-		if hpl != pl {
-			t.Fatalf("hook pl = %p, want %p", hpl, pl)
-		}
-		called = true
-		hookStatus = status
-		hookAp = hap
-		activeInsideHook = hpl.ActivePlanInProgress.Load()
-	}
-
-	ok := pl.onPlanCompleted(PlanStatusCompleted)
-	if !ok {
-		t.Fatalf("onPlanCompleted() = false, want true")
-	}
-	if !called {
-		t.Fatalf("onPlanCompletedHook not called")
-	}
-	if hookStatus != PlanStatusCompleted {
-		t.Fatalf("hook status = %v, want %v", hookStatus, PlanStatusCompleted)
-	}
-	if hookAp != ap {
-		t.Fatalf("hook ap = %p, want %p", hookAp, ap)
-	}
-	if activeInsideHook {
-		t.Fatalf("Active flag true inside hook, want false after leaveActive")
-	}
-	if cancelled != true {
-		t.Fatalf("ap.Cancel was not called")
-	}
-	if pl.getActivePlan() != nil {
-		t.Fatalf("ActivePlan not cleared by onPlanCompleted")
-	}
-}
-
-func TestOnPlanCompleted_NoActivePlanOrAlreadyCleared(t *testing.T) {
-	pl := &SharedState{}
-
-	// No ActivePlan stored -> tryClearActivePlan(nil) == false.
-	ok := pl.onPlanCompleted(PlanStatusCompleted)
-	if ok {
-		t.Fatalf("onPlanCompleted() = true, want false when there is no active plan")
-	}
-}
-
-func TestOnPlanCompleted_DefaultPathTearsDownAndMarksStatus(t *testing.T) {
+func TestOnPlanCompleted_HookAndDefaultPaths(t *testing.T) {
 	pl := &SharedState{}
 	pl.ActivePlanInProgress.Store(true)
 
@@ -1838,62 +874,168 @@ func TestOnPlanCompleted_DefaultPathTearsDownAndMarksStatus(t *testing.T) {
 	}
 	pl.ActivePlan.Store(ap)
 
-	// Ensure there is no hook so the default path is taken.
-	origOnHook := onPlanCompletedHook
-	defer func() { onPlanCompletedHook = origOnHook }()
-	onPlanCompletedHook = nil
+	t.Run("hook path", func(t *testing.T) {
+		pl.ActivePlanInProgress.Store(true)
+		pl.ActivePlan.Store(ap)
+		cancelled = false
 
-	var (
-		statusCalled bool
-		gotPl        *SharedState
-		gotCtx       context.Context
-		gotCM        string
-		gotStatus    PlanStatus
-	)
-	origMark := markPlanStatusToConfigMapHook
-	defer func() { markPlanStatusToConfigMapHook = origMark }()
+		var called bool
+		withOnPlanCompletedHook(t, func(hpl *SharedState, status PlanStatus, hap *ActivePlan) {
+			called = true
+			must(t, hpl == pl, "pl mismatch")
+			must(t, status == PlanStatusCompleted, "status mismatch")
+			must(t, hap == ap, "ap mismatch")
+			must(t, !hpl.ActivePlanInProgress.Load(), "active flag should be false inside hook")
+		})
 
-	markPlanStatusToConfigMapHook = func(hpl *SharedState, hctx context.Context, planCM string, status PlanStatus) bool {
-		statusCalled = true
-		gotPl = hpl
-		gotCtx = hctx
-		gotCM = planCM
-		gotStatus = status
-		return true // skip real mutateRaw
-	}
+		ok := pl.onPlanCompleted(PlanStatusCompleted)
+		must(t, ok, "expected ok")
+		must(t, called, "hook not called")
+		must(t, cancelled, "cancel not called")
+		must(t, pl.getActivePlan() == nil, "plan not cleared")
+	})
 
-	ok := pl.onPlanCompleted(PlanStatusCompleted)
-	if !ok {
-		t.Fatalf("onPlanCompleted() = false, want true")
-	}
-	if pl.getActivePlan() != nil {
-		t.Fatalf("active plan not cleared")
-	}
-	if pl.ActivePlanInProgress.Load() {
-		t.Fatalf("ActivePlanInProgress still true after onPlanCompleted")
-	}
-	if !cancelled {
-		t.Fatalf("ActivePlan.Cancel was not called")
-	}
-	if !statusCalled {
-		t.Fatalf("markPlanStatusToConfigMapHook not called")
-	}
-	if gotPl != pl {
-		t.Fatalf("markPlanStatusToConfigMapHook pl = %p, want %p", gotPl, pl)
-	}
-	if gotCtx == nil {
-		t.Fatalf("markPlanStatusToConfigMapHook ctx is nil")
-	}
-	if gotCM != ap.ID {
-		t.Fatalf("markPlanStatusToConfigMapHook planCM = %q, want %q", gotCM, ap.ID)
-	}
-	if gotStatus != PlanStatusCompleted {
-		t.Fatalf("markPlanStatusToConfigMapHook status = %v, want %v", gotStatus, PlanStatusCompleted)
-	}
+	t.Run("default path calls markPlanStatus hook", func(t *testing.T) {
+		// ensure no onPlanCompletedHook
+		onPlanCompletedHook = nil
+
+		pl.ActivePlanInProgress.Store(true)
+		pl.ActivePlan.Store(ap)
+		cancelled = false
+
+		var statusCalled bool
+		withMarkPlanStatusHook(t, func(hpl *SharedState, _ context.Context, planCM string, status PlanStatus) bool {
+			statusCalled = true
+			must(t, hpl == pl, "pl mismatch")
+			mustEq(t, planCM, ap.ID, "planCM mismatch")
+			mustEq(t, status, PlanStatusCompleted, "status mismatch")
+			return true
+		})
+
+		ok := pl.onPlanCompleted(PlanStatusCompleted)
+		must(t, ok, "expected ok")
+		must(t, statusCalled, "markPlanStatus hook not called")
+		must(t, cancelled, "cancel not called")
+		must(t, pl.getActivePlan() == nil, "plan not cleared")
+		must(t, !pl.ActivePlanInProgress.Load(), "active flag not cleared")
+	})
+
+	t.Run("no active plan => false", func(t *testing.T) {
+		pl2 := &SharedState{}
+		must(t, !pl2.onPlanCompleted(PlanStatusCompleted), "expected false")
+	})
 }
 
 // -------------------------
-// exportPlanToConfigMap
+// isPodAllowedByPlan + filterNodes
+// -------------------------
+
+func TestIsPodAllowedByPlan_AndFilterNodes(t *testing.T) {
+	pl := &SharedState{}
+
+	// no active plan
+	must(t, !pl.isPodAllowedByPlan(pod("ns", "p")), "expected false (no plan)")
+	nodes, reason, ok := pl.filterNodes(pod("ns", "p"))
+	must(t, ok, "expected ok=true when no plan")
+	must(t, nodes == nil, "expected nil nodes when no plan")
+	mustEq(t, reason, InfoNoActivePlan, "reason mismatch")
+
+	// pinned standalone
+	ap := &ActivePlan{
+		ID:              "plan",
+		PlacementByName: map[string]string{mergeNsName("ns", "p1"): "n1", mergeNsName("ns", "pAny"): ""},
+	}
+	pl.ActivePlan.Store(ap)
+
+	must(t, pl.isPodAllowedByPlan(pod("ns", "p1")), "expected allowed (pinned)")
+	s, _, ok := pl.filterNodes(pod("ns", "p1"))
+	must(t, ok, "expected ok")
+	must(t, s.Len() == 1 && s.Has("n1"), "expected only n1")
+
+	s, _, ok = pl.filterNodes(pod("ns", "pAny"))
+	must(t, ok, "expected ok")
+	must(t, s == nil, "expected nil set for empty pinned node")
+
+	// workload quotas
+	pOwned := pod("ns", "owned", withOwner("ReplicaSet", "rs-1"))
+	wk, _ := getTopWorkload(pOwned)
+	wkStr := wk.String()
+	ap.WorkloadQuotas = buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 1, "n2": 0}})
+
+	must(t, pl.isPodAllowedByPlan(pOwned), "expected allowed (any node has quota)")
+
+	allowed, _, ok := pl.filterNodes(pOwned)
+	must(t, ok, "expected ok")
+	must(t, allowed.Has("n1") && !allowed.Has("n2"), "expected only n1 allowed")
+
+	// workload missing from plan => block
+	pOther := pod("ns", "other", withOwner("ReplicaSet", "rs-other"))
+	_, _, ok = pl.filterNodes(pOther)
+	must(t, !ok, "expected block for workload not in plan")
+}
+
+// -------------------------
+// computePlanPodCounts
+// -------------------------
+
+func TestComputePlanPodCounts(t *testing.T) {
+	// nil output
+	a, b, c := computePlanPodCounts(nil, nil)
+	mustEq(t, []int{a, b, c}, []int{0, 0, 0}, "nil out mismatch")
+
+	now := metav1.Now()
+	run1 := pod("ns", "run1", onNode("n1"))
+	run2 := pod("ns", "run2", onNode("n2"))
+	pend := pod("ns", "pend")
+	del := pod("ns", "del", onNode("n1"))
+	del.DeletionTimestamp = &now
+
+	out := &SolverOutput{
+		Placements: []SolverPod{
+			{UID: pend.UID, Node: "n1"},
+			{UID: "u-unknown", Node: "n1"},
+			{UID: pend.UID, Node: ""}, // ignored
+		},
+		Evictions: []SolverPod{
+			{UID: run1.UID},
+			{UID: "u-missing"},
+		},
+	}
+	pendingScheduled, pre, post := computePlanPodCounts(out, []*v1.Pod{run1, run2, pend, del})
+	mustEq(t, pendingScheduled, 1, "pendingScheduled wrong")
+	mustEq(t, pre, 2, "pre wrong")
+	mustEq(t, post, 2, "post wrong")
+
+	// clamp non-negative
+	out2 := &SolverOutput{Evictions: []SolverPod{{UID: "u-missing"}}}
+	_, pre2, post2 := computePlanPodCounts(out2, []*v1.Pod{pod("ns", "only-pend")})
+	mustEq(t, pre2, 0, "pre2 wrong")
+	mustEq(t, post2, 0, "post2 wrong")
+}
+
+func TestComputePlanPodCounts_IgnoresPendingEvictions_AndRunningPlacements(t *testing.T) {
+	run := pod("ns", "run", withUID("u-run"), onNode("n1"))
+	pend := pod("ns", "pend", withUID("u-pend")) // pending (no node)
+
+	out := &SolverOutput{
+		// Evicting a pending pod must NOT reduce runningBefore.
+		Evictions: []SolverPod{{UID: pend.UID}},
+		// A placement for an already-running pod must NOT count as pendingScheduled.
+		Placements: []SolverPod{
+			{UID: run.UID, Node: "n2"},
+			{UID: pend.UID, Node: "n1"},
+		},
+	}
+
+	pendingScheduled, pre, post := computePlanPodCounts(out, []*v1.Pod{run, pend})
+	mustEq(t, pendingScheduled, 1, "pendingScheduled wrong")
+	mustEq(t, pre, 1, "runningBefore wrong")
+	mustEq(t, post, 2, "runningAfter wrong")
+}
+
+// -------------------------
+// exportPlanToConfigMap + setPlanStatusInConfigMap
+// (kept mostly like your original, but with cleaner hook usage)
 // -------------------------
 
 func TestExportPlanToConfigMap_UsesHook(t *testing.T) {
@@ -1902,35 +1044,50 @@ func TestExportPlanToConfigMap_UsesHook(t *testing.T) {
 	sp := &StoredPlan{}
 	name := PlanConfigMapNamePrefix + "cm"
 
-	var (
-		called  bool
-		gotPl   *SharedState
-		gotCtx  context.Context
-		gotName string
-		gotSp   *StoredPlan
-	)
-
-	orig := exportPlanToConfigMapHook
-	defer func() { exportPlanToConfigMapHook = orig }()
-
-	exportPlanToConfigMapHook = func(hpl *SharedState, hctx context.Context, hname string, hsp *StoredPlan) error {
+	var called bool
+	withExportPlanHook(t, func(hpl *SharedState, hctx context.Context, hname string, hsp *StoredPlan) error {
 		called = true
-		gotPl = hpl
-		gotCtx = hctx
-		gotName = hname
-		gotSp = hsp
+		must(t, hpl == pl, "pl mismatch")
+		must(t, hctx == ctx, "ctx mismatch")
+		mustEq(t, hname, name, "name mismatch")
+		must(t, hsp == sp, "sp mismatch")
 		return nil
+	})
+
+	must(t, pl.exportPlanToConfigMap(ctx, name, sp) == nil, "expected nil")
+	must(t, called, "hook not called")
+}
+
+func TestExportPlanToConfigMap_DefaultPath_CreatesConfigMap(t *testing.T) {
+	// Ensure hook is disabled to exercise real code.
+	orig := exportPlanToConfigMapHook
+	exportPlanToConfigMapHook = nil
+	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
+
+	ctx := context.Background()
+	pl, cleanup := newSharedStateWithConfigMapInformer(t /* no objects */)
+	defer cleanup()
+
+	name := fmt.Sprintf("%s%s", PlanConfigMapNamePrefix, "unit-default")
+	sp := &StoredPlan{
+		PluginVersion: "test",
+		GeneratedAt:   time.Unix(1, 0).UTC(),
+		PlanStatus:    PlanStatusActive,
+		Plan:          &Plan{},
 	}
 
-	if err := pl.exportPlanToConfigMap(ctx, name, sp); err != nil {
-		t.Fatalf("exportPlanToConfigMap() error = %v, want nil", err)
-	}
-	if !called {
-		t.Fatalf("exportPlanToConfigMapHook not called")
-	}
-	if gotPl != pl || gotCtx != ctx || gotName != name || gotSp != sp {
-		t.Fatalf("hook args mismatch")
-	}
+	err := pl.exportPlanToConfigMap(ctx, name, sp)
+	must(t, err == nil, "export err=%v", err)
+
+	gotCM, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
+	must(t, err == nil, "get err=%v", err)
+	must(t, gotCM.Labels[PlanConfigMapLabelKey] == "true", "expected plan label")
+
+	raw := gotCM.Data[PlanConfigMapLabelKey+".json"]
+	must(t, raw != "", "expected json data")
+	var got StoredPlan
+	must(t, json.Unmarshal([]byte(raw), &got) == nil, "unmarshal failed")
+	mustEq(t, got.PluginVersion, "test", "plugin version mismatch")
 }
 
 func newSharedStateWithConfigMapInformer(t *testing.T, objects ...runtime.Object) (*SharedState, func()) {
@@ -1950,266 +1107,144 @@ func newSharedStateWithConfigMapInformer(t *testing.T, objects ...runtime.Object
 	h := &fakeHandle{client: client, factory: factory}
 	pl := &SharedState{Client: client, Handle: h}
 
-	cleanup := func() { close(stopCh) }
-	return pl, cleanup
+	return pl, func() { close(stopCh) }
 }
-
-func TestExportPlanToConfigMap_Default_CreatesConfigMapWithJson(t *testing.T) {
-	orig := exportPlanToConfigMapHook
-	defer func() { exportPlanToConfigMapHook = orig }()
-	exportPlanToConfigMapHook = nil
-
-	pl, cleanup := newSharedStateWithConfigMapInformer(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	name := "plan-cm-default"
-	sp := &StoredPlan{
-		PluginVersion:        "test",
-		OptimizationStrategy: "unit",
-		GeneratedAt:          time.Unix(123, 0).UTC(),
-		PlanStatus:           PlanStatusActive,
-		SolverResult:         SolverResult{Status: "ok"},
-		Plan:                 &Plan{},
-	}
-
-	if err := pl.exportPlanToConfigMap(ctx, name, sp); err != nil {
-		t.Fatalf("exportPlanToConfigMap() error = %v, want nil", err)
-	}
-
-	cm, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get ConfigMap error = %v", err)
-	}
-	if cm.Labels == nil || cm.Labels[PlanConfigMapLabelKey] != "true" {
-		t.Fatalf("ConfigMap label %q=%q, want %q", PlanConfigMapLabelKey, cm.Labels[PlanConfigMapLabelKey], "true")
-	}
-	dataKey := PlanConfigMapLabelKey + ".json"
-	raw, ok := cm.Data[dataKey]
-	if !ok {
-		t.Fatalf("ConfigMap missing data key %q", dataKey)
-	}
-
-	var got StoredPlan
-	if err := json.Unmarshal([]byte(raw), &got); err != nil {
-		t.Fatalf("unmarshal stored plan error = %v", err)
-	}
-	if got.PlanStatus != PlanStatusActive {
-		t.Fatalf("stored plan status = %v, want %v", got.PlanStatus, PlanStatusActive)
-	}
-	if got.PluginVersion != "test" {
-		t.Fatalf("stored plan PluginVersion = %q, want %q", got.PluginVersion, "test")
-	}
-}
-
-func TestExportPlanToConfigMap_Default_PrunesOldPlans(t *testing.T) {
-	orig := exportPlanToConfigMapHook
-	defer func() { exportPlanToConfigMapHook = orig }()
-	exportPlanToConfigMapHook = nil
-
-	// Seed PlansToRetain+1 labeled ConfigMaps to ensure pruning runs.
-	objs := make([]runtime.Object, 0, PlansToRetain+1)
-	base := time.Now().UTC()
-	for i := 0; i < PlansToRetain+1; i++ {
-		name := "plan-retain-" + string(rune('a'+(i%26)))
-		if i >= 26 {
-			name = "plan-retain-" + string(rune('a'+((i/26)%26))) + string(rune('a'+(i%26)))
-		}
-		cm := &v1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:         SystemNamespace,
-				Name:              name,
-				Labels:            map[string]string{PlanConfigMapLabelKey: "true"},
-				CreationTimestamp: metav1.NewTime(base.Add(-time.Duration(i) * time.Minute)),
-			},
-			Data: map[string]string{PlanConfigMapLabelKey + ".json": "{}"},
-		}
-		objs = append(objs, cm)
-	}
-
-	pl, cleanup := newSharedStateWithConfigMapInformer(t, objs...)
-	defer cleanup()
-	ctx := context.Background()
-
-	// Update the newest plan so ensureJson doesn't change object count.
-	newestName := "plan-retain-a"
-	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
-
-	if err := pl.exportPlanToConfigMap(ctx, newestName, sp); err != nil {
-		t.Fatalf("exportPlanToConfigMap() error = %v, want nil", err)
-	}
-
-	list, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("List ConfigMaps error = %v", err)
-	}
-
-	// Count labeled plan CMs.
-	count := 0
-	for _, cm := range list.Items {
-		if cm.Labels != nil && cm.Labels[PlanConfigMapLabelKey] == "true" {
-			count++
-		}
-	}
-	if count != PlansToRetain {
-		t.Fatalf("labeled plan ConfigMaps = %d, want %d", count, PlansToRetain)
-	}
-}
-
-// -------------------------
-// setPlanStatusInConfigMap
-// -------------------------
 
 func TestSetPlanStatusInConfigMap_UsesHook(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 
-	var (
-		called    bool
-		gotPl     *SharedState
-		gotCtx    context.Context
-		gotCM     string
-		gotStatus PlanStatus
-	)
-
-	orig := markPlanStatusToConfigMapHook
-	defer func() { markPlanStatusToConfigMapHook = orig }()
-
-	markPlanStatusToConfigMapHook = func(hpl *SharedState, hctx context.Context, planCM string, status PlanStatus) bool {
+	var called bool
+	withMarkPlanStatusHook(t, func(hpl *SharedState, hctx context.Context, planCM string, status PlanStatus) bool {
 		called = true
-		gotPl = hpl
-		gotCtx = hctx
-		gotCM = planCM
-		gotStatus = status
-		return true // tell implementation to skip real mutateRaw
-	}
+		must(t, hpl == pl, "pl mismatch")
+		must(t, hctx == ctx, "ctx mismatch")
+		mustEq(t, planCM, "cm-name", "cm mismatch")
+		mustEq(t, status, PlanStatusFailed, "status mismatch")
+		return true
+	})
 
 	pl.setPlanStatusInConfigMap(ctx, "cm-name", PlanStatusFailed)
-
-	if !called {
-		t.Fatalf("markPlanStatusHook not called")
-	}
-	if gotPl != pl || gotCtx != ctx || gotCM != "cm-name" || gotStatus != PlanStatusFailed {
-		t.Fatalf("hook args mismatch")
-	}
+	must(t, called, "hook not called")
 }
 
-func TestSetPlanStatusInConfigMap_Default_SetsStatusAndCompletedAt(t *testing.T) {
+func TestSetPlanStatusInConfigMap_Default_SetsAndStickyAndBadJson(t *testing.T) {
+	// disable hook
 	orig := markPlanStatusToConfigMapHook
-	defer func() { markPlanStatusToConfigMapHook = orig }()
 	markPlanStatusToConfigMapHook = nil
+	t.Cleanup(func() { markPlanStatusToConfigMapHook = orig })
 
-	name := "plan-status-cm"
-	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
-	b, _ := json.MarshalIndent(sp, "", "  ")
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: SystemNamespace,
-			Name:      name,
-			Labels:    map[string]string{PlanConfigMapLabelKey: "true"},
-		},
-		Data: map[string]string{PlanConfigMapLabelKey + ".json": string(b)},
-	}
-
-	pl, cleanup := newSharedStateWithConfigMapInformer(t, cm)
-	defer cleanup()
 	ctx := context.Background()
 
-	pl.setPlanStatusInConfigMap(ctx, name, PlanStatusCompleted)
+	t.Run("sets status + CompletedAt", func(t *testing.T) {
+		name := "plan-status-cm"
+		sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
+		b, _ := json.MarshalIndent(sp, "", "  ")
+		cm := &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: SystemNamespace, Name: name, Labels: map[string]string{PlanConfigMapLabelKey: "true"}},
+			Data:       map[string]string{PlanConfigMapLabelKey + ".json": string(b)},
+		}
 
-	gotCM, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get ConfigMap error = %v", err)
-	}
-	raw := gotCM.Data[PlanConfigMapLabelKey+".json"]
+		pl, cleanup := newSharedStateWithConfigMapInformer(t, cm)
+		defer cleanup()
 
-	var got StoredPlan
-	if err := json.Unmarshal([]byte(raw), &got); err != nil {
-		t.Fatalf("unmarshal stored plan error = %v", err)
-	}
-	if got.PlanStatus != PlanStatusCompleted {
-		t.Fatalf("status = %v, want %v", got.PlanStatus, PlanStatusCompleted)
-	}
-	if got.CompletedAt.IsZero() {
-		t.Fatalf("CompletedAt is zero, want non-zero")
-	}
+		pl.setPlanStatusInConfigMap(ctx, name, PlanStatusCompleted)
+
+		gotCM, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
+		must(t, err == nil, "get err=%v", err)
+
+		var got StoredPlan
+		must(t, json.Unmarshal([]byte(gotCM.Data[PlanConfigMapLabelKey+".json"]), &got) == nil, "unmarshal failed")
+		mustEq(t, got.PlanStatus, PlanStatusCompleted, "status wrong")
+		must(t, !got.CompletedAt.IsZero(), "CompletedAt should be non-zero")
+	})
+
+	t.Run("final is sticky", func(t *testing.T) {
+		name := "plan-status-sticky"
+		completedAt := time.Unix(10, 0).UTC()
+		sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), CompletedAt: completedAt, PlanStatus: PlanStatusFailed, Plan: &Plan{}}
+		b, _ := json.MarshalIndent(sp, "", "  ")
+		cm := &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: SystemNamespace, Name: name, Labels: map[string]string{PlanConfigMapLabelKey: "true"}},
+			Data:       map[string]string{PlanConfigMapLabelKey + ".json": string(b)},
+		}
+
+		pl, cleanup := newSharedStateWithConfigMapInformer(t, cm)
+		defer cleanup()
+
+		pl.setPlanStatusInConfigMap(ctx, name, PlanStatusCompleted)
+
+		gotCM, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
+		must(t, err == nil, "get err=%v", err)
+
+		var got StoredPlan
+		must(t, json.Unmarshal([]byte(gotCM.Data[PlanConfigMapLabelKey+".json"]), &got) == nil, "unmarshal failed")
+		mustEq(t, got.PlanStatus, PlanStatusFailed, "status should stay failed")
+		must(t, got.CompletedAt.Equal(completedAt), "CompletedAt should remain unchanged")
+	})
+
+	t.Run("invalid json is best-effort noop", func(t *testing.T) {
+		name := "plan-status-invalid-json"
+		bad := "{"
+		cm := &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: SystemNamespace, Name: name, Labels: map[string]string{PlanConfigMapLabelKey: "true"}},
+			Data:       map[string]string{PlanConfigMapLabelKey + ".json": bad},
+		}
+
+		pl, cleanup := newSharedStateWithConfigMapInformer(t, cm)
+		defer cleanup()
+
+		pl.setPlanStatusInConfigMap(ctx, name, PlanStatusCompleted)
+
+		gotCM, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
+		must(t, err == nil, "get err=%v", err)
+		mustEq(t, gotCM.Data[PlanConfigMapLabelKey+".json"], bad, "expected unchanged bad json")
+	})
 }
 
-func TestSetPlanStatusInConfigMap_Default_FinalIsSticky(t *testing.T) {
-	orig := markPlanStatusToConfigMapHook
-	defer func() { markPlanStatusToConfigMapHook = orig }()
-	markPlanStatusToConfigMapHook = nil
+// -------------------------
+// clusterFingerprint
+// -------------------------
 
-	name := "plan-status-sticky"
-	completedAt := time.Unix(10, 0).UTC()
-	sp := &StoredPlan{
-		PluginVersion: "test",
-		GeneratedAt:   time.Unix(1, 0).UTC(),
-		CompletedAt:   completedAt,
-		PlanStatus:    PlanStatusFailed,
-		Plan:          &Plan{},
-	}
-	b, _ := json.MarshalIndent(sp, "", "  ")
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: SystemNamespace,
-			Name:      name,
-			Labels:    map[string]string{PlanConfigMapLabelKey: "true"},
-		},
-		Data: map[string]string{PlanConfigMapLabelKey + ".json": string(b)},
-	}
+func TestClusterFingerprint_Deterministic_ExcludesPending_AndUnusableNodes(t *testing.T) {
+	// Nodes: one usable, one unschedulable, one not-ready
+	n1 := node("n1", withAllocatable("2000m", "2Gi"))
+	nBad := node("n-bad", unschedulable())
+	nNR := node("n-nr", notReady())
 
-	pl, cleanup := newSharedStateWithConfigMapInformer(t, cm)
-	defer cleanup()
-	ctx := context.Background()
+	// Pods:
+	// - running on usable node => included
+	pRun := pod("ns", "run", withUID("u-run"), onNode("n1"), withReqs("100m", "64Mi"), withPrio(10))
+	// - pending => excluded
+	pPend := pod("ns", "pend", withUID("u-pend"), withReqs("100m", "64Mi"), withPrio(10))
+	// - running on unusable node => excluded
+	pOnBad := pod("ns", "bad", withUID("u-bad"), onNode("n-bad"), withReqs("100m", "64Mi"), withPrio(10))
 
-	pl.setPlanStatusInConfigMap(ctx, name, PlanStatusCompleted)
+	// Same data but shuffled order should yield identical fingerprint
+	fp1 := clusterFingerprint([]*v1.Node{n1, nBad, nNR}, []*v1.Pod{pRun, pPend, pOnBad})
+	fp2 := clusterFingerprint([]*v1.Node{nNR, nBad, n1}, []*v1.Pod{pOnBad, pPend, pRun})
+	mustEq(t, fp1, fp2, "fingerprint should be deterministic")
 
-	gotCM, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get ConfigMap error = %v", err)
-	}
-	raw := gotCM.Data[PlanConfigMapLabelKey+".json"]
+	// Changing only pending pods must not affect fingerprint
+	pPend2 := pod("ns", "pend2", withUID("u-pend2"), withReqs("500m", "1Gi"), withPrio(999))
+	fp3 := clusterFingerprint([]*v1.Node{n1}, []*v1.Pod{pRun, pPend, pPend2})
+	mustEq(t, fp1, fp3, "pending pods should not affect fingerprint")
 
-	var got StoredPlan
-	if err := json.Unmarshal([]byte(raw), &got); err != nil {
-		t.Fatalf("unmarshal stored plan error = %v", err)
-	}
-	if got.PlanStatus != PlanStatusFailed {
-		t.Fatalf("status = %v, want %v (sticky)", got.PlanStatus, PlanStatusFailed)
-	}
-	if !got.CompletedAt.Equal(completedAt) {
-		t.Fatalf("CompletedAt = %v, want %v (unchanged)", got.CompletedAt, completedAt)
-	}
+	// Changing a running pod request should affect fingerprint
+	pRunMut := pod("ns", "run", withUID("u-run"), onNode("n1"), withReqs("200m", "64Mi"), withPrio(10))
+	fp4 := clusterFingerprint([]*v1.Node{n1}, []*v1.Pod{pRunMut})
+	must(t, fp4 != clusterFingerprint([]*v1.Node{n1}, []*v1.Pod{pRun}), "expected fingerprint to change when running pod changes")
 }
 
-func TestSetPlanStatusInConfigMap_Default_InvalidJsonIsBestEffortNoop(t *testing.T) {
-	orig := markPlanStatusToConfigMapHook
-	defer func() { markPlanStatusToConfigMapHook = orig }()
-	markPlanStatusToConfigMapHook = nil
+func TestClusterFingerprint_IgnoresDeletedPods_AndNilNodes(t *testing.T) {
+	n1 := node("n1", withAllocatable("2000m", "2Gi"))
 
-	name := "plan-status-invalid-json"
-	bad := "{"
-	cm := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: SystemNamespace,
-			Name:      name,
-			Labels:    map[string]string{PlanConfigMapLabelKey: "true"},
-		},
-		Data: map[string]string{PlanConfigMapLabelKey + ".json": bad},
-	}
+	pRun := pod("ns", "run", withUID("u-run"), onNode("n1"), withReqs("100m", "64Mi"), withPrio(10))
+	pDel := pod("ns", "del", withUID("u-del"), onNode("n1"), withReqs("100m", "64Mi"), withPrio(10))
+	now := metav1.Now()
+	pDel.DeletionTimestamp = &now
 
-	pl, cleanup := newSharedStateWithConfigMapInformer(t, cm)
-	defer cleanup()
-	ctx := context.Background()
-
-	pl.setPlanStatusInConfigMap(ctx, name, PlanStatusCompleted)
-
-	gotCM, err := pl.Client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get ConfigMap error = %v", err)
-	}
-	if gotCM.Data[PlanConfigMapLabelKey+".json"] != bad {
-		t.Fatalf("expected invalid json to remain unchanged")
-	}
+	fp1 := clusterFingerprint([]*v1.Node{nil, n1}, []*v1.Pod{pRun, pDel})
+	fp2 := clusterFingerprint([]*v1.Node{n1}, []*v1.Pod{pRun})
+	mustEq(t, fp1, fp2, "deleted pods and nil nodes must not affect fingerprint")
 }

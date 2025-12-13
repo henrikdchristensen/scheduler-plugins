@@ -22,20 +22,6 @@ import (
 // Test Helpers
 // -------------------------
 
-func storeFromPods(pods ...*v1.Pod) map[string]map[string]*v1.Pod {
-	out := map[string]map[string]*v1.Pod{}
-	for _, p := range pods {
-		if p == nil {
-			continue
-		}
-		if out[p.Namespace] == nil {
-			out[p.Namespace] = map[string]*v1.Pod{}
-		}
-		out[p.Namespace][p.Name] = p
-	}
-	return out
-}
-
 func mustPodSet(t *testing.T, got []*v1.Pod, wantNsNames ...string) {
 	t.Helper()
 	gotSet := map[string]struct{}{}

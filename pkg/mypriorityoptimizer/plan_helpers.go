@@ -137,21 +137,6 @@ func sortPlacementsByPod(pls []SolverPod) {
 }
 
 // -------------------------
-// sortNewPlacementsByPod
-// -------------------------
-
-// sortNewPlacementsByPod sorts new placements by (namespace, name) for stable output.
-func sortNewPlacementsByPod(pls []SolverPod) {
-	sort.Slice(pls, func(i, j int) bool {
-		pi, pj := pls[i], pls[j]
-		if pi.Namespace != pj.Namespace {
-			return pi.Namespace < pj.Namespace
-		}
-		return pi.Name < pj.Name
-	})
-}
-
-// -------------------------
 // sortPodSetItemsByPriorityAndCreation
 // -------------------------
 
@@ -299,8 +284,8 @@ func (pl *SharedState) buildPlan(out *SolverOutput, preemptor *v1.Pod, pods []*v
 	}
 
 	// Stable ordering for new/moves.
-	sortNewPlacementsByPod(newPlacements)
-	sortNewPlacementsByPod(moves)
+	sortPlacementsByPod(newPlacements)
+	sortPlacementsByPod(moves)
 
 	return &Plan{
 		Evicts:          evicts,

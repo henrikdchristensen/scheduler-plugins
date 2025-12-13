@@ -49,7 +49,7 @@ func writeFakeSolverScript(t *testing.T, dir, body string) string {
 }
 
 // -------------------------
-// makePod
+// pod
 // -------------------------
 
 type PodOpt func(*v1.Pod)
@@ -111,7 +111,7 @@ func withReqs(cpuReq, memReq string) PodOpt {
 }
 
 // -------------------------
-// makeNode
+// node
 // -------------------------
 
 type NodeOpt func(*v1.Node)
@@ -169,7 +169,7 @@ func notReady() NodeOpt {
 }
 
 // -------------------------
-// mustStatus
+// mustHookStatus
 // -------------------------
 
 // mustHookStatus asserts the framework status code and (optionally) that the message contains a substring.
@@ -184,4 +184,23 @@ func mustHookStatus(t *testing.T, stage string, st *fwk.Status, want fwk.Code, c
 	if contains != "" && !strings.Contains(st.Message(), contains) {
 		t.Fatalf("%s() message = %q, want to contain %q", stage, st.Message(), contains)
 	}
+}
+
+// -------------------------
+// storeFromPods
+// -------------------------
+
+// storeFromPods creates a nested map from a list of pods for easy lookup by namespace and name.
+func storeFromPods(pods ...*v1.Pod) map[string]map[string]*v1.Pod {
+	out := map[string]map[string]*v1.Pod{}
+	for _, p := range pods {
+		if p == nil {
+			continue
+		}
+		if out[p.Namespace] == nil {
+			out[p.Namespace] = map[string]*v1.Pod{}
+		}
+		out[p.Namespace][p.Name] = p
+	}
+	return out
 }

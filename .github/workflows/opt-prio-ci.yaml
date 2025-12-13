@@ -12,7 +12,7 @@ jobs:
   # -------------------------------------------------------
   unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 4
 
     steps:
       - name: Checkout code
@@ -64,11 +64,12 @@ jobs:
             --cov=scripts \
             --cov-config=pytest-cfg.coveragerc \
             --cov-report=xml:coverage/python/coverage.xml \
-            --cov-report=html:coverage/python/html
+            --cov-report=html:coverage/python/html \
+            --timeout=1
 
       - name: Run go unit tests
         run: |
-          go test ./pkg/mypriorityoptimizer -v \
+          go test ./pkg/mypriorityoptimizer -timeout 3s -v \
             -coverprofile=coverage/go/go_coverage.out
           go tool cover \
             -func=coverage/go/go_coverage.out
@@ -90,7 +91,7 @@ jobs:
   integration-tests:
     needs: ["unit-tests"]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
 
     steps:
       - name: Checkout code

@@ -103,13 +103,14 @@ if "$RUN_UNIT_PY"; then
     --cov-config=pytest-cfg.coveragerc \
     --cov-report=term \
     --cov-report=html:coverage/python \
-    --cov-report=term-missing
+    --cov-report=term-missing \
+    --timeout=1
   echo "Python tests completed. Coverage HTML: coverage/python/index.html"
 fi
 
 if "$RUN_UNIT_GO"; then
   echo "=== Running Go unit tests (pkg/mypriorityoptimizer) ==="
-  go test ./pkg/mypriorityoptimizer -v -coverprofile=coverage/go/go_coverage.out
+  go test ./pkg/mypriorityoptimizer -timeout 3s -v -coverprofile=coverage/go/go_coverage.out
   go tool cover -func=coverage/go/go_coverage.out
   go tool cover -html=coverage/go/go_coverage.out -o coverage/go/coverage.html
   echo "Go coverage reports generated in coverage/go/"
