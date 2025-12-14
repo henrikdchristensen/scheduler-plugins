@@ -1,4 +1,4 @@
-// pkg/mypriorityoptimizer/plugin_config_test.go
+// plugin_config_test.go
 package mypriorityoptimizer
 
 import (
@@ -7,15 +7,21 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
-func getPluginCfgCM(t *testing.T, ctx context.Context, client *fake.Clientset) *v1.ConfigMap {
+// -------------------------
+// Helpers
+// -------------------------
+
+func mustGetPluginCfgCM(t *testing.T, ctx context.Context, client *fake.Clientset) *v1.ConfigMap {
 	t.Helper()
 	cm, err := client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, PluginCfgConfigMapName, metav1.GetOptions{})
 	if err != nil {
@@ -24,133 +30,184 @@ func getPluginCfgCM(t *testing.T, ctx context.Context, client *fake.Clientset) *
 	return cm
 }
 
-func decodePluginCfgSnap(t *testing.T, cm *v1.ConfigMap) PluginConfigSnapshot {
+func mustDecodePluginCfgSnap(t *testing.T, cm *v1.ConfigMap) PluginConfigSnapshot {
 	t.Helper()
 
+	if cm == nil {
+		t.Fatal("nil ConfigMap")
+	}
 	key := PluginCfgConfigMapLabelKey + ".json"
-	raw := cm.Data[key]
-	if raw == "" {
-		t.Fatalf("expected data key %q to be present and non-empty", key)
+	if cm.Data == nil {
+		t.Fatalf("expected cm.Data to be non-nil (missing key %q)", key)
+	}
+	raw, ok := cm.Data[key]
+	if !ok || raw == "" {
+		t.Fatalf("expected data key %q to be present and non-empty; data=%v", key, cm.Data)
 	}
 
 	var snap PluginConfigSnapshot
 	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
-		t.Fatalf("unmarshal snapshot failed: %v", err)
+		t.Fatalf("unmarshal snapshot failed: %v (raw=%q)", err, raw)
 	}
 	return snap
 }
 
-func TestBuildPluginConfigSnapshot_BasicFields(t *testing.T) {
-	snap := buildPluginConfigSnapshot()
-	if snap.Name != Name {
-		t.Fatalf("expected Name=%q, got %q", Name, snap.Name)
-	}
-	if snap.Version != PluginVersion {
-		t.Fatalf("expected Version=%q, got %q", PluginVersion, snap.Version)
-	}
-	if snap.SystemNamespace != SystemNamespace {
-		t.Fatalf("expected SystemNamespace=%q, got %q", SystemNamespace, snap.SystemNamespace)
-	}
-	if snap.OptimizeMode == "" {
-		t.Fatalf("expected non-empty OptimizeMode")
+func mustLabelTrue(t *testing.T, cm *v1.ConfigMap, labelKey string) {
+	t.Helper()
+	if cm.Labels == nil || cm.Labels[labelKey] != "true" {
+		t.Fatalf("expected label %q=true, got labels=%v", labelKey, cm.Labels)
 	}
 }
 
-func TestPersistPluginConfig(t *testing.T) {
+// -------------------------
+// buildPluginConfigSnapshot
+// -------------------------
+
+func TestBuildPluginConfigSnapshot_Invariants(t *testing.T) {
+	snap := buildPluginConfigSnapshot()
+
+	if snap.Name != Name {
+		t.Fatalf("Name=%q want %q", snap.Name, Name)
+	}
+	if snap.Version != PluginVersion {
+		t.Fatalf("Version=%q want %q", snap.Version, PluginVersion)
+	}
+	if snap.SystemNamespace != SystemNamespace {
+		t.Fatalf("SystemNamespace=%q want %q", snap.SystemNamespace, SystemNamespace)
+	}
+	if snap.OptimizeMode != getModeCombinedAsString() {
+		t.Fatalf("OptimizeMode=%q want %q", snap.OptimizeMode, getModeCombinedAsString())
+	}
+	if snap.Timestamp.IsZero() {
+		t.Fatalf("Timestamp is zero; want non-zero")
+	}
+	// Timestamp sanity: it should be "around now" (avoid being too strict).
+	if dt := time.Since(snap.Timestamp); dt < 0 || dt > 5*time.Minute {
+		t.Fatalf("Timestamp looks wrong: now-snap=%v (snap=%v)", dt, snap.Timestamp)
+	}
+}
+
+// -------------------------
+// persistPluginConfig
+// -------------------------
+
+func TestPersistPluginConfig_NoOpOnNilReceiverOrNilClient(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
-	t.Run("no-op when nil receiver or nil client", func(t *testing.T) {
-		var pl *SharedState
-		if err := pl.persistPluginConfig(ctx); err != nil {
-			t.Fatalf("nil receiver: expected nil error, got %v", err)
-		}
-		pl = &SharedState{Client: nil}
-		if err := pl.persistPluginConfig(ctx); err != nil {
-			t.Fatalf("nil client: expected nil error, got %v", err)
-		}
-	})
+	var pl *SharedState
+	if err := pl.persistPluginConfig(ctx); err != nil {
+		t.Fatalf("nil receiver: want nil error, got %v", err)
+	}
 
-	t.Run("create then update succeeds", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
-		pl := &SharedState{Client: client, BlockedWhileActive: newPodSet("x")}
+	pl = &SharedState{Client: nil}
+	if err := pl.persistPluginConfig(ctx); err != nil {
+		t.Fatalf("nil client: want nil error, got %v", err)
+	}
+}
 
-		// Create
-		if err := pl.persistPluginConfig(ctx); err != nil {
-			t.Fatalf("persistPluginConfig(create) error: %v", err)
-		}
-		cm := getPluginCfgCM(t, ctx, client)
-		if cm.Labels[PluginCfgConfigMapLabelKey] != "true" {
-			t.Fatalf("expected label %q=true, got %v", PluginCfgConfigMapLabelKey, cm.Labels)
-		}
-		snap := decodePluginCfgSnap(t, cm)
-		if snap.Name != Name {
-			t.Fatalf("expected snap.Name=%q, got %q", Name, snap.Name)
-		}
+func TestPersistPluginConfig_CreateThenUpdate_UpdatesSnapshot(t *testing.T) {
+	ctx, cancel := testCtx(t)
+	defer cancel()
 
-		// Update
-		if err := pl.persistPluginConfig(ctx); err != nil {
-			t.Fatalf("persistPluginConfig(update) error: %v", err)
-		}
-		list, err := client.CoreV1().ConfigMaps(SystemNamespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			t.Fatalf("List failed: %v", err)
-		}
-		found := 0
-		for _, c := range list.Items {
-			if c.Name == PluginCfgConfigMapName {
-				found++
+	client := fake.NewSimpleClientset()
+	pl := &SharedState{
+		Client:             client,
+		BlockedWhileActive: newPodSet("x"),
+	}
+
+	// Create with one HTTP addr...
+	withVar(t, &HTTPAddr, "127.0.0.1:1111")
+	if err := pl.persistPluginConfig(ctx); err != nil {
+		t.Fatalf("persistPluginConfig(create) error: %v", err)
+	}
+
+	cm1 := mustGetPluginCfgCM(t, ctx, client)
+	mustLabelTrue(t, cm1, PluginCfgConfigMapLabelKey)
+	snap1 := mustDecodePluginCfgSnap(t, cm1)
+	if snap1.HTTPAddr != "127.0.0.1:1111" {
+		t.Fatalf("snap1.HTTPAddr=%q want %q", snap1.HTTPAddr, "127.0.0.1:1111")
+	}
+
+	// ...then update with a different HTTP addr and verify it changed.
+	withVar(t, &HTTPAddr, "127.0.0.1:2222")
+	if err := pl.persistPluginConfig(ctx); err != nil {
+		t.Fatalf("persistPluginConfig(update) error: %v", err)
+	}
+
+	cm2 := mustGetPluginCfgCM(t, ctx, client)
+	mustLabelTrue(t, cm2, PluginCfgConfigMapLabelKey)
+	snap2 := mustDecodePluginCfgSnap(t, cm2)
+	if snap2.HTTPAddr != "127.0.0.1:2222" {
+		t.Fatalf("snap2.HTTPAddr=%q want %q", snap2.HTTPAddr, "127.0.0.1:2222")
+	}
+}
+
+func TestPersistPluginConfig_PropagatesClientErrors(t *testing.T) {
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	type tc struct {
+		name       string
+		verb       string
+		seed       *v1.ConfigMap
+		wantSubstr string
+	}
+
+	tests := []tc{
+		{name: "get fails", verb: "get", seed: nil, wantSubstr: "get-fail"},
+		{name: "create fails", verb: "create", seed: nil, wantSubstr: "create-fail"},
+		{
+			name: "update fails",
+			verb: "update",
+			seed: cm(SystemNamespace, PluginCfgConfigMapName,
+				map[string]string{PluginCfgConfigMapLabelKey: "true"},
+				map[string]string{PluginCfgConfigMapLabelKey + ".json": `{}`},
+				time.Now(),
+			),
+			wantSubstr: "update-fail",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var client *fake.Clientset
+			if tt.seed != nil {
+				client = fake.NewSimpleClientset(tt.seed)
+			} else {
+				client = fake.NewSimpleClientset()
 			}
-		}
-		if found != 1 {
-			t.Fatalf("expected exactly 1 configmap named %q, found %d", PluginCfgConfigMapName, found)
-		}
-	})
 
-	t.Run("ensureJson get fails -> propagates error", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
-		client.Fake.PrependReactor("get", "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, fmt.Errorf("get-fail")
+			// If we're testing create/update failures, we still want "get" to behave normally.
+			// For create failure: normal fake "get" returns NotFound, then ensureJson tries Create.
+			// For update failure: seeded CM ensures ensureJson tries Update.
+			client.Fake.PrependReactor(tt.verb, "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, fmt.Errorf("%s", tt.wantSubstr)
+			})
+
+			pl := &SharedState{Client: client, BlockedWhileActive: newPodSet("x")}
+			err := pl.persistPluginConfig(ctx)
+			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantSubstr, err)
+			}
+
+			// Small sanity check for create/update cases:
+			// - on create fail: CM should not exist
+			// - on update fail: CM should still exist
+			_, getErr := client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, PluginCfgConfigMapName, metav1.GetOptions{})
+			if tt.verb == "create" {
+				if getErr == nil {
+					t.Fatalf("expected CM to not exist after create failure")
+				}
+				if !apierrors.IsNotFound(getErr) {
+					t.Fatalf("expected NotFound after create failure, got %v", getErr)
+				}
+			}
+			if tt.verb == "update" {
+				if getErr != nil {
+					t.Fatalf("expected seeded CM to still exist after update failure, got %v", getErr)
+				}
+			}
 		})
-
-		pl := &SharedState{Client: client, BlockedWhileActive: newPodSet("x")}
-		err := pl.persistPluginConfig(ctx)
-		if err == nil || !strings.Contains(err.Error(), "get-fail") {
-			t.Fatalf("expected get-fail error, got %v", err)
-		}
-	})
-
-	t.Run("create fails -> propagates error", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
-		client.Fake.PrependReactor("create", "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, fmt.Errorf("create-fail")
-		})
-
-		pl := &SharedState{Client: client, BlockedWhileActive: newPodSet("x")}
-		err := pl.persistPluginConfig(ctx)
-		if err == nil || !strings.Contains(err.Error(), "create-fail") {
-			t.Fatalf("expected create-fail error, got %v", err)
-		}
-	})
-
-	t.Run("update fails -> propagates error", func(t *testing.T) {
-		seed := &v1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      PluginCfgConfigMapName,
-				Namespace: SystemNamespace,
-				Labels:    map[string]string{PluginCfgConfigMapLabelKey: "true"},
-			},
-			Data: map[string]string{PluginCfgConfigMapLabelKey + ".json": `{}`},
-		}
-		client := fake.NewSimpleClientset(seed)
-		client.Fake.PrependReactor("update", "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, fmt.Errorf("update-fail")
-		})
-
-		pl := &SharedState{Client: client, BlockedWhileActive: newPodSet("x")}
-		err := pl.persistPluginConfig(ctx)
-		if err == nil || !strings.Contains(err.Error(), "update-fail") {
-			t.Fatalf("expected update-fail error, got %v", err)
-		}
-	})
+	}
 }

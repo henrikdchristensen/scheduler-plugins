@@ -9,6 +9,7 @@ import (
 
 // buildPluginConfigSnapshot collects all the values we care about right now.
 // To extend, just add fields to PluginConfigSnapshot and populate them here.
+// CHECKED
 func buildPluginConfigSnapshot() PluginConfigSnapshot {
 	return PluginConfigSnapshot{
 		Timestamp: getTimestampNowUtc(),

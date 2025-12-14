@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 	fwk "k8s.io/kube-scheduler/framework"
@@ -104,6 +105,14 @@ type fakeHandle struct {
 	framework.Handle
 	client  kubernetes.Interface
 	factory informers.SharedInformerFactory
+}
+
+func mkHandle(host string) *fakeHandle {
+	cfg := &rest.Config{Host: host}
+	return &fakeHandle{
+		cfg:     cfg,
+		factory: informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0),
+	}
 }
 
 func (f *fakeHandle) KubeConfig() *rest.Config {
