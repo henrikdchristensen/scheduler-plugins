@@ -7,32 +7,57 @@ import (
 )
 
 // -------------------------
+// Helpers
+// -------------------------
+
+func ptr(s string) *string { return &s }
+
+// -------------------------
 // getenv
 // -------------------------
 
 func TestGetEnv(t *testing.T) {
-	t.Run("returns existing value", func(t *testing.T) {
-		t.Setenv("TEST_KEY", "value")
-		got := getEnv("TEST_KEY", "default")
-		if got != "value" {
-			t.Fatalf("getenv() = %q, want %q", got, "value")
-		}
-	})
+	tests := []struct {
+		name string
+		key  string
+		set  *string
+		def  string
+		want string
+	}{
+		{
+			name: "returns existing value",
+			key:  "TEST_KEY",
+			set:  ptr("value"),
+			def:  "default",
+			want: "value",
+		},
+		{
+			name: "returns default when unset",
+			key:  "UNSET_KEY",
+			set:  nil,
+			def:  "default",
+			want: "default",
+		},
+		{
+			name: "returns default when set to empty string",
+			key:  "EMPTY_KEY",
+			set:  ptr(""),
+			def:  "default",
+			want: "default",
+		},
+	}
 
-	t.Run("returns default when unset", func(t *testing.T) {
-		got := getEnv("UNSET_KEY", "default")
-		if got != "default" {
-			t.Fatalf("getenv() = %q, want %q", got, "default")
-		}
-	})
-
-	t.Run("returns default when set to empty string", func(t *testing.T) {
-		t.Setenv("EMPTY_KEY", "")
-		got := getEnv("EMPTY_KEY", "default")
-		if got != "default" {
-			t.Fatalf("getenv() with empty value = %q, want %q", got, "default")
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.set != nil {
+				t.Setenv(tt.key, *tt.set)
+			}
+			got := getEnv(tt.key, tt.def)
+			if got != tt.want {
+				t.Fatalf("getEnv(%q, %q) = %q, want %q", tt.key, tt.def, got, tt.want)
+			}
+		})
+	}
 }
 
 // -------------------------
