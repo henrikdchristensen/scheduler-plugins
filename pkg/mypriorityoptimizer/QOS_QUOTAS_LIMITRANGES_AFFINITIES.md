@@ -29,8 +29,9 @@ Supporting these features will make the plugin production-ready and ensure compl
    - [Go Plugin Changes](#go-plugin-changes)
    - [Python Solver Changes](#python-solver-changes)
 5. [Testing Strategy](#testing-strategy)
-6. [Performance Considerations](#performance-considerations)
-7. [References](#references)
+6. [Impact on Test Results Without These Features](#impact-on-test-results-without-these-features)
+7. [Performance Considerations](#performance-considerations)
+8. [References](#references)
 
 ---
 
@@ -1239,6 +1240,305 @@ if __name__ == "__main__":
 3. Monitor scheduler logs
 4. Verify solver stats
 5. Check pod placements match expectations
+
+---
+
+## Impact on Test Results Without These Features
+
+This section describes how the **absence** of QoS, Affinity, Quota, and LimitRange support affects the plugin's evaluation and what test scenarios would be **invalid or misleading** without proper implementation.
+
+### Testing Gaps Without QoS Support
+
+#### What You're Missing
+
+Without QoS class support, your plugin evaluation will have these critical gaps:
+
+1. **Incorrect Eviction Decisions**
+   - **Problem**: Plugin treats all pods equally during preemption, ignoring QoS class
+   - **Impact**: May evict a Guaranteed pod before a BestEffort pod, violating Kubernetes semantics
+   - **Test Limitation**: Cannot validate that eviction order respects QoS hierarchy
+   - **Real-world Consequence**: Production workloads (Guaranteed) could be evicted in favor of batch jobs (BestEffort)
+
+2. **Misleading Resource Accounting**
+   - **Problem**: BestEffort pods have zero requests but consume real resources
+   - **Impact**: Node capacity calculations are incorrect for BestEffort pods
+   - **Test Limitation**: Cannot measure true cluster utilization with mixed QoS workloads
+   - **Real-world Consequence**: Over-provisioning or under-utilization in clusters with BestEffort workloads
+
+3. **Incomplete Optimization Metrics**
+   - **Problem**: Cannot differentiate between evicting a critical service vs a batch job
+   - **Impact**: Optimization may produce "better" solutions by evicting important pods
+   - **Test Limitation**: Solver score doesn't reflect true business value of placements
+   - **Real-world Consequence**: SLA violations when Guaranteed pods are preempted unnecessarily
+
+#### Test Results That Would Be Invalid
+
+- **Eviction order tests**: If you test with mixed QoS pods, results showing "fewer evictions" could be misleading if the plugin evicts Guaranteed pods while keeping BestEffort pods
+- **Resource efficiency tests**: Utilization metrics will be inaccurate for workloads mixing QoS classes
+- **Comparison with default scheduler**: Default scheduler respects QoS; your plugin won't, making A/B testing unfair
+
+#### Example Test Scenario That Fails
+
+```yaml
+# Scenario: Node at capacity with 1 Guaranteed + 1 BestEffort pod
+# New high-priority Guaranteed pod needs to be placed
+
+Current Behavior (WITHOUT QoS support):
+- Plugin may evict the existing Guaranteed pod (if it has lower priority)
+- Keeps the BestEffort pod running
+- Result: Violates Kubernetes QoS semantics
+
+Expected Behavior (WITH QoS support):
+- Plugin evicts the BestEffort pod first
+- Keeps both Guaranteed pods
+- Result: Respects QoS hierarchy
+```
+
+**Metric Impact**: Without QoS support, your "pods placed" metric could be high, but you're placing them by violating QoS guarantees.
+
+---
+
+### Testing Gaps Without Affinity Support
+
+#### What You're Missing
+
+1. **Compliance Violations**
+   - **Problem**: Plugin ignores required affinity rules
+   - **Impact**: Pods may be scheduled on nodes they should never run on
+   - **Test Limitation**: Cannot validate compliance with security/regulatory requirements
+   - **Real-world Consequence**: PCI-DSS workloads scheduled on non-compliant nodes; data residency violations
+
+2. **High Availability Failures**
+   - **Problem**: Pod anti-affinity is not enforced
+   - **Impact**: All replicas of a service may be co-located on the same node/zone
+   - **Test Limitation**: Cannot test fault tolerance of your scheduling decisions
+   - **Real-world Consequence**: Single point of failure; entire service down when one node fails
+
+3. **Co-location Optimization Ignored**
+   - **Problem**: Pod affinity for data locality is not considered
+   - **Impact**: Database pods not co-located with their application pods
+   - **Test Limitation**: Cannot measure latency improvements from affinity
+   - **Real-world Consequence**: Increased cross-node network traffic; higher latencies
+
+4. **Invalid Solutions**
+   - **Problem**: Solver may produce "optimal" solutions that violate required affinity
+   - **Impact**: Pods fail to start due to admission webhook rejecting placement
+   - **Test Limitation**: Plugin appears to work but pods never actually run
+   - **Real-world Consequence**: Plan execution fails; cluster in inconsistent state
+
+#### Test Results That Would Be Invalid
+
+- **Placement optimization tests**: High placement counts are meaningless if pods are placed on non-compliant nodes and get rejected
+- **HA tests**: Cannot validate that your plugin maintains fault tolerance
+- **Performance tests**: Cannot measure impact of data locality on application performance
+
+#### Example Test Scenario That Fails
+
+```yaml
+# Scenario: Web app with required anti-affinity (HA)
+# 3 replicas must be spread across zones
+
+Current Behavior (WITHOUT affinity support):
+- Plugin places all 3 replicas on same zone (e.g., all in us-west-1a)
+- Optimization metric: "3/3 pods placed" ✓
+- Reality: Single zone failure takes down entire service ✗
+
+Expected Behavior (WITH affinity support):
+- Plugin places 1 replica per zone (us-west-1a, us-west-1b, us-west-1c)
+- Optimization metric: "3/3 pods placed" ✓
+- Reality: Service survives zone failures ✓
+```
+
+**Metric Impact**: Your "pods placed" and "minimized disruption" metrics may look good, but you've created a single point of failure.
+
+---
+
+### Testing Gaps Without Quota Support
+
+#### What You're Missing
+
+1. **Multi-tenancy Violations**
+   - **Problem**: Plugin doesn't respect namespace resource quotas
+   - **Impact**: One namespace can consume all cluster resources
+   - **Test Limitation**: Cannot validate fair resource allocation across namespaces
+   - **Real-world Consequence**: Resource starvation for other tenants; quota violations cause pod rejections
+
+2. **Plan Execution Failures**
+   - **Problem**: Solver proposes placements that exceed namespace quotas
+   - **Impact**: Kubernetes API rejects pod creation/updates
+   - **Test Limitation**: Plugin reports "success" but pods never actually run
+   - **Real-world Consequence**: Optimization plan is partially or completely unexecutable
+
+3. **Cost Control Failures**
+   - **Problem**: Cannot enforce resource budgets per team/project
+   - **Impact**: Cloud costs exceed budget due to unconstrained resource usage
+   - **Test Limitation**: Cannot test cost optimization scenarios
+   - **Real-world Consequence**: Budget overruns; unexpected cloud bills
+
+#### Test Results That Would Be Invalid
+
+- **Resource utilization tests**: May show "100% utilization" but violate quota limits
+- **Multi-tenant tests**: Cannot validate fair sharing between namespaces
+- **Plan success rate**: Solver claims success but placements get rejected by quota admission
+
+#### Example Test Scenario That Fails
+
+```yaml
+# Scenario: Namespace "team-a" has quota: 10 CPU cores
+# Currently using: 8 cores (running pods)
+# New pods need: 5 cores (would total 13 cores)
+
+Current Behavior (WITHOUT quota support):
+- Plugin places all new pods in team-a namespace
+- Solver reports: "5/5 pods placed" ✓
+- Reality: API rejects pod creation (quota exceeded) ✗
+- Actual result: 0/5 new pods running
+
+Expected Behavior (WITH quota support):
+- Plugin recognizes quota limit (2 cores remaining)
+- Solver places pods that fit within quota or evicts lower-priority pods
+- Reality: Placements succeed ✓
+```
+
+**Metric Impact**: Your solver might report "optimal" solutions, but if they violate quotas, execution fails completely.
+
+---
+
+### Testing Gaps Without LimitRange Support
+
+#### What You're Missing
+
+1. **Inconsistent Pod Specs**
+   - **Problem**: Pods without requests/limits don't get defaults applied
+   - **Impact**: Pod behavior differs between plugin and actual cluster
+   - **Test Limitation**: Test environment behaves differently than production
+   - **Real-world Consequence**: Pods scheduled in testing but rejected in production
+
+2. **Invalid Pod Configurations**
+   - **Problem**: Pods violating LimitRange min/max are not detected
+   - **Impact**: Solver optimizes for pods that will be rejected by admission
+   - **Test Limitation**: Cannot test with realistic pod specifications
+   - **Real-world Consequence**: Plan execution fails due to admission rejection
+
+3. **Resource Request Inaccuracy**
+   - **Problem**: Solver uses incomplete resource values
+   - **Impact**: Bin-packing calculations are incorrect
+   - **Test Limitation**: Resource utilization metrics are unreliable
+   - **Real-world Consequence**: Over-subscription or under-utilization
+
+#### Test Results That Would Be Invalid
+
+- **Scheduling tests with pods lacking resources**: Results don't reflect real cluster behavior
+- **Resource packing tests**: Incorrect if pods would have different requests/limits in production
+- **Plan validation tests**: Cannot detect pods that would fail admission
+
+#### Example Test Scenario That Fails
+
+```yaml
+# Scenario: Namespace has LimitRange with default: 500m CPU
+# Pod submitted without CPU request
+
+Current Behavior (WITHOUT LimitRange support):
+- Plugin treats pod as having 0 CPU request (BestEffort)
+- Solver places pod easily (no resource constraint)
+- Test result: "Pod placed successfully" ✓
+
+Expected Behavior (WITH LimitRange support):
+- Plugin applies default: 500m CPU request
+- Solver must find node with 500m available
+- Test result: May require eviction or different node
+```
+
+**Metric Impact**: Your placement success rate may be artificially high because you're not accounting for real resource requirements.
+
+---
+
+### Combined Impact on Plugin Evaluation
+
+#### Overall Test Quality Issues
+
+Without proper support for these features, your plugin evaluation suffers from:
+
+1. **False Positives**: Tests pass but wouldn't work in production
+2. **Misleading Metrics**: High placement rates that violate constraints
+3. **Incomplete Comparison**: Cannot fairly compare with default scheduler
+4. **Limited Applicability**: Cannot test with realistic production workloads
+
+#### Key Metrics That Become Unreliable
+
+| Metric | Impact Without Feature Support |
+|--------|--------------------------------|
+| **Pods Placed** | May include pods that violate constraints or would be rejected |
+| **Evictions** | Count is meaningless if wrong pods are evicted (QoS) |
+| **Disruption** | Metric doesn't account for HA violations (affinity) |
+| **Resource Utilization** | Inaccurate with mixed QoS or missing LimitRange defaults |
+| **Plan Success Rate** | Artificially high if plans violate quotas/affinity |
+| **Solver Performance** | Cannot test on realistic constraint complexity |
+
+#### Production Readiness Assessment
+
+Without these features, you **cannot claim** that your plugin:
+- ✗ Respects Kubernetes scheduling semantics (QoS, affinity)
+- ✗ Works in multi-tenant environments (quotas)
+- ✗ Maintains high availability (anti-affinity)
+- ✗ Complies with security/regulatory requirements (affinity)
+- ✗ Produces executable plans (quota/affinity validation)
+
+#### Recommended Testing Approach
+
+Until these features are implemented:
+
+1. **Clearly Document Limitations** in test reports:
+   ```
+   ⚠️ Note: Tests use homogeneous Guaranteed pods only.
+   ⚠️ Real-world results may differ with mixed QoS classes.
+   ```
+
+2. **Constrain Test Scenarios** to avoid unsupported features:
+   - Only test with Guaranteed pods (uniform QoS)
+   - Avoid pods with affinity/anti-affinity rules
+   - Single namespace tests only (no quota conflicts)
+   - Always specify explicit resource requests/limits
+
+3. **Separate Evaluation Metrics**:
+   - Mark tests as "Simplified Environment" vs "Production-Ready"
+   - Report solver performance separately from constraint compliance
+
+4. **Comparison Fairness**:
+   - When comparing with default scheduler, disable its affinity/quota enforcement for fair comparison
+   - Or acknowledge that comparison is not apples-to-apples
+
+#### Example: How to Present Limited Test Results
+
+```markdown
+## Plugin Evaluation Results
+
+### Test Environment
+- **Workload Type**: Uniform QoS (all Guaranteed pods)
+- **Affinity**: Not tested (feature not implemented)
+- **Quotas**: Not tested (feature not implemented)
+- **Constraints**: CPU/Memory capacity only
+
+### Results (with caveats)
+- Pods Placed: 95% (in simplified environment)
+- Evictions: 15 pods (note: QoS priority not considered)
+- Performance: 2.3s solver time for 100 pods
+
+### Known Limitations
+⚠️ These results do NOT validate:
+- Correct eviction order for mixed QoS workloads
+- High availability (anti-affinity) compliance
+- Multi-tenant quota enforcement
+- Production constraint complexity
+
+### Next Steps
+To make plugin production-ready, implement:
+1. QoS class support (est. 1-2 weeks)
+2. Quota enforcement (est. 1-2 weeks)
+3. Affinity constraints (est. 3-4 weeks)
+```
+
+This transparency helps stakeholders understand that strong performance in simplified tests doesn't guarantee production readiness.
 
 ---
 
