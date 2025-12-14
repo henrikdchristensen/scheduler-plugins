@@ -17,8 +17,6 @@ var (
 	ErrInformersCanceledOrTimedOut         = errors.New(InfoInformersCanceledOrTimedOut)
 	ErrWaitForUsableNodeCanceledOrTimedOut = errors.New(InfoWaitForUsableNodeCanceledOrTimedOut)
 	ErrPlanNotApplicable                   = errors.New(InfoPlanNotApplicable)
-	ErrSolverSolutionNotUsable             = errors.New(InfoSolverSolutionNotUsable)
-	ErrSolverSolutionNotBetterThanBaseline = errors.New(InfoSolverSolutionNotBetterThanBaseline)
 	ErrFailedToListNodes                   = errors.New(InfoFailedToListNodes)
 	ErrFailedToListPods                    = errors.New(InfoFailedToListPods)
 	ErrFailedToBuildSolverInput            = errors.New(InfoFailedToBuildSolverInput)

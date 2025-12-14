@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// OptimizeLoopConfig holds configuration for an optimization loop.
 type OptimizeLoopConfig struct {
 	Label          string        // log label
 	Interval       time.Duration // base tick interval

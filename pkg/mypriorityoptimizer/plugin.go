@@ -13,24 +13,22 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
-func (pl *SharedState) Name() string { return Name }
-
 // HandleDeps is a minimal subset of framework.Handle that New/newFromHandle
-// actually depend on. This lets tests provide a tiny fake without
-// implementing the whole framework.Handle interface.
+// actually depend on. This lets tests provide a tiny fake without implementing
+// the whole framework.Handle interface.
 type HandleDeps interface {
 	KubeConfig() *rest.Config
 	SharedInformerFactory() informers.SharedInformerFactory
 }
 
-// pluginReadinessStarter is a hook so tests can avoid starting goroutines
-// and can assert that readiness wiring was invoked.
+// pluginReadinessStarter is a hook so tests can avoid starting goroutines and
+// can assert that readiness wiring was invoked.
 var pluginReadinessStarter = func(pl *SharedState, ctx context.Context, infs ...cache.SharedIndexInformer) {
 	go pl.pluginReadiness(ctx, infs...)
 }
 
-// httpServerStarter is a hook so tests can avoid starting the HTTP server
-// and can assert that it would have been started.
+// httpServerStarter is a hook so tests can avoid starting the HTTP server and
+// can assert that it would have been started.
 var httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
 	go pl.startHttpServer(ctx, addr)
 }
@@ -40,6 +38,17 @@ var httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) 
 var solverEnabled = func(pl *SharedState) bool {
 	return pl.isAnySolverEnabled()
 }
+
+// -------------------------
+// Name
+// -------------------------
+
+// Name returns name of the plugin. It is used in logs and configurations.
+func (pl *SharedState) Name() string { return Name }
+
+// -------------------------
+// newFromHandle
+// -------------------------
 
 // newFromHandle contains the real logic of New, parameterized over:
 //   - clientFn: how to build a client from a kubeconfig
@@ -104,8 +113,12 @@ func newFromHandle(
 	return pl, nil
 }
 
-// New is the scheduler's plugin factory. It delegates to newFromHandle with
-// the real kubernetes.NewForConfig and the full framework.Handle.
+// -------------------------
+// New
+// -------------------------
+
+// New is the scheduler's plugin factory. It delegates to newFromHandle with the
+// real kubernetes.NewForConfig and the full framework.Handle.
 func New(ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
 	clientFn := func(c *rest.Config) (kubernetes.Interface, error) {
 		return kubernetes.NewForConfig(c)

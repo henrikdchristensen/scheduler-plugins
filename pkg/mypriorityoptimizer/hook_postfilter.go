@@ -11,14 +11,20 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
-var postFilterSleep = time.Sleep
+// -------------------------
+// Test Hooks
+// -------------------------
 
-// injectable (test seams)
+var postFilterSleep = time.Sleep
 var postFilterPerPodEnabled = isPerPodMode
 var postFilterRunOptimization = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
 	plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)
 	return plan, err
 }
+
+// -------------------------
+// PostFilter
+// -------------------------
 
 // PostFilter is called if no nodes are found to run the Pod in the filtering phase.
 // CHECKED

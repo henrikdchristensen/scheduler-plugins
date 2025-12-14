@@ -12,10 +12,10 @@ import (
 )
 
 // -------------------------
-// Helpers
+// Test Helpers
 // -------------------------
 
-func ai32(v int32) *atomic.Int32 {
+func atomicInt(v int32) *atomic.Int32 {
 	a := new(atomic.Int32)
 	a.Store(v)
 	return a
@@ -118,7 +118,7 @@ func TestReserve(t *testing.T) {
 					ID:              "ap1",
 					PlacementByName: map[string]string{},
 					WorkloadQuotas: WorkloadQuotasAtomics{
-						wkKey: {"node2": ai32(1)},
+						wkKey: {"node2": atomicInt(1)},
 					},
 				})
 				return pl, pod, framework.NewCycleState(), "node1"
@@ -141,7 +141,7 @@ func TestReserve(t *testing.T) {
 					ID:              "ap1",
 					PlacementByName: map[string]string{},
 					WorkloadQuotas: WorkloadQuotasAtomics{
-						wkKey: {"node1": ai32(0)},
+						wkKey: {"node1": atomicInt(0)},
 					},
 				})
 				return pl, pod, framework.NewCycleState(), "node1"
@@ -159,7 +159,7 @@ func TestReserve(t *testing.T) {
 				}
 				wkKey := wk.String()
 
-				c := ai32(1)
+				c := atomicInt(1)
 
 				pl := &SharedState{}
 				pl.ActivePlan.Store(&ActivePlan{
@@ -278,7 +278,7 @@ func TestUnreserve(t *testing.T) {
 			name:       "active plan present returns quota",
 			cycleWrite: &rsReservationState{key: reservationKey{rsKey: "rs:default/rs1", nodeName: "node1"}},
 			activePlan: func() *ActivePlan {
-				c := ai32(0)
+				c := atomicInt(0)
 				return &ActivePlan{
 					ID: "ap1",
 					WorkloadQuotas: WorkloadQuotasAtomics{
@@ -299,7 +299,7 @@ func TestUnreserve(t *testing.T) {
 			activePlan: func() *ActivePlan {
 				return &ActivePlan{
 					ID:              "ap1",
-					WorkloadQuotas:  WorkloadQuotasAtomics{"other": {"node2": ai32(5)}},
+					WorkloadQuotas:  WorkloadQuotasAtomics{"other": {"node2": atomicInt(5)}},
 					PlacementByName: map[string]string{},
 				}
 			}(),

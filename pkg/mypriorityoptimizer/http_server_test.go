@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +19,7 @@ import (
 // Test Helpers
 // -------------------------
 
-func call(t *testing.T, h func(http.ResponseWriter, *http.Request), method, path string) *httptest.ResponseRecorder {
+func httpCall(t *testing.T, h http.HandlerFunc, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, nil)
@@ -25,27 +27,27 @@ func call(t *testing.T, h func(http.ResponseWriter, *http.Request), method, path
 	return rr
 }
 
-func mustCode(t *testing.T, rr *httptest.ResponseRecorder, want int) {
+func mustStatus(t *testing.T, rr *httptest.ResponseRecorder, want int) {
 	t.Helper()
 	if rr.Code != want {
-		t.Fatalf("status = %d, want %d (body=%q)", rr.Code, want, rr.Body.String())
+		t.Fatalf("status=%d want=%d body=%q", rr.Code, want, rr.Body.String())
 	}
 }
 
-func mustBody(t *testing.T, rr *httptest.ResponseRecorder, want string) {
+func mustJSON[T any](t *testing.T, rr *httptest.ResponseRecorder, wantStatus int) T {
 	t.Helper()
-	if got := rr.Body.String(); got != want {
-		t.Fatalf("body = %q, want %q", got, want)
-	}
-}
+	mustStatus(t, rr, wantStatus)
 
-func decodeHTTP(t *testing.T, rr *httptest.ResponseRecorder) HttpResponse {
-	t.Helper()
-	var resp HttpResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode JSON response: %v (body=%q)", err, rr.Body.String())
+	ct := rr.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Fatalf("Content-Type=%q want=%q body=%q", ct, "application/json", rr.Body.String())
 	}
-	return resp
+
+	var out T
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("invalid JSON: %v body=%q", err, rr.Body.String())
+	}
+	return out
 }
 
 func withRunOptFlow(t *testing.T, fn func(*SharedState, context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error), body func()) {
@@ -56,31 +58,61 @@ func withRunOptFlow(t *testing.T, fn func(*SharedState, context.Context) (*Plan,
 	body()
 }
 
+func reserveAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen :0: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+func waitHTTP(t *testing.T, url string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			return
+		}
+		lastErr = err
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server never became reachable at %s (last err: %v)", url, lastErr)
+}
+
 // -------------------------
 // /healthz
 // -------------------------
 
 func TestHTTP_Healthz(t *testing.T) {
 	tests := []struct {
-		name      string
-		ready     bool
-		wantCode  int
-		wantBody  string
-		checkBody bool
+		name     string
+		ready    bool
+		wantCode int
+		wantBody string
 	}{
-		{name: "warming", ready: false, wantCode: http.StatusServiceUnavailable},
-		{name: "ready", ready: true, wantCode: http.StatusOK, wantBody: "ok", checkBody: true},
+		{"warming", false, http.StatusServiceUnavailable, ""}, // body is http.Error text, not stable
+		{"ready", true, http.StatusOK, "ok"},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			pl := &SharedState{}
 			pl.PluginReady.Store(tt.ready)
 
-			rr := call(t, pl.httpHealthzHandler, http.MethodGet, "/healthz")
-			mustCode(t, rr, tt.wantCode)
-			if tt.checkBody {
-				mustBody(t, rr, tt.wantBody)
+			rr := httpCall(t, pl.httpHealthzHandler, http.MethodGet, "/healthz")
+			mustStatus(t, rr, tt.wantCode)
+			if tt.wantBody != "" && rr.Body.String() != tt.wantBody {
+				t.Fatalf("body=%q want=%q", rr.Body.String(), tt.wantBody)
 			}
 		})
 	}
@@ -96,26 +128,28 @@ func TestHTTP_Active(t *testing.T) {
 		method     string
 		active     bool
 		wantCode   int
-		wantJSON   bool
-		wantActive bool
+		wantActive *bool // nil => no JSON expected
 	}{
-		{name: "method not allowed", method: http.MethodPost, active: true, wantCode: http.StatusMethodNotAllowed},
-		{name: "ok", method: http.MethodGet, active: true, wantCode: http.StatusOK, wantJSON: true, wantActive: true},
+		{"method not allowed", http.MethodPost, true, http.StatusMethodNotAllowed, nil},
+		{"ok true", http.MethodGet, true, http.StatusOK, ptr(true)},
+		{"ok false", http.MethodGet, false, http.StatusOK, ptr(false)},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			pl := &SharedState{}
 			pl.ActivePlanInProgress.Store(tt.active)
 
-			rr := call(t, pl.httpActiveHandler, tt.method, "/active")
-			mustCode(t, rr, tt.wantCode)
+			rr := httpCall(t, pl.httpActiveHandler, tt.method, "/active")
+			if tt.wantActive == nil {
+				mustStatus(t, rr, tt.wantCode)
+				return
+			}
 
-			if tt.wantJSON {
-				resp := decodeHTTP(t, rr)
-				if resp.Active != tt.wantActive {
-					t.Fatalf("Active = %v, want %v", resp.Active, tt.wantActive)
-				}
+			resp := mustJSON[HttpResponse](t, rr, tt.wantCode)
+			if resp.Active != *tt.wantActive {
+				t.Fatalf("Active=%v want=%v", resp.Active, *tt.wantActive)
 			}
 		})
 	}
@@ -125,90 +159,141 @@ func TestHTTP_Active(t *testing.T) {
 // /solve
 // -------------------------
 
-func TestHTTP_Solve_MethodNotAllowed(t *testing.T) {
-	pl := &SharedState{}
-	rr := call(t, pl.httpSolveHandler, http.MethodGet, "/solve")
-	mustCode(t, rr, http.StatusMethodNotAllowed)
-}
-
-func TestHTTP_Solve_NotReady(t *testing.T) {
-	pl := &SharedState{}
-	pl.ActivePlanInProgress.Store(true) // ensure propagated
-	pl.PluginReady.Store(false)
-
-	rr := call(t, pl.httpSolveHandler, http.MethodPost, "/solve")
-	mustCode(t, rr, http.StatusPreconditionFailed)
-
-	resp := decodeHTTP(t, rr)
-	if resp.Status != "not-ready" {
-		t.Fatalf("Status = %q, want %q", resp.Status, "not-ready")
-	}
-	if !resp.Active {
-		t.Fatalf("Active = %v, want true", resp.Active)
-	}
-	// DurationMs can be 0 on fast machines, so only sanity check it exists.
-	if resp.DurationMs < 0 {
-		t.Fatalf("DurationMs = %d, want >= 0", resp.DurationMs)
-	}
-}
-
-func TestHTTP_Solve_Ready_StatusVariants(t *testing.T) {
-	// Two pending + one running => PendingBefore should be 2.
+func TestHTTP_Solve(t *testing.T) {
+	// Two pending + one running => PendingBefore should be 2
 	p1 := pod("ns", "p1")
 	p2 := pod("ns", "p2")
 	p3 := pod("ns", "p3", onNode("n1"))
-
-	store := map[string]map[string]*v1.Pod{
+	fpl := &fakePodLister{store: map[string]map[string]*v1.Pod{
 		"ns": {"p1": p1, "p2": p2, "p3": p3},
-	}
-	fpl := &fakePodLister{store: store}
+	}}
 
 	attempts := []SolverResult{
 		{Name: "solverA", Status: "FEASIBLE"},
 		{Name: "solverB", Status: "OPTIMAL"},
 	}
 
-	tests := []struct {
+	type tc struct {
 		name       string
-		err        error
+		method     string
+		ready      bool
+		active     bool
+		runErr     error
+		wantCode   int
 		wantStatus string
 		wantErrSet bool
-	}{
-		{name: "ok", err: nil, wantStatus: "ok", wantErrSet: false},
-		{name: "busy", err: ErrActiveInProgress, wantStatus: "busy", wantErrSet: true},
-		{name: "noop", err: ErrNoPendingPods, wantStatus: "noop", wantErrSet: true},
-		{name: "error", err: fmt.Errorf("boom"), wantStatus: "error", wantErrSet: true},
+	}
+
+	tests := []tc{
+		{
+			name:     "method not allowed",
+			method:   http.MethodGet,
+			ready:    true,
+			active:   true,
+			wantCode: http.StatusMethodNotAllowed,
+		},
+		{
+			name:       "not ready",
+			method:     http.MethodPost,
+			ready:      false,
+			active:     true, // should be reflected back
+			wantCode:   http.StatusPreconditionFailed,
+			wantStatus: "not-ready",
+		},
+		{
+			name:       "ok",
+			method:     http.MethodPost,
+			ready:      true,
+			active:     true,
+			runErr:     nil,
+			wantCode:   http.StatusOK,
+			wantStatus: "ok",
+			wantErrSet: false,
+		},
+		{
+			name:       "busy",
+			method:     http.MethodPost,
+			ready:      true,
+			active:     true,
+			runErr:     ErrActiveInProgress,
+			wantCode:   http.StatusOK,
+			wantStatus: "busy",
+			wantErrSet: true,
+		},
+		{
+			name:       "noop",
+			method:     http.MethodPost,
+			ready:      true,
+			active:     true,
+			runErr:     ErrNoPendingPods,
+			wantCode:   http.StatusOK,
+			wantStatus: "noop",
+			wantErrSet: true,
+		},
+		{
+			name:       "error",
+			method:     http.MethodPost,
+			ready:      true,
+			active:     true,
+			runErr:     fmt.Errorf("boom"),
+			wantCode:   http.StatusOK,
+			wantStatus: "error",
+			wantErrSet: true,
+		},
 	}
 
 	withPodLister(fpl, func() {
 		for _, tt := range tests {
+			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
 				pl := &SharedState{}
-				pl.PluginReady.Store(true)
-				pl.ActivePlanInProgress.Store(true)
+				pl.PluginReady.Store(tt.ready)
+				pl.ActivePlanInProgress.Store(tt.active)
+
+				// Ensure runOptFlow is never called on early exits.
+				if tt.method != http.MethodPost || !tt.ready {
+					withRunOptFlow(t, func(*SharedState, context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
+						t.Fatalf("runOptFlow must not be called for method=%s ready=%v", tt.method, tt.ready)
+						return nil, nil, "", nil, nil, nil
+					}, func() {
+						rr := httpCall(t, pl.httpSolveHandler, tt.method, "/solve")
+						mustStatus(t, rr, tt.wantCode)
+						if tt.wantStatus == "not-ready" {
+							resp := mustJSON[HttpResponse](t, rr, tt.wantCode)
+							if resp.Status != "not-ready" {
+								t.Fatalf("Status=%q want=%q", resp.Status, "not-ready")
+							}
+							if resp.Active != tt.active {
+								t.Fatalf("Active=%v want=%v", resp.Active, tt.active)
+							}
+							if resp.DurationMs < 0 {
+								t.Fatalf("DurationMs=%d want>=0", resp.DurationMs)
+							}
+						}
+					})
+					return
+				}
 
 				withRunOptFlow(t, func(*SharedState, context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
-					return nil, &SolverScore{Evicted: 1}, "solverB", nil, attempts, tt.err
+					return nil, &SolverScore{Evicted: 1}, "solverB", nil, attempts, tt.runErr
 				}, func() {
-					rr := call(t, pl.httpSolveHandler, http.MethodPost, "/solve")
-					mustCode(t, rr, http.StatusOK)
-
-					resp := decodeHTTP(t, rr)
+					rr := httpCall(t, pl.httpSolveHandler, tt.method, "/solve")
+					resp := mustJSON[HttpResponse](t, rr, tt.wantCode)
 
 					if resp.Status != tt.wantStatus {
-						t.Fatalf("Status = %q, want %q", resp.Status, tt.wantStatus)
+						t.Fatalf("Status=%q want=%q", resp.Status, tt.wantStatus)
 					}
-					if !resp.Active {
-						t.Fatalf("Active = false, want true")
+					if resp.Active != tt.active {
+						t.Fatalf("Active=%v want=%v", resp.Active, tt.active)
 					}
 					if resp.PendingBefore != 2 {
-						t.Fatalf("PendingBefore = %d, want 2", resp.PendingBefore)
+						t.Fatalf("PendingBefore=%d want=2", resp.PendingBefore)
 					}
 					if tt.wantErrSet && resp.Error == "" {
-						t.Fatalf("expected Error to be populated for err=%v", tt.err)
+						t.Fatalf("expected Error to be populated (err=%v)", tt.runErr)
 					}
 					if !tt.wantErrSet && resp.Error != "" {
-						t.Fatalf("expected Error empty when err=nil, got %q", resp.Error)
+						t.Fatalf("expected Error empty, got %q", resp.Error)
 					}
 				})
 			})
@@ -222,17 +307,20 @@ func TestHTTP_Solve_Ready_StatusVariants(t *testing.T) {
 
 func TestStartHttpServer_ShutsDownOnContextCancel(t *testing.T) {
 	pl := &SharedState{}
+	pl.PluginReady.Store(true) // makes /healthz return 200 once reachable
 
+	addr := reserveAddr(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
 	go func() {
-		pl.startHttpServer(ctx, "127.0.0.1:0") // OS picks port
+		pl.startHttpServer(ctx, addr)
 		close(done)
 	}()
 
-	// Give ListenAndServe a moment to start.
-	time.Sleep(50 * time.Millisecond)
+	// Wait until the server is reachable (no sleeps/guesses).
+	waitHTTP(t, "http://"+addr+"/healthz", 2*time.Second)
+
 	cancel()
 
 	select {
@@ -247,7 +335,7 @@ func TestStartHttpServer_ListenAndServeError_Returns(t *testing.T) {
 	pl := &SharedState{}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // ensure shutdown goroutine doesn't leak
+	cancel() // avoid leaking shutdown goroutine
 
 	// Invalid port -> ListenAndServe returns immediately with an error != http.ErrServerClosed.
 	pl.startHttpServer(ctx, "127.0.0.1:-1")
@@ -257,7 +345,7 @@ func TestStartHttpServer_ListenAndServeError_Returns(t *testing.T) {
 // writeHttpJson
 // -------------------------
 
-func TestWriteHttpJson_SetsHeaderStatusAndEncodesBody(t *testing.T) {
+func TestWriteHttpJson(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	type payload struct {
@@ -268,18 +356,21 @@ func TestWriteHttpJson_SetsHeaderStatusAndEncodesBody(t *testing.T) {
 
 	writeHttpJson(rr, http.StatusTeapot, want)
 
-	if rr.Code != http.StatusTeapot {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusTeapot)
-	}
+	mustStatus(t, rr, http.StatusTeapot)
 	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
-		t.Fatalf("Content-Type = %q, want %q", ct, "application/json")
+		t.Fatalf("Content-Type=%q want=%q", ct, "application/json")
 	}
 
 	var got payload
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response body is not valid JSON: %v (body=%q)", err, rr.Body.String())
+		t.Fatalf("invalid JSON: %v body=%q", err, rr.Body.String())
 	}
 	if got != want {
-		t.Fatalf("decoded payload = %#v, want %#v", got, want)
+		t.Fatalf("decoded=%#v want=%#v", got, want)
+	}
+
+	// json.Encoder writes a trailing newline; assert it so this line stays covered.
+	if !strings.HasSuffix(rr.Body.String(), "\n") {
+		t.Fatalf("expected trailing newline from Encoder, got %q", rr.Body.String())
 	}
 }

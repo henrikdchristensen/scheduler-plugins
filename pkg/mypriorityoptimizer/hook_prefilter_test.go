@@ -11,6 +11,10 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
+// -------------------------
+// Test Helpers
+// -------------------------
+
 func mustNodeNames(t *testing.T, res *framework.PreFilterResult, want []string) {
 	t.Helper()
 	if len(want) == 0 {
@@ -33,12 +37,20 @@ func mustNodeNames(t *testing.T, res *framework.PreFilterResult, want []string) 
 	}
 }
 
+// -------------------------
+// PreFilter Extensions
+// -------------------------
+
 func TestPreFilterExtensions_IsNil(t *testing.T) {
 	pl := &SharedState{}
 	if ext := pl.PreFilterExtensions(); ext != nil {
 		t.Fatalf("PreFilterExtensions() = %#v, want nil", ext)
 	}
 }
+
+// -------------------------
+// PreFilter
+// -------------------------
 
 func TestPreFilter(t *testing.T) {
 	type tc struct {

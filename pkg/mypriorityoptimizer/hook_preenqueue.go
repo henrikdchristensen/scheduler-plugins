@@ -42,7 +42,7 @@ func (pl *SharedState) PreEnqueue(ctx context.Context, pending *v1.Pod) *fwk.Sta
 			return fwk.NewStatus(fwk.Pending, msg(stage, InfoActivePlanInProgress+"; "+InfoBlockPod))
 		}
 
-		// Plan exists and pod IS allowed by the plan -> let it through.
+		// Plan exists and pod is allowed by the plan -> let it through.
 		klog.V(MyV).InfoS(
 			msg(stage, "allowed by active plan; pass-through"),
 			"pod", klog.KObj(pending),

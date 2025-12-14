@@ -19,7 +19,6 @@ import (
 // -------------------------
 
 // isAnySolverEnabled checks if any solver is enabled.
-// CHECKED
 func (pl *SharedState) isAnySolverEnabled() bool {
 	return SolverPythonEnabled // add more using ORs as needed
 }
@@ -30,7 +29,6 @@ func (pl *SharedState) isAnySolverEnabled() bool {
 
 // buildSolverInput builds the solver input from live nodes/pods (and optional
 // preemptor)
-// CHECKED
 func (pl *SharedState) buildSolverInput(
 	nodes []*v1.Node,
 	pods []*v1.Pod,
@@ -97,7 +95,6 @@ func (pl *SharedState) buildSolverInput(
 // -------------------------
 
 // buildBaselineScore computes the baseline score from the solver input.
-// CHECKED
 func buildBaselineScore(pods []*v1.Pod) SolverScore {
 	placedByPri := map[string]int{}
 	for _, p := range pods {
@@ -120,7 +117,6 @@ func buildBaselineScore(pods []*v1.Pod) SolverScore {
 
 // solverConfigArgs builds a list of key-value pairs representing the active
 // solver configuration.
-// CHECKED
 func solverConfigArgs() []any {
 	args := make([]any, 0, 10)
 	if SolverPythonEnabled {
@@ -149,7 +145,6 @@ func solverConfigArgs() []any {
 //
 // Returns 1 if suggested is better, -1 if worse, 0 if equal.
 // Returns as soon as a difference is found.
-// CHECKED
 func isSolutionBetter(old, new *SolverScore) int {
 	// 1) Placed-by-priority (more is better)
 	if cmp := cmpLexi(new.PlacedByPriority, old.PlacedByPriority); cmp != 0 {
@@ -186,7 +181,6 @@ func isSolutionBetter(old, new *SolverScore) int {
 // (there can be multiple optimal solutions and the solver is
 // non-deterministic). FEASIBLE means the solution is not optimal but still
 // meets all constraints.
-// CHECKED
 func isSolutionUsable(status string) bool {
 	return status != "" && (status == "OPTIMAL" || status == "FEASIBLE")
 }
@@ -198,7 +192,6 @@ func isSolutionUsable(status string) bool {
 // isSolutionApplicable checks whether a SolverOutput can still be safely
 // applied on the current cluster state. It allows unrelated drift and only
 // insists that the concrete preconditions for the plan still hold.
-// CHECKED
 func (pl *SharedState) isSolutionApplicable(
 	out *SolverOutput,
 	nodes []*v1.Node,
@@ -313,7 +306,6 @@ func (pl *SharedState) isSolutionApplicable(
 // logLeaderboard prints a compact solver leaderboard relative to baseline.
 // It groups attempts as better/equal/worse vs baseline and tags adjacent ties.
 // If best is nil, it logs only the baseline row.
-// CHECKED
 func logLeaderboard(
 	label string,
 	attempts []SolverResult,
@@ -409,8 +401,6 @@ func logLeaderboard(
 //   - placed_by_priority: number of pods that were placed for each priority
 //   - evicted:            number of pods that were evicted
 //   - moved:              number of pods that were moved to a different node
-//
-// CHECKED
 func scoreSolution(in SolverInput, out *SolverOutput) SolverScore {
 	if out == nil {
 		return SolverScore{}
@@ -486,7 +476,6 @@ func scoreSolution(in SolverInput, out *SolverOutput) SolverScore {
 // -------------------------
 
 // toSolverPod converts a Pod to a SolverPod.
-// CHECKED
 func toSolverPod(p *v1.Pod, node string) SolverPod {
 	return SolverPod{
 		UID:         p.UID,
@@ -504,7 +493,6 @@ func toSolverPod(p *v1.Pod, node string) SolverPod {
 // -------------------------
 
 // addUniqueSolverPod adds a SolverPod to the SolverInput if not already present.
-// CHECKED
 func addUniqueSolverPod(in *SolverInput, seen map[types.UID]bool, p *v1.Pod, node string) {
 	sp := toSolverPod(p, node)
 	if isPodProtected(p) {
@@ -522,7 +510,6 @@ func addUniqueSolverPod(in *SolverInput, seen map[types.UID]bool, p *v1.Pod, nod
 
 // exportSolverStatsToConfigMap exports a compact run record to the stats
 // ConfigMap. Only runs when `hadFeasible` is true.
-// CHECKED
 func (pl *SharedState) exportSolverStatsToConfigMap(
 	ctx context.Context,
 	strategy string,
@@ -564,7 +551,6 @@ var solverStatsConfigMapNsListerFor = func(pl *SharedState) corev1listers.Config
 }
 
 // appendSolverStatsCM appends an entry to the solver stats ConfigMap.
-// CHECKED
 func (pl *SharedState) appendSolverStatsCM(ctx context.Context, entry ExportedSolverStats) error {
 	// Allow unit tests to intercept ConfigMap writes and avoid real K8s clients.
 	if appendSolverStatsCMHook != nil {

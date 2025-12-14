@@ -3,6 +3,10 @@ package mypriorityoptimizer
 
 import "testing"
 
+// -------------------------
+// msg
+// -------------------------
+
 func TestMsg(t *testing.T) {
 	tests := []struct {
 		name      string

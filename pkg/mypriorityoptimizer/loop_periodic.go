@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// -------------------------
+// loopPeriodic
+// -------------------------
+
+// loopPeriodic runs optimization periodically at fixed intervals.
 func (pl *SharedState) loopPeriodic(ctx context.Context) {
 	if OptimizePeriodicInterval <= 1 {
 		OptimizePeriodicInterval = 2 * time.Second

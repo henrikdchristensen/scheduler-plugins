@@ -71,6 +71,10 @@ func (pl *SharedState) PreFilter(ctx context.Context, st fwk.CycleState, pending
 	}
 }
 
+// -------------------------
+// PreFilter Extensions
+// -------------------------
+
 // PreFilterExtensions returns nil as we don't implement PreFilterExtensions.
 // CHECKED
 func (pl *SharedState) PreFilterExtensions() framework.PreFilterExtensions {
