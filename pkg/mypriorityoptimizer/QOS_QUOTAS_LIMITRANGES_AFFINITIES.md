@@ -1468,12 +1468,12 @@ Without proper support for these features, your plugin evaluation suffers from:
 
 | Metric | Impact Without Feature Support |
 |--------|--------------------------------|
-| **Pods Placed** | May include pods that violate constraints or would be rejected |
-| **Evictions** | Count is meaningless if wrong pods are evicted (QoS) |
-| **Disruption** | Metric doesn't account for HA violations (affinity) |
-| **Resource Utilization** | Inaccurate with mixed QoS or missing LimitRange defaults |
-| **Plan Success Rate** | Artificially high if plans violate quotas/affinity |
-| **Solver Performance** | Cannot test on realistic constraint complexity |
+| **Pods Placed** | May include pods that violate constraints or would be rejected (e.g., pods violating required affinity, exceeding quotas) |
+| **Evictions** | Count is meaningless if wrong pods are evicted (e.g., Guaranteed before BestEffort) |
+| **Disruption** | Metric doesn't account for HA violations (e.g., co-locating all replicas on same node/zone) |
+| **Resource Utilization** | Inaccurate with mixed QoS (BestEffort shows 0 requests) or missing LimitRange defaults |
+| **Plan Success Rate** | Artificially high if plans violate quotas/affinity and fail during execution |
+| **Solver Performance** | Cannot test on realistic constraint complexity (affinity rules, quota checks) |
 
 #### Production Readiness Assessment
 
@@ -1515,8 +1515,8 @@ Until these features are implemented:
 
 ### Test Environment
 - **Workload Type**: Uniform QoS (all Guaranteed pods)
-- **Affinity**: Not tested (feature not implemented)
-- **Quotas**: Not tested (feature not implemented)
+- **Affinity**: Not tested (not implemented)
+- **Quotas**: Not tested (not implemented)
 - **Constraints**: CPU/Memory capacity only
 
 ### Results (with caveats)
