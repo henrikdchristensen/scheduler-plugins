@@ -1,5 +1,7 @@
 # MyPriorityOptimizer Modes Documentation
 
+**NOTE:** This document describes the implementation in the **`opt-prio-refactor`** branch, which includes significant refactoring improvements over the base implementation. All code references, function names, and line numbers refer to files in that branch.
+
 This document provides a detailed verification and description of the optimization modes and concurrency mechanisms in the MyPriorityOptimizer scheduler plugin, based on the `opt-prio-refactor` branch implementation.
 
 ## Table of Contents
