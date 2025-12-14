@@ -26,12 +26,6 @@ func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
 	t.Cleanup(func() { readAllStdout = orig })
 }
 
-// withStreamSolverStderr temporarily replaces streamSolverStderrFn for the duration of the test.
-func withStreamSolverStderr(t *testing.T, f func(r io.Reader) error) {
-	t.Helper()
-	withVar(t, &streamSolverStderrFn, f)
-}
-
 // -------------------------
 // runSolverExternal
 // -------------------------
