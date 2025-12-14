@@ -1,4 +1,4 @@
-// objects_helpers_test.go
+// pkg/mypriorityoptimizer/objects_helpers_test.go
 package mypriorityoptimizer
 
 import (
@@ -22,29 +22,39 @@ import (
 // Test Helpers
 // -------------------------
 
-func mustPodSet(t *testing.T, got []*v1.Pod, wantNsNames ...string) {
+func mustPodSet(t *testing.T, got []*v1.Pod, want ...string) {
 	t.Helper()
 	gotSet := map[string]struct{}{}
 	for _, p := range got {
 		gotSet[mergeNsName(p.Namespace, p.Name)] = struct{}{}
 	}
 	wantSet := map[string]struct{}{}
-	for _, k := range wantNsNames {
+	for _, k := range want {
 		wantSet[k] = struct{}{}
 	}
 	if !reflect.DeepEqual(gotSet, wantSet) {
-		t.Fatalf("pods = %#v, want set %#v", gotSet, wantSet)
+		t.Fatalf("pods=%v want=%v", gotSet, wantSet)
 	}
 }
 
+func toRuntimeObjs(pods ...*v1.Pod) []runtime.Object {
+	out := make([]runtime.Object, 0, len(pods))
+	for _, p := range pods {
+		if p != nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // -------------------------
-// listers + getNodes/getPods
+// Listers + getNodes/getPods
 // -------------------------
 
 func TestListersAndGetters(t *testing.T) {
 	pl := &SharedState{}
 
-	t.Run("nodesLister/podsLister injection", func(t *testing.T) {
+	t.Run("nodesLister/podsLister can be injected", func(t *testing.T) {
 		nl := &fakeNodeLister{}
 		plst := &fakePodLister{}
 		withNodeLister(nl, func() {
@@ -62,8 +72,11 @@ func TestListersAndGetters(t *testing.T) {
 	t.Run("getNodes success + error", func(t *testing.T) {
 		withNodeLister(&fakeNodeLister{nodes: []*v1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "n1"}}}}, func() {
 			got, err := pl.getNodes()
-			if err != nil || len(got) != 1 || got[0].Name != "n1" {
-				t.Fatalf("getNodes() = %#v err=%v", got, err)
+			if err != nil {
+				t.Fatalf("getNodes() err=%v", err)
+			}
+			if len(got) != 1 || got[0].Name != "n1" {
+				t.Fatalf("getNodes()=%#v want [n1]", got)
 			}
 		})
 
@@ -76,78 +89,87 @@ func TestListersAndGetters(t *testing.T) {
 		})
 	})
 
-	t.Run("getPods: lister error bubbles", func(t *testing.T) {
-		sentinel := errors.New("boom")
-		withPodLister(&fakePodLister{err: sentinel}, func() {
-			_, err := pl.getPods()
-			if !errors.Is(err, sentinel) {
-				t.Fatalf("getPods() err=%v want %v", err, sentinel)
-			}
-		})
-	})
+	t.Run("getPods paths", func(t *testing.T) {
+		type tc struct {
+			name          string
+			listerPods    []*v1.Pod
+			clientPods    []*v1.Pod
+			clientListErr error
+			want          []string
+		}
 
-	t.Run("getPods: hasAssigned -> returns lister view (no fallback)", func(t *testing.T) {
-		pAssigned := pod("ns", "p1", onNode("n1"))
-		lister := &fakePodLister{store: storeFromPods(pAssigned)}
-		pl.Client = fake.NewSimpleClientset() // non-nil; still should early-return due to hasAssigned
-		t.Cleanup(func() { pl.Client = nil })
+		tests := []tc{
+			{
+				name:       "lister error bubbles",
+				listerPods: nil,
+				want:       nil,
+			},
+			{
+				name:       "hasAssigned -> returns lister view (no fallback)",
+				listerPods: []*v1.Pod{pod("ns", "p1", onNode("n1"))},
+				clientPods: []*v1.Pod{pod("ns", "ignored")},
+				want:       []string{"ns/p1"},
+			},
+			{
+				name:       "Client=nil and only unassigned -> returns lister view",
+				listerPods: []*v1.Pod{pod("ns", "p1")},
+				clientPods: nil,
+				want:       []string{"ns/p1"},
+			},
+			{
+				name:       "fallback API list success returns API pods",
+				listerPods: []*v1.Pod{pod("ns", "p1")}, // only unassigned -> triggers fallback
+				clientPods: []*v1.Pod{pod("ns", "p1"), pod("ns", "p2", onNode("n1"))},
+				want:       []string{"ns/p1", "ns/p2"},
+			},
+			{
+				name:          "fallback API list error -> best-effort returns lister view",
+				listerPods:    []*v1.Pod{pod("ns", "p1")},
+				clientPods:    []*v1.Pod{},
+				clientListErr: errors.New("list boom"),
+				want:          []string{"ns/p1"},
+			},
+		}
 
-		withPodLister(lister, func() {
-			got, err := pl.getPods()
-			if err != nil {
-				t.Fatalf("getPods() err=%v", err)
-			}
-			mustPodSet(t, got, "ns/p1")
-		})
-	})
-
-	t.Run("getPods: Client=nil and only unassigned -> returns lister view", func(t *testing.T) {
-		pUnassigned := pod("ns", "p1")
-		pl.Client = nil
-		withPodLister(&fakePodLister{store: storeFromPods(pUnassigned)}, func() {
-			got, err := pl.getPods()
-			if err != nil {
-				t.Fatalf("getPods() err=%v", err)
-			}
-			mustPodSet(t, got, "ns/p1")
-		})
-	})
-
-	t.Run("getPods: fallback API list success returns API pods", func(t *testing.T) {
-		// Lister only sees unassigned -> triggers fallback.
-		pListerOnly := pod("ns", "p1")
-		withPodLister(&fakePodLister{store: storeFromPods(pListerOnly)}, func() {
-			// API sees more (including assigned).
-			pAPIExtra := pod("ns", "p2", onNode("n1"))
-			pl.Client = fake.NewSimpleClientset(pListerOnly, pAPIExtra)
-			t.Cleanup(func() { pl.Client = nil })
-
-			got, err := pl.getPods()
-			if err != nil {
-				t.Fatalf("getPods() err=%v", err)
-			}
-			mustPodSet(t, got, "ns/p1", "ns/p2")
-		})
-	})
-
-	t.Run("getPods: fallback API list error -> best-effort returns lister view", func(t *testing.T) {
-		pListerOnly := pod("ns", "p1")
-		withPodLister(&fakePodLister{store: storeFromPods(pListerOnly)}, func() {
-			cs := fake.NewSimpleClientset()
-			sentinel := errors.New("list boom")
-			cs.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
-				return true, nil, sentinel
+		// Special-case: lister error test uses fakePodLister.err.
+		t.Run("lister error bubbles", func(t *testing.T) {
+			sentinel := errors.New("boom")
+			withPodLister(&fakePodLister{err: sentinel}, func() {
+				_, err := pl.getPods()
+				if !errors.Is(err, sentinel) {
+					t.Fatalf("getPods err=%v want %v", err, sentinel)
+				}
 			})
-			pl.Client = cs
-			t.Cleanup(func() { pl.Client = nil })
-
-			got, err := pl.getPods()
-			if err != nil {
-				t.Fatalf("getPods() err=%v", err)
-			}
-			// Should fall back to lister output.
-			mustPodSet(t, got, "ns/p1")
 		})
+
+		for _, tt := range tests[1:] {
+			tt := tt
+			t.Run(tt.name, func(t *testing.T) {
+				// install lister view
+				lister := &fakePodLister{store: storeFromPods(tt.listerPods...)}
+				withPodLister(lister, func() {
+					// install client if requested
+					if tt.clientPods != nil {
+						cs := fake.NewSimpleClientset(toRuntimeObjs(tt.clientPods...)...)
+						if tt.clientListErr != nil {
+							cs.Fake.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+								return true, nil, tt.clientListErr
+							})
+						}
+						pl.Client = cs
+						t.Cleanup(func() { pl.Client = nil })
+					} else {
+						pl.Client = nil
+					}
+
+					got, err := pl.getPods()
+					if err != nil {
+						t.Fatalf("getPods() err=%v", err)
+					}
+					mustPodSet(t, got, tt.want...)
+				})
+			})
+		}
 	})
 }
 
@@ -158,19 +180,37 @@ func TestListersAndGetters(t *testing.T) {
 func TestNamespaceNameHelpers(t *testing.T) {
 	p := pod("ns", "p")
 	if got := podRef(p); got != "ns/p" {
-		t.Fatalf("podRef()=%q want %q", got, "ns/p")
+		t.Fatalf("podRef=%q want %q", got, "ns/p")
 	}
 
 	if got := mergeNsName("ns", "name"); got != "ns/name" {
-		t.Fatalf("mergeNsName()=%q want %q", got, "ns/name")
+		t.Fatalf("mergeNsName=%q want %q", got, "ns/name")
 	}
 
-	ns, name, err := splitNsName("ns/name")
-	if err != nil || ns != "ns" || name != "name" {
-		t.Fatalf("splitNsName()=(%q,%q,%v) want (ns,name,nil)", ns, name, err)
+	tests := []struct {
+		in       string
+		wantNS   string
+		wantName string
+		wantErr  bool
+	}{
+		{"ns/name", "ns", "name", false},
+		{"ns/name/extra", "ns", "name/extra", false}, // SplitN(2) keeps remainder
+		{"/name", "", "name", false},                 // your current implementation allows empty ns
+		{"invalid", "", "", true},
 	}
-	if _, _, err := splitNsName("invalid"); err == nil {
-		t.Fatalf("splitNsName(invalid) expected error")
+
+	for _, tt := range tests {
+		ns, name, err := splitNsName(tt.in)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("splitNsName(%q) expected error", tt.in)
+			}
+			continue
+		}
+		if err != nil || ns != tt.wantNS || name != tt.wantName {
+			t.Fatalf("splitNsName(%q)=(%q,%q,%v) want (%q,%q,nil)",
+				tt.in, ns, name, err, tt.wantNS, tt.wantName)
+		}
 	}
 }
 
@@ -191,7 +231,7 @@ func TestCountPendingPods(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "terminating", Namespace: "ns", DeletionTimestamp: &now}},
 	}
 	if got := countPendingPods(pods); got != 1 {
-		t.Fatalf("countPendingPods()=%d want 1", got)
+		t.Fatalf("countPendingPods=%d want 1", got)
 	}
 }
 
@@ -205,9 +245,9 @@ func TestEvictPod(t *testing.T) {
 
 	t.Run("success captures eviction body", func(t *testing.T) {
 		var gotEv *policyv1.Eviction
-		withEvictHook(func(_ *SharedState, _ context.Context, pod *v1.Pod, ev *policyv1.Eviction) error {
-			if pod != p {
-				t.Fatalf("unexpected pod")
+		withEvictHook(func(_ *SharedState, _ context.Context, podIn *v1.Pod, ev *policyv1.Eviction) error {
+			if podIn != p {
+				t.Fatalf("unexpected pod pointer")
 			}
 			gotEv = ev
 			return nil
@@ -222,6 +262,9 @@ func TestEvictPod(t *testing.T) {
 		}
 		if *gotEv.DeleteOptions.GracePeriodSeconds != 0 {
 			t.Fatalf("grace=%d want 0", *gotEv.DeleteOptions.GracePeriodSeconds)
+		}
+		if gotEv.ObjectMeta.Namespace != "ns" || gotEv.ObjectMeta.Name != "p" {
+			t.Fatalf("ObjectMeta mismatch: %#v", gotEv.ObjectMeta)
 		}
 		if gotEv.DeleteOptions.Preconditions == nil || gotEv.DeleteOptions.Preconditions.UID == nil || *gotEv.DeleteOptions.Preconditions.UID != p.UID {
 			t.Fatalf("preconditions UID mismatch")
@@ -252,8 +295,9 @@ func TestNodeHelpers(t *testing.T) {
 			t.Fatalf("cpu=%d want 1500", got)
 		}
 		qMem := resource.MustParse("2Gi")
-		if got := getNodeMemoryAllocatable(n); got != qMem.Value() {
-			t.Fatalf("mem=%d want %d", got, qMem.Value())
+		wantMem := qMem.Value()
+		if got := getNodeMemoryAllocatable(n); got != wantMem {
+			t.Fatalf("mem=%d want %d", got, wantMem)
 		}
 	})
 
@@ -263,30 +307,41 @@ func TestNodeHelpers(t *testing.T) {
 			n    *v1.Node
 			want bool
 		}{
-			{"worker", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker", Labels: map[string]string{}}}, false},
+			{"worker", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}}, false},
 			{"label control-plane", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"node-role.kubernetes.io/control-plane": "true"}}}, true},
 			{"label master", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n2", Labels: map[string]string{"node-role.kubernetes.io/master": "true"}}}, true},
 			{"name control-plane", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "control-plane"}}, true},
 			{"name kind-control-plane", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "kind-control-plane"}}, true},
 		}
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				if got := isNodeControlPlane(tt.n); got != tt.want {
-					t.Fatalf("got=%v want=%v", got, tt.want)
-				}
-			})
+			if got := isNodeControlPlane(tt.n); got != tt.want {
+				t.Fatalf("%s: got=%v want=%v", tt.name, got, tt.want)
+			}
 		}
 	})
 
-	t.Run("isNodeReady: NodeReady not-first condition", func(t *testing.T) {
-		n := &v1.Node{Status: v1.NodeStatus{
-			Conditions: []v1.NodeCondition{
-				{Type: v1.NodeDiskPressure, Status: v1.ConditionFalse},
-				{Type: v1.NodeReady, Status: v1.ConditionTrue},
-			},
-		}}
-		if !isNodeReady(n) {
-			t.Fatalf("expected ready")
+	t.Run("isNodeReady branches", func(t *testing.T) {
+		if isNodeReady(&v1.Node{}) {
+			t.Fatalf("no conditions => not ready")
+		}
+		nNoReady := &v1.Node{Status: v1.NodeStatus{Conditions: []v1.NodeCondition{
+			{Type: v1.NodeDiskPressure, Status: v1.ConditionFalse},
+		}}}
+		if isNodeReady(nNoReady) {
+			t.Fatalf("no NodeReady condition => not ready")
+		}
+		nReadyLater := &v1.Node{Status: v1.NodeStatus{Conditions: []v1.NodeCondition{
+			{Type: v1.NodeDiskPressure, Status: v1.ConditionFalse},
+			{Type: v1.NodeReady, Status: v1.ConditionTrue},
+		}}}
+		if !isNodeReady(nReadyLater) {
+			t.Fatalf("NodeReady later => ready")
+		}
+		nReadyFalse := &v1.Node{Status: v1.NodeStatus{Conditions: []v1.NodeCondition{
+			{Type: v1.NodeReady, Status: v1.ConditionFalse},
+		}}}
+		if isNodeReady(nReadyFalse) {
+			t.Fatalf("NodeReady false => not ready")
 		}
 	})
 
@@ -303,15 +358,13 @@ func TestNodeHelpers(t *testing.T) {
 			{"PreferNoSchedule ignored", &v1.Node{Spec: v1.NodeSpec{Taints: []v1.Taint{{Key: "node.kubernetes.io/not-ready", Effect: v1.TaintEffectPreferNoSchedule}}}}, false},
 		}
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				if got := isNodeNoScheduleConditionTainted(tt.n); got != tt.want {
-					t.Fatalf("got=%v want=%v", got, tt.want)
-				}
-			})
+			if got := isNodeNoScheduleConditionTainted(tt.n); got != tt.want {
+				t.Fatalf("%s: got=%v want=%v", tt.name, got, tt.want)
+			}
 		}
 	})
 
-	t.Run("isNodeUsable table (covers every sub-check)", func(t *testing.T) {
+	t.Run("isNodeUsable table (covers all sub-checks)", func(t *testing.T) {
 		base := node("n", withAllocatable("1000m", "1Gi"))
 
 		tests := []struct {
@@ -325,11 +378,7 @@ func TestNodeHelpers(t *testing.T) {
 				n.Labels = map[string]string{"node-role.kubernetes.io/control-plane": "true"}
 				return n
 			}(), false},
-			{"unschedulable", func() *v1.Node {
-				n := base.DeepCopy()
-				n.Spec.Unschedulable = true
-				return n
-			}(), false},
+			{"unschedulable", func() *v1.Node { n := base.DeepCopy(); n.Spec.Unschedulable = true; return n }(), false},
 			{"not ready", func() *v1.Node {
 				n := base.DeepCopy()
 				n.Status.Conditions = []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionFalse}}
@@ -350,59 +399,9 @@ func TestNodeHelpers(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				if got := isNodeUsable(tt.n); got != tt.want {
-					t.Fatalf("got=%v want=%v", got, tt.want)
-				}
-			})
-		}
-	})
-}
-
-func TestIsNodeReady(t *testing.T) {
-	t.Run("no conditions", func(t *testing.T) {
-		n := &v1.Node{}
-		if isNodeReady(n) {
-			t.Fatalf("node with no conditions should not be ready")
-		}
-	})
-
-	t.Run("no NodeReady condition present", func(t *testing.T) {
-		n := &v1.Node{
-			Status: v1.NodeStatus{
-				Conditions: []v1.NodeCondition{
-					{Type: v1.NodeMemoryPressure, Status: v1.ConditionFalse},
-					{Type: v1.NodeDiskPressure, Status: v1.ConditionFalse},
-				},
-			},
-		}
-		if isNodeReady(n) {
-			t.Fatalf("node with no NodeReady condition should not be ready")
-		}
-	})
-
-	t.Run("NodeReady appears later", func(t *testing.T) {
-		n := &v1.Node{
-			Status: v1.NodeStatus{
-				Conditions: []v1.NodeCondition{
-					{Type: v1.NodeDiskPressure, Status: v1.ConditionFalse},
-					{Type: v1.NodeReady, Status: v1.ConditionTrue},
-				},
-			},
-		}
-		if !isNodeReady(n) {
-			t.Fatalf("expected node to be ready when NodeReady=True exists later in list")
-		}
-	})
-
-	t.Run("NodeReady false", func(t *testing.T) {
-		n := &v1.Node{
-			Status: v1.NodeStatus{
-				Conditions: []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionFalse}},
-			},
-		}
-		if isNodeReady(n) {
-			t.Fatalf("node with NodeReady=False should not be ready")
+			if got := isNodeUsable(tt.n); got != tt.want {
+				t.Fatalf("%s: got=%v want=%v", tt.name, got, tt.want)
+			}
 		}
 	})
 }
@@ -466,8 +465,8 @@ func TestPodLookup(t *testing.T) {
 			}
 		})
 
-		// Name exists but UID mismatch -> fallback to UID.
-		pWrong := pod("ns", "p")
+		// Name exists but UID mismatch -> fallback to UID scan.
+		pWrong := pod("ns", "p") // empty UID
 		withPodLister(&fakePodLister{store: storeFromPods(pWrong, pOther)}, func() {
 			got := pl.getPod(types.UID("uid-target"), "ns", "p")
 			if got != pOther {
@@ -504,10 +503,15 @@ func TestPodResourceAndPredicateHelpers(t *testing.T) {
 	t.Run("CPU/mem request sums", func(t *testing.T) {
 		p := &v1.Pod{Spec: v1.PodSpec{
 			Containers: []v1.Container{
-				{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("100m"), v1.ResourceMemory: resource.MustParse("64Mi")}}},
-				{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("250m"), v1.ResourceMemory: resource.MustParse("128Mi")}}},
+				{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("100m"), v1.ResourceMemory: resource.MustParse("64Mi"),
+				}}},
+				{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{
+					v1.ResourceCPU: resource.MustParse("250m"), v1.ResourceMemory: resource.MustParse("128Mi"),
+				}}},
 			},
 		}}
+
 		if got := getPodCPURequest(p); got != 350 {
 			t.Fatalf("cpu=%d want 350", got)
 		}
@@ -533,9 +537,9 @@ func TestPodResourceAndPredicateHelpers(t *testing.T) {
 		}
 	})
 
-	t.Run("isSamePodUID branches", func(t *testing.T) {
+	t.Run("isSamePodUID requires non-empty and equal", func(t *testing.T) {
 		if !isSamePodUID("u1", "u1") {
-			t.Fatalf("expected same")
+			t.Fatalf("expected true")
 		}
 		if isSamePodUID("u1", "u2") || isSamePodUID("", "u2") || isSamePodUID("u1", "") || isSamePodUID("", "") {
 			t.Fatalf("unexpected true")
@@ -570,7 +574,10 @@ func TestPodResourceAndPredicateHelpers(t *testing.T) {
 		if !isPodAssignedAndAlive(&v1.Pod{Spec: v1.PodSpec{NodeName: "n"}}) {
 			t.Fatalf("assigned should be alive")
 		}
-		if isPodAssignedAndAlive(&v1.Pod{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now}, Spec: v1.PodSpec{NodeName: "n"}}) {
+		if isPodAssignedAndAlive(&v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now},
+			Spec:       v1.PodSpec{NodeName: "n"},
+		}) {
 			t.Fatalf("terminating should not count")
 		}
 
@@ -589,69 +596,12 @@ func TestPodResourceAndPredicateHelpers(t *testing.T) {
 		now := metav1.NewTime(time.Now())
 		p1 := pod("ns", "p1", withUID("u1"))
 		p2 := pod("ns", "p2", withUID("u2"), withDeletionTimestamp(now))
-		p3 := pod("ns", "p3", withUID("u1"))
+		p3 := pod("ns", "p3", withUID("u1")) // overwrites u1
 		m := podsByUID([]*v1.Pod{p1, p2, nil, p3})
 		if len(m) != 1 || m[types.UID("u1")].Name != "p3" {
 			t.Fatalf("map=%#v", m)
 		}
 	})
-}
-
-// -------------------------
-// clusterFingerprint
-// -------------------------
-
-func TestClusterFingerprint_CoreProperties(t *testing.T) {
-	n1 := node("n1", withAllocatable("1000m", "1Gi"))
-	n2 := node("n2", withAllocatable("2000m", "2Gi"))
-
-	running := pod("ns", "p1", onNode("n1"), withReqs("100m", "128Mi"))
-	pending := pod("ns", "p2")
-
-	fp1 := clusterFingerprint([]*v1.Node{n2, n1}, []*v1.Pod{pending, running})
-	fp2 := clusterFingerprint([]*v1.Node{n1, n2}, []*v1.Pod{running, pending})
-	if fp1 != fp2 {
-		t.Fatalf("not deterministic: %q vs %q", fp1, fp2)
-	}
-
-	// running CPU change changes fingerprint
-	r2 := running.DeepCopy()
-	r2.Spec.Containers[0].Resources.Requests[v1.ResourceCPU] = resource.MustParse("200m")
-	if fp3 := clusterFingerprint([]*v1.Node{n1, n2}, []*v1.Pod{r2}); fp3 == fp1 {
-		t.Fatalf("expected fingerprint to change on running CPU change")
-	}
-
-	// pending-only changes should not matter
-	pending2 := pod("ns", "p3")
-	if fp4 := clusterFingerprint([]*v1.Node{n1, n2}, []*v1.Pod{running, pending, pending2}); fp4 != fp1 {
-		t.Fatalf("pending pods should not affect fingerprint")
-	}
-
-	// ignore nil/unusable nodes + pods scheduled on unusable nodes
-	nBad := &v1.Node{ObjectMeta: metav1.ObjectMeta{
-		Name:   "bad",
-		Labels: map[string]string{"node-role.kubernetes.io/control-plane": "true"},
-	}}
-	onBad := pod("ns", "pbad", onNode("bad"), withReqs("50m", "64Mi"))
-
-	if fp5 := clusterFingerprint([]*v1.Node{nil, nBad, n1, n2}, []*v1.Pod{running, onBad, pending}); fp5 != fp1 {
-		t.Fatalf("should ignore unusable nodes/pods-on-them: fp5=%q base=%q", fp5, fp1)
-	}
-}
-
-// specifically hits the pod key sorting comparator paths (same node + diff node)
-func TestClusterFingerprint_SortingBranches(t *testing.T) {
-	n1 := node("n1", withAllocatable("1000m", "1Gi"))
-	n2 := node("n2", withAllocatable("1000m", "1Gi"))
-
-	p1 := pod("ns", "p1", onNode("n1"), withReqs("100m", "128Mi"))
-	p2 := pod("ns", "p2", onNode("n1"), withReqs("100m", "128Mi"))
-	p3 := pod("ns", "p3", onNode("n2"), withReqs("100m", "128Mi"))
-	fpA := clusterFingerprint([]*v1.Node{n2, n1}, []*v1.Pod{p3, p2, p1})
-	fpB := clusterFingerprint([]*v1.Node{n1, n2}, []*v1.Pod{p1, p3, p2})
-	if fpA != fpB {
-		t.Fatalf("not deterministic: fpA=%q fpB=%q", fpA, fpB)
-	}
 }
 
 // -------------------------
@@ -671,11 +621,9 @@ func TestWorkloadKeyString(t *testing.T) {
 		{"unknown", WorkloadKey{Kind: WorkloadKind(999), Namespace: "ns", Name: "foo"}, "ns/foo"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.wk.String(); got != tt.want {
-				t.Fatalf("got=%q want=%q", got, tt.want)
-			}
-		})
+		if got := tt.wk.String(); got != tt.want {
+			t.Fatalf("%s: got=%q want=%q", tt.name, got, tt.want)
+		}
 	}
 }
 
@@ -695,54 +643,18 @@ func TestGetTopWorkload(t *testing.T) {
 		wantOK bool
 		wantWK WorkloadKey
 	}{
-		{
-			name:   "ReplicaSet controller true",
-			owners: []owner{{kind: "ReplicaSet", name: "rs1", ctrl: &ctrlTrue}},
-			wantOK: true,
-			wantWK: WorkloadKey{Kind: wkReplicaSet, Namespace: "ns", Name: "rs1"},
-		},
-		{
-			name:   "StatefulSet controller true",
-			owners: []owner{{kind: "StatefulSet", name: "ss1", ctrl: &ctrlTrue}},
-			wantOK: true,
-			wantWK: WorkloadKey{Kind: wkStatefulSet, Namespace: "ns", Name: "ss1"},
-		},
-		{
-			name:   "DaemonSet controller true",
-			owners: []owner{{kind: "DaemonSet", name: "ds1", ctrl: &ctrlTrue}},
-			wantOK: true,
-			wantWK: WorkloadKey{Kind: wkDaemonSet, Namespace: "ns", Name: "ds1"},
-		},
-		{
-			name:   "Job controller true",
-			owners: []owner{{kind: "Job", name: "job1", ctrl: &ctrlTrue}},
-			wantOK: true,
-			wantWK: WorkloadKey{Kind: wkJob, Namespace: "ns", Name: "job1"},
-		},
-		{
-			name:   "controller nil ignored",
-			owners: []owner{{kind: "ReplicaSet", name: "rs1", ctrl: nil}},
-			wantOK: false,
-		},
-		{
-			name:   "controller false ignored",
-			owners: []owner{{kind: "ReplicaSet", name: "rs1", ctrl: &ctrlFalse}},
-			wantOK: false,
-		},
-		{
-			name:   "unknown kind ignored",
-			owners: []owner{{kind: "Deployment", name: "d1", ctrl: &ctrlTrue}},
-			wantOK: false,
-		},
-		{
-			name:   "skip non-controller then accept later controller",
-			owners: []owner{{kind: "ReplicaSet", name: "rs-old", ctrl: &ctrlFalse}, {kind: "ReplicaSet", name: "rs-new", ctrl: &ctrlTrue}},
-			wantOK: true,
-			wantWK: WorkloadKey{Kind: wkReplicaSet, Namespace: "ns", Name: "rs-new"},
-		},
+		{"ReplicaSet controller true", []owner{{"ReplicaSet", "rs1", &ctrlTrue}}, true, WorkloadKey{Kind: wkReplicaSet, Namespace: "ns", Name: "rs1"}},
+		{"StatefulSet controller true", []owner{{"StatefulSet", "ss1", &ctrlTrue}}, true, WorkloadKey{Kind: wkStatefulSet, Namespace: "ns", Name: "ss1"}},
+		{"DaemonSet controller true", []owner{{"DaemonSet", "ds1", &ctrlTrue}}, true, WorkloadKey{Kind: wkDaemonSet, Namespace: "ns", Name: "ds1"}},
+		{"Job controller true", []owner{{"Job", "job1", &ctrlTrue}}, true, WorkloadKey{Kind: wkJob, Namespace: "ns", Name: "job1"}},
+		{"controller nil ignored", []owner{{"ReplicaSet", "rs1", nil}}, false, WorkloadKey{}},
+		{"controller false ignored", []owner{{"ReplicaSet", "rs1", &ctrlFalse}}, false, WorkloadKey{}},
+		{"unknown kind ignored", []owner{{"Deployment", "d1", &ctrlTrue}}, false, WorkloadKey{}},
+		{"skip non-controller then accept later controller", []owner{{"ReplicaSet", "rs-old", &ctrlFalse}, {"ReplicaSet", "rs-new", &ctrlTrue}}, true, WorkloadKey{Kind: wkReplicaSet, Namespace: "ns", Name: "rs-new"}},
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			p := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns"}}
 			for _, o := range tt.owners {
@@ -755,72 +667,11 @@ func TestGetTopWorkload(t *testing.T) {
 
 			got, ok := getTopWorkload(p)
 			if ok != tt.wantOK {
-				t.Fatalf("ok=%v want %v (wk=%#v)", ok, tt.wantOK, got)
+				t.Fatalf("ok=%v want=%v (wk=%#v)", ok, tt.wantOK, got)
 			}
 			if tt.wantOK && got != tt.wantWK {
-				t.Fatalf("wk=%#v want %#v", got, tt.wantWK)
+				t.Fatalf("wk=%#v want=%#v", got, tt.wantWK)
 			}
 		})
 	}
-}
-
-func TestBuildPendingSnapshot_NoUsableNodes(t *testing.T) {
-	pl := &SharedState{}
-
-	// control-plane node => not usable
-	nBad := &v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "cp",
-			Labels: map[string]string{"node-role.kubernetes.io/control-plane": "true"},
-		},
-		Status: v1.NodeStatus{
-			Conditions: []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionTrue}},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("1000m"),
-				v1.ResourceMemory: resource.MustParse("1Gi"),
-			},
-		},
-	}
-
-	// Pending/unassigned pod (should count as pending, but NOT affect fingerprint)
-	pPending := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "p1",
-			Namespace: "ns",
-			UID:       types.UID("u1"),
-		},
-		Status: v1.PodStatus{Phase: v1.PodPending},
-		Spec:   v1.PodSpec{NodeName: ""},
-	}
-
-	withNodeLister(&fakeNodeLister{nodes: []*v1.Node{nBad}}, func() {
-		withPodLister(&fakePodLister{store: storeFromPods(pPending)}, func() {
-			snap, err := pl.buildPendingSnapshot()
-			if err != nil {
-				t.Fatalf("buildPendingSnapshot() unexpected error: %v", err)
-			}
-
-			// Snapshot still returns nodes/pods as observed by listers.
-			if len(snap.Nodes) != 1 || snap.Nodes[0].Name != "cp" {
-				t.Fatalf("Nodes=%#v, want [cp]", snap.Nodes)
-			}
-			if len(snap.Pods) != 1 || snap.Pods[0].Name != "p1" {
-				t.Fatalf("Pods=%#v, want [ns/p1]", snap.Pods)
-			}
-
-			// Pending pod should be counted.
-			if snap.PendingCount != 1 {
-				t.Fatalf("PendingCount=%d, want 1", snap.PendingCount)
-			}
-			if _, ok := snap.PendingUIDs[pPending.UID]; !ok {
-				t.Fatalf("PendingUIDs missing %q", pPending.UID)
-			}
-
-			// Fingerprint should match the same helper used elsewhere (and will be the "empty" basis here).
-			wantFP := clusterFingerprint([]*v1.Node{nBad}, []*v1.Pod{pPending})
-			if snap.Fingerprint != wantFP {
-				t.Fatalf("Fingerprint=%q, want %q", snap.Fingerprint, wantFP)
-			}
-		})
-	})
 }

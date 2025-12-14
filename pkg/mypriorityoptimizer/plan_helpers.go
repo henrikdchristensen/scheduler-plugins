@@ -32,9 +32,9 @@ var (
 	markPlanStatusToConfigMapHook func(pl *SharedState, ctx context.Context, planCM string, status PlanStatus) bool
 )
 
-// tryEnterActivePlan attempts to enter the active plan state.
-// Use CompareAndSwap to ensure only one goroutine can enter the active state
-// by checking that the previous value is false before setting it to true.
+// tryEnterActivePlan attempts to enter the active plan state. Use
+// CompareAndSwap to ensure only one goroutine can enter the active state by
+// checking that the previous value is false before setting it to true.
 func (pl *SharedState) tryEnterActivePlan() bool {
 	return pl.ActivePlanInProgress.CompareAndSwap(false, true)
 }
@@ -49,7 +49,7 @@ func (pl *SharedState) getActivePlan() *ActivePlan {
 	return pl.ActivePlan.Load()
 }
 
-// test hook: override in unit tests to simulate CAS failure deterministically.
+// override in unit tests to simulate CAS failure deterministically.
 var activePlanCompareAndSwap = func(pl *SharedState, old, new *ActivePlan) bool {
 	return pl.ActivePlan.CompareAndSwap(old, new)
 }
@@ -165,10 +165,18 @@ func sortPodSetItemsByPriorityAndCreation(items []PodSetItem) {
 	})
 }
 
+// -------------------------
+// isPlanPodUnscheduled
+// -------------------------
+
 // isPlanPodUnscheduled returns true if the solver do not want pod to be placed
 func isPlanPodUnscheduled(toNode string) bool {
 	return toNode == ""
 }
+
+// -------------------------
+// isPlanPodMove
+// -------------------------
 
 // isPlanPodMove returns true if the pod is currently bound to a node
 // and the solver wants it on a different node.
@@ -176,14 +184,26 @@ func isPlanPodMove(fromNode, toNode string) bool {
 	return fromNode != "" && fromNode != toNode
 }
 
+// -------------------------
+// isPlanPodPlacementChanged
+// -------------------------
+
 // isPlanPodPlacementChanged returns true if the pod's placement is changing
 func isPlanPodPlacementChanged(fromNode, toNode string) bool {
 	return fromNode == "" || fromNode != toNode
 }
 
+// -------------------------
+// isPlanPodNewlyScheduled
+// -------------------------
+
 func isPlanPodNewlyScheduled(fromNode, toNode string) bool {
 	return fromNode == "" && toNode != ""
 }
+
+// -------------------------
+// indexPodsForPlan
+// -------------------------
 
 // indexPodsForPlan builds a UID -> *Pod map for all live pods plus (optionally) the preemptor.
 func indexPodsForPlan(pods []*v1.Pod, preemptor *v1.Pod) map[types.UID]*v1.Pod {
@@ -193,6 +213,10 @@ func indexPodsForPlan(pods []*v1.Pod, preemptor *v1.Pod) map[types.UID]*v1.Pod {
 	}
 	return byUID
 }
+
+// -------------------------
+// collectOldPlacements
+// -------------------------
 
 // collectOldPlacements returns placements for all currently assigned & alive pods.
 func collectOldPlacements(byUID map[types.UID]*v1.Pod) []SolverPod {
@@ -205,6 +229,10 @@ func collectOldPlacements(byUID map[types.UID]*v1.Pod) []SolverPod {
 	sortPlacementsByPod(oldPlacements)
 	return oldPlacements
 }
+
+// -------------------------
+// collectEvictions
+// -------------------------
 
 // collectEvictions builds evict placements from the solver output and pod index.
 func collectEvictions(out *SolverOutput, byUID map[types.UID]*v1.Pod) []SolverPod {
@@ -223,6 +251,10 @@ func collectEvictions(out *SolverOutput, byUID map[types.UID]*v1.Pod) []SolverPo
 	}
 	return evicts
 }
+
+// -------------------------
+// buildPlan
+// -------------------------
 
 // buildPlan builds the evictions, movements, old placements, new placements,
 // placementByName, workloadQuotas and the nominatedNode (if preemptor exists)
@@ -310,9 +342,14 @@ func (pl *SharedState) buildPlan(out *SolverOutput, preemptor *v1.Pod, pods []*v
 	}, nil
 }
 
-// setActivePlan sets the given stored plan as the active plan and initializes its counters,
-// deriving both WorkloadPerNodeCnts and PlacementByName solely from NewPlacements.
-// For controller-owned pods, quotas are keyed by the controller (e.g., ReplicaSet) name.
+// -------------------------
+// setActivePlan
+// -------------------------
+
+// setActivePlan sets the given stored plan as the active plan and initializes
+// its counters, deriving both WorkloadPerNodeCnts and PlacementByName solely
+// from NewPlacements. For controller-owned pods, quotas are keyed by the
+// controller (e.g., ReplicaSet) name.
 func (pl *SharedState) setActivePlan(plan *Plan, id string, _ []*v1.Pod) {
 	// Exit if no plan provided
 	if plan == nil {
@@ -338,8 +375,12 @@ func (pl *SharedState) setActivePlan(plan *Plan, id string, _ []*v1.Pod) {
 	pl.ActivePlan.Store(ap)
 }
 
-// buildWorkloadQuotas converts WorkloadQuotas (int32) to WorkloadPerNodeCnts (atomic.Int32)
-// for faster concurrent access during plan execution.
+// -------------------------
+// buildWorkloadQuotas
+// -------------------------
+
+// buildWorkloadQuotas converts WorkloadQuotas (int32) to WorkloadPerNodeCnts
+// (atomic.Int32) for faster concurrent access during plan execution.
 func buildWorkloadQuotas(wkQuotas WorkloadQuotas) WorkloadQuotasAtomics {
 	remaining := make(WorkloadQuotasAtomics) // workload -> node -> *atomic.Int32
 	if wkQuotas != nil {
@@ -389,7 +430,10 @@ func (pl *SharedState) evictTargets(ctx context.Context, targets []*v1.Pod) erro
 	return nil
 }
 
-// waitTargetsGone waits until the evicted pods disappear from cache.
+// -------------------------
+// waitPodsGone
+// -------------------------
+
 // waitPodsGone waits until the evicted pods disappear from cache.
 func (pl *SharedState) waitPodsGone(ctx context.Context, pods []*v1.Pod) error {
 	if waitPodsGoneHook != nil {
@@ -431,15 +475,19 @@ func (pl *SharedState) waitPodsGone(ctx context.Context, pods []*v1.Pod) error {
 	})
 }
 
+// -------------------------
+// activatePods
+// -------------------------
+
 // activatePods performs the actual framework.Handle.Activate call.
 // In tests we override this to capture which pods would be activated.
 var activatePods = func(pl *SharedState, toAct map[string]*v1.Pod) {
 	pl.Handle.Activate(klog.Background(), toAct)
 }
 
-// activateBlockedPods activates up to 'max' pods from the blocked set; clear only the ones activated.
-// It returns the UIDs of the pods that were attempted to be activated (in priority/time order).
-// if max <= 0, all pods are activated.
+// activatePods activates up to 'max' pods from the blocked set; clear only the
+// ones activated. It returns the UIDs of the pods that were attempted to be
+// activated (in priority/time order). if max <= 0, all pods are activated.
 func (pl *SharedState) activatePods(podSet *PodSet, removeActivated bool, max int) (tried []types.UID) {
 	// Prune stale entries first
 	_ = pl.prunePodSet(podSet)
@@ -491,8 +539,12 @@ func (pl *SharedState) activatePods(podSet *PodSet, removeActivated bool, max in
 	return tried
 }
 
-// activatePlannedPods activates all live pending pods that the plan intends to place
-// (i.e., NewPlacement with FromNode == "" and ToNode != "").
+// -------------------------
+// activatePlannedPods
+// -------------------------
+
+// activatePlannedPods activates all live pending pods that the plan intends to
+// place (i.e., NewPlacement with FromNode == "" and ToNode != "").
 func (pl *SharedState) activatePlannedPods(plan *Plan, pods []*v1.Pod) {
 	planNil := plan == nil
 	newPlacementsLen := 0
@@ -549,8 +601,12 @@ func (pl *SharedState) activatePlannedPods(plan *Plan, pods []*v1.Pod) {
 	activatePods(pl, toAct)
 }
 
-// isPlanCompleted checks if the plan is completed by verifying the state of the cluster.
-// It is based on the current active plan snapshot (ap):
+// -------------------------
+// isPlanCompleted
+// -------------------------
+
+// isPlanCompleted checks if the plan is completed by verifying the state of the
+// cluster. It is based on the current active plan snapshot (ap):
 //
 //	A) all pinned pods (PlacementByName) that still exist must run on the planned node;
 //	   if a pinned pod was deleted or is terminating, we treat it as "no longer required".
@@ -585,9 +641,10 @@ func (pl *SharedState) isPlanCompleted(ap *ActivePlan) (bool, error) {
 		}
 	}
 
-	// A) Standalone/preemptor pods pinned by name must be on the expected nodes.
-	//    If a pinned pod was deleted (or is terminating), we treat it as "satisfied"
-	//    under the current workload (e.g., user scaled down or deleted it; furthermore, standalone pods are not recreated automatically).
+	// A) Standalone/preemptor pods pinned by name must be on the expected
+	// nodes. If a pinned pod was deleted (or is terminating), we treat it as
+	// "satisfied" under the current workload (e.g., user scaled down or deleted
+	// it; furthermore, standalone pods are not recreated automatically).
 	for nsname, wantNode := range ap.PlacementByName {
 		ns, name, err := splitNsName(nsname)
 		if err != nil {
@@ -628,10 +685,10 @@ func (pl *SharedState) isPlanCompleted(ap *ActivePlan) (bool, error) {
 	}
 
 	// B) Per-workload per-node quotas:
-	// 	1) If total remaining == 0  -> satisfied.
-	// 	2) If workload has NO live pods -> workload deleted/scale-to-zero -> ignore remaining.
-	// 	3) If workload has pending pods -> still work to do -> not complete.
-	// 	4) If workload has live but no pending pods -> scaled under plan / nothing left that can consume extra quota -> treat remaining quota as satisfied.
+	//  1) If total remaining == 0  -> satisfied.
+	//  2) If workload has NO live pods -> workload deleted/scale-to-zero -> ignore remaining.
+	//  3) If workload has pending pods -> still work to do -> not complete.
+	//  4) If workload has live but no pending pods -> scaled under plan / nothing left that can consume extra quota -> treat remaining quota as satisfied.
 	for wk, perNode := range ap.WorkloadQuotas {
 		var totalRemaining int32
 		for _, ctr := range perNode {
@@ -674,6 +731,10 @@ func (pl *SharedState) isPlanCompleted(ap *ActivePlan) (bool, error) {
 	return true, nil
 }
 
+// -------------------------
+// onPlanCompleted
+// -------------------------
+
 // onPlanCompleted is called when a plan is settled (i.e., all its actions are completed).
 func (pl *SharedState) onPlanCompleted(status PlanStatus) bool {
 	ap := pl.getActivePlan()
@@ -706,12 +767,16 @@ func (pl *SharedState) onPlanCompleted(status PlanStatus) bool {
 	return true
 }
 
+// -------------------------
+// isPodAllowedByPlan
+// -------------------------
+
 // isPodAllowedByPlan returns true if the pod is allowed by the active plan.
-// Standalone/preemptor pods are allowed by exact name match.
-// For controller-owned pods, we allow only if the plan still has remaining
-// per-node quota for that workload. If the pod already targets a specific
-// node (NodeName set), we check that node's remaining quota; otherwise we
-// allow if ANY node for that workload has remaining > 0.
+// Standalone/preemptor pods are allowed by exact name match. For
+// controller-owned pods, we allow only if the plan still has remaining per-node
+// quota for that workload. If the pod already targets a specific node (NodeName
+// set), we check that node's remaining quota; otherwise we allow if ANY node
+// for that workload has remaining > 0.
 func (pl *SharedState) isPodAllowedByPlan(pod *v1.Pod) bool {
 	ap := pl.getActivePlan()
 	if ap == nil {
@@ -749,6 +814,10 @@ func (pl *SharedState) isPodAllowedByPlan(pod *v1.Pod) bool {
 	return false
 }
 
+// -------------------------
+// filterNodes
+// -------------------------
+
 // filterNodes returns the set of nodes the pod is allowed to run on according to the active plan.
 func (pl *SharedState) filterNodes(pod *v1.Pod) (sets.Set[string], string, bool) {
 	ap := pl.getActivePlan()
@@ -784,6 +853,10 @@ func (pl *SharedState) filterNodes(pod *v1.Pod) (sets.Set[string], string, bool)
 
 	return nil, "pod not in active plan; block", false
 }
+
+// -------------------------
+// computePlanPodCounts
+// -------------------------
 
 // computePlanPodCounts summarizes the effect of a plan on pod counts:
 //
@@ -847,7 +920,6 @@ func computePlanPodCounts(out *SolverOutput, pods []*v1.Pod) (
 // exportPlanToConfigMap
 // -------------------------
 
-// exportPlanToConfigMap exports the given plan to a ConfigMap.
 // exportPlanToConfigMap exports the given plan to a ConfigMap.
 func (pl *SharedState) exportPlanToConfigMap(ctx context.Context, name string, sp *StoredPlan) error {
 	if exportPlanToConfigMapHook != nil {
@@ -925,14 +997,12 @@ func (pl *SharedState) setPlanStatusInConfigMap(ctx context.Context, planCM stri
 	})
 }
 
+// -------------------------
+// clusterFingerprint
+// -------------------------
+
 // clusterFingerprint returns a deterministic fingerprint of the "relevant"
 // cluster state for scheduling/plan-cancellation purposes.
-//
-// Contract (required by tests):
-// - Deterministic across input ordering
-// - Excludes pending/unassigned pods
-// - Excludes unusable nodes and pods scheduled on them
-// - Includes running pod resource requests (cpu/mem) so changes affect the fp
 func clusterFingerprint(nodes []*v1.Node, pods []*v1.Pod) string {
 	// 1) Keep only usable nodes; sort for determinism.
 	usable := make(map[string]*v1.Node, len(nodes))
