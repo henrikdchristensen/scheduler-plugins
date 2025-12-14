@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,33 +26,27 @@ import (
 // Test Helpers
 // -------------------------
 
-// cmNSLister is a stub that lets tests inject List/Get behaviors without wiring
-// informers/indexers.
 type cmNSLister struct {
 	listFn func() ([]*v1.ConfigMap, error)
 	getFn  func(name string) (*v1.ConfigMap, error)
 }
 
 func (c cmNSLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) { return c.listFn() }
+func (c cmNSLister) Get(name string) (*v1.ConfigMap, error)          { return c.getFn(name) }
 
-func (c cmNSLister) Get(name string) (*v1.ConfigMap, error) { return c.getFn(name) }
-
-// nsLister returns a namespace-scoped lister backed by an in-memory indexer.
 func nsLister(ns string, cms ...*v1.ConfigMap) corev1listers.ConfigMapNamespaceLister {
 	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
 		cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
 	})
 	for _, cm := range cms {
-		if cm == nil {
-			continue
+		if cm != nil {
+			_ = indexer.Add(cm)
 		}
-		_ = indexer.Add(cm)
 	}
 	return corev1listers.NewConfigMapLister(indexer).ConfigMaps(ns)
 }
 
-// makeCm is a helper to create a ConfigMap with given params.
-func makeCm(ns, name string, lbls map[string]string, data map[string]string, ts time.Time) *v1.ConfigMap {
+func cm(ns, name string, lbls map[string]string, data map[string]string, ts time.Time) *v1.ConfigMap {
 	return &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:         ns,
@@ -63,8 +58,7 @@ func makeCm(ns, name string, lbls map[string]string, data map[string]string, ts 
 	}
 }
 
-// makeCmDoc is a helper to create a ConfigMapDoc with given params.
-func makeCmDoc(ns, name, labelKey, dataKey string) ConfigMapDoc {
+func cmDoc(ns, name, labelKey, dataKey string) ConfigMapDoc {
 	return ConfigMapDoc{Namespace: ns, Name: name, LabelKey: labelKey, DataKey: dataKey}
 }
 
@@ -76,57 +70,111 @@ func setupCm(
 	if cm != nil {
 		objs = append(objs, cm)
 	}
+
 	cli := fake.NewSimpleClientset(objs...)
-	var lister corev1listers.ConfigMapNamespaceLister
+	lister := nsLister(ns) // empty
 	if cm != nil {
 		lister = nsLister(ns, cm)
-	} else {
-		lister = nsLister(ns)
 	}
+
 	return cli, cli.CoreV1().ConfigMaps(ns), lister
+}
+
+func deleteActions(cli *fake.Clientset) []string {
+	var out []string
+	for _, a := range cli.Actions() {
+		if a.GetVerb() != "delete" || a.GetResource().Resource != "configmaps" {
+			continue
+		}
+		da, ok := a.(k8stesting.DeleteAction)
+		if ok {
+			out = append(out, da.GetName())
+		}
+	}
+	return out
+}
+
+func mustReadJSON[T any](t *testing.T, cm *v1.ConfigMap, key string) T {
+	t.Helper()
+	var out T
+	if err := json.Unmarshal([]byte(cm.Data[key]), &out); err != nil {
+		t.Fatalf("json.Unmarshal(Data[%q]) err = %v", key, err)
+	}
+	return out
+}
+
+func assertReadJSON(t *testing.T, raw []byte, found bool, err error, wantFound bool, wantRaw *string, wantErrSubstr string) {
+	t.Helper()
+
+	if wantErrSubstr != "" {
+		if err == nil || !strings.Contains(err.Error(), wantErrSubstr) {
+			t.Fatalf("err=%v, want substring %q", err, wantErrSubstr)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if found != wantFound {
+		t.Fatalf("found=%v, want %v", found, wantFound)
+	}
+
+	if wantRaw == nil {
+		if raw != nil {
+			t.Fatalf("raw=%q, want nil", string(raw))
+		}
+		return
+	}
+	if raw == nil {
+		t.Fatalf("raw=nil, want %q", *wantRaw)
+	}
+	if string(raw) != *wantRaw {
+		t.Fatalf("raw=%q, want %q", string(raw), *wantRaw)
+	}
 }
 
 // -------------------------
 // listConfigMaps
 // -------------------------
 
-func TestListConfigMaps_SortsAndFilters(t *testing.T) {
+func TestListConfigMaps(t *testing.T) {
 	ctx := context.Background()
-	namespace := "ns6"
+	ns := "ns"
 	labelKey := "myx/keep"
-	now := time.Now()
 
-	cmOld := makeCm(namespace, "cm-old", map[string]string{labelKey: "true"}, nil, now.Add(-2*time.Hour))
-	cmMid := makeCm(namespace, "cm-mid", map[string]string{labelKey: "true"}, nil, now.Add(-1*time.Hour))
-	cmNew := makeCm(namespace, "cm-new", map[string]string{labelKey: "true"}, nil, now)
-	cmNoLabel := makeCm(namespace, "cm-nolabel", nil, nil, now.Add(-30*time.Minute)) // ignored
+	base := time.Unix(1_700_000_000, 0)
+	// newest -> oldest should be: new, mid, old
+	cmOld := cm(ns, "old", map[string]string{labelKey: "true"}, nil, base.Add(-2*time.Hour))
+	cmMid := cm(ns, "mid", map[string]string{labelKey: "true"}, nil, base.Add(-1*time.Hour))
+	cmNew := cm(ns, "new", map[string]string{labelKey: "true"}, nil, base)
+	cmNoLabel := cm(ns, "nolabel", nil, nil, base.Add(-30*time.Minute))
 
-	lister := nsLister(namespace, cmOld, cmMid, cmNew, cmNoLabel)
+	t.Run("sorts newest first and filters by label", func(t *testing.T) {
+		items, err := listConfigMaps(ctx, nsLister(ns, cmOld, cmMid, cmNew, cmNoLabel), labelKey)
+		if err != nil {
+			t.Fatalf("listConfigMaps error: %v", err)
+		}
+		got := []string{}
+		for _, it := range items {
+			got = append(got, it.Name)
+		}
+		want := []string{"new", "mid", "old"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("order=%v, want %v", got, want)
+		}
+	})
 
-	items, err := listConfigMaps(ctx, lister, labelKey)
-	if err != nil {
-		t.Fatalf("listConfigMaps error: %v", err)
-	}
-	if len(items) != 3 {
-		t.Fatalf("expected 3 labeled configmaps, got %d", len(items))
-	}
-	// Newest first: cmNew, cmMid, cmOld
-	if items[0].Name != "cm-new" || items[1].Name != "cm-mid" || items[2].Name != "cm-old" {
-		t.Fatalf("unexpected order: %v, %v, %v", items[0].Name, items[1].Name, items[2].Name)
-	}
-}
-
-func TestListConfigMaps_ListError(t *testing.T) {
-	wantErr := fmt.Errorf("boom")
-	lister := cmNSLister{
-		listFn: func() ([]*v1.ConfigMap, error) { return nil, wantErr },
-		getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
-	}
-
-	_, err := listConfigMaps(context.Background(), lister, "label")
-	if err == nil || !strings.Contains(err.Error(), "boom") {
-		t.Fatalf("expected list error, got %v", err)
-	}
+	t.Run("propagates list error", func(t *testing.T) {
+		wantErr := fmt.Errorf("boom")
+		l := cmNSLister{
+			listFn: func() ([]*v1.ConfigMap, error) { return nil, wantErr },
+			getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
+		}
+		_, err := listConfigMaps(ctx, l, labelKey)
+		if err == nil || !strings.Contains(err.Error(), "boom") {
+			t.Fatalf("expected list error, got %v", err)
+		}
+	})
 }
 
 // -------------------------
@@ -134,254 +182,250 @@ func TestListConfigMaps_ListError(t *testing.T) {
 // -------------------------
 
 func TestPruneConfigMaps(t *testing.T) {
-	tests := []struct {
-		name       string
-		namespace  string
-		labelKey   string
-		keep       int
-		offsets    map[string]time.Duration
-		wantExists map[string]bool
-	}{
+	ctx := context.Background()
+	base := time.Unix(1_700_000_000, 0)
+
+	type tc struct {
+		name string
+		keep int
+		// what lister sees (order doesn't matter; timestamps decide)
+		listerCMs []*v1.ConfigMap
+		// what client actually has stored (can be fewer to trigger NotFound delete)
+		clientObjs []runtime.Object
+
+		// optional reactors
+		listErr   error
+		deleteErr map[string]error // name -> error
+
+		wantErrSubstr string
+		wantDeletes   []string
+	}
+
+	ns := "ns"
+	labelKey := "myx/prune"
+
+	// newest..oldest: cm4, cm3, cm2, cm1
+	cm1 := cm(ns, "cm1", map[string]string{labelKey: "true"}, nil, base.Add(-3*time.Hour))
+	cm2 := cm(ns, "cm2", map[string]string{labelKey: "true"}, nil, base.Add(-2*time.Hour))
+	cm3 := cm(ns, "cm3", map[string]string{labelKey: "true"}, nil, base.Add(-1*time.Hour))
+	cm4 := cm(ns, "cm4", map[string]string{labelKey: "true"}, nil, base)
+
+	tests := []tc{
 		{
-			name:      "deletes oldest when keep=2",
-			namespace: "ns7",
-			labelKey:  "myx/prune",
-			keep:      2,
-			offsets: map[string]time.Duration{
-				"cm1": -3 * time.Hour,
-				"cm2": -2 * time.Hour,
-				"cm3": -1 * time.Hour,
-				"cm4": 0,
-			},
-			wantExists: map[string]bool{"cm4": true, "cm3": true, "cm2": false, "cm1": false},
+			name:          "keep<=0 returns immediately",
+			keep:          0,
+			listerCMs:     []*v1.ConfigMap{cm1, cm2},
+			clientObjs:    []runtime.Object{cm1, cm2},
+			wantDeletes:   nil,
+			wantErrSubstr: "",
 		},
 		{
-			name:      "keep=0 is a no-op",
-			namespace: "ns7-k0",
-			labelKey:  "myx/prune-k0",
-			keep:      0,
-			offsets: map[string]time.Duration{
-				"cm1": -1 * time.Hour,
-				"cm2": 0,
-			},
-			wantExists: map[string]bool{"cm1": true, "cm2": true},
+			name:        "len(items)<=keep is a no-op",
+			keep:        10,
+			listerCMs:   []*v1.ConfigMap{cm1, cm2, cm3},
+			clientObjs:  []runtime.Object{cm1, cm2, cm3},
+			wantDeletes: nil,
 		},
 		{
-			name:      "keep>len(items) is a no-op",
-			namespace: "ns7-kbig",
-			labelKey:  "myx/prune-kbig",
-			keep:      10,
-			offsets: map[string]time.Duration{
-				"cm1": -3 * time.Hour,
-				"cm2": -2 * time.Hour,
-				"cm3": -1 * time.Hour,
-			},
-			wantExists: map[string]bool{"cm1": true, "cm2": true, "cm3": true},
+			name:        "deletes older beyond keep",
+			keep:        2,
+			listerCMs:   []*v1.ConfigMap{cm1, cm2, cm3, cm4},
+			clientObjs:  []runtime.Object{cm1, cm2, cm3, cm4},
+			wantDeletes: []string{"cm2", "cm1"}, // keep cm4,cm3; delete cm2,cm1
+		},
+		{
+			name:          "list error propagates",
+			keep:          1,
+			listErr:       fmt.Errorf("boom"),
+			wantErrSubstr: "boom",
+		},
+		{
+			name: "delete NotFound is ignored",
+			keep: 1,
+			// lister sees 3 labeled, but client only has newest
+			listerCMs:   []*v1.ConfigMap{cm2, cm3, cm4},
+			clientObjs:  []runtime.Object{cm4},
+			wantDeletes: []string{"cm3", "cm2"},
+			// fake client will return NotFound for deletes of cm3/cm2
+		},
+		{
+			name:          "delete other error is returned",
+			keep:          1,
+			listerCMs:     []*v1.ConfigMap{cm2, cm3, cm4},
+			clientObjs:    []runtime.Object{cm2, cm3, cm4},
+			deleteErr:     map[string]error{"cm3": fmt.Errorf("delete-fail")},
+			wantErrSubstr: "delete-fail",
+			// delete attempts: starts at cm3 then cm2, but should stop on cm3 error
+			wantDeletes: []string{"cm3"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			now := time.Now()
+			cli := fake.NewSimpleClientset(tt.clientObjs...)
+			cms := cli.CoreV1().ConfigMaps(ns)
 
-			var objs []runtime.Object
-			var seeded []*v1.ConfigMap
-			for name, offset := range tt.offsets {
-				cm := makeCm(tt.namespace, name, map[string]string{tt.labelKey: "true"}, nil, now.Add(offset))
-				objs = append(objs, cm)
-				seeded = append(seeded, cm)
-			}
-
-			cli := fake.NewSimpleClientset(objs...)
-			cms := cli.CoreV1().ConfigMaps(tt.namespace)
-			lister := nsLister(tt.namespace, seeded...)
-
-			if err := pruneConfigMaps(ctx, cms, lister, tt.labelKey, tt.keep); err != nil {
-				t.Fatalf("pruneConfigMaps failed: %v", err)
-			}
-
-			for name, wantExist := range tt.wantExists {
-				_, err := cms.Get(ctx, name, metav1.GetOptions{})
-				switch {
-				case wantExist && err != nil:
-					t.Errorf("expected %s to exist, got error: %v", name, err)
-				case !wantExist && err == nil:
-					t.Errorf("expected %s to be deleted, but Get succeeded", name)
-				case !wantExist && err != nil && !apierrors.IsNotFound(err):
-					t.Errorf("expected notfound for %s, got: %v", name, err)
+			var l corev1listers.ConfigMapNamespaceLister
+			if tt.listErr != nil {
+				l = cmNSLister{
+					listFn: func() ([]*v1.ConfigMap, error) { return nil, tt.listErr },
+					getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
 				}
+			} else {
+				l = nsLister(ns, tt.listerCMs...)
+			}
+
+			// Per-name delete errors (and explicit NotFound behavior when object not present)
+			if len(tt.deleteErr) > 0 {
+				cli.Fake.PrependReactor("delete", "configmaps", func(a k8stesting.Action) (bool, runtime.Object, error) {
+					da := a.(k8stesting.DeleteAction)
+					if err, ok := tt.deleteErr[da.GetName()]; ok {
+						return true, nil, err
+					}
+					return false, nil, nil // fall through to default fake behavior
+				})
+			}
+
+			err := pruneConfigMaps(ctx, cms, l, labelKey, tt.keep)
+
+			if tt.wantErrSubstr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
+					t.Fatalf("err=%v, want substring %q", err, tt.wantErrSubstr)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+
+			gotDeletes := deleteActions(cli)
+			if !reflect.DeepEqual(gotDeletes, tt.wantDeletes) {
+				t.Fatalf("delete actions=%v, want %v", gotDeletes, tt.wantDeletes)
 			}
 		})
 	}
-}
 
-func TestPruneConfigMaps_ListErrorPropagates(t *testing.T) {
-	ctx := context.Background()
-	ns := "ns-prune-listerr"
-	labelKey := "lk"
-
-	cli := fake.NewSimpleClientset()
-	cms := cli.CoreV1().ConfigMaps(ns)
-
-	lister := cmNSLister{
-		listFn: func() ([]*v1.ConfigMap, error) { return nil, fmt.Errorf("boom") },
-		getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
-	}
-
-	err := pruneConfigMaps(ctx, cms, lister, labelKey, 1)
-	if err == nil || !strings.Contains(err.Error(), "boom") {
-		t.Fatalf("expected error containing %q, got %v", "boom", err)
-	}
-}
-
-func TestPruneConfigMaps_DeleteNotFoundIsIgnored(t *testing.T) {
-	ctx := context.Background()
-	ns := "ns-prune-notfound"
-	labelKey := "lk"
-	now := time.Now()
-
-	// Lister sees 3 labeled CMs (so prune will attempt deletes of 2).
-	cmNew := makeCm(ns, "cm-new", map[string]string{labelKey: "true"}, nil, now)
-	cmOld1 := makeCm(ns, "cm-old1", map[string]string{labelKey: "true"}, nil, now.Add(-1*time.Hour))
-	cmOld2 := makeCm(ns, "cm-old2", map[string]string{labelKey: "true"}, nil, now.Add(-2*time.Hour))
-	lister := nsLister(ns, cmNew, cmOld1, cmOld2)
-
-	// Client only has the newest CM. Deleting the old ones will return NotFound,
-	// which pruneConfigMaps must ignore.
-	cli := fake.NewSimpleClientset(cmNew)
-	cms := cli.CoreV1().ConfigMaps(ns)
-
-	err := pruneConfigMaps(ctx, cms, lister, labelKey, 1)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-
-	// Sanity: newest still exists
-	if _, err := cms.Get(ctx, "cm-new", metav1.GetOptions{}); err != nil {
-		t.Fatalf("expected cm-new to exist, got %v", err)
-	}
-
-	// Ensure we actually executed the delete path (2 delete actions attempted).
-	seen := map[string]bool{}
-	for _, a := range cli.Actions() {
-		if a.GetVerb() == "delete" && a.GetResource().Resource == "configmaps" {
-			if da, ok := a.(k8stesting.DeleteAction); ok {
-				seen[da.GetName()] = true
-			}
+	// Small sanity: prove fake client NotFound path behaves like apiserver (for the NotFound test above).
+	t.Run("fake delete of missing returns NotFound", func(t *testing.T) {
+		cli := fake.NewSimpleClientset()
+		err := cli.CoreV1().ConfigMaps(ns).Delete(ctx, "missing", metav1.DeleteOptions{})
+		if err == nil || !apierrors.IsNotFound(err) {
+			t.Fatalf("expected NotFound, got %v", err)
 		}
-	}
-	if !seen["cm-old1"] || !seen["cm-old2"] {
-		t.Fatalf("expected delete attempts for cm-old1 and cm-old2, seen=%v", seen)
-	}
+	})
 }
 
 // -------------------------
 // marshalJsonIndented
 // -------------------------
 
-func TestMarshalJsonIndented_Success(t *testing.T) {
-	type payload struct {
-		Foo string `json:"foo"`
-		Bar int    `json:"bar"`
-	}
+func TestMarshalJsonIndented(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		type payload struct {
+			Foo string `json:"foo"`
+			Bar int    `json:"bar"`
+		}
 
-	b, err := marshalJsonIndented(payload{Foo: "x", Bar: 42})
-	if err != nil {
-		t.Fatalf("marshalJsonIndented returned error: %v", err)
-	}
+		want := payload{Foo: "x", Bar: 42}
 
-	var got map[string]any
-	if err := json.Unmarshal(b, &got); err != nil {
-		t.Fatalf("unmarshal of marshalled JSON failed: %v", err)
-	}
-	if got["foo"] != "x" {
-		t.Fatalf(`expected foo="x", got %v`, got["foo"])
-	}
-	if v, ok := got["bar"].(float64); !ok || v != 42 {
-		t.Fatalf("expected bar=42, got %T %v", got["bar"], got["bar"])
-	}
+		b, err := marshalJsonIndented(want)
+		if err != nil {
+			t.Fatalf("marshalJsonIndented() err = %v", err)
+		}
 
-	// Pretty-printed.
-	s := string(b)
-	if !strings.Contains(s, "\n") {
-		t.Fatalf("expected pretty-printed JSON to contain a newline, got %q", s)
-	}
-	if !strings.Contains(s, "  \"foo\"") {
-		t.Fatalf("expected pretty-printed JSON to contain indented key, got %q", s)
-	}
-}
+		// Round-trip into the same type (avoids float64 casting from map[string]any).
+		var got payload
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatalf("json.Unmarshal() err = %v; json=%q", err, string(b))
+		}
+		if got != want {
+			t.Fatalf("round-trip = %#v, want %#v", got, want)
+		}
 
-func TestMarshalJsonIndented_Error(t *testing.T) {
-	_, err := marshalJsonIndented(make(chan int))
-	if err == nil {
-		t.Fatalf("expected error for unsupported type, got nil")
-	}
+		// Indentation check (more specific than just "contains newline").
+		if !strings.Contains(string(b), "\n  \"foo\":") {
+			t.Fatalf("expected indented JSON, got %q", string(b))
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		if _, err := marshalJsonIndented(make(chan int)); err == nil {
+			t.Fatalf("marshalJsonIndented() expected error, got nil")
+		}
+	})
 }
 
 // -------------------------
-// jsonString
+// marshalToJsonString
 // -------------------------
 
-func TestJsonString_Success(t *testing.T) {
-	type payload struct {
-		Answer int `json:"answer"`
-	}
+func TestMarshalToJsonString(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		type payload struct {
+			Answer int `json:"answer"`
+		}
+		want := payload{Answer: 1234}
 
-	s, err := marshalToJsonString(payload{Answer: 1234})
-	if err != nil {
-		t.Fatalf("jsonString returned error: %v", err)
-	}
+		s, err := marshalToJsonString(want)
+		if err != nil {
+			t.Fatalf("marshalToJsonString() err = %v", err)
+		}
 
-	var got map[string]int
-	if err := json.Unmarshal([]byte(s), &got); err != nil {
-		t.Fatalf("unmarshal of jsonString output failed: %v", err)
-	}
-	if got["answer"] != 1234 {
-		t.Fatalf("expected answer=1234, got %d", got["answer"])
-	}
-}
+		var got payload
+		if err := json.Unmarshal([]byte(s), &got); err != nil {
+			t.Fatalf("json.Unmarshal() err = %v; json=%q", err, s)
+		}
+		if got != want {
+			t.Fatalf("round-trip = %#v, want %#v", got, want)
+		}
 
-func TestJsonString_Error(t *testing.T) {
-	_, err := marshalToJsonString(make(chan int))
-	if err == nil {
-		t.Fatalf("expected error for unsupported type, got nil")
-	}
+		// Indentation check (since marshalToJsonString uses MarshalIndent).
+		if !strings.Contains(s, "\n  \"answer\":") {
+			t.Fatalf("expected indented JSON, got %q", s)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		if _, err := marshalToJsonString(make(chan int)); err == nil {
+			t.Fatalf("marshalToJsonString() expected error, got nil")
+		}
+	})
 }
 
 // -------------------------
 // patchDataString
 // -------------------------
 
-func TestPatchDataString_UpdatesSingleKey(t *testing.T) {
+func TestPatchDataString(t *testing.T) {
 	ctx := context.Background()
-	namespace := "ns-patch"
+	ns := "ns-patch"
 	name := "cm-patch"
 	dataKey := "myx/plan.json"
 
-	initial := makeCm(namespace, name, nil, map[string]string{
+	initial := cm(ns, name, nil, map[string]string{
 		dataKey: "old-value",
 		"other": "keep-me",
 	}, time.Now())
 
-	_, cms, _ := setupCm(namespace, initial)
-	doc := makeCmDoc(namespace, name, "", dataKey)
+	_, cms, _ := setupCm(ns, initial)
+	doc := cmDoc(ns, name, "", dataKey)
 
 	raw := `{"foo":"bar"}`
 	if err := doc.patchDataString(ctx, cms, raw); err != nil {
-		t.Fatalf("patchDataString failed: %v", err)
+		t.Fatalf("patchDataString() err = %v", err)
 	}
 
-	cm, err := cms.Get(ctx, name, metav1.GetOptions{})
+	gotCM, err := cms.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("Get after patchDataString failed: %v", err)
+		t.Fatalf("Get() after patchDataString err = %v", err)
 	}
 
-	if got := cm.Data[dataKey]; got != raw {
-		t.Fatalf("dataKey %q mismatch: got %q, want %q", dataKey, got, raw)
+	want := map[string]string{
+		dataKey: raw,
+		"other": "keep-me",
 	}
-	if got := cm.Data["other"]; got != "keep-me" {
-		t.Fatalf("expected other key to be unchanged, got %q", got)
+	for k, v := range want {
+		if got := gotCM.Data[k]; got != v {
+			t.Fatalf("cm.Data[%q] = %q, want %q", k, got, v)
+		}
 	}
 }
 
@@ -391,135 +435,98 @@ func TestPatchDataString_UpdatesSingleKey(t *testing.T) {
 
 func TestEnsureJson_CreateAndUpdate(t *testing.T) {
 	ctx := context.Background()
-	namespace := "ns1"
-	name := "cm1"
-	labelKey := "myx/plan"
-	dataKey := "myx/plan.json"
+	ns, name := "ns1", "cm1"
+	labelKey, dataKey := "myx/plan", "myx/plan.json"
 
-	_, cms, _ := setupCm(namespace, nil)
-	doc := makeCmDoc(namespace, name, labelKey, dataKey)
+	_, cms, _ := setupCm(ns, nil)
+	doc := cmDoc(ns, name, labelKey, dataKey)
 
 	type payload struct {
 		Value string `json:"value"`
 	}
 
-	// Create
-	if err := doc.ensureJson(ctx, cms, payload{Value: "first"}); err != nil {
-		t.Fatalf("ensureJson(create) failed: %v", err)
-	}
+	cases := []string{"first", "second"}
+	for _, v := range cases {
+		if err := doc.ensureJson(ctx, cms, payload{Value: v}); err != nil {
+			t.Fatalf("ensureJson(%q) err = %v", v, err)
+		}
 
-	cm, err := cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after create failed: %v", err)
-	}
-	if cm.Labels[labelKey] != "true" {
-		t.Fatalf("expected label %q=true, got %v", labelKey, cm.Labels)
-	}
-	var got payload
-	if err := json.Unmarshal([]byte(cm.Data[dataKey]), &got); err != nil {
-		t.Fatalf("unmarshal created data failed: %v", err)
-	}
-	if got.Value != "first" {
-		t.Fatalf("expected value=first, got %q", got.Value)
-	}
+		gotCM, err := cms.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Get(%q) err = %v", name, err)
+		}
 
-	// Update
-	if err := doc.ensureJson(ctx, cms, payload{Value: "second"}); err != nil {
-		t.Fatalf("ensureJson(update) failed: %v", err)
-	}
-	cm, err = cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after update failed: %v", err)
-	}
-	got = payload{}
-	if err := json.Unmarshal([]byte(cm.Data[dataKey]), &got); err != nil {
-		t.Fatalf("unmarshal updated data failed: %v", err)
-	}
-	if got.Value != "second" {
-		t.Fatalf("expected value=second after update, got %q", got.Value)
+		if got := gotCM.Labels[labelKey]; got != "true" {
+			t.Fatalf("label %q = %q, want %q", labelKey, got, "true")
+		}
+
+		got := mustReadJSON[payload](t, gotCM, dataKey)
+		if got.Value != v {
+			t.Fatalf("Value = %q, want %q", got.Value, v)
+		}
 	}
 }
 
 func TestEnsureJson_UpdateOnNilData(t *testing.T) {
 	ctx := context.Background()
-	namespace := "ns1-nildata"
-	name := "cm-nildata"
-	labelKey := "myx/plan"
-	dataKey := "myx/plan.json"
+	ns, name := "ns1-nildata", "cm-nildata"
+	labelKey, dataKey := "myx/plan", "myx/plan.json"
 
 	existing := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: ns,
 			Labels:    map[string]string{labelKey: "true"},
 		},
 		Data: nil,
 	}
 
-	_, cms, _ := setupCm(namespace, existing)
-	doc := makeCmDoc(namespace, name, labelKey, dataKey)
+	_, cms, _ := setupCm(ns, existing)
+	doc := cmDoc(ns, name, labelKey, dataKey)
 
 	type payload struct {
 		Value string `json:"value"`
 	}
 
 	if err := doc.ensureJson(ctx, cms, payload{Value: "from-nil"}); err != nil {
-		t.Fatalf("ensureJson(update on nil Data) failed: %v", err)
+		t.Fatalf("ensureJson err = %v", err)
 	}
 
-	cm, err := cms.Get(ctx, name, metav1.GetOptions{})
+	gotCM, err := cms.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("Get after ensureJson failed: %v", err)
+		t.Fatalf("Get(%q) err = %v", name, err)
 	}
-	if cm.Data == nil {
-		t.Fatalf("expected Data map to be initialized, got nil")
+	if gotCM.Data == nil {
+		t.Fatalf("Data is nil, want initialized map")
 	}
 
-	var got payload
-	if err := json.Unmarshal([]byte(cm.Data[dataKey]), &got); err != nil {
-		t.Fatalf("unmarshal updated data failed: %v", err)
-	}
+	got := mustReadJSON[payload](t, gotCM, dataKey)
 	if got.Value != "from-nil" {
-		t.Fatalf("expected value=from-nil, got %q", got.Value)
+		t.Fatalf("Value = %q, want %q", got.Value, "from-nil")
 	}
 }
 
 func TestEnsureJson_PropagatesClientErrors(t *testing.T) {
 	ctx := context.Background()
+	const ns, name, lk, dk = "ns", "cm", "lk", "dk"
+	doc := cmDoc(ns, name, lk, dk)
 
-	type tc struct {
-		name       string
-		verb       string
-		seed       *v1.ConfigMap
-		wantSubstr string
+	seedForUpdate := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+			Labels:    map[string]string{lk: "true"},
+		},
+		Data: map[string]string{dk: `{"old":true}`},
 	}
 
-	tests := []tc{
-		{
-			name:       "get fails",
-			verb:       "get",
-			seed:       nil,
-			wantSubstr: "get-fail",
-		},
-		{
-			name:       "create fails",
-			verb:       "create",
-			seed:       nil,
-			wantSubstr: "create-fail",
-		},
-		{
-			name: "update fails",
-			verb: "update",
-			seed: &v1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "cm",
-					Namespace: "ns",
-					Labels:    map[string]string{"lk": "true"},
-				},
-				Data: map[string]string{"dk": `{"old":true}`},
-			},
-			wantSubstr: "update-fail",
-		},
+	tests := []struct {
+		name, verb, wantSubstr string
+		seed                   *v1.ConfigMap
+	}{
+		{"get fails", "get", "get-fail", nil},
+		{"create fails", "create", "create-fail", nil},
+		{"update fails", "update", "update-fail", seedForUpdate},
 	}
 
 	for _, tt := range tests {
@@ -535,12 +542,9 @@ func TestEnsureJson_PropagatesClientErrors(t *testing.T) {
 				return true, nil, fmt.Errorf("%s", tt.wantSubstr)
 			})
 
-			cms := cli.CoreV1().ConfigMaps("ns")
-			doc := makeCmDoc("ns", "cm", "lk", "dk")
-
-			err := doc.ensureJson(ctx, cms, map[string]any{"x": 1})
+			err := doc.ensureJson(ctx, cli.CoreV1().ConfigMaps(ns), map[string]any{"x": 1})
 			if err == nil || !strings.Contains(err.Error(), tt.wantSubstr) {
-				t.Fatalf("expected error containing %q, got %v", tt.wantSubstr, err)
+				t.Fatalf("err=%v, want substring %q", err, tt.wantSubstr)
 			}
 		})
 	}
@@ -549,14 +553,13 @@ func TestEnsureJson_PropagatesClientErrors(t *testing.T) {
 func TestEnsureJson_MarshalError_NoClientActions(t *testing.T) {
 	ctx := context.Background()
 	cli, cms, _ := setupCm("ns", nil)
-	doc := makeCmDoc("ns", "cm", "lk", "dk")
+	doc := cmDoc("ns", "cm", "lk", "dk")
 
-	err := doc.ensureJson(ctx, cms, make(chan int))
-	if err == nil {
+	if err := doc.ensureJson(ctx, cms, make(chan int)); err == nil {
 		t.Fatalf("expected marshal error, got nil")
 	}
-	if got := len(cli.Actions()); got != 0 {
-		t.Fatalf("expected no client actions on marshal error, got %d: %#v", got, cli.Actions())
+	if len(cli.Actions()) != 0 {
+		t.Fatalf("expected no client actions, got %#v", cli.Actions())
 	}
 }
 
@@ -564,83 +567,69 @@ func TestEnsureJson_MarshalError_NoClientActions(t *testing.T) {
 // readJson
 // -------------------------
 
-func TestReadJson_NilConfigMapNoError(t *testing.T) {
-	doc := makeCmDoc("ns", "cm", "", "dk")
+func TestReadJson(t *testing.T) {
+	ns, name, dk := "ns", "cm", "dk"
+	doc := cmDoc(ns, name, "", dk)
 
-	lister := cmNSLister{
-		getFn:  func(string) (*v1.ConfigMap, error) { return nil, nil }, // hit cm == nil branch
-		listFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
-	}
+	now := time.Now()
+	presentVal := `{"hello":"world"}`
+	presentCM := cm(ns, name, map[string]string{"": ""}, map[string]string{dk: presentVal}, now)
+	emptyKeyCM := cm(ns, name, map[string]string{"": ""}, map[string]string{}, now)
 
-	raw, found, err := doc.readJson(lister)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Fatalf("expected found=false when cm is nil")
-	}
-	if raw != nil {
-		t.Fatalf("expected nil raw when cm is nil, got %q", string(raw))
-	}
-}
-
-func TestReadJson_MissingAndPresent(t *testing.T) {
-	namespace := "ns3"
-	name := "cm3"
-	dataKey := "myx/plan.json"
-
-	doc := makeCmDoc(namespace, name, "", dataKey)
-
-	// Missing
-	raw, found, err := doc.readJson(nsLister(namespace))
-	if err != nil {
-		t.Fatalf("readJson(missing) returned error: %v", err)
-	}
-	if found || raw != nil {
-		t.Fatalf("expected missing -> (nil,false,nil), got raw=%v found=%v err=%v", raw, found, err)
-	}
-
-	// Present
-	cm := makeCm(namespace, name, nil, map[string]string{dataKey: `{"hello":"world"}`}, time.Now())
-	raw, found, err = doc.readJson(nsLister(namespace, cm))
-	if err != nil {
-		t.Fatalf("readJson(present) error: %v", err)
-	}
-	if !found {
-		t.Fatalf("expected found=true")
-	}
-	if string(raw) != cm.Data[dataKey] {
-		t.Fatalf("readJson mismatch: got %q, want %q", string(raw), cm.Data[dataKey])
-	}
-}
-
-func TestReadJson_GetReturnsError(t *testing.T) {
-	doc := makeCmDoc("ns", "cm", "", "dk")
-
-	lister := cmNSLister{
-		getFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("boom") },
-		listFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
+	tests := []struct {
+		name         string
+		lister       corev1listers.ConfigMapNamespaceLister
+		customLister corev1listers.ConfigMapNamespaceLister // when we need cmNSLister
+		wantFound    bool
+		wantRaw      *string
+		wantErrSub   string
+	}{
+		{
+			name: "nil configmap treated as missing",
+			customLister: cmNSLister{
+				getFn:  func(string) (*v1.ConfigMap, error) { return nil, nil },
+				listFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
+			},
+			wantFound: false,
+			wantRaw:   nil,
+		},
+		{
+			name:      "not found is missing",
+			lister:    nsLister(ns /* no objects */),
+			wantFound: false,
+			wantRaw:   nil,
+		},
+		{
+			name:      "present returns bytes",
+			lister:    nsLister(ns, presentCM),
+			wantFound: true,
+			wantRaw:   &presentVal,
+		},
+		{
+			name: "get error propagates",
+			customLister: cmNSLister{
+				getFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("boom") },
+				listFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
+			},
+			wantErrSub: "boom",
+		},
+		{
+			name:      "key missing returns empty bytes but found=true",
+			lister:    nsLister(ns, emptyKeyCM),
+			wantFound: true,
+			wantRaw:   ptr(""),
+		},
 	}
 
-	_, _, err := doc.readJson(lister)
-	if err == nil || !strings.Contains(err.Error(), "boom") {
-		t.Fatalf("expected error, got %v", err)
-	}
-}
-
-func TestReadJson_KeyMissing(t *testing.T) {
-	doc := makeCmDoc("ns", "cm", "", "dk")
-	cm := makeCm("ns", "cm", nil, map[string]string{}, time.Now())
-
-	raw, found, err := doc.readJson(nsLister("ns", cm))
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if !found {
-		t.Fatalf("expected found=true")
-	}
-	if raw == nil || string(raw) != "" {
-		t.Fatalf("expected empty bytes, got %v (%q)", raw, string(raw))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := tt.lister
+			if tt.customLister != nil {
+				l = tt.customLister
+			}
+			raw, found, err := doc.readJson(l)
+			assertReadJSON(t, raw, found, err, tt.wantFound, tt.wantRaw, tt.wantErrSub)
+		})
 	}
 }
 
@@ -650,65 +639,89 @@ func TestReadJson_KeyMissing(t *testing.T) {
 
 func TestPatchJson(t *testing.T) {
 	ctx := context.Background()
-	namespace := "ns2"
-	name := "cm2"
-	labelKey := "myx/plan"
-	dataKey := "myx/plan.json"
-
-	initial := makeCm(namespace, name, map[string]string{labelKey: "true"}, map[string]string{
-		dataKey: `{"value":"old"}`,
-	}, time.Now())
-
-	_, cms, _ := setupCm(namespace, initial)
-	doc := makeCmDoc(namespace, name, labelKey, dataKey)
 
 	type payload struct {
 		Value string `json:"value"`
 	}
 
-	if err := doc.patchJson(ctx, cms, payload{Value: "patched"}); err != nil {
-		t.Fatalf("patchJson failed: %v", err)
+	tests := []struct {
+		name      string
+		ns        string
+		cmName    string
+		labelKey  string
+		dataKey   string
+		in        any
+		wantErr   bool
+		wantValue string // only used on success
+		wantRaw   string // expected raw stored in cm after call
+	}{
+		{
+			name:      "success patches json",
+			ns:        "ns2",
+			cmName:    "cm2",
+			labelKey:  "myx/plan",
+			dataKey:   "myx/plan.json",
+			in:        payload{Value: "patched"},
+			wantErr:   false,
+			wantValue: "patched",
+			wantRaw:   "", // computed after marshal/unmarshal check
+		},
+		{
+			name:     "marshal failure returns error and does not change data",
+			ns:       "ns2-err",
+			cmName:   "cm2-err",
+			labelKey: "myx/plan",
+			dataKey:  "myx/plan.json",
+			in:       make(chan int),
+			wantErr:  true,
+			wantRaw:  `{"value":"old"}`,
+		},
 	}
 
-	cm, err := cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after patch failed: %v", err)
-	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			old := `{"value":"old"}`
+			initial := cm(tt.ns, tt.cmName, map[string]string{tt.labelKey: "true"}, map[string]string{
+				tt.dataKey: old,
+			}, time.Now())
 
-	var got payload
-	if err := json.Unmarshal([]byte(cm.Data[dataKey]), &got); err != nil {
-		t.Fatalf("unmarshal patched data failed: %v", err)
-	}
-	if got.Value != "patched" {
-		t.Fatalf("expected Value=patched, got %q", got.Value)
-	}
-}
+			_, cms, _ := setupCm(tt.ns, initial)
+			doc := cmDoc(tt.ns, tt.cmName, tt.labelKey, tt.dataKey)
 
-func TestPatchJson_ErrorOnMarshalFailure(t *testing.T) {
-	ctx := context.Background()
-	namespace := "ns2-err"
-	name := "cm2-err"
-	labelKey := "myx/plan"
-	dataKey := "myx/plan.json"
+			err := doc.patchJson(ctx, cms, tt.in)
 
-	initial := makeCm(namespace, name, map[string]string{labelKey: "true"}, map[string]string{
-		dataKey: `{"value":"old"}`,
-	}, time.Now())
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				after, gerr := cms.Get(ctx, tt.cmName, metav1.GetOptions{})
+				if gerr != nil {
+					t.Fatalf("Get after patchJson failed: %v", gerr)
+				}
+				if got := after.Data[tt.dataKey]; got != old {
+					t.Fatalf("expected dataKey unchanged; got %q, want %q", got, old)
+				}
+				return
+			}
 
-	_, cms, _ := setupCm(namespace, initial)
-	doc := makeCmDoc(namespace, name, labelKey, dataKey)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-	badValue := make(chan int)
-	if err := doc.patchJson(ctx, cms, badValue); err == nil {
-		t.Fatalf("expected error from patchJson when marshalling fails, got nil")
-	}
+			after, gerr := cms.Get(ctx, tt.cmName, metav1.GetOptions{})
+			if gerr != nil {
+				t.Fatalf("Get after patch failed: %v", gerr)
+			}
 
-	cm, err := cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after patchJson error failed: %v", err)
-	}
-	if got := cm.Data[dataKey]; got != `{"value":"old"}` {
-		t.Fatalf("expected dataKey to remain unchanged, got %q", got)
+			var got payload
+			if uerr := json.Unmarshal([]byte(after.Data[tt.dataKey]), &got); uerr != nil {
+				t.Fatalf("unmarshal patched data failed: %v", uerr)
+			}
+			if got.Value != tt.wantValue {
+				t.Fatalf("Value=%q, want %q", got.Value, tt.wantValue)
+			}
+		})
 	}
 }
 
@@ -716,131 +729,162 @@ func TestPatchJson_ErrorOnMarshalFailure(t *testing.T) {
 // mutateJson
 // -------------------------
 
-func TestMutateJson_Appends(t *testing.T) {
+func TestMutateJson(t *testing.T) {
 	ctx := context.Background()
-	namespace := "ns4"
-	name := "cm4"
-	dataKey := "myx/arr.json"
 
 	type item struct {
 		ID int `json:"id"`
 	}
 
-	initialArr := []item{{ID: 1}, {ID: 2}}
-	initialJSON, _ := json.Marshal(initialArr)
-
-	cm := makeCm(namespace, name, nil, map[string]string{
-		dataKey: string(initialJSON),
-	}, time.Now())
-
-	_, cms, _ := setupCm(namespace, cm)
-	doc := makeCmDoc(namespace, name, "", dataKey)
-	lister := nsLister(namespace, cm)
-
-	err := mutateJson(ctx, cms, lister, doc, func(existing []item) ([]item, error) {
-		return append(existing, item{ID: 3}), nil
-	})
-	if err != nil {
-		t.Fatalf("mutateJson failed: %v", err)
-	}
-
-	updated, err := cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after mutateJson failed: %v", err)
-	}
-
-	var arr []item
-	if err := json.Unmarshal([]byte(updated.Data[dataKey]), &arr); err != nil {
-		t.Fatalf("unmarshal after mutateJson failed: %v", err)
-	}
-	if len(arr) != 3 || arr[2].ID != 3 {
-		t.Fatalf("expected appended item with ID=3, got %#v", arr)
-	}
-}
-
-func TestMutateJson_MutateError_NoChange(t *testing.T) {
-	ctx := context.Background()
-	namespace := "ns4-err"
-	name := "cm4-err"
-	dataKey := "myx/arr.json"
-
-	type item struct {
-		ID int `json:"id"`
-	}
-
-	initialArr := []item{{ID: 1}}
-	initialJSON, _ := json.Marshal(initialArr)
-
-	cm := makeCm(namespace, name, nil, map[string]string{
-		dataKey: string(initialJSON),
-	}, time.Now())
-
-	_, cms, _ := setupCm(namespace, cm)
-	doc := makeCmDoc(namespace, name, "", dataKey)
-	lister := nsLister(namespace, cm)
-
-	err := mutateJson(ctx, cms, lister, doc, func(existing []item) ([]item, error) {
-		if len(existing) != 1 || existing[0].ID != 1 {
-			t.Fatalf("unexpected existing slice in mutateJson: %#v", existing)
+	mustGet := func(t *testing.T, cms interface {
+		Get(context.Context, string, metav1.GetOptions) (*v1.ConfigMap, error)
+	}, name string) *v1.ConfigMap {
+		t.Helper()
+		got, err := cms.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Get(%s) failed: %v", name, err)
 		}
-		return nil, fmt.Errorf("boom")
-	})
-	if err == nil || !strings.Contains(err.Error(), "boom") {
-		t.Fatalf("expected mutateJson to return our error, got %v", err)
+		return got
 	}
 
-	updated, err := cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after mutateJson error failed: %v", err)
+	tests := []struct {
+		name     string
+		ns       string
+		cmName   string
+		dataKey  string
+		raw      string
+		lister   corev1listers.ConfigMapNamespaceLister
+		patchErr string // if set, inject patch reactor error
+		run      func(t *testing.T, cms corev1client.ConfigMapInterface) error
+		assert   func(t *testing.T, cms corev1client.ConfigMapInterface)
+		wantSub  string
+	}{
+		{
+			name:    "appends",
+			ns:      "ns4",
+			cmName:  "cm4",
+			dataKey: "myx/arr.json",
+			raw:     `[{"id":1},{"id":2}]`,
+			run: func(t *testing.T, cms corev1client.ConfigMapInterface) error {
+				cm0 := cm("ns4", "cm4", nil, map[string]string{"myx/arr.json": `[{"id":1},{"id":2}]`}, time.Now())
+				doc := cmDoc("ns4", "cm4", "", "myx/arr.json")
+				l := nsLister("ns4", cm0)
+				return mutateJson(ctx, cms, l, doc, func(existing []item) ([]item, error) {
+					return append(existing, item{ID: 3}), nil
+				})
+			},
+			assert: func(t *testing.T, cms corev1client.ConfigMapInterface) {
+				updated := mustGet(t, cms, "cm4")
+				var arr []item
+				if err := json.Unmarshal([]byte(updated.Data["myx/arr.json"]), &arr); err != nil {
+					t.Fatalf("unmarshal failed: %v", err)
+				}
+				if len(arr) != 3 || arr[2].ID != 3 {
+					t.Fatalf("expected appended ID=3, got %#v", arr)
+				}
+			},
+		},
+		{
+			name:    "mutate error leaves data unchanged",
+			ns:      "ns4-err",
+			cmName:  "cm4-err",
+			dataKey: "myx/arr.json",
+			raw:     `[{"id":1}]`,
+			run: func(t *testing.T, cms corev1client.ConfigMapInterface) error {
+				cm0 := cm("ns4-err", "cm4-err", nil, map[string]string{"myx/arr.json": `[{"id":1}]`}, time.Now())
+				doc := cmDoc("ns4-err", "cm4-err", "", "myx/arr.json")
+				l := nsLister("ns4-err", cm0)
+				return mutateJson(ctx, cms, l, doc, func(existing []item) ([]item, error) {
+					if len(existing) != 1 || existing[0].ID != 1 {
+						t.Fatalf("unexpected existing: %#v", existing)
+					}
+					return nil, fmt.Errorf("boom")
+				})
+			},
+			wantSub: "boom",
+			assert: func(t *testing.T, cms corev1client.ConfigMapInterface) {
+				updated := mustGet(t, cms, "cm4-err")
+				if got := updated.Data["myx/arr.json"]; got != `[{"id":1}]` {
+					t.Fatalf("expected unchanged raw, got %q", got)
+				}
+			},
+		},
+		{
+			name: "read error propagates and mutate not called",
+			ns:   "ns",
+			run: func(t *testing.T, cms corev1client.ConfigMapInterface) error {
+				doc := cmDoc("ns", "cm", "", "dk")
+				called := false
+				l := cmNSLister{
+					getFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("read-fail") },
+					listFn: func() ([]*v1.ConfigMap, error) { return nil, nil },
+				}
+				err := mutateJson(ctx, cms, l, doc, func(_ []int) ([]int, error) {
+					called = true
+					return nil, nil
+				})
+				if called {
+					t.Fatalf("mutate must not run on read error")
+				}
+				return err
+			},
+			wantSub: "read-fail",
+		},
+		{
+			name:     "patch failure propagates",
+			ns:       "ns",
+			cmName:   "cm",
+			dataKey:  "dk",
+			raw:      `[1,2]`,
+			patchErr: "patch-fail",
+			run: func(t *testing.T, cms corev1client.ConfigMapInterface) error {
+				cm0 := cm("ns", "cm", nil, map[string]string{"dk": `[1,2]`}, time.Now())
+				doc := cmDoc("ns", "cm", "", "dk")
+				l := nsLister("ns", cm0)
+				return mutateJson(ctx, cms, l, doc, func(existing []int) ([]int, error) {
+					return append(existing, 3), nil
+				})
+			},
+			wantSub: "patch-fail",
+		},
 	}
-	if updated.Data[dataKey] != string(initialJSON) {
-		t.Fatalf("expected dataKey to remain unchanged on error, got %q", updated.Data[dataKey])
-	}
-}
 
-func TestMutateJson_PropagatesReadError(t *testing.T) {
-	ctx := context.Background()
-	_, cms, _ := setupCm("ns", nil)
-	doc := makeCmDoc("ns", "cm", "", "dk")
-	lister := cmNSLister{
-		getFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("read-fail") },
-		listFn: func() ([]*v1.ConfigMap, error) { return nil, nil },
-	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var seed *v1.ConfigMap
+			if tt.cmName != "" && tt.dataKey != "" {
+				seed = cm(tt.ns, tt.cmName, nil, map[string]string{tt.dataKey: tt.raw}, time.Now())
+			}
 
-	called := false
-	err := mutateJson(ctx, cms, lister, doc, func(_ []int) ([]int, error) {
-		called = true
-		return nil, nil
-	})
-	if called {
-		t.Fatalf("mutate function should not run on read error")
-	}
-	if err == nil || !strings.Contains(err.Error(), "read-fail") {
-		t.Fatalf("expected read error, got %v", err)
-	}
-}
+			var cli *fake.Clientset
+			if seed != nil {
+				cli = fake.NewSimpleClientset(seed)
+			} else {
+				cli = fake.NewSimpleClientset()
+			}
+			cms := cli.CoreV1().ConfigMaps(tt.ns)
 
-func TestMutateJson_PatchFails(t *testing.T) {
-	ctx := context.Background()
-	namespace := "ns"
-	name := "cm"
-	dataKey := "dk"
+			if tt.patchErr != "" {
+				cli.Fake.PrependReactor("patch", "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, fmt.Errorf("%s", tt.patchErr)
+				})
+			}
 
-	cm := makeCm(namespace, name, nil, map[string]string{dataKey: `[1,2]`}, time.Now())
-	cli, cms, _ := setupCm(namespace, cm)
+			err := tt.run(t, cms)
 
-	cli.Fake.PrependReactor("patch", "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, fmt.Errorf("patch-fail")
-	})
+			if tt.wantSub != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantSub) {
+					t.Fatalf("err=%v, want substring %q", err, tt.wantSub)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
 
-	doc := makeCmDoc(namespace, name, "", dataKey)
-	l := nsLister(namespace, cm)
-
-	err := mutateJson(ctx, cms, l, doc, func(existing []int) ([]int, error) {
-		return append(existing, 3), nil
-	})
-	if err == nil || !strings.Contains(err.Error(), "patch-fail") {
-		t.Fatalf("expected patch error, got %v", err)
+			if tt.assert != nil {
+				tt.assert(t, cms)
+			}
+		})
 	}
 }
 
@@ -848,102 +892,112 @@ func TestMutateJson_PatchFails(t *testing.T) {
 // mutateRaw
 // -------------------------
 
-func TestMutateRaw_Uppercases(t *testing.T) {
+func TestMutateRaw(t *testing.T) {
 	ctx := context.Background()
-	namespace := "ns5"
-	name := "cm5"
-	dataKey := "myx/raw.json"
 
-	cm := makeCm(namespace, name, nil, map[string]string{
-		dataKey: `{"msg":"hello"}`,
-	}, time.Now())
-
-	_, cms, _ := setupCm(namespace, cm)
-	doc := makeCmDoc(namespace, name, "", dataKey)
-	l := nsLister(namespace, cm)
-
-	err := doc.mutateRaw(ctx, cms, l, func(_ []byte) ([]byte, error) {
-		return []byte(`{"msg":"HELLO"}`), nil
-	})
-	if err != nil {
-		t.Fatalf("mutateRaw failed: %v", err)
+	type tc struct {
+		name      string
+		ns, cm    string
+		dataKey   string
+		seed      *v1.ConfigMap // nil => missing
+		mutate    func(t *testing.T) func([]byte) ([]byte, error)
+		wantErr   string
+		wantCalls int
+		wantVal   *string // nil => CM must not exist
 	}
 
-	updated, err := cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after mutateRaw failed: %v", err)
-	}
-	if updated.Data[dataKey] != `{"msg":"HELLO"}` {
-		t.Fatalf("mutateRaw did not update dataKey; got %q", updated.Data[dataKey])
-	}
-}
-
-func TestMutateRaw_MissingConfigMap_NoOp(t *testing.T) {
-	ctx := context.Background()
-	namespace := "ns5-miss"
-	name := "cm5-miss"
-	dataKey := "myx/raw.json"
-
-	_, cms, _ := setupCm(namespace, nil)
-	doc := makeCmDoc(namespace, name, "", dataKey)
-	lister := nsLister(namespace)
-
-	called := false
-	err := doc.mutateRaw(ctx, cms, lister, func(raw []byte) ([]byte, error) {
-		called = true
-		return raw, nil
-	})
-	if err != nil {
-		t.Fatalf("mutateRaw on missing CM returned error: %v", err)
-	}
-	if called {
-		t.Fatalf("mutate callback should not be called when CM is missing")
-	}
-
-	_, err = cms.Get(ctx, name, metav1.GetOptions{})
-	if err == nil {
-		t.Fatalf("expected no ConfigMap to be created on missing mutateRaw")
-	}
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("expected notfound, got: %v", err)
-	}
-}
-
-func TestMutateRaw_NilNewRaw_NoOp(t *testing.T) {
-	ctx := context.Background()
-	namespace := "ns5-nilraw"
-	name := "cm5-nilraw"
-	dataKey := "myx/raw.json"
-
-	original := `{"msg":"hello"}`
-	cm := makeCm(namespace, name, nil, map[string]string{
-		dataKey: original,
-	}, time.Now())
-
-	_, cms, _ := setupCm(namespace, cm)
-	doc := makeCmDoc(namespace, name, "", dataKey)
-	lister := nsLister(namespace, cm)
-
-	calls := 0
-	err := doc.mutateRaw(ctx, cms, lister, func(raw []byte) ([]byte, error) {
-		calls++
-		if string(raw) != original {
-			t.Fatalf("unexpected raw in mutate: %q", string(raw))
-		}
-		return nil, nil // "no change"
-	})
-	if err != nil {
-		t.Fatalf("mutateRaw returned error: %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("expected mutate to be called once, got %d", calls)
+	tests := []tc{
+		{
+			name:    "uppercases",
+			ns:      "ns5",
+			cm:      "cm5",
+			dataKey: "myx/raw.json",
+			seed: cm("ns5", "cm5", nil, map[string]string{
+				"myx/raw.json": `{"msg":"hello"}`,
+			}, time.Now()),
+			mutate: func(t *testing.T) func([]byte) ([]byte, error) {
+				return func(_ []byte) ([]byte, error) {
+					return []byte(`{"msg":"HELLO"}`), nil
+				}
+			},
+			wantCalls: 1,
+			wantVal:   ptr(`{"msg":"HELLO"}`),
+		},
+		{
+			name:    "missing configmap => no-op, mutate not called, nothing created",
+			ns:      "ns5-miss",
+			cm:      "cm5-miss",
+			dataKey: "myx/raw.json",
+			seed:    nil,
+			mutate: func(t *testing.T) func([]byte) ([]byte, error) {
+				return func(raw []byte) ([]byte, error) {
+					t.Fatalf("mutate must not be called on missing CM (raw=%q)", string(raw))
+					return raw, nil
+				}
+			},
+			wantCalls: 0,
+			wantVal:   nil, // CM must not exist
+		},
+		{
+			name:    "nil newRaw => no-op (keeps original)",
+			ns:      "ns5-nilraw",
+			cm:      "cm5-nilraw",
+			dataKey: "myx/raw.json",
+			seed: cm("ns5-nilraw", "cm5-nilraw", nil, map[string]string{
+				"myx/raw.json": `{"msg":"hello"}`,
+			}, time.Now()),
+			mutate: func(t *testing.T) func([]byte) ([]byte, error) {
+				original := `{"msg":"hello"}`
+				return func(raw []byte) ([]byte, error) {
+					if string(raw) != original {
+						t.Fatalf("unexpected raw: got %q want %q", string(raw), original)
+					}
+					return nil, nil // "no change"
+				}
+			},
+			wantCalls: 1,
+			wantVal:   ptr(`{"msg":"hello"}`),
+		},
 	}
 
-	updated, err := cms.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get after mutateRaw no-op failed: %v", err)
-	}
-	if updated.Data[dataKey] != original {
-		t.Fatalf("expected dataKey to remain unchanged, got %q", updated.Data[dataKey])
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, cms, _ := setupCm(tt.ns, tt.seed)
+			doc := cmDoc(tt.ns, tt.cm, "", tt.dataKey)
+
+			var calls int
+			err := doc.mutateRaw(ctx, cms, nsLister(tt.ns, tt.seed), func(raw []byte) ([]byte, error) {
+				calls++
+				return tt.mutate(t)(raw)
+			})
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err=%v, want substring %q", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+
+			if calls != tt.wantCalls {
+				t.Fatalf("calls=%d, want %d", calls, tt.wantCalls)
+			}
+
+			got, getErr := cms.Get(ctx, tt.cm, metav1.GetOptions{})
+			if tt.wantVal == nil {
+				if getErr == nil || !apierrors.IsNotFound(getErr) {
+					t.Fatalf("expected CM to be missing (NotFound), got err=%v cm=%#v", getErr, got)
+				}
+				return
+			}
+
+			if getErr != nil {
+				t.Fatalf("Get failed: %v", getErr)
+			}
+			if got.Data[tt.dataKey] != *tt.wantVal {
+				t.Fatalf("data[%q]=%q, want %q", tt.dataKey, got.Data[tt.dataKey], *tt.wantVal)
+			}
+		})
 	}
 }

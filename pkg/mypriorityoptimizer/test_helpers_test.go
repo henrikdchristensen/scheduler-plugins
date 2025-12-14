@@ -27,6 +27,8 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
+func ptr[T any](v T) *T { return &v }
+
 type fakePodLister struct {
 	store     map[string]map[string]*v1.Pod
 	err       error

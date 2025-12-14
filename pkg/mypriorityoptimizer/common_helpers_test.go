@@ -11,7 +11,7 @@ import (
 // getUniqueId
 // -------------------------
 
-func TestGetUniqueId_UniqueAndPrefix(t *testing.T) {
+func TestGetUniqueId(t *testing.T) {
 	old := nowUnixNano
 	defer func() { nowUnixNano = old }()
 
@@ -33,7 +33,7 @@ func TestGetUniqueId_UniqueAndPrefix(t *testing.T) {
 // getTimestampNowUtc
 // -------------------------
 
-func TestGetTimestampNowUtc_IsUTC(t *testing.T) {
+func TestGetTimestampNowUtc(t *testing.T) {
 	ts := getTimestampNowUtc()
 	if ts.Location() != time.UTC {
 		t.Fatalf("location=%v want UTC", ts.Location())
@@ -60,7 +60,7 @@ func TestCmpInt(t *testing.T) {
 // cmpLexiByKeys
 // -------------------------
 
-func TestCmpLexiByKeys_IntKeys(t *testing.T) {
+func TestCmpLexiByKeys(t *testing.T) {
 	keys := []int{2, 1, 0}
 
 	type tc struct {
@@ -95,7 +95,7 @@ func TestCmpLexiByKeys_IntKeys(t *testing.T) {
 			if got := cmpLexiByKeys(keys, tt.a, tt.b); got != tt.want {
 				t.Fatalf("cmpLexiByKeys(a,b)=%d want %d; a=%v b=%v", got, tt.want, tt.a, tt.b)
 			}
-			
+
 			// Invariant: antisymmetry
 			gotAB := cmpLexiByKeys(keys, tt.a, tt.b)
 			gotBA := cmpLexiByKeys(keys, tt.b, tt.a)
@@ -115,7 +115,7 @@ func TestCmpLexiByKeys_IntKeys(t *testing.T) {
 // cmpLexi
 // -------------------------
 
-func TestCmpLexi_Invariants(t *testing.T) {
+func TestCmpLexi(t *testing.T) {
 	cases := []map[string]int{
 		{"1": 2, "0": 1},
 		{"10": 1},

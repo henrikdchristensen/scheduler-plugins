@@ -110,10 +110,10 @@ func cmpLexi(a, b map[string]int) int {
 		jv, jerr := strconv.Atoi(kj)
 
 		if ierr == nil && jerr == nil {
-			// Higher integer first.
+			// higher integer first
 			return iv > jv
 		}
-		// Fallback: simple string comparison (also descending).
+		// Fallback: simple string comparison (also descending)
 		return ki > kj
 	})
 
