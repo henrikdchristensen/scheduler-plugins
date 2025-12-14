@@ -1,6 +1,6 @@
 # MyPriorityOptimizer Modes Documentation
 
-This document provides a detailed verification and description of the optimization modes and concurrency mechanisms in the MyPriorityOptimizer scheduler plugin.
+This document provides a detailed verification and description of the optimization modes and concurrency mechanisms in the MyPriorityOptimizer scheduler plugin, based on the `opt-prio-refactor` branch implementation.
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ The plugin supports five distinct optimization modes that determine **when** the
 
 ### 1. Manual Mode
 
-**File**: `mode_types.go:18-20`  
+**File**: `mode_types.go:14-16`  
 **Constant**: `ModeManual`
 
 **Description**:
@@ -26,7 +26,7 @@ Manual mode collects pending pods like Periodic mode but **only optimizes when m
 **How it works**:
 - Pods enter the scheduler queue normally and the default scheduler attempts to place them
 - If pods fail to schedule, they remain pending but **do not trigger automatic optimization**
-- Background loops (periodic/interlude) do **not** run in Manual mode (see `loop_helpers.go:33-38`)
+- Background loops (periodic/interlude) do **not** run in Manual mode (see `loop_helpers.go`)
 - Optimization only occurs when the `/solve` endpoint is called via HTTP POST
 - Normal scheduling flow is **not blocked** - pods can be scheduled by the default scheduler while waiting for manual trigger
 
@@ -34,15 +34,12 @@ Manual mode collects pending pods like Periodic mode but **only optimizes when m
 
 **Implementation verification**:
 ```go
-// mode_types.go:18-20
+// mode_types.go:14-16
 // ModeManual collects like ModePeriodic but only optimizes when the HTTP
 // /solve endpoint is called.
 ModeManual
 
-// mode_helpers.go:11-12
-func isManualMode() bool { return OptimizeMode == ModeManual }
-
-// loop_helpers.go:33-38 - No background loop started for Manual mode
+// loop_helpers.go - No background loop started for Manual mode
 switch OptimizeMode {
 case ModePeriodic:
     go pl.loopPeriodic(ctx)
@@ -51,7 +48,7 @@ case ModeInterlude:
 }
 // Note: Manual mode does NOT start a background loop
 
-// http_server.go:96-140 - Manual trigger via HTTP
+// http_server.go - Manual trigger via HTTP
 func (pl *SharedState) solveHandler(w http.ResponseWriter, r *http.Request) {
     // ... validation ...
     _, baseline, bestName, _, attempts, err := runFlowForHTTP(pl, context.Background())
@@ -63,14 +60,14 @@ func (pl *SharedState) solveHandler(w http.ResponseWriter, r *http.Request) {
 
 ### 2. Manual Blocking Mode
 
-**File**: `mode_types.go:22-23`  
+**File**: `mode_types.go:17-18`  
 **Constant**: `ModeManualBlocking`
 
 **Description**:
 Manual Blocking mode **prevents any pod from entering the cluster** until the solver is manually triggered via HTTP and completes its optimization.
 
 **How it works**:
-- All pods are blocked at the PreEnqueue stage (see `hook_preenqueue.go:51-57`)
+- All pods are blocked at the PreEnqueue stage (see `hook_preenqueue.go`)
 - Pods remain in Pending status and cannot be scheduled
 - The scheduler accumulates a backlog of pending pods
 - When `/solve` is called, the solver optimizes all pending pods
@@ -84,18 +81,18 @@ Manual Blocking mode **prevents any pod from entering the cluster** until the so
 
 **Implementation verification**:
 ```go
-// mode_types.go:22-23
+// mode_types.go:17-18
 // ModeManualBlocking blocks the normal scheduling flow until /solve is called.
 ModeManualBlocking
 
-// mode_helpers.go:14-15
+// mode_helpers.go
 func isManualBlockingMode() bool { return OptimizeMode == ModeManualBlocking }
 
-// hook_preenqueue.go:51-57 - Blocks pods in ManualBlocking mode
+// hook_preenqueue.go - Blocks pods in ManualBlocking mode
 if isManualBlockingMode() {
     klog.V(MyV).InfoS(msg(stage, InfoPendingPod), "pod", klog.KObj(pending))
     // Pods are blocked from entering the scheduling queue
-    return framework.NewStatus(framework.Pending, msg(stage, InfoPendingPod))
+    return fwk.NewStatus(fwk.Pending, msg(stage, InfoPendingPod))
 }
 ```
 
@@ -113,7 +110,7 @@ Per Pod mode triggers optimization **for every pod that hits PostFilter**, meani
 - When a pod enters the scheduler, it first attempts normal scheduling
 - If the default scheduler cannot place the pod (reaches PostFilter stage), the plugin immediately triggers optimization
 - The solver runs for that specific pod plus any other pending pods
-- The optimization is **always synchronous** in PerPod mode (see `mode_helpers.go:21-26`)
+- The optimization is **always synchronous** in PerPod mode (see `mode_helpers.go`)
 - New pods are blocked while optimization is running
 
 **Key characteristics**:
@@ -130,27 +127,24 @@ Per Pod mode triggers optimization **for every pod that hits PostFilter**, meani
 // ModePerPod optimizes for every new pod.
 ModePerPod
 
-// mode_helpers.go:8-9
+// mode_helpers.go
 func isPerPodMode() bool { return OptimizeMode == ModePerPod }
 
-// hook_postfilter.go:14-49 - Triggers optimization for every failed pod
-func (pl *SharedState) PostFilter(ctx context.Context, _ *framework.CycleState, pending *v1.Pod, _ framework.NodeToStatusMap) (*framework.PostFilterResult, *framework.Status) {
+// hook_postfilter.go - Triggers optimization for every failed pod
+func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pending *v1.Pod, m framework.NodeToStatusMap) (*framework.PostFilterResult, *fwk.Status) {
     // Only proceed if PerPod is enabled
-    if !isPerPodMode() {
-        return nil, framework.NewStatus(framework.Unschedulable, ...)
+    if !postFilterPerPodEnabled() {
+        return nil, fwk.NewStatus(fwk.Unschedulable, ...)
     }
     
     // Run optimization flow for the pod
-    plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)
+    plan, err := postFilterRunOptimization(pl, ctx, pending)
     // ...
 }
 
-// mode_helpers.go:21-26 - PerPod is always synchronous
+// mode_helpers.go - PerPod is always synchronous
 func isAsyncSolving() bool {
-    if OptimizeMode == ModePerPod {
-        return false  // Always synchronous
-    }
-    return !OptimizeSolveSynch
+    return OptimizeMode != ModePerPod && !OptimizeSolveSynch
 }
 ```
 
@@ -158,7 +152,7 @@ func isAsyncSolving() bool {
 
 ### 4. Periodic Mode
 
-**File**: `mode_types.go:11-12`  
+**File**: `mode_types.go:10-11`  
 **Constant**: `ModePeriodic`
 
 **Description**:
@@ -181,11 +175,11 @@ Periodic mode triggers optimization **at fixed time intervals**, regardless of c
 
 **Implementation verification**:
 ```go
-// mode_types.go:11-12
+// mode_types.go:10-11
 // ModePeriodic runs periodic optimization over the accumulated pending set.
 ModePeriodic
 
-// loop_periodic.go:9-22
+// loop_periodic.go
 func (pl *SharedState) loopPeriodic(ctx context.Context) {
     if OptimizePeriodicInterval <= 1 {
         OptimizePeriodicInterval = 2 * time.Second
@@ -200,7 +194,7 @@ func (pl *SharedState) loopPeriodic(ctx context.Context) {
     optimizeBackgroundLoopFunc(pl, ctx, cfg)
 }
 
-// loop_helpers.go:33-38 - Started when mode is Periodic
+// loop_helpers.go - Started when mode is Periodic
 switch OptimizeMode {
 case ModePeriodic:
     go pl.loopPeriodic(ctx)
@@ -213,7 +207,7 @@ case ModeInterlude:
 
 ### 5. Interlude Mode
 
-**File**: `mode_types.go:14-16`  
+**File**: `mode_types.go:11-13`  
 **Constant**: `ModeInterlude`
 
 **Description**:
@@ -223,7 +217,7 @@ Interlude mode triggers optimization **only during "quiet" periods** when the pe
 - A background loop checks cluster state at regular intervals (e.g., every 250ms)
 - Tracks changes to the pending pod set
 - Only triggers optimization when the pending set has been **stable** (unchanged) for at least `OPTIMIZE_INTERLUDE_DELAY` (e.g., 2s)
-- If new pods arrive during solver execution, the run is **cancelled** and reset (see `loop_helpers.go:131-140`)
+- If new pods arrive during solver execution, the run is **cancelled** and reset (see `loop_helpers.go`)
 - Waits for another stable period before retrying
 
 **Key characteristics**:
@@ -237,12 +231,12 @@ Interlude mode triggers optimization **only during "quiet" periods** when the pe
 
 **Implementation verification**:
 ```go
-// mode_types.go:14-16
+// mode_types.go:11-13
 // ModeInterlude runs optimization only during "quiet" periods where the
 // pending set has been stable for some time.
 ModeInterlude
 
-// loop_interlude.go:9-27
+// loop_interlude.go
 func (pl *SharedState) loopInterlude(ctx context.Context) {
     delay := OptimizeInterludeDelay           // Stability requirement
     if delay <= 0 {
@@ -262,7 +256,7 @@ func (pl *SharedState) loopInterlude(ctx context.Context) {
     optimizeBackgroundLoopFunc(pl, ctx, cfg)
 }
 
-// loop_helpers.go:169-178 - Tracks pending set changes and resets timer
+// loop_helpers.go - Tracks pending set changes and resets timer
 if !sameUIDSet(currentSet, lastPendingSet) {
     lastPendingSet = cloneUIDSet(currentSet)
     lastChange = time.Now()  // Reset the stability timer
@@ -274,7 +268,7 @@ if !sameUIDSet(currentSet, lastPendingSet) {
     continue
 }
 
-// loop_helpers.go:180-187 - Checks if stable for long enough
+// loop_helpers.go - Checks if stable for long enough
 if cfg.InterludeDelay > 0 {
     idleFor := time.Since(lastChange)
     if idleFor < cfg.InterludeDelay {
@@ -283,7 +277,7 @@ if cfg.InterludeDelay > 0 {
     }
 }
 
-// loop_helpers.go:131-140 - Cancels if pending set changes during solving
+// loop_helpers.go - Cancels if pending set changes during solving
 if cfg.CancelOnChange && !sameUIDSet(currentSet, baselineSet) {
     klog.V(MyV).InfoS(
         msg(cfg.Label, "pending set changed; cancelling run"),
@@ -297,14 +291,14 @@ if cfg.CancelOnChange && !sameUIDSet(currentSet, baselineSet) {
 
 ## Sync vs Async Solving
 
-The plugin supports two solving strategies that control **when** the `Active` lock is acquired during optimization:
+The plugin supports two solving strategies that control **when** the `ActivePlanInProgress` lock is acquired during optimization:
 
 ### Synchronous Solving
 
 **Configuration**: `OptimizeSolveSynch = true` or `OPTIMIZE_SOLVE_SYNCH=true`
 
 **Behavior**:
-- The `Active` lock is acquired **immediately** at the start of `runOptimizationFlow()`
+- The `ActivePlanInProgress` lock is acquired **immediately** at the start of `runOptimizationFlow()`
 - All new pods are **blocked** from scheduling while:
   - The solver is computing the plan
   - The plan is being applied (evictions + recreations)
@@ -319,10 +313,10 @@ The plugin supports two solving strategies that control **when** the `Active` lo
 
 **Implementation**:
 ```go
-// optimization_flow.go:19-26
-// Periodic-sync/Per-pod: take Active early.
-if !isAsyncSolving() {
-    if !pl.tryEnterActive() {
+// optimization_flow.go
+// Periodic-sync/Per-pod: take PlanActive early.
+if !isAsyncSolvingFn() {
+    if !pl.tryEnterActivePlan() {
         klog.InfoS(msg(strategy, InfoActivePlanInProgress))
         return nil, nil, "", nil, nil, ErrActiveInProgress
     }
@@ -333,15 +327,15 @@ if !isAsyncSolving() {
 **Timeline**:
 ```
 Time ──────────────────────────────────────────────────────────►
-      │◄─────── Active lock held ──────────►│
-      │                                      │
-      ├─ Snapshot cluster                   │
-      ├─ Run solver (blocked)               │
-      ├─ Validate plan                      │
-      ├─ Apply plan (evict/recreate)        │
-      └─ Release lock                       │
+      │◄──── ActivePlanInProgress lock held ──────►│
+      │                                             │
+      ├─ Snapshot cluster                          │
+      ├─ Run solver (blocked)                      │
+      ├─ Validate plan                             │
+      ├─ Apply plan (evict/recreate)               │
+      └─ Release lock                              │
       
-New pods: BLOCKED ──────────────────────────┼─ ALLOWED
+New pods: BLOCKED ─────────────────────────────────┼─ ALLOWED
 ```
 
 ---
@@ -351,9 +345,9 @@ New pods: BLOCKED ────────────────────�
 **Configuration**: `OptimizeSolveSynch = false` or `OPTIMIZE_SOLVE_SYNCH=false`
 
 **Behavior**:
-- The `Active` lock is acquired **only after** the solver completes successfully
+- The `ActivePlanInProgress` lock is acquired **only after** the solver completes successfully
 - New pods can continue scheduling while the solver is running
-- Before applying the plan, the cluster state is **re-validated** to ensure the plan is still valid
+- Before applying the plan, the cluster state is **re-validated** to ensure the plan is still valid (via `isSolutionApplicable()`)
 - If the cluster changed significantly, the plan is discarded and pods continue with normal scheduling
 - Only blocks new pods during plan application
 
@@ -365,17 +359,23 @@ New pods: BLOCKED ────────────────────�
 
 **Implementation**:
 ```go
-// optimization_flow.go:19-26 - Does NOT take Active early in async mode
-if !isAsyncSolving() {
+// optimization_flow.go - Does NOT take ActivePlanInProgress early in async mode
+if !isAsyncSolvingFn() {
     // ... only sync mode takes lock here ...
 }
 
-// optimization_flow.go:63-70 - Takes Active only after solver succeeds
-// Async modes: take Active now that we know it is worth applying the plan.
-if isAsyncSolving() {
-    if !pl.tryEnterActive() {
+// optimization_flow.go - Re-validation before taking lock
+ok, why := isSolutionApplicableFn(pl, bestOut, nodes, pods)
+if !ok {
+    klog.Error(msg(strategy, InfoPlanNotApplicable), "solver", bestName, "status", bestOut.Status, "reason", why)
+    pl.tryLeaveActivePlan()
+    return nil, &baselineScore, bestName, bestAttempt, attempts, ErrPlanNotApplicable
+}
+
+// optimization_flow.go - Takes ActivePlanInProgress only after solver succeeds
+if isAsyncSolvingFn() {
+    if !pl.tryEnterActivePlan() {
         klog.InfoS(msg(strategy, InfoActivePlanInProgress))
-        pl.exportSolverStatsToConfigMap(...)
         return nil, nil, "", nil, nil, ErrActiveInProgress
     }
 }
@@ -384,18 +384,18 @@ if isAsyncSolving() {
 **Timeline**:
 ```
 Time ──────────────────────────────────────────────────────────►
-      │                           │◄─ Active lock held ─►│
-      │                           │                       │
-      ├─ Snapshot cluster         │                       │
-      ├─ Run solver (background)  │                       │
-      │   ▲                       │                       │
-      │   └─ pods can schedule ───┤                       │
-      │                           │                       │
-      │                           ├─ Re-validate plan     │
-      │                           ├─ Apply plan           │
-      │                           └─ Release lock         │
+      │                           │◄─ ActivePlanInProgress ─►│
+      │                           │                           │
+      ├─ Snapshot cluster         │                           │
+      ├─ Run solver (background)  │                           │
+      │   ▲                       │                           │
+      │   └─ pods can schedule ───┤                           │
+      │                           │                           │
+      │                           ├─ Re-validate plan         │
+      │                           ├─ Apply plan               │
+      │                           └─ Release lock             │
       
-New pods: ALLOWED ────────────────┼─ BLOCKED ────────────┼─ ALLOWED
+New pods: ALLOWED ────────────────┼─ BLOCKED ────────────────┼─ ALLOWED
 ```
 
 **Trade-offs**:
@@ -415,21 +415,20 @@ New pods: ALLOWED ────────────────┼─ BLOCKED
 
 The plugin implements a sophisticated concurrency control mechanism to ensure correctness and prevent race conditions.
 
-### The Active Lock
+### The ActivePlanInProgress Lock
 
-**Type**: `atomic.Bool` (see `plugin_types.go:19`)  
-**Purpose**: Ensures only one optimization can run at a time
+**Type**: `atomic.Bool` (see `plugin_types.go:17`)  
+**Purpose**: Ensures only one plan can be active (being applied) at a time
 
 **Key operations**:
 ```go
-// plan_helpers.go:40-42
-func (pl *SharedState) tryEnterActive() bool {
-    return pl.Active.CompareAndSwap(false, true)  // Atomic CAS
+// plan_helpers.go
+func (pl *SharedState) tryEnterActivePlan() bool {
+    return pl.ActivePlanInProgress.CompareAndSwap(false, true)  // Atomic CAS
 }
 
-// plan_helpers.go:45-47
-func (pl *SharedState) leaveActive() {
-    pl.Active.Store(false)  // Atomic store
+func (pl *SharedState) tryLeaveActivePlan() {
+    pl.ActivePlanInProgress.Store(false)  // Atomic store
 }
 ```
 
@@ -443,6 +442,49 @@ func (pl *SharedState) leaveActive() {
 - Only one goroutine can successfully CAS from `false` to `true`
 - All others get `false` and back off
 
+### The OptimizationInProgress Lock
+
+**Type**: `atomic.Bool` (see `plugin_types.go:19`)  
+**Purpose**: Ensures only one optimization flow can run at a time (even if plan is not yet active)
+
+**Key operations**:
+```go
+// plan_helpers.go
+func (pl *SharedState) tryEnterOptimizationFlow() bool {
+    return pl.OptimizationInProgress.CompareAndSwap(false, true)
+}
+
+func (pl *SharedState) tryLeaveOptimizationFlow() {
+    pl.OptimizationInProgress.Store(false)
+}
+```
+
+**Why it's needed**:
+- Prevents multiple solvers from running concurrently
+- In async mode, `ActivePlanInProgress` is taken late, so we need another lock to prevent multiple concurrent solver runs
+- Ensures resource efficiency (only one solver uses CPU at a time)
+
+**Relationship to ActivePlanInProgress**:
+```
+OptimizationInProgress: Controls solver computation phase
+ActivePlanInProgress:   Controls plan application phase
+
+Sync mode:
+  tryEnterActivePlan()          <-- Taken first
+  tryEnterOptimizationFlow()    <-- Taken second
+  ... snapshot, solve, validate, apply ...
+  tryLeaveOptimizationFlow()
+  tryLeaveActivePlan()
+
+Async mode:
+  tryEnterOptimizationFlow()    <-- Taken first
+  ... snapshot, solve, validate ...
+  tryEnterActivePlan()          <-- Taken only before apply
+  ... apply ...
+  tryLeaveOptimizationFlow()
+  tryLeaveActivePlan()
+```
+
 ### The Active Plan Pointer
 
 **Type**: `atomic.Pointer[ActivePlan]` (see `plugin_types.go:21`)  
@@ -450,17 +492,16 @@ func (pl *SharedState) leaveActive() {
 
 **Key operations**:
 ```go
-// plan_helpers.go:50-52
+// plan_helpers.go
 func (pl *SharedState) getActivePlan() *ActivePlan {
     return pl.ActivePlan.Load()  // Atomic load
 }
 
-// plan_helpers.go:55-60
 func (pl *SharedState) tryClearActivePlan(ap *ActivePlan) bool {
     if ap == nil {
         return false
     }
-    return pl.ActivePlan.CompareAndSwap(ap, nil)  // Atomic CAS
+    return activePlanCompareAndSwap(pl, ap, nil)  // Atomic CAS
 }
 ```
 
@@ -481,7 +522,7 @@ func (pl *SharedState) tryClearActivePlan(ap *ActivePlan) bool {
 
 ### Workload Quotas
 
-**Type**: `WorkloadQuotasAtomics = map[string]map[string]*atomic.Int32`  
+**Type**: `WorkloadQuotasAtomics = map[string]map[string]*atomic.Int32` (see `plugin_types.go:40-42`)  
 **Purpose**: Track remaining placement slots per workload per node
 
 **Key operations**:
@@ -507,19 +548,30 @@ if quota.Add(-1) >= 0 {
 
 ### Why the concurrency model is correct
 
-#### 1. **Mutual Exclusion via Active Lock**
+#### 1. **Mutual Exclusion via Dual Lock System**
 
-**Property**: At most one optimization can hold the Active lock
-**Mechanism**: Atomic CAS on `pl.Active`
+**Property**: At most one plan application can occur, and at most one optimization can run
+**Mechanism**: Two atomic CAS locks - `ActivePlanInProgress` and `OptimizationInProgress`
 **Proof**:
-- Initial state: `Active = false`
-- When goroutine G1 calls `tryEnterActive()`:
-  - CAS(false, true) succeeds → G1 holds lock
-  - `Active = true`
-- When goroutine G2 calls `tryEnterActive()`:
-  - CAS(false, true) fails because `Active = true`
-  - G2 returns `false` and backs off
-- Only when G1 calls `leaveActive()` (Store(false)) can another goroutine enter
+
+- **ActivePlanInProgress** ensures only one plan application at a time:
+  - Initial state: `ActivePlanInProgress = false`
+  - When goroutine G1 calls `tryEnterActivePlan()`:
+    - CAS(false, true) succeeds → G1 holds lock
+    - `ActivePlanInProgress = true`
+  - When goroutine G2 calls `tryEnterActivePlan()`:
+    - CAS(false, true) fails because `ActivePlanInProgress = true`
+    - G2 returns `false` and backs off
+  - Only when G1 calls `tryLeaveActivePlan()` (Store(false)) can another goroutine enter
+
+- **OptimizationInProgress** ensures only one solver run at a time:
+  - Same CAS mechanism as `ActivePlanInProgress`
+  - Prevents multiple concurrent solver computations
+  - In async mode, allows solver to run while not blocking pod scheduling
+
+- **Together**: These two locks provide precise control:
+  - Sync mode: Both locks held during entire flow (solver + apply)
+  - Async mode: `OptimizationInProgress` held during solver, `ActivePlanInProgress` only during apply
 
 #### 2. **No Concurrent Plan Modifications**
 
@@ -568,32 +620,41 @@ pl.activatePods(pl.BlockedWhileActive, false, -1)  // Mutex protected
 #### 5. **Async Mode Re-validation**
 
 **Property**: Plan is applied only if still valid
-**Mechanism**: Deferred lock acquisition
+**Mechanism**: Explicit validation before taking `ActivePlanInProgress` lock
 **Flow**:
 ```go
 // Async mode
-// 1. Snapshot cluster (no lock)
-nodes, pods, inp, baseline, pending, err := pl.planContext(preemptor)
+// 1. Snapshot cluster (no locks)
+nodes, pods, inp, err := planContextFn(pl, preemptor)
 
-// 2. Run solver (no lock, other pods can schedule)
-bestName, hadImproving, bestAttempt, attempts := pl.planComputation(...)
+// 2. Run solver (only OptimizationInProgress lock)
+bestName, hadImp, bestAttempt, bestOut, attempts := planComputationFn(pl, ctx, inp)
 
-// 3. Only now, try to take lock
-if isAsyncSolving() {
-    if !pl.tryEnterActive() {
+// 3. Verify plan is still applicable
+ok, why := isSolutionApplicableFn(pl, bestOut, nodes, pods)
+if !ok {
+    // Plan not applicable anymore, abort
+    return ErrPlanNotApplicable
+}
+
+// 4. Only now, try to take ActivePlanInProgress lock
+if isAsyncSolvingFn() {
+    if !pl.tryEnterActivePlan() {
         return ErrActiveInProgress  // Another optimizer got here first
     }
 }
 
-// 4. Inside planActivation(), cluster state is implicitly re-checked:
-//    - Pods that were pending might now be running
-//    - Nodes might have different allocations
-//    - These are handled by the eviction/recreation logic
+// 5. Apply plan
+planActivationFn(pl, plan, pods)
 ```
 
 **Correctness**:
-- Lock is taken only after solver completes
+- Lock is taken only after solver completes and plan is validated
 - If another optimizer took the lock first, we abort
+- `isSolutionApplicable()` explicitly checks if the solution can still be applied:
+  - Checks if new placements conflict with current pod placements
+  - Checks if evictions are still valid (pods haven't already moved)
+  - Ensures no double-eviction or invalid placement occurs
 - Plan application automatically handles cluster changes:
   - Pods that are now running won't be in the pending set anymore
   - Node allocations are re-checked before placement
@@ -669,6 +730,8 @@ extraEnvs:
 
 ## References
 
+All implementation details are based on the **`opt-prio-refactor`** branch:
+
 - Mode types: `pkg/mypriorityoptimizer/mode_types.go`
 - Mode helpers: `pkg/mypriorityoptimizer/mode_helpers.go`
 - Optimization flow: `pkg/mypriorityoptimizer/optimization_flow.go`
@@ -679,3 +742,5 @@ extraEnvs:
 - HTTP server: `pkg/mypriorityoptimizer/http_server.go`
 - Plan helpers: `pkg/mypriorityoptimizer/plan_helpers.go`
 - Plugin types: `pkg/mypriorityoptimizer/plugin_types.go`
+- Errors: `pkg/mypriorityoptimizer/errors.go`
+- Info messages: `pkg/mypriorityoptimizer/infos.go`
