@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,10 @@ import (
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
+
+// -------------------------
+// Test Helpers
+// -------------------------
 
 func statsCMWithRaw(t *testing.T, raw string) *v1.ConfigMap {
 	t.Helper()
@@ -52,6 +57,21 @@ func readStatsArr(t *testing.T, ctx context.Context, pl *SharedState) []Exported
 	return arr
 }
 
+// kvToMap converts the alternating key/value slice returned by solverConfigArgs
+// into a map for easier assertions in tests.
+func kvToMap(t *testing.T, args []any) map[string]any {
+	t.Helper()
+	must(t, len(args)%2 == 0, "expected even len kv args, got %d: %v", len(args), args)
+
+	m := make(map[string]any, len(args)/2)
+	for i := 0; i < len(args); i += 2 {
+		k, ok := args[i].(string)
+		must(t, ok, "kv key at %d is not string: %T (%v)", i, args[i], args[i])
+		m[k] = args[i+1]
+	}
+	return m
+}
+
 // -------------------------
 // isAnySolverEnabled
 // -------------------------
@@ -59,15 +79,19 @@ func readStatsArr(t *testing.T, ctx context.Context, pl *SharedState) []Exported
 func TestIsAnySolverEnabled(t *testing.T) {
 	pl := &SharedState{}
 
-	withVar(t, &SolverPythonEnabled, false)
-	if pl.isAnySolverEnabled() {
-		t.Fatalf("want false when all disabled")
-	}
+	t.Run("all_disabled", func(t *testing.T) {
+		withVar(t, &SolverPythonEnabled, false)
+		if pl.isAnySolverEnabled() {
+			t.Fatalf("want false when all disabled")
+		}
+	})
 
-	withVar(t, &SolverPythonEnabled, true)
-	if !pl.isAnySolverEnabled() {
-		t.Fatalf("want true when python enabled")
-	}
+	t.Run("python_enabled", func(t *testing.T) {
+		withVar(t, &SolverPythonEnabled, true)
+		if !pl.isAnySolverEnabled() {
+			t.Fatalf("want true when python enabled")
+		}
+	})
 }
 
 // -------------------------
@@ -87,17 +111,48 @@ func TestBuildSolverInput(t *testing.T) {
 		}
 	})
 
-	t.Run("filters_nodes_dedups_pods_sets_preemptor_and_protected", func(t *testing.T) {
-		n1 := node("n1")
-		n2 := node("n2", unschedulable()) // ignored
+	t.Run("filters_nodes_dedups_pods_sets_preemptor_and_protected_and_baseline", func(t *testing.T) {
+		// Nodes
+		n1 := node("n1")                  // usable
+		n2 := node("n2", unschedulable()) // unusable -> ignored
 
-		pPending := pod("ns", "p-pending", withUID("u-pending"), withReqs("100m", "64Mi"))
-		pRunUsable := pod("ns", "p-run", withUID("u-run"), onNode("n1"), withReqs("200m", "128Mi"))
-		pRunBad := pod("ns", "p-run-bad", withUID("u-bad"), onNode("n2"), withReqs("300m", "256Mi"))
-		pSys := pod(SystemNamespace, "p-sys", withUID("u-sys"), withReqs("50m", "32Mi"))
+		// Pods
+		pPending := pod("ns", "p-pending",
+			withUID("u-pending"),
+			withReqs("100m", "64Mi"),
+			withPrio(10),
+		)
+		pRunUsable := pod("ns", "p-run",
+			withUID("u-run"),
+			onNode("n1"),
+			withReqs("200m", "128Mi"),
+			withPrio(1),
+			withPhase(v1.PodRunning),
+		)
+		pRunBad := pod("ns", "p-run-bad",
+			withUID("u-bad"),
+			onNode("n2"),
+			withReqs("300m", "256Mi"),
+			withPrio(2),
+			withPhase(v1.PodRunning),
+		)
 
-		pre := pod("ns", "p-pre", withUID("u-pre"), withReqs("100m", "64Mi"))
+		// System namespace pod should become Protected in SolverPod
+		pSys := pod(SystemNamespace, "p-sys",
+			withUID("u-sys"),
+			withReqs("50m", "32Mi"),
+			withPrio(0),
+			withPhase(v1.PodPending),
+		)
 
+		// Preemptor: must go into Preemptor field, and be excluded from in.Pods
+		pre := pod("ns", "p-pre",
+			withUID("u-pre"),
+			withReqs("100m", "64Mi"),
+			withPrio(99),
+		)
+
+		// Include duplicates + nil
 		pods := []*v1.Pod{
 			pPending, pRunUsable, pRunBad, pre, pSys,
 			pPending, // dup uid
@@ -109,22 +164,53 @@ func TestBuildSolverInput(t *testing.T) {
 			t.Fatalf("unexpected err: %v", err)
 		}
 
+		// SolverInput defaults
+		if !in.IgnoreAffinity {
+			t.Fatalf("IgnoreAffinity=%v, want true", in.IgnoreAffinity)
+		}
+
+		// Nodes: only usable nodes kept; and capacities copied
 		if len(in.Nodes) != 1 || in.Nodes[0].Name != "n1" {
 			t.Fatalf("Nodes=%+v, want [n1]", in.Nodes)
 		}
+		if in.Nodes[0].CapCPUm != 1000 {
+			t.Fatalf("CapCPUm=%d, want 1000", in.Nodes[0].CapCPUm)
+		}
+		if in.Nodes[0].CapMemBytes != 1073741824 { // 1Gi
+			t.Fatalf("CapMemBytes=%d, want 1073741824", in.Nodes[0].CapMemBytes)
+		}
+
+		// Preemptor is set
 		if in.Preemptor == nil || string(in.Preemptor.UID) != "u-pre" {
 			t.Fatalf("Preemptor=%#v, want uid u-pre", in.Preemptor)
 		}
+		if in.Preemptor.Node != "" {
+			t.Fatalf("Preemptor.Node=%q, want empty (treated as pending here)", in.Preemptor.Node)
+		}
 
-		// expect: pending + running-on-n1 + system-pending (protected) = 3
+		// Pods included:
+		// - pending (u-pending)
+		// - running on usable node (u-run)
+		// - system pending (u-sys) with Protected=true
+		// Excluded:
+		// - running on unusable node (u-bad)
+		// - preemptor (u-pre)
 		if len(in.Pods) != 3 {
-			t.Fatalf("Pods len=%d, want 3", len(in.Pods))
+			t.Fatalf("Pods len=%d, want 3 (u-pending,u-run,u-sys). Pods=%+v", len(in.Pods), in.Pods)
 		}
 
 		got := map[string]SolverPod{}
 		for _, sp := range in.Pods {
 			got[string(sp.UID)] = sp
 		}
+
+		if _, ok := got["u-pre"]; ok {
+			t.Fatalf("preemptor should not be in Pods list")
+		}
+		if _, ok := got["u-bad"]; ok {
+			t.Fatalf("pod on unusable node should not be in Pods list")
+		}
+
 		if got["u-pending"].Node != "" {
 			t.Fatalf("pending Node=%q, want empty", got["u-pending"].Node)
 		}
@@ -133,6 +219,16 @@ func TestBuildSolverInput(t *testing.T) {
 		}
 		if !got["u-sys"].Protected {
 			t.Fatalf("system pod must be Protected=true")
+		}
+
+		// Baseline score: counts all currently assigned pods (even those on unusable nodes),
+		// because buildBaselineScore() runs over the full pods slice.
+		// We set u-run prio=1 and u-bad prio=2 (both assigned).
+		if in.BaselineScore.Evicted != 0 || in.BaselineScore.Moved != 0 {
+			t.Fatalf("baseline Evicted/Moved=%d/%d, want 0/0", in.BaselineScore.Evicted, in.BaselineScore.Moved)
+		}
+		if in.BaselineScore.PlacedByPriority["1"] != 1 || in.BaselineScore.PlacedByPriority["2"] != 1 {
+			t.Fatalf("baseline PlacedByPriority=%v, want {1:1,2:1}", in.BaselineScore.PlacedByPriority)
 		}
 	})
 }
@@ -144,7 +240,7 @@ func TestBuildSolverInput(t *testing.T) {
 func TestBuildBaselineScore(t *testing.T) {
 	p1 := pod("ns", "p1", withUID("p1"), onNode("n1"), withPrio(1), withPhase(v1.PodRunning))
 	p2 := pod("ns", "p2", withUID("p2"), onNode("n2"), withPrio(2), withPhase(v1.PodRunning))
-	p3 := pod("ns", "p3", withUID("p3"), withPrio(2), withPhase(v1.PodPending)) // not assigned
+	p3 := pod("ns", "p3", withUID("p3"), withPrio(2), withPhase(v1.PodPending)) // not assigned -> ignored
 
 	score := buildBaselineScore([]*v1.Pod{p1, p2, p3})
 
@@ -160,32 +256,52 @@ func TestBuildBaselineScore(t *testing.T) {
 // solverConfigArgs
 // -------------------------
 
-func kvHas(args []any, key string) bool {
-	for i := 0; i+1 < len(args); i += 2 {
-		if k, ok := args[i].(string); ok && k == key {
-			return true
-		}
-	}
-	return false
-}
-
 func TestSolverConfigArgs(t *testing.T) {
+	// Set everything explicitly so the formatting is deterministic.
+	withVar(t, &SolverSaveAllAttempts, true)
 	withVar(t, &SolverPythonEnabled, false)
-	withVar(t, &SolverSaveAllAttempts, false)
 
-	args := solverConfigArgs()
-	if kvHas(args, "pythonSolver") {
-		t.Fatalf("unexpected pythonSolver when disabled: %v", args)
-	}
-	if !kvHas(args, "saveFailedAttempts") {
-		t.Fatalf("expected saveFailedAttempts always present: %v", args)
-	}
+	t.Run("python_disabled_still_includes_shared_flags", func(t *testing.T) {
+		args := solverConfigArgs()
+		kv := kvToMap(t, args)
 
-	withVar(t, &SolverPythonEnabled, true)
-	args = solverConfigArgs()
-	if !kvHas(args, "pythonSolver") {
-		t.Fatalf("missing pythonSolver when enabled: %v", args)
-	}
+		if _, ok := kv["pythonSolver"]; ok {
+			t.Fatalf("unexpected pythonSolver when disabled: %v", kv)
+		}
+		if v, ok := kv["saveFailedAttempts"]; !ok || v != SolverSaveAllAttempts {
+			t.Fatalf("saveFailedAttempts missing or wrong: got=%v ok=%v want=%v", v, ok, SolverSaveAllAttempts)
+		}
+	})
+
+	t.Run("python_enabled_includes_all_python_fields_with_expected_formats", func(t *testing.T) {
+		withVar(t, &SolverPythonEnabled, true)
+		withVar(t, &SolverPythonTimeout, 123*time.Millisecond)
+		withVar(t, &SolverPythonGapLimit, 0.125)
+		withVar(t, &SolverPythonGuaranteedTierFraction, 0.5)
+		withVar(t, &SolverPythonMoveFractionOfTier, 0.75)
+
+		args := solverConfigArgs()
+		kv := kvToMap(t, args)
+
+		if kv["pythonSolver"] != true {
+			t.Fatalf("pythonSolver=%v, want true", kv["pythonSolver"])
+		}
+		if kv["pythonTimeout"] != "123ms" {
+			t.Fatalf("pythonTimeout=%v, want %q", kv["pythonTimeout"], "123ms")
+		}
+		if kv["pythonGapLimit"] != "0.12" {
+			t.Fatalf("pythonGapLimit=%v, want %q", kv["pythonGapLimit"], "0.12")
+		}
+		if kv["pythonGuaranteedTierFraction"] != "0.50" {
+			t.Fatalf("pythonGuaranteedTierFraction=%v, want %q", kv["pythonGuaranteedTierFraction"], "0.50")
+		}
+		if kv["pythonMoveFractionOfTier"] != "0.75" {
+			t.Fatalf("pythonMoveFractionOfTier=%v, want %q", kv["pythonMoveFractionOfTier"], "0.75")
+		}
+		if v, ok := kv["saveFailedAttempts"]; !ok || v != SolverSaveAllAttempts {
+			t.Fatalf("saveFailedAttempts missing or wrong: got=%v ok=%v want=%v", v, ok, SolverSaveAllAttempts)
+		}
+	})
 }
 
 // -------------------------
@@ -200,16 +316,26 @@ func TestIsSolutionBetter(t *testing.T) {
 		new  SolverScore
 		want int
 	}{
-		{"better_placed", SolverScore{PlacedByPriority: map[string]int{"1": 2, "0": 0}, Evicted: 2, Moved: 3}, 1},
-		{"fewer_evictions", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 1, Moved: 3}, 1},
+		// Placed-by-priority dominates; "better placed" should win even if it shifts lower prio counts.
+		{"better_placed", SolverScore{PlacedByPriority: map[string]int{"1": 2, "0": 0}, Evicted: 999, Moved: 999}, 1},
+
+		// Equal placed, fewer evictions is better
+		{"fewer_evictions", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 1, Moved: 999}, 1},
+
+		// Equal placed/evictions, fewer moves is better
+		{"fewer_moves", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 2}, 1},
+
+		// Worse on moves
 		{"more_moves_worse", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 4}, -1},
+
+		// Equal everything
 		{"equal", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 3}, 0},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isSolutionBetter(&base, &tc.new); got != tc.want {
-				t.Fatalf("got=%d, want=%d", got, tc.want)
+				t.Fatalf("got=%d, want=%d (base=%v new=%v)", got, tc.want, base, tc.new)
 			}
 		})
 	}
@@ -367,31 +493,42 @@ func TestIsSolutionApplicable(t *testing.T) {
 // logLeaderboard
 // -------------------------
 
-func TestLogLeaderboard(t *testing.T) {
+func TestLogLeaderboard_SmokeScenarios(t *testing.T) {
+	// We intentionally treat this as a smoke test, since logLeaderboard only logs.
+	// The value here is ensuring it stays panic-free across the main branches.
 	baseline := SolverScore{PlacedByPriority: map[string]int{"1": 1}, Evicted: 0, Moved: 0}
 
-	// best == nil branch
-	logLeaderboard("label", nil, baseline, nil)
-
-	// attempts empty but best non-nil branch
-	best := SolverResult{Name: "baseline", Status: "BASELINE", DurationMs: 0, Score: baseline}
-	logLeaderboard("label", []SolverResult{}, baseline, &best)
-
-	// tie tagging + better/equal/worse + best != baseline placed-map selection
-	better := SolverResult{Name: "better", Status: "OPTIMAL", DurationMs: 1, Score: SolverScore{PlacedByPriority: map[string]int{"1": 2}}}
-	equal := SolverResult{Name: "equal", Status: "FEASIBLE", DurationMs: 2, Score: baseline}
-	worse := SolverResult{Name: "worse", Status: "FEASIBLE", DurationMs: 3, Score: SolverScore{PlacedByPriority: map[string]int{"1": 1}, Moved: 1}}
-
-	// tie: adjacent equal scores
-	attempts := []SolverResult{
-		{Name: "a", Status: "OPTIMAL", DurationMs: 1, Score: baseline},
-		{Name: "b", Status: "FEASIBLE", DurationMs: 2, Score: baseline},
+	tests := []struct {
+		name     string
+		attempts []SolverResult
+		best     *SolverResult
+	}{
+		{
+			name:     "best_nil_only_baseline",
+			attempts: nil,
+			best:     nil,
+		},
+		{
+			name:     "attempts_empty_best_baseline_non_nil",
+			attempts: []SolverResult{},
+			best:     &SolverResult{Name: "baseline", Status: "BASELINE", DurationMs: 0, Score: baseline},
+		},
+		{
+			name: "ties_better_worse_and_best_not_baseline",
+			attempts: []SolverResult{
+				{Name: "a", Status: "OPTIMAL", DurationMs: 1, Score: baseline},
+				{Name: "b", Status: "FEASIBLE", DurationMs: 2, Score: baseline},
+				{Name: "worse", Status: "FEASIBLE", DurationMs: 3, Score: SolverScore{PlacedByPriority: map[string]int{"1": 1}, Moved: 1}},
+			},
+			best: &SolverResult{Name: "better", Status: "OPTIMAL", DurationMs: 1, Score: SolverScore{PlacedByPriority: map[string]int{"1": 2}}},
+		},
 	}
-	best2 := attempts[0]
-	logLeaderboard("label", attempts, baseline, &best2)
 
-	best3 := better
-	logLeaderboard("label", []SolverResult{worse, equal, better}, baseline, &best3)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logLeaderboard("label", tt.attempts, baseline, tt.best)
+		})
+	}
 }
 
 // -------------------------
@@ -402,8 +539,8 @@ func TestScoreSolution(t *testing.T) {
 	in := SolverInput{
 		Pods: []SolverPod{
 			{UID: "u1", Priority: 1, Node: "n1"},
-			{UID: "u2", Priority: 2, Node: ""},
-			{UID: "u3", Priority: 1, Node: "n1"},
+			{UID: "u2", Priority: 2, Node: ""},   // pending
+			{UID: "u3", Priority: 1, Node: "n1"}, // placed
 		},
 		Preemptor: &SolverPod{UID: "u-pre", Priority: 5},
 	}
@@ -422,6 +559,9 @@ func TestScoreSolution(t *testing.T) {
 				{UID: "u3", Node: "n2"},    // move
 				{UID: "uX", Node: "n1"},    // unknown ignored
 				{UID: "u-pre", Node: "n1"}, // place preemptor
+				{UID: "u2", Node: ""},      // covers plm.Node=="" continue (ignored)
+				{UID: "u3", Node: "n2"},    // idempotent
+				{UID: "u-pre", Node: "n1"}, // idempotent
 			},
 			Evictions: []SolverPod{{UID: "u1"}},
 		}
@@ -461,11 +601,21 @@ func TestScoreSolution_PreemptorAlreadyIncludedAndEmptyPlacementNode(t *testing.
 }
 
 func TestToSolverPod(t *testing.T) {
-	p := pod("ns", "mypod", withUID("uid-1"))
+	p := pod("ns", "mypod", withUID("uid-1"), withPrio(7), withReqs("250m", "64Mi"))
 	sp := toSolverPod(p, "nodeX")
 
 	if sp.UID != p.UID || sp.Namespace != p.Namespace || sp.Name != p.Name || sp.Node != "nodeX" {
 		t.Fatalf("unexpected mapping: %+v", sp)
+	}
+	if sp.Priority != 7 {
+		t.Fatalf("Priority=%d, want 7", sp.Priority)
+	}
+	if sp.ReqCPUm != 250 {
+		t.Fatalf("ReqCPUm=%d, want 250", sp.ReqCPUm)
+	}
+	// 64Mi = 67108864 bytes
+	if sp.ReqMemBytes != 67108864 {
+		t.Fatalf("ReqMemBytes=%d, want 67108864", sp.ReqMemBytes)
 	}
 }
 

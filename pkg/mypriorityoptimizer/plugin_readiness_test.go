@@ -1,3 +1,4 @@
+// plugin_readiness_test.go
 package mypriorityoptimizer
 
 import (
@@ -14,7 +15,7 @@ import (
 )
 
 // -------------------------
-// Helpers
+// Test Helpers
 // -------------------------
 
 type readinessEnv struct {
@@ -32,9 +33,9 @@ type readinessEnv struct {
 func withReadinessEnv(t *testing.T, env readinessEnv, fn func()) {
 	t.Helper()
 
-	// defaults
-	if env.interval == 0 {
-		env.interval = 1 * time.Millisecond
+	// defaults (keep tests fast but not razor-thin)
+	if env.interval <= 0 {
+		env.interval = 2 * time.Millisecond
 	}
 	if env.getNodes == nil {
 		env.getNodes = func(*SharedState) ([]*v1.Node, error) { return nil, nil }
@@ -52,33 +53,13 @@ func withReadinessEnv(t *testing.T, env readinessEnv, fn func()) {
 		env.startLoops = func(*SharedState, context.Context) {}
 	}
 
-	// save
-	oldInterval := readinessUsableNodeInterval
-	oldWarmup := cacheWarmupDelay
-	oldGet := getNodesForReadiness
-	oldUsable := isNodeUsableForReadiness
-	oldPersist := persistPluginConfigForReadiness
-	oldActivate := activateBlockedPodsForReadiness
-	oldStart := startLoopsForReadiness
-
-	// set
-	readinessUsableNodeInterval = env.interval
-	cacheWarmupDelay = env.warmup
-	getNodesForReadiness = env.getNodes
-	isNodeUsableForReadiness = env.isUsable
-	persistPluginConfigForReadiness = env.persist
-	activateBlockedPodsForReadiness = env.activate
-	startLoopsForReadiness = env.startLoops
-
-	t.Cleanup(func() {
-		readinessUsableNodeInterval = oldInterval
-		cacheWarmupDelay = oldWarmup
-		getNodesForReadiness = oldGet
-		isNodeUsableForReadiness = oldUsable
-		persistPluginConfigForReadiness = oldPersist
-		activateBlockedPodsForReadiness = oldActivate
-		startLoopsForReadiness = oldStart
-	})
+	withVar(t, &readinessUsableNodeInterval, env.interval)
+	withVar(t, &cacheWarmupDelay, env.warmup)
+	withVar(t, &getNodesForReadiness, env.getNodes)
+	withVar(t, &isNodeUsableForReadiness, env.isUsable)
+	withVar(t, &persistPluginConfigForReadiness, env.persist)
+	withVar(t, &activateBlockedPodsForReadiness, env.activate)
+	withVar(t, &startLoopsForReadiness, env.startLoops)
 
 	fn()
 }
@@ -93,6 +74,14 @@ func newTestPodInformer() cache.SharedIndexInformer {
 		},
 	}
 	return cache.NewSharedIndexInformer(lw, &v1.Pod{}, 0, cache.Indexers{})
+}
+
+func startInformer(t *testing.T, inf cache.SharedIndexInformer) chan struct{} {
+	t.Helper()
+	stopCh := make(chan struct{})
+	go inf.Run(stopCh)
+	t.Cleanup(func() { close(stopCh) })
+	return stopCh
 }
 
 // -------------------------
@@ -125,6 +114,18 @@ func TestIsCacheReady_ContextCanceled_ReturnsFalse(t *testing.T) {
 
 	if got := isCacheReady(ctx, inf); got {
 		t.Fatalf("isCacheReady(canceled ctx) = %v, want false", got)
+	}
+}
+
+func TestIsCacheReady_RunningInformer_Syncs_ReturnsTrue(t *testing.T) {
+	inf := newTestPodInformer()
+	startInformer(t, inf)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	if got := isCacheReady(ctx, inf); !got {
+		t.Fatalf("isCacheReady(running informer) = %v, want true", got)
 	}
 }
 
@@ -162,7 +163,7 @@ func TestWaitForUsableNode_EventuallyFindsUsableNode(t *testing.T) {
 		},
 		isUsable: func(n *v1.Node) bool { return n != nil && n.Name == "nodeB" },
 	}, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()
 
 		if got := pl.waitForUsableNode(ctx); !got {
@@ -189,11 +190,14 @@ func TestWaitForUsableNode_GetNodesErrorThenSucceeds(t *testing.T) {
 		},
 		isUsable: func(n *v1.Node) bool { return n != nil && n.Name == "nodeB" },
 	}, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()
 
 		if got := pl.waitForUsableNode(ctx); !got {
 			t.Fatalf("waitForUsableNode() = %v, want true", got)
+		}
+		if calls.Load() < 2 {
+			t.Fatalf("expected getNodesForReadiness >=2, got %d", calls.Load())
 		}
 	})
 }
@@ -239,7 +243,7 @@ func TestPluginReadiness_WarmupCanceled_DoesNotMarkReady_AndNoSideEffects(t *tes
 	var persistCalls, activateCalls, startCalls atomic.Int32
 
 	withReadinessEnv(t, readinessEnv{
-		warmup:   250 * time.Millisecond,
+		warmup:   250 * time.Millisecond, // should not actually sleep because ctx is already canceled
 		getNodes: func(*SharedState) ([]*v1.Node, error) { return []*v1.Node{node("n1")}, nil },
 		isUsable: func(*v1.Node) bool { return true },
 		persist:  func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
@@ -281,7 +285,7 @@ func TestPluginReadiness_UsableNodeNeverFound_DoesNotMarkReady_AndNoSideEffects(
 			startCalls.Add(1)
 		},
 	}, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 		defer cancel()
 
 		pl.pluginReadiness(ctx)
@@ -297,6 +301,49 @@ func TestPluginReadiness_UsableNodeNeverFound_DoesNotMarkReady_AndNoSideEffects(
 	})
 }
 
+func TestPluginReadiness_Success_WithInformer_MarksReady_AndCallsSideEffects(t *testing.T) {
+	pl := &SharedState{}
+	pl.BlockedWhileActive = newPodSet("blocked")
+	pl.PluginReady.Store(false)
+
+	var persistCalls, activateCalls, startCalls atomic.Int32
+	var getNodesCalls atomic.Int32
+
+	inf := newTestPodInformer()
+	startInformer(t, inf)
+
+	withReadinessEnv(t, readinessEnv{
+		warmup: 0,
+		getNodes: func(*SharedState) ([]*v1.Node, error) {
+			getNodesCalls.Add(1)
+			return []*v1.Node{node("n1")}, nil
+		},
+		isUsable: func(*v1.Node) bool { return true },
+		persist:  func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
+		activate: func(*SharedState) { activateCalls.Add(1) },
+		startLoops: func(*SharedState, context.Context) {
+			startCalls.Add(1)
+		},
+	}, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		pl.pluginReadiness(ctx, inf)
+
+		if !pl.PluginReady.Load() {
+			t.Fatalf("PluginReady = false, want true on success")
+		}
+		if persistCalls.Load() != 1 || activateCalls.Load() != 1 || startCalls.Load() != 1 {
+			t.Fatalf("expected side effects once (persist=%d activate=%d start=%d)",
+				persistCalls.Load(), activateCalls.Load(), startCalls.Load(),
+			)
+		}
+		if getNodesCalls.Load() == 0 {
+			t.Fatalf("expected getNodesForReadiness to be called at least once")
+		}
+	})
+}
+
 func TestPluginReadiness_Success_MarksReady_CallsSideEffects_AndHonorsWarmup(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
@@ -304,8 +351,11 @@ func TestPluginReadiness_Success_MarksReady_CallsSideEffects_AndHonorsWarmup(t *
 
 	var persistCalls, activateCalls, startCalls atomic.Int32
 
+	// Use a warmup long enough to make the timing assertion robust.
+	warmup := 40 * time.Millisecond
+
 	withReadinessEnv(t, readinessEnv{
-		warmup:   20 * time.Millisecond,
+		warmup:   warmup,
 		getNodes: func(*SharedState) ([]*v1.Node, error) { return []*v1.Node{node("n1")}, nil },
 		isUsable: func(*v1.Node) bool { return true },
 		persist:  func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
@@ -314,7 +364,7 @@ func TestPluginReadiness_Success_MarksReady_CallsSideEffects_AndHonorsWarmup(t *
 			startCalls.Add(1)
 		},
 	}, func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 
 		start := time.Now()
@@ -329,8 +379,10 @@ func TestPluginReadiness_Success_MarksReady_CallsSideEffects_AndHonorsWarmup(t *
 				persistCalls.Load(), activateCalls.Load(), startCalls.Load(),
 			)
 		}
-		if elapsed < 15*time.Millisecond {
-			t.Fatalf("expected warmup delay to be honored, elapsed=%v", elapsed)
+
+		// Timers should not fire early; allow a tiny scheduling margin.
+		if elapsed < warmup-5*time.Millisecond {
+			t.Fatalf("expected warmup delay to be honored, warmup=%v elapsed=%v", warmup, elapsed)
 		}
 	})
 }
