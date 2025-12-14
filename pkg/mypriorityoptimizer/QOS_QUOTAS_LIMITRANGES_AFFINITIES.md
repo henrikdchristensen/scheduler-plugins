@@ -1279,9 +1279,9 @@ Without QoS class support, your plugin evaluation will have these critical gaps:
 
 #### Example Test Scenario That Fails
 
-```yaml
-# Scenario: Node at capacity with 1 Guaranteed + 1 BestEffort pod
-# New high-priority Guaranteed pod needs to be placed
+```
+Scenario: Node at capacity with 1 Guaranteed + 1 BestEffort pod
+         New high-priority Guaranteed pod needs to be placed
 
 Current Behavior (WITHOUT QoS support):
 - Plugin may evict the existing Guaranteed pod (if it has lower priority)
@@ -1334,9 +1334,9 @@ Expected Behavior (WITH QoS support):
 
 #### Example Test Scenario That Fails
 
-```yaml
-# Scenario: Web app with required anti-affinity (HA)
-# 3 replicas must be spread across zones
+```
+Scenario: Web app with required anti-affinity (HA)
+         3 replicas must be spread across zones
 
 Current Behavior (WITHOUT affinity support):
 - Plugin places all 3 replicas on same zone (e.g., all in us-west-1a)
@@ -1383,10 +1383,10 @@ Expected Behavior (WITH affinity support):
 
 #### Example Test Scenario That Fails
 
-```yaml
-# Scenario: Namespace "team-a" has quota: 10 CPU cores
-# Currently using: 8 cores (running pods)
-# New pods need: 5 cores (would total 13 cores)
+```
+Scenario: Namespace "team-a" has quota: 10 CPU cores
+         Currently using: 8 cores (running pods)
+         New pods need: 5 cores (would total 13 cores)
 
 Current Behavior (WITHOUT quota support):
 - Plugin places all new pods in team-a namespace
@@ -1434,9 +1434,9 @@ Expected Behavior (WITH quota support):
 
 #### Example Test Scenario That Fails
 
-```yaml
-# Scenario: Namespace has LimitRange with default: 500m CPU
-# Pod submitted without CPU request
+```
+Scenario: Namespace has LimitRange with default: 500m CPU
+         Pod submitted without CPU request
 
 Current Behavior (WITHOUT LimitRange support):
 - Plugin treats pod as having 0 CPU request (BestEffort)
