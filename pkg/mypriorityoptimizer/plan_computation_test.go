@@ -78,12 +78,18 @@ func TestPlanComputation_ErrorWithNonNilOutput_RecordsStatusAndScore(t *testing.
 		return &SolverOutput{
 			Status: "OPTIMAL",
 			Placements: []SolverPod{
-				{UID: pre.UID, Namespace: pre.Namespace, Name: pre.Name, Node: "n1"},
+				// Include Priority to make scoreSolution independent of any lookup strategy.
+				{UID: pre.UID, Namespace: pre.Namespace, Name: pre.Name, Priority: pre.Priority, Node: "n1"},
 			},
 		}, errors.New("boom")
 	})
 
-	in := SolverInput{Preemptor: pre, BaselineScore: SolverScore{}}
+	// Provide Pods[] as well (some scoreSolution implementations look up priority from input pods).
+	in := SolverInput{
+		Preemptor:     pre,
+		Pods:          []SolverPod{*pre},
+		BaselineScore: SolverScore{},
+	}
 
 	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), in)
 
@@ -157,12 +163,17 @@ func TestPlanComputation_UsesRunPythonSolverFnWhenHookNil_AndImproves(t *testing
 		return &SolverOutput{
 			Status: "OPTIMAL",
 			Placements: []SolverPod{
-				{UID: pre.UID, Namespace: pre.Namespace, Name: pre.Name, Node: "n1"},
+				// Include Priority to make scoring robust.
+				{UID: pre.UID, Namespace: pre.Namespace, Name: pre.Name, Priority: pre.Priority, Node: "n1"},
 			},
 		}, nil
 	})
 
-	in := SolverInput{Preemptor: pre, BaselineScore: SolverScore{}}
+	in := SolverInput{
+		Preemptor:     pre,
+		Pods:          []SolverPod{*pre},
+		BaselineScore: SolverScore{},
+	}
 
 	bestName, hadUsable, bestAttempt, bestOutput, attempts := pl.planComputation(context.Background(), in)
 

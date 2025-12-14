@@ -11,14 +11,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// By default this just calls (*SharedState).optimizeBackgroundLoop.
-// Tests can override this variable to intercept the cfg passed in.
-var optimizeBackgroundLoopFunc = func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
-	pl.optimizeBackgroundLoop(ctx, cfg)
-}
+// -------------------------
+// Test Hooks
+// -------------------------
 
-// test hooks – overridden only in unit tests.
 var (
+	optimizeBackgroundLoopFunc = func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
+		pl.optimizeBackgroundLoop(ctx, cfg)
+	}
+
 	buildPendingSnapshotHook = func(pl *SharedState) (*PendingSnapshot, error) {
 		return pl.buildPendingSnapshot()
 	}
@@ -48,6 +49,7 @@ var (
 
 // startLoops launches background loops exactly once, after caches are warm.
 // It is safe to call multiple times; only the first call does anything.
+// CHECKED
 func (pl *SharedState) startLoops(ctx context.Context) {
 	if !pl.PluginReady.Load() {
 		return
@@ -60,6 +62,9 @@ func (pl *SharedState) startLoops(ctx context.Context) {
 	}
 }
 
+// optimizeBackgroundLoop runs optimization in the background periodically or
+// in interludes, based on the provided configuration.
+// CHECKED
 func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeLoopConfig) {
 	strategy := getModeCombinedAsString()
 
@@ -227,6 +232,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 }
 
 // isSameUIDSet returns true if a and b contain exactly the same UIDs.
+// CHECKED
 func isSameUIDSet(a, b map[types.UID]struct{}) bool {
 	if a == nil && b == nil {
 		return true
@@ -246,6 +252,7 @@ func isSameUIDSet(a, b map[types.UID]struct{}) bool {
 }
 
 // cloneUIDSet shallow-copies a UID set (so we don't alias maps by accident).
+// CHECKED
 func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 	if in == nil {
 		return nil
@@ -257,17 +264,13 @@ func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 	return out
 }
 
-// isAlreadyComputedForPendingSet decides whether a run of runFlow has
-// "fully solved" the current pending set, i.e. there is nothing
-// better to do for this set of pending pods under the current cluster state.
-// We only consider it solved when:
-//   - runFlow returned ErrNoImprovingSolutionFromAnySolver OR
-//     ErrNoPendingPodsToSchedule, AND
-//   - bestAttempt is non-nil with Status == "OPTIMAL".
-//
-// If the solver only found a FEASIBLE solution, hit a time limit,
-// was cancelled, or otherwise did not prove optimality, we return false
-// so that the same pending set may be retried later.
+// isAlreadyComputedForPendingSet decides whether a optimization run has "fully
+// solved" the current pending set, i.e. there is nothing better to do for this
+// set of pending pods under the current cluster state. If the solver only found
+// a FEASIBLE solution, hit a time limit, was cancelled, or otherwise did not
+// prove optimality, we return false so that the same pending set may be retried
+// later.
+// CHECKED
 func isAlreadyComputedForPendingSet(err error, bestAttempt *SolverResult) bool {
 	if bestAttempt == nil {
 		return false
@@ -284,6 +287,8 @@ func isAlreadyComputedForPendingSet(err error, bestAttempt *SolverResult) bool {
 //   - lists current pods and nodes via informers
 //   - builds the set of Pending pod UIDs
 //   - computes the baseline cluster fingerprint (usable nodes + running pods).
+//
+// CHECKED
 func (pl *SharedState) buildPendingSnapshot() (*PendingSnapshot, error) {
 	pods, err := pl.getPods()
 	if err != nil {

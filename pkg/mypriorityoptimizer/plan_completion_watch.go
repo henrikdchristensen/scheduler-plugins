@@ -9,26 +9,35 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Small hooks for easier testing.
-var planCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
-	pl.planCompletionWatch(ap)
-}
+// -------------------------
+// Test Hooks
+// -------------------------
 
-var getActivePlanForWatch = func(pl *SharedState) *ActivePlan {
-	return pl.getActivePlan()
-}
+var (
+	planCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
+		pl.planCompletionWatch(ap)
+	}
 
-var isPlanCompletedFn = func(pl *SharedState, ap *ActivePlan) (bool, error) {
-	return pl.isPlanCompleted(ap)
-}
+	getActivePlanForWatch = func(pl *SharedState) *ActivePlan {
+		return pl.getActivePlan()
+	}
 
-var onPlanCompletedFn = func(pl *SharedState, status PlanStatus) {
-	pl.onPlanCompleted(status)
-}
+	isPlanCompletedFn = func(pl *SharedState, ap *ActivePlan) (bool, error) {
+		return pl.isPlanCompleted(ap)
+	}
 
-var getPlanCompletionCheckInterval = func() time.Duration {
-	return PlanCompletionCheckInterval
-}
+	onPlanCompletedFn = func(pl *SharedState, status PlanStatus) {
+		pl.onPlanCompleted(status)
+	}
+
+	getPlanCompletionCheckInterval = func() time.Duration {
+		return PlanCompletionCheckInterval
+	}
+)
+
+// -------------------------
+// planCompletionWatch
+// -------------------------
 
 // startPlanCompletionWatch spawns a goroutine that periodically checks
 // whether the active plan has been realized, or has timed out.

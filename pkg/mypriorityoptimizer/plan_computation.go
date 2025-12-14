@@ -29,6 +29,10 @@ var runPythonSolverFn = func(
 	return pl.runPythonSolver(ctx, in, opts)
 }
 
+// -------------------------
+// planComputation
+// -------------------------
+
 // planComputation tries enabled solvers in order, keeping the best attempt.
 // Returns the name of the best solver, whether any usable result was found,
 // the best attempt details, the best output, and all attempts.

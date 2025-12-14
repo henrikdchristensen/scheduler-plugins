@@ -9,10 +9,14 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// -------------------------
 // Test Hooks
+// -------------------------
+
 var (
 	isAsyncSolvingFn = isAsyncSolving
-	planContextFn    = func(pl *SharedState, preemptor *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
+
+	planContextFn = func(pl *SharedState, preemptor *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		return pl.planContext(preemptor)
 	}
 	planComputationFn = func(pl *SharedState, ctx context.Context, in SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
@@ -37,6 +41,10 @@ var (
 		pl.exportSolverStatsToConfigMap(context.Background(), strategy, baseline, bestName, attempts, errMsg)
 	}
 )
+
+// -------------------------
+// runOptimizationFlow
+// -------------------------
 
 // runOptimizationFlow runs the optimisation flow for the given phase (AllSynch,
 // AllAsynch, Single). For Single phase, the preemptor must be provided.

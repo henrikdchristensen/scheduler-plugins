@@ -3,7 +3,10 @@ package mypriorityoptimizer
 
 import v1 "k8s.io/api/core/v1"
 
-// test hooks (nil in prod)
+// -------------------------
+// Test Helpers
+// -------------------------
+
 var (
 	getNodesForPlanContext = func(pl *SharedState) ([]*v1.Node, error) { return pl.getNodes() }
 	getPodsForPlanContext  = func(pl *SharedState) ([]*v1.Pod, error) { return pl.getPods() }
@@ -11,6 +14,10 @@ var (
 		return pl.buildSolverInput(nodes, pods, preemptor)
 	}
 )
+
+// -------------------------
+// planContext
+// -------------------------
 
 func (pl *SharedState) planContext(preemptor *v1.Pod) (
 	nodes []*v1.Node,

@@ -1,4 +1,3 @@
-// pkg/mypriorityoptimizer/plan_registration_test.go
 // plan_registration_test.go
 package mypriorityoptimizer
 

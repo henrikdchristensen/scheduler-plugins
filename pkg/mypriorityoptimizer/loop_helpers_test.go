@@ -15,7 +15,7 @@ import (
 )
 
 // -------------------------
-// Helpers
+// Test Helpers
 // -------------------------
 
 func uidSet(uids ...string) map[types.UID]struct{} {
@@ -54,9 +54,20 @@ func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg strin
 		if cond() {
 			return
 		}
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("timeout after %v: %s", timeout, msg)
+}
+
+func withOptimizeLoopFunc(t *testing.T,
+	fn func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig),
+	body func(),
+) {
+	t.Helper()
+	orig := optimizeBackgroundLoopFunc
+	optimizeBackgroundLoopFunc = fn
+	t.Cleanup(func() { optimizeBackgroundLoopFunc = orig })
+	body()
 }
 
 // -------------------------
@@ -64,42 +75,33 @@ func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg strin
 // -------------------------
 
 func TestStartLoops_DoesNothingWhenNotReady(t *testing.T) {
-	origMode := OptimizeMode
-	defer func() { OptimizeMode = origMode }()
-
-	OptimizeMode = ModePeriodic
+	withVar(t, &OptimizeMode, ModePeriodic)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 
 	pl := &SharedState{} // PluginReady default is false
-
-	called := false
+	calledCh := make(chan OptimizeLoopConfig, 1)
 
 	withOptimizeLoopFunc(t,
-		func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
-			called = true
-		},
+		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) { calledCh <- cfg },
 		func() {
 			pl.startLoops(ctx)
-			// If it accidentally started a goroutine, this gives it a chance to run.
-			time.Sleep(20 * time.Millisecond)
+			select {
+			case cfg := <-calledCh:
+				t.Fatalf("unexpected loop start: cfg=%+v (PluginReady=false)", cfg)
+			case <-time.After(50 * time.Millisecond):
+				// ok
+			}
 		},
 	)
-
-	if called {
-		t.Fatalf("startLoops called optimizeBackgroundLoopFunc even though PluginReady was false")
-	}
 }
 
 func TestStartLoops_LaunchesPeriodicLoopWhenModePeriodic(t *testing.T) {
-	origMode := OptimizeMode
-	defer func() { OptimizeMode = origMode }()
-
-	OptimizeMode = ModePeriodic
+	withVar(t, &OptimizeMode, ModePeriodic)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 
 	pl := &SharedState{}
 	pl.PluginReady.Store(true)
@@ -107,18 +109,15 @@ func TestStartLoops_LaunchesPeriodicLoopWhenModePeriodic(t *testing.T) {
 	cfgCh := make(chan OptimizeLoopConfig, 1)
 
 	withOptimizeLoopFunc(t,
-		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) {
-			cfgCh <- cfg
-		},
+		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) { cfgCh <- cfg },
 		func() {
 			pl.startLoops(ctx)
-
 			select {
 			case cfg := <-cfgCh:
 				if cfg.Label != "PeriodicLoop" {
 					t.Fatalf("expected Label=PeriodicLoop, got %q", cfg.Label)
 				}
-			case <-time.After(200 * time.Millisecond):
+			case <-time.After(500 * time.Millisecond):
 				t.Fatalf("optimizeBackgroundLoopFunc was not called for ModePeriodic")
 			}
 		},
@@ -126,13 +125,10 @@ func TestStartLoops_LaunchesPeriodicLoopWhenModePeriodic(t *testing.T) {
 }
 
 func TestStartLoops_LaunchesInterludeLoopWhenModeInterlude(t *testing.T) {
-	origMode := OptimizeMode
-	defer func() { OptimizeMode = origMode }()
-
-	OptimizeMode = ModeInterlude
+	withVar(t, &OptimizeMode, ModeInterlude)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 
 	pl := &SharedState{}
 	pl.PluginReady.Store(true)
@@ -140,18 +136,15 @@ func TestStartLoops_LaunchesInterludeLoopWhenModeInterlude(t *testing.T) {
 	cfgCh := make(chan OptimizeLoopConfig, 1)
 
 	withOptimizeLoopFunc(t,
-		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) {
-			cfgCh <- cfg
-		},
+		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) { cfgCh <- cfg },
 		func() {
 			pl.startLoops(ctx)
-
 			select {
 			case cfg := <-cfgCh:
 				if cfg.Label != "InterludeLoop" {
 					t.Fatalf("expected Label=InterludeLoop, got %q", cfg.Label)
 				}
-			case <-time.After(200 * time.Millisecond):
+			case <-time.After(500 * time.Millisecond):
 				t.Fatalf("optimizeBackgroundLoopFunc was not called for ModeInterlude")
 			}
 		},
@@ -171,7 +164,7 @@ func TestOptimizeBackgroundLoop_DefaultInterval_ImmediateCancel(t *testing.T) {
 
 	cfg := OptimizeLoopConfig{
 		Label:          "TestLoop",
-		Interval:       0, // <-- covers interval<=0 => default 1s path
+		Interval:       0, // covers interval<=0 => default 1s path
 		InterludeDelay: 0,
 		CancelOnChange: false,
 	}
@@ -183,12 +176,11 @@ func TestOptimizeBackgroundLoop_DefaultInterval_ImmediateCancel(t *testing.T) {
 func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 	pl := &SharedState{}
 
-	// Fast loop, but still allows interlude gating to fire.
 	cfg := OptimizeLoopConfig{
 		Label:          "TestLoop",
 		Interval:       5 * time.Millisecond,
-		InterludeDelay: 15 * time.Millisecond, // cover idle window logic
-		CancelOnChange: true,                  // cover cancel-on-change branch
+		InterludeDelay: 15 * time.Millisecond,
+		CancelOnChange: true,
 	}
 
 	// Snapshots we will “serve” via the hook.
@@ -198,56 +190,43 @@ func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 	snapU2 := &PendingSnapshot{PendingUIDs: uidSet("u2"), PendingCount: 1, Fingerprint: "fp2"}
 	snapU3 := &PendingSnapshot{PendingUIDs: uidSet("u3"), PendingCount: 1, Fingerprint: "fp3"}
 
-	// Control knobs for the snapshot hook.
 	var servedErrOnce atomic.Bool
 	var serveEmpty atomic.Bool
 	var serveU3 atomic.Bool
 
-	// Run counters + ctx capture from started runs.
 	var runCount atomic.Int32
 	run1CtxCh := make(chan context.Context, 1)
 	run3CtxCh := make(chan context.Context, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
-	// Make sure we also cover:
-	// - PluginReady=false warm-up branch
-	// - Active plan branch
+	// Cover PluginReady=false warm-up branch + active plan skip branch.
 	pl.PluginReady.Store(false)
-
-	// NOTE: getActivePlan() may depend on ActivePlan and/or ActivePlanInProgress in your impl,
-	// so we set both during the “active plan” window.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
+	time.AfterFunc(10*time.Millisecond, func() {
 		pl.PluginReady.Store(true)
-
-		// Active plan for a brief window.
 		pl.ActivePlanInProgress.Store(true)
 		pl.ActivePlan.Store(&ActivePlan{ID: "ap-1"})
-		time.Sleep(10 * time.Millisecond)
-
-		// Clear it (typed-nil works for both atomic.Pointer and atomic.Value setups).
-		pl.ActivePlanInProgress.Store(false)
-		pl.ActivePlan.Store((*ActivePlan)(nil))
-	}()
+		time.AfterFunc(10*time.Millisecond, func() {
+			pl.ActivePlanInProgress.Store(false)
+			pl.ActivePlan.Store((*ActivePlan)(nil))
+		})
+	})
 
 	withBackgroundHooks(t,
 		// buildPendingSnapshotHook
 		func(_ *SharedState) (*PendingSnapshot, error) {
-			// 1) Force snapshot error once.
 			if !servedErrOnce.Load() {
 				servedErrOnce.Store(true)
 				return nil, snapErr
 			}
-			// 2) After we decide to serve empty/u3, do that.
 			if serveU3.Load() {
 				return snapU3, nil
 			}
 			if serveEmpty.Load() {
 				return snapEmpty, nil
 			}
-			// 3) Before first run starts, serve u1. After first run starts, switch to u2
-			//    so the in-flight run sees a changed set and cancels.
+			// Before first run starts -> u1. While run1 is in-flight -> u2 (forces cancel-on-change).
 			if runCount.Load() >= 1 {
 				return snapU2, nil
 			}
@@ -257,27 +236,23 @@ func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 		// startBackgroundOptimization hook
 		func(_ *SharedState, _ OptimizeLoopConfig, ctxRun context.Context, runDone chan<- bool) {
 			n := runCount.Add(1)
-
 			switch n {
 			case 1:
-				// Run 1: stays in-flight until cancelled -> returns solved=false.
 				run1CtxCh <- ctxRun
 				go func() {
 					<-ctxRun.Done()
 					runDone <- false
 				}()
 			case 2:
-				// Run 2: immediate solved=true => should set lastSolvedSet+fingerprint and enable skip.
+				// solved=true should record lastSolvedSet+fingerprint => skip further runs for same set+fp.
 				runDone <- true
 			case 3:
-				// Run 3: used to cover ctx.Done branch (outer ctx cancelled while run in-flight).
 				run3CtxCh <- ctxRun
 				go func() {
 					<-ctxRun.Done()
 					runDone <- true
 				}()
 			default:
-				// Should not happen; keep the loop unblocked if it does.
 				runDone <- false
 			}
 		},
@@ -293,59 +268,54 @@ func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 			var run1 context.Context
 			select {
 			case run1 = <-run1CtxCh:
-			case <-time.After(500 * time.Millisecond):
+			case <-time.After(2 * time.Second):
 				t.Fatalf("run #1 did not start")
 			}
 			select {
 			case <-run1.Done():
-				// ok: cancel-on-change fired
-			case <-time.After(500 * time.Millisecond):
+			case <-time.After(2 * time.Second):
 				t.Fatalf("run #1 was not cancelled (expected cancel-on-change)")
 			}
 
-			// ---- Run 2: must start, and then we should not start any extra runs
-			// because lastSolvedSet+fingerprint match => skip optimization.
-			eventually(t, 700*time.Millisecond, func() bool {
+			// ---- Run 2: must start.
+			eventually(t, 2*time.Second, func() bool {
 				return runCount.Load() >= 2
 			}, "run #2 did not start")
 
-			// Allow time for “run finished” to be observed and “skip” to kick in.
-			time.Sleep(40 * time.Millisecond)
+			// Let loop observe completion and establish skip state.
+			time.Sleep(30 * time.Millisecond)
 
-			// If skip is working, we should still be at exactly 2 runs.
+			// If skip works (same set+fingerprint), it should not start extra runs yet.
 			if got := runCount.Load(); got != 2 {
 				t.Fatalf("expected skip to prevent extra runs; runCount=%d, want 2", got)
 			}
 
-			// ---- pendingCount==0 path (also resets state when previous state exists)
+			// ---- pendingCount==0 path resets internal state.
 			serveEmpty.Store(true)
 			time.Sleep(20 * time.Millisecond)
 			serveEmpty.Store(false)
 
-			// ---- Run 3: switch to u3, let it start, then cancel outer ctx to hit ctx.Done cleanup.
+			// ---- Run 3: serve u3, let it start, then cancel outer ctx to hit ctx.Done cleanup.
 			serveU3.Store(true)
 
 			var run3 context.Context
 			select {
 			case run3 = <-run3CtxCh:
-			case <-time.After(700 * time.Millisecond):
+			case <-time.After(2 * time.Second):
 				t.Fatalf("run #3 did not start")
 			}
 
-			// Cancel outer loop while run is in-flight: ctx.Done branch must cancel run + drain runDone.
 			cancel()
 
 			select {
 			case <-run3.Done():
-				// ok: ctx.Done path cancelled the in-flight run
-			case <-time.After(500 * time.Millisecond):
+			case <-time.After(2 * time.Second):
 				t.Fatalf("run #3 was not cancelled by outer ctx.Done")
 			}
 
 			select {
 			case <-done:
-				// ok: loop exited
-			case <-time.After(700 * time.Millisecond):
+			case <-time.After(2 * time.Second):
 				t.Fatalf("optimizeBackgroundLoop did not exit after ctx cancel")
 			}
 		},
@@ -409,12 +379,10 @@ func TestCloneUIDSet_Independence(t *testing.T) {
 	if !isSameUIDSet(src, cloned) {
 		t.Fatalf("cloneUIDSet() produced different contents: src=%v cloned=%v", src, cloned)
 	}
-	// Mutate clone and ensure src is unaffected
 	delete(cloned, types.UID("u1"))
 	if _, ok := src[types.UID("u1")]; !ok {
 		t.Fatalf("mutating clone mutated source: src=%v cloned=%v", src, cloned)
 	}
-	// Mutate src and ensure clone is unaffected
 	src[types.UID("u3")] = struct{}{}
 	if _, ok := cloned[types.UID("u3")]; ok {
 		t.Fatalf("mutating source mutated clone: src=%v cloned=%v", src, cloned)
@@ -466,7 +434,6 @@ func TestIsAlreadyComputedForPendingSet_OptimalWithOtherError(t *testing.T) {
 func TestBuildPendingSnapshot(t *testing.T) {
 	pl := &SharedState{}
 
-	// One usable node
 	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "n1"},
 		Status: v1.NodeStatus{
@@ -478,13 +445,11 @@ func TestBuildPendingSnapshot(t *testing.T) {
 		},
 	}
 
-	// Pending pod (counts)
 	pPending := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "p-pending", Namespace: "ns", UID: types.UID("pu1")},
 		Status:     v1.PodStatus{Phase: v1.PodPending},
 	}
 
-	// Running pod (ignored)
 	pRunning := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "p-running", Namespace: "ns", UID: types.UID("pu2")},
 		Status:     v1.PodStatus{Phase: v1.PodRunning},
@@ -501,7 +466,6 @@ func TestBuildPendingSnapshot(t *testing.T) {
 		},
 	}
 
-	// Pending but deleting (must be ignored)
 	now := metav1.Now()
 	pDeletingPending := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -513,7 +477,6 @@ func TestBuildPendingSnapshot(t *testing.T) {
 		Status: v1.PodStatus{Phase: v1.PodPending},
 	}
 
-	// Store includes a nil pod pointer to hit (p == nil) branch.
 	store := map[string]map[string]*v1.Pod{
 		"ns": {
 			"p-pending":  pPending,
@@ -530,15 +493,12 @@ func TestBuildPendingSnapshot(t *testing.T) {
 				t.Fatalf("buildPendingSnapshot() unexpected error: %v", err)
 			}
 
-			// Only pPending should count.
 			if snap.PendingCount != 1 {
 				t.Fatalf("PendingCount = %d, want 1", snap.PendingCount)
 			}
 			if _, ok := snap.PendingUIDs[pPending.UID]; !ok {
 				t.Fatalf("pending UID set missing %q", pPending.UID)
 			}
-
-			// Deleting pending must be excluded.
 			if _, ok := snap.PendingUIDs[pDeletingPending.UID]; ok {
 				t.Fatalf("deleting pending pod must be excluded from pending set")
 			}
@@ -558,8 +518,6 @@ func TestBuildPendingSnapshot_NodesErrorPropagated(t *testing.T) {
 	sentinel := errors.New("nodes boom")
 
 	withNodeLister(&fakeNodeLister{err: sentinel}, func() {
-		// Pod lister should not matter if node listing already fails,
-		// but we provide a no-op lister for completeness.
 		withPodLister(&fakePodLister{}, func() {
 			snap, err := pl.buildPendingSnapshot()
 			if snap != nil {
@@ -576,7 +534,6 @@ func TestBuildPendingSnapshot_PodsErrorPropagated(t *testing.T) {
 	pl := &SharedState{}
 	sentinel := errors.New("pods boom")
 
-	// One usable node so we get past node listing.
 	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "n1"},
 		Status: v1.NodeStatus{

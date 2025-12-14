@@ -1,4 +1,3 @@
-// pkg/mypriorityoptimizer/optimization_flow_test.go
 // optimization_flow_test.go
 package mypriorityoptimizer
 
@@ -250,7 +249,8 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 	}
 
 	mkPendingPods := func() []*v1.Pod {
-		return []*v1.Pod{pod("default", "p-pending")}
+		// Make absolutely sure countPendingPods() treats this as pending.
+		return []*v1.Pod{pod("default", "p-pending", withPhase(v1.PodPending))}
 	}
 
 	tests := []struct {
@@ -283,14 +283,13 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			want: want{
 				err:             ErrNoPendingPods,
 				planNonNil:      false,
-				baselineEvict:   ptrInt(99), // function returns &baselineScore on this path
+				baselineEvict:   ptr(99), // function returns &baselineScore on this path
 				bestName:        "",
 				attemptsLen:     0,
 				exportCalled:    false,
 				watchCalled:     false,
 				completedCalled: false,
 
-				// See note below
 				checkActiveReleased: true,
 			},
 		},
@@ -313,7 +312,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			want: want{
 				err:                 ErrNoImprovingSolutionFromAnySolver,
 				planNonNil:          false,
-				baselineEvict:       ptrInt(42),
+				baselineEvict:       ptr(42),
 				bestName:            "solverB",
 				bestAttemptPtr:      &SolverResult{Name: "attempt-1"}, // pointer equality checked separately below
 				attemptsLen:         2,
@@ -342,7 +341,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			want: want{
 				err:                 ErrPlanNotApplicable,
 				planNonNil:          false,
-				baselineEvict:       ptrInt(7),
+				baselineEvict:       ptr(7),
 				bestName:            "solverX",
 				attemptsLen:         1,
 				exportCalled:        true,
@@ -372,7 +371,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			want: want{
 				err:                 ErrNoPendingPodsScheduled,
 				planNonNil:          false,
-				baselineEvict:       ptrInt(10),
+				baselineEvict:       ptr(10),
 				bestName:            "solverY",
 				attemptsLen:         1,
 				exportCalled:        true,
@@ -406,7 +405,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			want: want{
 				err:                 ErrPlanRegistration,
 				planNonNil:          false,
-				baselineEvict:       ptrInt(5),
+				baselineEvict:       ptr(5),
 				bestName:            "solverReg",
 				attemptsLen:         1,
 				exportCalled:        true,
@@ -439,7 +438,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			want: want{
 				err:                 ErrPlanActivationFailed,
 				planNonNil:          false,
-				baselineEvict:       ptrInt(2),
+				baselineEvict:       ptr(2),
 				bestName:            "solverAct",
 				attemptsLen:         1,
 				exportCalled:        true,
@@ -472,7 +471,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			want: want{
 				err:                 nil,
 				planNonNil:          true,
-				baselineEvict:       ptrInt(0),
+				baselineEvict:       ptr(0),
 				bestName:            "solverZ",
 				attemptsLen:         1,
 				exportCalled:        true,
@@ -643,7 +642,7 @@ func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 		async: true,
 
 		nodes:         []*v1.Node{},
-		pods:          []*v1.Pod{pod("default", "p-pending")},
+		pods:          []*v1.Pod{pod("default", "p-pending", withPhase(v1.PodPending))},
 		baselineEvict: 11,
 
 		bestName:       "solverAsync",
@@ -696,9 +695,3 @@ func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 		t.Fatalf("exported errMsg=%q, want %q", caps.export.errMsg, ErrActiveInProgress.Error())
 	}
 }
-
-// -------------------------
-// small helper to avoid &int literals in table
-// -------------------------
-
-func ptrInt(v int) *int { return &v }
