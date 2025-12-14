@@ -10,7 +10,7 @@ import (
 // Mode Predicates
 // -------------------------
 
-func TestModePredicates_Matrix(t *testing.T) {
+func TestModePredicates(t *testing.T) {
 	modes := []ModeType{
 		ModePerPod,
 		ModePeriodic,

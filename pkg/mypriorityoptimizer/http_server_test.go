@@ -331,7 +331,7 @@ func TestStartHttpServer_ShutsDownOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestStartHttpServer_ListenAndServeError_Returns(t *testing.T) {
+func TestStartHttpServer_ListenAndServeError(t *testing.T) {
 	pl := &SharedState{}
 
 	ctx, cancel := context.WithCancel(context.Background())

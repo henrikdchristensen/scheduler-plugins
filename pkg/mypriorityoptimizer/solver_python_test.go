@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+// -------------------------
+// runPythonSolver
+// -------------------------
+
 func TestRunPythonSolver(t *testing.T) {
 	requireBash(t)
 

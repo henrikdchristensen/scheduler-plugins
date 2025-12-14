@@ -5,7 +5,9 @@ import (
 	"context"
 	"sync/atomic"
 
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
@@ -44,3 +46,11 @@ type ActivePlan struct {
 // WorkloadQuotasAtomics is a map of workloadKey -> node -> remaining count
 // The atomic.Int32 allows concurrent safe decrement during plan execution.
 type WorkloadQuotasAtomics map[string]map[string]*atomic.Int32
+
+// HandleDeps is a minimal subset of framework.Handle that New/newFromHandle
+// actually depend on. This lets tests provide a tiny fake without implementing
+// the whole framework.Handle interface.
+type HandleDeps interface {
+	KubeConfig() *rest.Config
+	SharedInformerFactory() informers.SharedInformerFactory
+}

@@ -14,12 +14,9 @@ import (
 // Test Hooks
 // -------------------------
 
-var (
-	// Keep only this hook so tests can stub the optimisation flow.
-	runOptFlow = func(pl *SharedState, ctx context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
-		return pl.runOptimizationFlow(ctx, nil)
-	}
-)
+var runOptFlow = func(pl *SharedState, ctx context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
+	return pl.runOptimizationFlow(ctx, nil)
+}
 
 // -------------------------
 // /healthz endpoint
