@@ -95,8 +95,8 @@ func TestCmpLexiByKeys_IntKeys(t *testing.T) {
 			if got := cmpLexiByKeys(keys, tt.a, tt.b); got != tt.want {
 				t.Fatalf("cmpLexiByKeys(a,b)=%d want %d; a=%v b=%v", got, tt.want, tt.a, tt.b)
 			}
-
-			// Invariant: antisymmetry (works for all cases)
+			
+			// Invariant: antisymmetry
 			gotAB := cmpLexiByKeys(keys, tt.a, tt.b)
 			gotBA := cmpLexiByKeys(keys, tt.b, tt.a)
 			if gotAB != -gotBA {

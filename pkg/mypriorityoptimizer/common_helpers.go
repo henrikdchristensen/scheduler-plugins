@@ -28,7 +28,7 @@ func getUniqueId(prefix string) string {
 // getTimestampNowUtc
 // -------------------------
 
-// getTimestampNowUtc returns the current timestamp in UTC.
+// getTimestampNowUtc returns the current timestamp in UTC
 // CHECKED
 func getTimestampNowUtc() time.Time {
 	return time.Now().UTC()
@@ -38,9 +38,9 @@ func getTimestampNowUtc() time.Time {
 // cmpInt
 // -------------------------
 
-// cmpInt returns +1 if suggested<baseline (improvement because smaller is
-// better), -1 if suggested>baseline (worse), 0 if equal.
-// CHECKED
+// cmpInt returns:
+// +1 if suggested<baseline (improvement because smaller is better), or
+// -1 if suggested>baseline (worse), 0 if equal. CHECKED
 func cmpInt(a, b int) int {
 	switch {
 	case a < b:
@@ -57,8 +57,11 @@ func cmpInt(a, b int) int {
 // -------------------------
 
 // cmpLexiByKeys compares two score maps lexicographically along the given key
-// order. The first key in `keys` is the most significant, the last the least.
-// Returns 1 if a>b, -1 if a<b, 0 if equal.
+// order. The first key in 'keys' is the most significant, the last the least.
+// Returns:
+// 1 if a>b,
+// -1 if a<b,
+// 0 if equal.
 // CHECKED
 func cmpLexiByKeys[K comparable](keys []K, a, b map[K]int) int {
 	for _, k := range keys {
