@@ -2,48 +2,21 @@
 package mypriorityoptimizer
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // -------------------------
 // Test Helpers
 // -------------------------
-
-// requireNonWindows skips the test if running on Windows.
-func requireNonWindows(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("skipping on windows (shell scripts / /dev/zero assumptions)")
-	}
-}
-
-// runBashSolver writes a temporary bash script with the given content and runs
-func runBashSolver(t *testing.T, script string, payload []byte) ([]byte, error) {
-	t.Helper()
-	tmpDir := t.TempDir()
-	scriptPath := writeFakeSolverScript(t, tmpDir, script)
-
-	pl := &SharedState{}
-	ctx, cancel := testCtx(t)
-	defer cancel()
-
-	return pl.runSolverExternal(ctx, payload, "bash", scriptPath)
-}
-
-// withExecCommandContext temporarily replaces execCommandContext for the duration of the test.
-func withExecCommandContext(t *testing.T, f func(ctx context.Context, name string, args ...string) *exec.Cmd) {
-	t.Helper()
-	orig := execCommandContext
-	execCommandContext = f
-	t.Cleanup(func() { execCommandContext = orig })
-}
 
 // withReadAllStdout temporarily replaces readAllStdout for the duration of the test.
 func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
@@ -52,6 +25,16 @@ func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
 	readAllStdout = f
 	t.Cleanup(func() { readAllStdout = orig })
 }
+
+// withStreamSolverStderr temporarily replaces streamSolverStderrFn for the duration of the test.
+func withStreamSolverStderr(t *testing.T, f func(r io.Reader) error) {
+	t.Helper()
+	withVar(t, &streamSolverStderrFn, f)
+}
+
+// -------------------------
+// runSolverExternal
+// -------------------------
 
 func TestRunSolverExternal_Success_AndScansStderr(t *testing.T) {
 	requireBash(t)
@@ -86,6 +69,23 @@ exit 3
 	}
 	if out != nil {
 		t.Fatalf("out=%q, want nil on error", string(out))
+	}
+}
+
+func TestRunSolverExternal_ForwardsStdin(t *testing.T) {
+	requireBash(t)
+
+	script := `#!/usr/bin/env bash
+# Echo stdin back to stdout
+cat
+`
+	payload := []byte("hello solver\n")
+	out, err := runBashSolver(t, script, payload)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if string(out) != string(payload) {
+		t.Fatalf("out=%q want %q", string(out), string(payload))
 	}
 }
 
@@ -173,8 +173,35 @@ func TestRunSolverExternal_StartError(t *testing.T) {
 	}
 }
 
+func TestRunSolverExternal_ContextDeadlineExceeded(t *testing.T) {
+	requireBash(t)
+
+	script := `#!/usr/bin/env bash
+cat >/dev/null
+sleep 5
+echo "never"
+`
+	pl := &SharedState{}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "bash", writeFakeSolverScript(t, t.TempDir(), script))
+	if err == nil {
+		t.Fatalf("expected error, got nil (out=%q)", string(out))
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v, want deadline exceeded (wrapped)", err)
+	}
+	if out != nil {
+		t.Fatalf("out=%q, want nil on error", string(out))
+	}
+}
+
+// -------------------------
+// streamSolverStderr
+// -------------------------
+
 func TestStreamSolverStderr_ScansLines(t *testing.T) {
-	// Covers: for s.Scan() loop body
 	err := streamSolverStderr(strings.NewReader("line1\nline2\n"))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -182,13 +209,12 @@ func TestStreamSolverStderr_ScansLines(t *testing.T) {
 }
 
 func TestStreamSolverStderr_TokenTooLong(t *testing.T) {
-	// Covers: s.Err() branch with bufio.Scanner ErrTooLong
-	tooBig := bytes.Repeat([]byte("a"), 1024*1024+1) // 1MB + 1
+	tooBig := bytes.Repeat([]byte("a"), 1024*1024+1) // > 1MB token
 	err := streamSolverStderr(bytes.NewReader(tooBig))
 	if err == nil {
 		t.Fatalf("expected scanner error, got nil")
 	}
-	if !strings.Contains(err.Error(), "token too long") {
-		t.Fatalf("err=%v, want contains %q", err, "token too long")
+	if !errors.Is(err, bufio.ErrTooLong) {
+		t.Fatalf("err=%v, want bufio.ErrTooLong", err)
 	}
 }

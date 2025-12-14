@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -362,6 +363,36 @@ func writeFakeSolverScript(t *testing.T, dir, body string) string {
 		t.Fatalf("failed to write fake solver script: %v", err)
 	}
 	return path
+}
+
+// requireNonWindows skips the test if running on Windows.
+func requireNonWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows (shell scripts / /dev/zero assumptions)")
+	}
+}
+
+// runBashSolver writes a temporary bash script with the given content and runs
+func runBashSolver(t *testing.T, script string, payload []byte) ([]byte, error) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	scriptPath := writeFakeSolverScript(t, tmpDir, script)
+
+	pl := &SharedState{}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	return pl.runSolverExternal(ctx, payload, "bash", scriptPath)
+}
+
+// withExecCommandContext temporarily replaces execCommandContext for the
+// duration of the test.
+func withExecCommandContext(t *testing.T, f func(ctx context.Context, name string, args ...string) *exec.Cmd) {
+	t.Helper()
+	orig := execCommandContext
+	execCommandContext = f
+	t.Cleanup(func() { execCommandContext = orig })
 }
 
 // requireBash skips the test if bash is not available.
