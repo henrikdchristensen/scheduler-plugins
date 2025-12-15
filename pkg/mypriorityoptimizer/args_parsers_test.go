@@ -172,7 +172,7 @@ func TestParseFloat(t *testing.T) {
 			in:     "notafloat",
 			lLimit: -1.0,
 			uLimit: 10.0,
-			want:   0.0, // 0.0 is within [-1, 10], so returned as-is
+			want:   0.0,
 		},
 	}
 
@@ -230,13 +230,14 @@ func TestParseOptimizeMode(t *testing.T) {
 	}{
 		{"perpod", ModePerPod},
 		{"per_pod", ModePerPod},
-		{"PER_POD", ModePerPod},
-		{"periodic ", ModePeriodic},
+		{"PER_POD ", ModePerPod}, // test for 'with spaces' and 'uppercase'
+		{"periodic", ModePeriodic},
 		{"interlude", ModeInterlude},
 		{"manual", ModeManual},
 		{"manualblocking", ModeManualBlocking},
 		{"manual_blocking", ModeManualBlocking},
-		{"unknown", ModePeriodic}, // default
+		{"unknown", ModePeriodic}, // default case
+		{"", ModePeriodic},        // default case
 	}
 
 	for _, test := range tests {

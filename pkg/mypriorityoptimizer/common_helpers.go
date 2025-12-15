@@ -106,12 +106,12 @@ func cmpLexi(a, b map[string]int) int {
 	sort.Slice(keys, func(i, j int) bool {
 		ki, kj := keys[i], keys[j]
 
-		iv, ierr := strconv.Atoi(ki)
-		jv, jerr := strconv.Atoi(kj)
+		iValue, iErr := strconv.Atoi(ki)
+		jValue, jErr := strconv.Atoi(kj)
 
-		if ierr == nil && jerr == nil {
+		if iErr == nil && jErr == nil {
 			// higher integer first
-			return iv > jv
+			return iValue > jValue
 		}
 		// Fallback: simple string comparison (also descending)
 		return ki > kj

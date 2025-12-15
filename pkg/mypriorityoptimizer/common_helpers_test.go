@@ -12,15 +12,8 @@ import (
 // -------------------------
 
 func TestGetUniqueId(t *testing.T) {
-	old := nowUnixNano
-	defer func() { nowUnixNano = old }()
-
-	i := int64(100)
-	nowUnixNano = func() int64 { i++; return i }
-
 	id1 := getUniqueId("job-")
 	id2 := getUniqueId("job-")
-
 	if id1 == id2 {
 		t.Fatalf("expected unique ids")
 	}
