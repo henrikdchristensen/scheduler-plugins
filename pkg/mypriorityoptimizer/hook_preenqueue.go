@@ -18,16 +18,16 @@ import (
 func (pl *SharedState) PreEnqueue(ctx context.Context, pending *v1.Pod) *fwk.Status {
 	const stage = "PreEnqueue"
 
-	// 1) Always allow kube-system pods.
+	// 1) Always allow protected pods (e.g., kube-system).
 	if isPodProtected(pending) {
 		return fwk.NewStatus(fwk.Success)
 	}
 
-	// 2) If caches are not warm, block the pod. It will be re-queued when ready.
+	// 2) If plugin is not ready, block the pod. It will be re-queued when ready.
 	if !pl.PluginReady.Load() {
 		pl.BlockedWhileActive.AddPod(pending)
-		klog.V(MyV).Info(msg(stage, "caches not warmed up yet; waiting"))
-		return fwk.NewStatus(fwk.Pending, msg(stage, "caches not warmed up yet; waiting"))
+		klog.V(MyV).Info(msg(stage, "plugin not ready yet; waiting"))
+		return fwk.NewStatus(fwk.Pending, msg(stage, "plugin not ready yet; waiting"))
 	}
 
 	// 3) If there is an active plan, enforce it.

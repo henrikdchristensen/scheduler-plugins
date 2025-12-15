@@ -49,7 +49,6 @@ var (
 
 // startLoops launches background loops exactly once, after caches are warm.
 // It is safe to call multiple times; only the first call does anything.
-// CHECKED
 func (pl *SharedState) startLoops(ctx context.Context) {
 	if !pl.PluginReady.Load() {
 		return
@@ -64,7 +63,6 @@ func (pl *SharedState) startLoops(ctx context.Context) {
 
 // optimizeBackgroundLoop runs optimization in the background periodically or
 // in interludes, based on the provided configuration.
-// CHECKED
 func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeLoopConfig) {
 	strategy := getModeCombinedAsString()
 
@@ -232,7 +230,6 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 }
 
 // isSameUIDSet returns true if a and b contain exactly the same UIDs.
-// CHECKED
 func isSameUIDSet(a, b map[types.UID]struct{}) bool {
 	if a == nil && b == nil {
 		return true
@@ -252,7 +249,6 @@ func isSameUIDSet(a, b map[types.UID]struct{}) bool {
 }
 
 // cloneUIDSet shallow-copies a UID set (so we don't alias maps by accident).
-// CHECKED
 func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 	if in == nil {
 		return nil
@@ -270,7 +266,6 @@ func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 // a FEASIBLE solution, hit a time limit, was cancelled, or otherwise did not
 // prove optimality, we return false so that the same pending set may be retried
 // later.
-// CHECKED
 func isAlreadyComputedForPendingSet(err error, bestAttempt *SolverResult) bool {
 	if bestAttempt == nil {
 		return false
@@ -287,8 +282,6 @@ func isAlreadyComputedForPendingSet(err error, bestAttempt *SolverResult) bool {
 //   - lists current pods and nodes via informers
 //   - builds the set of Pending pod UIDs
 //   - computes the baseline cluster fingerprint (usable nodes + running pods).
-//
-// CHECKED
 func (pl *SharedState) buildPendingSnapshot() (*PendingSnapshot, error) {
 	pods, err := pl.getPods()
 	if err != nil {

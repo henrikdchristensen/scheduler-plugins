@@ -15,12 +15,14 @@ import (
 // Test Hooks
 // -------------------------
 
-var postFilterSleep = time.Sleep
-var postFilterPerPodEnabled = isPerPodMode
-var postFilterRunOptimization = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
-	plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)
-	return plan, err
-}
+var (
+	postFilterSleep           = time.Sleep
+	postFilterPerPodEnabled   = isPerPodMode
+	postFilterRunOptimization = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
+		plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)
+		return plan, err
+	}
+)
 
 // -------------------------
 // PostFilter

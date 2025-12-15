@@ -9,33 +9,35 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// test hook: if non-nil, planComputation uses this instead of pl.runPythonSolver.
-// In production this stays nil and the real solver is invoked.
-var runPythonSolverHook func(
-	pl *SharedState,
-	ctx context.Context,
-	in SolverInput,
-	opts PythonSolverOptions,
-) (*SolverOutput, error)
+// -------------------------
+// Test Helpers
+// -------------------------
 
-// Indirection to allow unit tests to cover the "no hook" path without
-// invoking the real external solver.
-var runPythonSolverFn = func(
-	pl *SharedState,
-	ctx context.Context,
-	in SolverInput,
-	opts PythonSolverOptions,
-) (*SolverOutput, error) {
-	return pl.runPythonSolver(ctx, in, opts)
-}
+var (
+	runPythonSolverHook func(
+		pl *SharedState,
+		ctx context.Context,
+		in SolverInput,
+		opts PythonSolverOptions,
+	) (*SolverOutput, error)
+
+	runPythonSolverFn = func(
+		pl *SharedState,
+		ctx context.Context,
+		in SolverInput,
+		opts PythonSolverOptions,
+	) (*SolverOutput, error) {
+		return pl.runPythonSolver(ctx, in, opts)
+	}
+)
 
 // -------------------------
 // planComputation
 // -------------------------
 
 // planComputation tries enabled solvers in order, keeping the best attempt.
-// Returns the name of the best solver, whether any usable result was found,
-// the best attempt details, the best output, and all attempts.
+// Returns the name of the best solver, whether any usable result was found, the
+// best attempt details, the best output, and all attempts.
 func (pl *SharedState) planComputation(
 	ctx context.Context,
 	solverInput SolverInput,

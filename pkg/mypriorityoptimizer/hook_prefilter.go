@@ -25,12 +25,12 @@ func (pl *SharedState) PreFilter(ctx context.Context, st fwk.CycleState, pending
 
 	ap := pl.getActivePlan()
 
-	// Always allow kube-system pods and pending pods when no active plan exists.
+	// Always allow protected pods and pods if there is no active plan; don't filter any nodes.
 	if isPodProtected(pending) || ap == nil {
 		return nil, fwk.NewStatus(fwk.Success)
 	}
 
-	// Get filtering decision from active plan (if any)
+	// Get filtered nodes for the pending pod from the active plan.
 	filteredNodes, filterMsg, ok := pl.filterNodes(pending)
 
 	// Convert filteredNodes to slice for logging
@@ -46,14 +46,14 @@ func (pl *SharedState) PreFilter(ctx context.Context, st fwk.CycleState, pending
 	)
 
 	switch {
-	case ok && filteredNodes == nil: // allowed on all nodes
+	case ok && filteredNodes == nil: // pending pod allowed on all nodes
 		klog.V(MyV).InfoS(msg(stage, InfoAllowPod),
 			"pod", klog.KObj(pending),
 			"reason", filterMsg,
 		)
 		return nil, fwk.NewStatus(fwk.Success)
 
-	case ok && filteredNodes.Len() > 0: // allowed on specific nodes
+	case ok && filteredNodes.Len() > 0: // pending pod allowed on specific nodes
 		klog.V(MyV).InfoS(msg(stage, InfoPinPod),
 			"pod", klog.KObj(pending),
 			"nodes", nodeNames,
@@ -61,7 +61,7 @@ func (pl *SharedState) PreFilter(ctx context.Context, st fwk.CycleState, pending
 		)
 		return &framework.PreFilterResult{NodeNames: filteredNodes}, fwk.NewStatus(fwk.Success)
 
-	default: // not allowed on any node; block the pod
+	default: // not allowed on any node; block the pending pod
 		klog.V(MyV).InfoS(msg(stage, InfoBlockPod),
 			"pod", klog.KObj(pending),
 			"reason", filterMsg,

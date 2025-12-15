@@ -9,6 +9,10 @@ import (
 	fwk "k8s.io/kube-scheduler/framework"
 )
 
+// -------------------------
+// PreEnqueue
+// -------------------------
+
 func TestPreEnqueue(t *testing.T) {
 	type tc struct {
 		name string
@@ -19,7 +23,7 @@ func TestPreEnqueue(t *testing.T) {
 		mode         ModeType
 		synch        bool
 		activePlan   *ActivePlan
-		placementMap map[string]string // convenience: ActivePlan.PlacementByName
+		placementMap map[string]string
 
 		// expected
 		wantCode    fwk.Code

@@ -3,23 +3,12 @@ package mypriorityoptimizer
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
-
-// -------------------------
-// Test Helpers
-// -------------------------
-
-func atomicInt(v int32) *atomic.Int32 {
-	a := new(atomic.Int32)
-	a.Store(v)
-	return a
-}
 
 // -------------------------
 // Reserve
@@ -173,8 +162,7 @@ func TestReserve(t *testing.T) {
 				return pl, pod, framework.NewCycleState(), "node1"
 			},
 			wantCode:     fwk.Success,
-			wantStateKey: &reservationKey{rsKey: "rs:default/rs1", nodeName: "node1"}, // overwritten in-loop below after we compute wkKey
-			// quota assertion will be done by reading the exact counter from ActivePlan (below)
+			wantStateKey: &reservationKey{rsKey: "rs:default/rs1", nodeName: "node1"},
 		},
 	}
 
@@ -216,7 +204,7 @@ func TestReserve(t *testing.T) {
 				}
 			}
 
-			// Other cases: if caller asked for a reservation key, enforce it (rare; currently only the consume case uses it)
+			// If caller asked for a reservation key, enforce it.
 			if tt.wantStateKey != nil && tt.name != "consumes quota and writes reservation state" {
 				data, err := cs.Read(rsReservationKey)
 				if err != nil {
@@ -245,12 +233,8 @@ func (b *badState) Clone() fwk.StateData { return &badState{} }
 func TestUnreserve(t *testing.T) {
 	type tc struct {
 		name string
-
-		// inputs
 		cycleWrite fwk.StateData // written under rsReservationKey; nil => don't write
 		activePlan *ActivePlan
-
-		// optional quota assertion
 		wantQuota bool
 		wkKey     string
 		node      string

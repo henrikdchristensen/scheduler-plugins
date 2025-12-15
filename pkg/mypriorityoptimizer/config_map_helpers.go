@@ -23,11 +23,7 @@ import (
 // listConfigMaps lists config maps in the namespace with the given label key,
 // sorted by creation timestamp descending.
 // CHECKED
-func listConfigMaps(
-	_ context.Context,
-	nsLister corev1listers.ConfigMapNamespaceLister,
-	labelKey string,
-) ([]apiv1.ConfigMap, error) {
+func listConfigMaps(nsLister corev1listers.ConfigMapNamespaceLister, labelKey string) ([]apiv1.ConfigMap, error) {
 	// List with label selector
 	sel := labels.SelectorFromSet(labels.Set{labelKey: "true"})
 	items, err := nsLister.List(sel)
@@ -61,12 +57,13 @@ func pruneConfigMaps(
 	labelKey string,
 	keep int,
 ) error {
+	// Nothing to do
 	if keep <= 0 {
 		return nil
 	}
 
 	// List config maps with label
-	items, err := listConfigMaps(ctx, nsLister, labelKey)
+	items, err := listConfigMaps(nsLister, labelKey)
 	if err != nil || len(items) <= keep {
 		return err
 	}

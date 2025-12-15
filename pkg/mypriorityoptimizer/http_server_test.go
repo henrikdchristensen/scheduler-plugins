@@ -99,12 +99,11 @@ func TestHTTP_Healthz(t *testing.T) {
 		wantCode int
 		wantBody string
 	}{
-		{"warming", false, http.StatusServiceUnavailable, ""}, // body is http.Error text, not stable
+		{"warming", false, http.StatusServiceUnavailable, ""},
 		{"ready", true, http.StatusOK, "ok"},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			pl := &SharedState{}
 			pl.PluginReady.Store(tt.ready)
@@ -136,7 +135,6 @@ func TestHTTP_Active(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			pl := &SharedState{}
 			pl.ActivePlanInProgress.Store(tt.active)
@@ -160,7 +158,6 @@ func TestHTTP_Active(t *testing.T) {
 // -------------------------
 
 func TestHTTP_Solve(t *testing.T) {
-	// Two pending + one running => PendingBefore should be 2
 	p1 := pod("ns", "p1")
 	p2 := pod("ns", "p2")
 	p3 := pod("ns", "p3", onNode("n1"))
@@ -244,7 +241,6 @@ func TestHTTP_Solve(t *testing.T) {
 
 	withPodLister(fpl, func() {
 		for _, tt := range tests {
-			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
 				pl := &SharedState{}
 				pl.PluginReady.Store(tt.ready)
@@ -274,6 +270,7 @@ func TestHTTP_Solve(t *testing.T) {
 					return
 				}
 
+				// Normal flow with runOptFlow mocked.
 				withRunOptFlow(t, func(*SharedState, context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
 					return nil, &SolverScore{Evicted: 1}, "solverB", nil, attempts, tt.runErr
 				}, func() {
@@ -337,7 +334,7 @@ func TestStartHttpServer_ListenAndServeError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // avoid leaking shutdown goroutine
 
-	// Invalid port -> ListenAndServe returns immediately with an error != http.ErrServerClosed.
+	// Invalid port -> ListenAndServe returns immediately with an error
 	pl.startHttpServer(ctx, "127.0.0.1:-1")
 }
 
@@ -369,7 +366,7 @@ func TestWriteHttpJson(t *testing.T) {
 		t.Fatalf("decoded=%#v want=%#v", got, want)
 	}
 
-	// json.Encoder writes a trailing newline; assert it so this line stays covered.
+	// ensure trailing newline
 	if !strings.HasSuffix(rr.Body.String(), "\n") {
 		t.Fatalf("expected trailing newline from Encoder, got %q", rr.Body.String())
 	}

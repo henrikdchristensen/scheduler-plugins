@@ -27,6 +27,10 @@ var exportPlanToConfigMapFn = func(
 	return pl.exportPlanToConfigMap(ctx, id, stored)
 }
 
+// -------------------------
+// planRegistration
+// -------------------------
+
 // planRegistration builds and registers a new plan as active, exporting it to a ConfigMap.
 func (pl *SharedState) planRegistration(
 	ctx context.Context,

@@ -19,6 +19,7 @@ var (
 // planContext
 // -------------------------
 
+// planContext builds the context (nodes, pods, solver input) for optimization.
 func (pl *SharedState) planContext(preemptor *v1.Pod) (
 	nodes []*v1.Node,
 	pods []*v1.Pod,

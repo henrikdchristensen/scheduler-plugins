@@ -70,7 +70,6 @@ func setupCm(
 	if cm != nil {
 		objs = append(objs, cm)
 	}
-
 	cli := fake.NewSimpleClientset(objs...)
 	lister := nsLister(ns) // empty
 	if cm != nil {
@@ -105,7 +104,6 @@ func mustReadJSON[T any](t *testing.T, cm *v1.ConfigMap, key string) T {
 
 func assertReadJSON(t *testing.T, raw []byte, found bool, err error, wantFound bool, wantRaw *string, wantErrSubstr string) {
 	t.Helper()
-
 	if wantErrSubstr != "" {
 		if err == nil || !strings.Contains(err.Error(), wantErrSubstr) {
 			t.Fatalf("err=%v, want substring %q", err, wantErrSubstr)
@@ -118,7 +116,6 @@ func assertReadJSON(t *testing.T, raw []byte, found bool, err error, wantFound b
 	if found != wantFound {
 		t.Fatalf("found=%v, want %v", found, wantFound)
 	}
-
 	if wantRaw == nil {
 		if raw != nil {
 			t.Fatalf("raw=%q, want nil", string(raw))
@@ -138,19 +135,19 @@ func assertReadJSON(t *testing.T, raw []byte, found bool, err error, wantFound b
 // -------------------------
 
 func TestListConfigMaps(t *testing.T) {
-	ctx := context.Background()
 	ns := "ns"
 	labelKey := "myx/keep"
 
 	base := time.Unix(1_700_000_000, 0)
-	// newest -> oldest should be: new, mid, old
+
+	// newest to oldest cms
 	cmOld := cm(ns, "old", map[string]string{labelKey: "true"}, nil, base.Add(-2*time.Hour))
 	cmMid := cm(ns, "mid", map[string]string{labelKey: "true"}, nil, base.Add(-1*time.Hour))
 	cmNew := cm(ns, "new", map[string]string{labelKey: "true"}, nil, base)
 	cmNoLabel := cm(ns, "nolabel", nil, nil, base.Add(-30*time.Minute))
 
 	t.Run("sorts newest first and filters by label", func(t *testing.T) {
-		items, err := listConfigMaps(ctx, nsLister(ns, cmOld, cmMid, cmNew, cmNoLabel), labelKey)
+		items, err := listConfigMaps(nsLister(ns, cmOld, cmMid, cmNew, cmNoLabel), labelKey)
 		if err != nil {
 			t.Fatalf("listConfigMaps error: %v", err)
 		}
@@ -170,7 +167,7 @@ func TestListConfigMaps(t *testing.T) {
 			listFn: func() ([]*v1.ConfigMap, error) { return nil, wantErr },
 			getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
 		}
-		_, err := listConfigMaps(ctx, l, labelKey)
+		_, err := listConfigMaps(l, labelKey)
 		if err == nil || !strings.Contains(err.Error(), "boom") {
 			t.Fatalf("expected list error, got %v", err)
 		}
@@ -183,20 +180,15 @@ func TestListConfigMaps(t *testing.T) {
 
 func TestPruneConfigMaps(t *testing.T) {
 	ctx := context.Background()
-	base := time.Unix(1_700_000_000, 0)
+	base := time.Unix(700_000_000, 0)
 
 	type tc struct {
-		name string
-		keep int
-		// what lister sees (order doesn't matter; timestamps decide)
-		listerCMs []*v1.ConfigMap
-		// what client actually has stored (can be fewer to trigger NotFound delete)
-		clientObjs []runtime.Object
-
-		// optional reactors
-		listErr   error
-		deleteErr map[string]error // name -> error
-
+		name          string
+		keep          int
+		listerCMs     []*v1.ConfigMap
+		clientObjs    []runtime.Object
+		listErr       error
+		deleteErr     map[string]error
 		wantErrSubstr string
 		wantDeletes   []string
 	}
@@ -204,7 +196,7 @@ func TestPruneConfigMaps(t *testing.T) {
 	ns := "ns"
 	labelKey := "myx/prune"
 
-	// newest..oldest: cm4, cm3, cm2, cm1
+	// newest to oldest cms
 	cm1 := cm(ns, "cm1", map[string]string{labelKey: "true"}, nil, base.Add(-3*time.Hour))
 	cm2 := cm(ns, "cm2", map[string]string{labelKey: "true"}, nil, base.Add(-2*time.Hour))
 	cm3 := cm(ns, "cm3", map[string]string{labelKey: "true"}, nil, base.Add(-1*time.Hour))
@@ -303,7 +295,7 @@ func TestPruneConfigMaps(t *testing.T) {
 		})
 	}
 
-	// Small sanity: prove fake client NotFound path behaves like apiserver (for the NotFound test above).
+	// Prove fake client NotFound path behaves like apiserver
 	t.Run("fake delete of missing returns NotFound", func(t *testing.T) {
 		cli := fake.NewSimpleClientset()
 		err := cli.CoreV1().ConfigMaps(ns).Delete(ctx, "missing", metav1.DeleteOptions{})
@@ -331,7 +323,7 @@ func TestMarshalJsonIndented(t *testing.T) {
 			t.Fatalf("marshalJsonIndented() err = %v", err)
 		}
 
-		// Round-trip into the same type (avoids float64 casting from map[string]any).
+		// Round-trip into the same type
 		var got payload
 		if err := json.Unmarshal(b, &got); err != nil {
 			t.Fatalf("json.Unmarshal() err = %v; json=%q", err, string(b))
@@ -340,7 +332,7 @@ func TestMarshalJsonIndented(t *testing.T) {
 			t.Fatalf("round-trip = %#v, want %#v", got, want)
 		}
 
-		// Indentation check (more specific than just "contains newline").
+		// Indentation check
 		if !strings.Contains(string(b), "\n  \"foo\":") {
 			t.Fatalf("expected indented JSON, got %q", string(b))
 		}
@@ -369,6 +361,7 @@ func TestMarshalToJsonString(t *testing.T) {
 			t.Fatalf("marshalToJsonString() err = %v", err)
 		}
 
+		// Round-trip into the same type
 		var got payload
 		if err := json.Unmarshal([]byte(s), &got); err != nil {
 			t.Fatalf("json.Unmarshal() err = %v; json=%q", err, s)
@@ -377,7 +370,7 @@ func TestMarshalToJsonString(t *testing.T) {
 			t.Fatalf("round-trip = %#v, want %#v", got, want)
 		}
 
-		// Indentation check (since marshalToJsonString uses MarshalIndent).
+		// Indentation check
 		if !strings.Contains(s, "\n  \"answer\":") {
 			t.Fatalf("expected indented JSON, got %q", s)
 		}
@@ -570,7 +563,6 @@ func TestEnsureJson_MarshalError_NoClientActions(t *testing.T) {
 func TestReadJson(t *testing.T) {
 	ns, name, dk := "ns", "cm", "dk"
 	doc := cmDoc(ns, name, "", dk)
-
 	now := time.Now()
 	presentVal := `{"hello":"world"}`
 	presentCM := cm(ns, name, map[string]string{"": ""}, map[string]string{dk: presentVal}, now)
@@ -579,7 +571,7 @@ func TestReadJson(t *testing.T) {
 	tests := []struct {
 		name         string
 		lister       corev1listers.ConfigMapNamespaceLister
-		customLister corev1listers.ConfigMapNamespaceLister // when we need cmNSLister
+		customLister corev1listers.ConfigMapNamespaceLister
 		wantFound    bool
 		wantRaw      *string
 		wantErrSub   string
@@ -595,7 +587,7 @@ func TestReadJson(t *testing.T) {
 		},
 		{
 			name:      "not found is missing",
-			lister:    nsLister(ns /* no objects */),
+			lister:    nsLister(ns),
 			wantFound: false,
 			wantRaw:   nil,
 		},
@@ -679,7 +671,6 @@ func TestPatchJson(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			old := `{"value":"old"}`
 			initial := cm(tt.ns, tt.cmName, map[string]string{tt.labelKey: "true"}, map[string]string{
@@ -688,7 +679,6 @@ func TestPatchJson(t *testing.T) {
 
 			_, cms, _ := setupCm(tt.ns, initial)
 			doc := cmDoc(tt.ns, tt.cmName, tt.labelKey, tt.dataKey)
-
 			err := doc.patchJson(ctx, cms, tt.in)
 
 			if tt.wantErr {
@@ -754,7 +744,7 @@ func TestMutateJson(t *testing.T) {
 		dataKey  string
 		raw      string
 		lister   corev1listers.ConfigMapNamespaceLister
-		patchErr string // if set, inject patch reactor error
+		patchErr string
 		run      func(t *testing.T, cms corev1client.ConfigMapInterface) error
 		assert   func(t *testing.T, cms corev1client.ConfigMapInterface)
 		wantSub  string
@@ -850,7 +840,6 @@ func TestMutateJson(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			var seed *v1.ConfigMap
 			if tt.cmName != "" && tt.dataKey != "" {
@@ -961,7 +950,6 @@ func TestMutateRaw(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, cms, _ := setupCm(tt.ns, tt.seed)
 			doc := cmDoc(tt.ns, tt.cm, "", tt.dataKey)

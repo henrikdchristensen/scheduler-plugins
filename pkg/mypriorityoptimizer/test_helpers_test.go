@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -167,6 +168,12 @@ func withEvictHook(hook func(pl *SharedState, ctx context.Context, pod *v1.Pod, 
 	fn()
 }
 
+func atomicInt(v int32) *atomic.Int32 {
+	a := new(atomic.Int32)
+	a.Store(v)
+	return a
+}
+
 // -------------------------
 // withMode
 // -------------------------
@@ -292,6 +299,16 @@ func withAllocatable(cpu, mem string) NodeOpt {
 		}
 		n.Status.Allocatable[v1.ResourceCPU] = resource.MustParse(cpu)
 		n.Status.Allocatable[v1.ResourceMemory] = resource.MustParse(mem)
+	}
+}
+
+func withNodeLabels(labels map[string]string) NodeOpt {
+	return func(n *v1.Node) { n.Labels = labels }
+}
+
+func withNodeTaints(taints ...v1.Taint) NodeOpt {
+	return func(n *v1.Node) {
+		n.Spec.Taints = append([]v1.Taint(nil), taints...)
 	}
 }
 

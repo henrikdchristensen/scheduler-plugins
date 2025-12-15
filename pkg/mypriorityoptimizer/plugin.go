@@ -39,7 +39,6 @@ var solverEnabled = func(pl *SharedState) bool {
 // -------------------------
 
 // Name returns name of the plugin. It is used in logs and configurations.
-// CHECKED
 func (pl *SharedState) Name() string { return Name }
 
 // -------------------------
@@ -50,8 +49,6 @@ func (pl *SharedState) Name() string { return Name }
 //   - clientFn: how to build a client from a kubeconfig
 //   - h: a minimal handleDeps interface
 //   - fullHandle: the real framework.Handle to store in SharedState (can be nil in tests)
-//
-// CHECKED
 func newFromHandle(
 	ctx context.Context,
 	obj runtime.Object,
@@ -117,7 +114,6 @@ func newFromHandle(
 
 // New is the scheduler's plugin factory. It delegates to newFromHandle with the
 // real kubernetes.NewForConfig and the full framework.Handle.
-// CHECKED
 func New(ctx context.Context, obj runtime.Object, h framework.Handle) (framework.Plugin, error) {
 	clientFn := func(c *rest.Config) (kubernetes.Interface, error) {
 		return kubernetes.NewForConfig(c)

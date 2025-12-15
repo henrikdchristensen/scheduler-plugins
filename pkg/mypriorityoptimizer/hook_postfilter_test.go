@@ -10,8 +10,11 @@ import (
 	fwk "k8s.io/kube-scheduler/framework"
 )
 
+// -------------------------
+// PostFilter
+// -------------------------
+
 func TestPostFilter(t *testing.T) {
-	// common: avoid 1s sleep
 	origSleep := postFilterSleep
 	postFilterSleep = func(time.Duration) {}
 	t.Cleanup(func() { postFilterSleep = origSleep })
@@ -92,7 +95,6 @@ func TestPostFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// stub seams per test
 			origPerPod := postFilterPerPodEnabled
 			origRun := postFilterRunOptimization
 			postFilterPerPodEnabled = func() bool { return tt.perPodEnabled }

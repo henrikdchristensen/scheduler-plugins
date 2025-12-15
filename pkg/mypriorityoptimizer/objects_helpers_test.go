@@ -1,4 +1,4 @@
-// pkg/mypriorityoptimizer/objects_helpers_test.go
+// objects_helpers_test.go
 package mypriorityoptimizer
 
 import (
@@ -70,7 +70,7 @@ func TestListersAndGetters(t *testing.T) {
 	})
 
 	t.Run("getNodes success + error", func(t *testing.T) {
-		withNodeLister(&fakeNodeLister{nodes: []*v1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "n1"}}}}, func() {
+		withNodeLister(&fakeNodeLister{nodes: []*v1.Node{node("n1")}}, func() {
 			got, err := pl.getNodes()
 			if err != nil {
 				t.Fatalf("getNodes() err=%v", err)
@@ -143,7 +143,6 @@ func TestListersAndGetters(t *testing.T) {
 		})
 
 		for _, tt := range tests[1:] {
-			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
 				// install lister view
 				lister := &fakePodLister{store: storeFromPods(tt.listerPods...)}
@@ -228,7 +227,7 @@ func TestCountPendingPods(t *testing.T) {
 		nil,
 		pod("ns", "running", onNode("n1")),
 		pod("ns", "pending"),
-		{ObjectMeta: metav1.ObjectMeta{Name: "terminating", Namespace: "ns", DeletionTimestamp: &now}},
+		pod("ns", "terminating", withDeletionTimestamp(now)),
 	}
 	if got := countPendingPods(pods); got != 1 {
 		t.Fatalf("countPendingPods=%d want 1", got)
@@ -307,11 +306,11 @@ func TestNodeHelpers(t *testing.T) {
 			n    *v1.Node
 			want bool
 		}{
-			{"worker", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}}, false},
-			{"label control-plane", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"node-role.kubernetes.io/control-plane": "true"}}}, true},
-			{"label master", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n2", Labels: map[string]string{"node-role.kubernetes.io/master": "true"}}}, true},
-			{"name control-plane", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "control-plane"}}, true},
-			{"name kind-control-plane", &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "kind-control-plane"}}, true},
+			{"worker", node("worker"), false},
+			{"label control-plane", node("n1", withNodeLabels(map[string]string{"node-role.kubernetes.io/control-plane": "true"})), true},
+			{"label master", node("n2", withNodeLabels(map[string]string{"node-role.kubernetes.io/master": "true"})), true},
+			{"name control-plane", node("control-plane"), true},
+			{"name kind-control-plane", node("kind-control-plane"), true},
 		}
 		for _, tt := range tests {
 			if got := isNodeControlPlane(tt.n); got != tt.want {
@@ -352,10 +351,10 @@ func TestNodeHelpers(t *testing.T) {
 			want bool
 		}{
 			{"none", &v1.Node{}, false},
-			{"not-ready NoSchedule", &v1.Node{Spec: v1.NodeSpec{Taints: []v1.Taint{{Key: "node.kubernetes.io/not-ready", Effect: v1.TaintEffectNoSchedule}}}}, true},
-			{"unreachable NoSchedule", &v1.Node{Spec: v1.NodeSpec{Taints: []v1.Taint{{Key: "node.kubernetes.io/unreachable", Effect: v1.TaintEffectNoSchedule}}}}, true},
-			{"not-ready empty effect counts", &v1.Node{Spec: v1.NodeSpec{Taints: []v1.Taint{{Key: "node.kubernetes.io/not-ready"}}}}, true},
-			{"PreferNoSchedule ignored", &v1.Node{Spec: v1.NodeSpec{Taints: []v1.Taint{{Key: "node.kubernetes.io/not-ready", Effect: v1.TaintEffectPreferNoSchedule}}}}, false},
+			{"not-ready NoSchedule", node("n", withNodeTaints(v1.Taint{Key: "node.kubernetes.io/not-ready", Effect: v1.TaintEffectNoSchedule})), true},
+			{"unreachable NoSchedule", node("n", withNodeTaints(v1.Taint{Key: "node.kubernetes.io/unreachable", Effect: v1.TaintEffectNoSchedule})), true},
+			{"not-ready empty effect counts", node("n", withNodeTaints(v1.Taint{Key: "node.kubernetes.io/not-ready"})), true},
+			{"PreferNoSchedule ignored", node("n", withNodeTaints(v1.Taint{Key: "node.kubernetes.io/not-ready", Effect: v1.TaintEffectPreferNoSchedule})), false},
 		}
 		for _, tt := range tests {
 			if got := isNodeNoScheduleConditionTainted(tt.n); got != tt.want {
@@ -373,11 +372,7 @@ func TestNodeHelpers(t *testing.T) {
 			want bool
 		}{
 			{"nil", nil, false},
-			{"control-plane", func() *v1.Node {
-				n := base.DeepCopy()
-				n.Labels = map[string]string{"node-role.kubernetes.io/control-plane": "true"}
-				return n
-			}(), false},
+			{"control-plane", node("n", withAllocatable("1000m", "1Gi"), withNodeLabels(map[string]string{"node-role.kubernetes.io/control-plane": "true"})), false},
 			{"unschedulable", func() *v1.Node { n := base.DeepCopy(); n.Spec.Unschedulable = true; return n }(), false},
 			{"not ready", func() *v1.Node {
 				n := base.DeepCopy()
@@ -654,9 +649,8 @@ func TestGetTopWorkload(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			p := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns"}}
+			p := pod("ns", "p")
 			for _, o := range tt.owners {
 				p.OwnerReferences = append(p.OwnerReferences, metav1.OwnerReference{
 					Kind:       o.kind,

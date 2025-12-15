@@ -16,12 +16,12 @@ type OptimizeLoopConfig struct {
 	CancelOnChange bool          // cancel in-flight run if pending set changes
 }
 
-// PendingSnapshot bundles the pieces of state that both the periodic and
-// free-time loops need in order to decide whether to run the solver.
+// PendingSnapshot represents a snapshot of the current pending pods
+// and nodes in the cluster.
 type PendingSnapshot struct {
 	PendingUIDs  map[types.UID]struct{}
 	PendingCount int
 	Fingerprint  string     // clusterFingerprint(nodes, pods)
-	Pods         []*v1.Pod  // live snapshot (for priority checks)
+	Pods         []*v1.Pod  // live snapshot (for solver input)
 	Nodes        []*v1.Node // live snapshot (for solver input)
 }

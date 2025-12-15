@@ -37,7 +37,7 @@ func (pl *SharedState) runPythonSolver(
 		return nil, fmt.Errorf("marshal python solver payload: %w", err)
 	}
 
-	// Solver-specific logging lives here (not in the generic helper).
+	// Solver-specific logging lives here to avoid cluttering the generic code.
 	klog.V(MyV).InfoS("Python solver input",
 		"nodes", len(in.Nodes),
 		"pods", len(in.Pods),

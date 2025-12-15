@@ -11,7 +11,6 @@ import (
 // -------------------------
 
 // loopInterlude runs optimization in interludes when the pending set is stable.
-// CHECKED
 func (pl *SharedState) loopInterlude(ctx context.Context) {
 	delay := OptimizeInterludeDelay
 	if delay <= 0 {

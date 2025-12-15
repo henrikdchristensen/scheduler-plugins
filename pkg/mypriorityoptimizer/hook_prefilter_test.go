@@ -38,30 +38,15 @@ func mustNodeNames(t *testing.T, res *framework.PreFilterResult, want []string) 
 }
 
 // -------------------------
-// PreFilter Extensions
-// -------------------------
-
-func TestPreFilterExtensions_IsNil(t *testing.T) {
-	pl := &SharedState{}
-	if ext := pl.PreFilterExtensions(); ext != nil {
-		t.Fatalf("PreFilterExtensions() = %#v, want nil", ext)
-	}
-}
-
-// -------------------------
 // PreFilter
 // -------------------------
 
 func TestPreFilter(t *testing.T) {
 	type tc struct {
-		name string
-
-		pod        *v1.Pod
-		activePlan *ActivePlan
-
-		// optional plan setup for quotas case
-		setup func(pl *SharedState) *v1.Pod
-
+		name        string
+		pod         *v1.Pod
+		activePlan  *ActivePlan
+		setup       func(pl *SharedState) *v1.Pod
 		wantCode    fwk.Code
 		wantNodes   []string // nil => res must be nil
 		wantBlocked int
@@ -167,5 +152,16 @@ func TestPreFilter(t *testing.T) {
 				t.Fatalf("BlockedWhileActive.Size() = %d, want %d", got, tt.wantBlocked)
 			}
 		})
+	}
+}
+
+// -------------------------
+// PreFilter Extensions
+// -------------------------
+
+func TestPreFilterExtensions_IsNil(t *testing.T) {
+	pl := &SharedState{}
+	if ext := pl.PreFilterExtensions(); ext != nil {
+		t.Fatalf("PreFilterExtensions() = %#v, want nil", ext)
 	}
 }
