@@ -78,7 +78,9 @@ func TestActivePlanFlags(t *testing.T) {
 	must(t, pl.tryEnterActivePlan(), "first tryEnterActivePlan() want true")
 	must(t, pl.ActivePlanInProgress.Load(), "ActivePlanInProgress want true after enter")
 	must(t, !pl.tryEnterActivePlan(), "second tryEnterActivePlan() want false")
+
 	pl.tryLeaveActivePlan()
+
 	must(t, !pl.ActivePlanInProgress.Load(), "ActivePlanInProgress want false after leave")
 }
 
@@ -88,7 +90,9 @@ func TestOptimizationFlowFlags(t *testing.T) {
 	must(t, pl.tryEnterOptimizationFlow(), "first tryEnterOptimizationFlow() want true")
 	must(t, pl.OptimizationInProgress.Load(), "OptimizationInProgress want true after enter")
 	must(t, !pl.tryEnterOptimizationFlow(), "second tryEnterOptimizationFlow() want false")
+
 	pl.tryLeaveOptimizationFlow()
+
 	must(t, !pl.OptimizationInProgress.Load(), "OptimizationInProgress want false after leave")
 }
 
@@ -100,6 +104,7 @@ func TestGetAndClearActivePlan(t *testing.T) {
 	must(t, pl.getActivePlan() == nil, "expected nil plan initially")
 
 	pl.ActivePlan.Store(ap1)
+
 	must(t, pl.getActivePlan() == ap1, "expected getActivePlan() to return stored plan")
 
 	must(t, !pl.tryClearActivePlan(ap2), "tryClearActivePlan(wrong ptr) want false")
@@ -112,7 +117,7 @@ func TestGetAndClearActivePlan(t *testing.T) {
 }
 
 // -------------------------
-// tiny plan helper funcs
+// Test Small Plan Helpers
 // -------------------------
 
 func TestPlanPodHelpers(t *testing.T) {
@@ -501,7 +506,7 @@ func TestWaitPodsGone_NotFound_UIDChange_Terminating(t *testing.T) {
 }
 
 // -------------------------
-// activatePods (blocked set)
+// activatePods
 // -------------------------
 
 func TestActivatePods_NilOrEmptySetDoesNothing(t *testing.T) {

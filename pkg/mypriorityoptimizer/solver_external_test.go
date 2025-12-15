@@ -33,7 +33,7 @@ func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
 func TestRunSolverExternal_Success_AndScansStderr(t *testing.T) {
 	requireBash(t)
 
-	// Emit two stderr lines so the goroutine's Scan() loop body is exercised.
+	// Script that writes to stderr and stdout.
 	script := `#!/usr/bin/env bash
 cat >/dev/null
 echo "log line 1" 1>&2
@@ -90,7 +90,7 @@ func TestRunSolverExternal_ReadStdoutError(t *testing.T) {
 		return nil, fmt.Errorf("forced read error")
 	})
 
-	// Must be a script that exits quickly so the internal `_ = cmd.Wait()` does not hang.
+	// The script is irrelevant since we force readAllStdout to fail.
 	script := `#!/usr/bin/env bash
 cat >/dev/null
 printf '{"status":"OPTIMAL"}'

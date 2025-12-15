@@ -39,26 +39,31 @@ var (
 // tryEnterActivePlan attempts to enter the active plan state. Use
 // CompareAndSwap to ensure only one goroutine can enter the active state by
 // checking that the previous value is false before setting it to true.
+// CHECKED
 func (pl *SharedState) tryEnterActivePlan() bool {
 	return pl.ActivePlanInProgress.CompareAndSwap(false, true)
 }
 
 // tryLeaveActivePlan exits the active plan state.
+// CHECKED
 func (pl *SharedState) tryLeaveActivePlan() {
 	pl.ActivePlanInProgress.Store(false)
 }
 
 // getActivePlan returns the currently active plan, if any.
+// CHECKED
 func (pl *SharedState) getActivePlan() *ActivePlan {
 	return pl.ActivePlan.Load()
 }
 
 // override in unit tests to simulate CAS failure deterministically.
+// CHECKED
 var activePlanCompareAndSwap = func(pl *SharedState, old, new *ActivePlan) bool {
 	return pl.ActivePlan.CompareAndSwap(old, new)
 }
 
 // tryClearActivePlan clears the currently active plan, if any (CAS-based).
+// CHECKED
 func (pl *SharedState) tryClearActivePlan(ap *ActivePlan) bool {
 	if ap == nil {
 		return false
@@ -67,11 +72,13 @@ func (pl *SharedState) tryClearActivePlan(ap *ActivePlan) bool {
 }
 
 // tryEnterOptimizationFlow attempts to enter the optimization flow state.
+// CHECKED
 func (pl *SharedState) tryEnterOptimizationFlow() bool {
 	return pl.OptimizationInProgress.CompareAndSwap(false, true)
 }
 
 // tryLeaveOptimizationFlow exits the optimization flow state.
+// CHECKED
 func (pl *SharedState) tryLeaveOptimizationFlow() {
 	pl.OptimizationInProgress.Store(false)
 }

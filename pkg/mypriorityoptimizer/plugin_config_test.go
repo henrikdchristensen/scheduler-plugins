@@ -115,8 +115,7 @@ func TestPersistPluginConfig_CreateThenUpdate_UpdatesSnapshot(t *testing.T) {
 		Client:             client,
 		BlockedWhileActive: newPodSet("x"),
 	}
-
-	// Create with one HTTP addr...
+	// First create with one HTTP addr...
 	withVar(t, &HTTPAddr, "127.0.0.1:1111")
 	if err := pl.persistPluginConfig(ctx); err != nil {
 		t.Fatalf("persistPluginConfig(create) error: %v", err)
@@ -178,9 +177,6 @@ func TestPersistPluginConfig_PropagatesClientErrors(t *testing.T) {
 				client = fake.NewSimpleClientset()
 			}
 
-			// If we're testing create/update failures, we still want "get" to behave normally.
-			// For create failure: normal fake "get" returns NotFound, then ensureJson tries Create.
-			// For update failure: seeded CM ensures ensureJson tries Update.
 			client.Fake.PrependReactor(tt.verb, "configmaps", func(_ k8stesting.Action) (bool, runtime.Object, error) {
 				return true, nil, fmt.Errorf("%s", tt.wantSubstr)
 			})
@@ -191,9 +187,7 @@ func TestPersistPluginConfig_PropagatesClientErrors(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", tt.wantSubstr, err)
 			}
 
-			// Small sanity check for create/update cases:
-			// - on create fail: CM should not exist
-			// - on update fail: CM should still exist
+			// Verify CM existence
 			_, getErr := client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, PluginCfgConfigMapName, metav1.GetOptions{})
 			if tt.verb == "create" {
 				if getErr == nil {
