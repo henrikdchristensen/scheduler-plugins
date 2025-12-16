@@ -20,7 +20,7 @@ func TestReserve(t *testing.T) {
 		setup        func(t *testing.T) (*SharedState, *v1.Pod, *framework.CycleState, string)
 		wantCode     fwk.Code
 		wantMsgSub   string
-		wantStateKey *reservationKey // if non-nil, state must be written
+		wantStateKey *ReservationKey // if non-nil, state must be written
 	}
 
 	tests := []tc{
@@ -162,7 +162,7 @@ func TestReserve(t *testing.T) {
 				return pl, pod, framework.NewCycleState(), "node1"
 			},
 			wantCode:     fwk.Success,
-			wantStateKey: &reservationKey{rsKey: "rs:default/rs1", nodeName: "node1"},
+			wantStateKey: &ReservationKey{RsKey: "rs:default/rs1", NodeName: "node1"},
 		},
 	}
 
@@ -194,13 +194,13 @@ func TestReserve(t *testing.T) {
 				if err != nil {
 					t.Fatalf("CycleState.Read(rsReservationKey) err = %v", err)
 				}
-				rs, ok := data.(*rsReservationState)
+				rs, ok := data.(*RsReservationState)
 				if !ok {
 					t.Fatalf("reservation state type = %T, want *rsReservationState", data)
 				}
-				want := reservationKey{rsKey: wkKey, nodeName: node}
-				if rs.key != want {
-					t.Fatalf("reservation key = %#v, want %#v", rs.key, want)
+				want := ReservationKey{RsKey: wkKey, NodeName: node}
+				if rs.Key != want {
+					t.Fatalf("reservation key = %#v, want %#v", rs.Key, want)
 				}
 			}
 
@@ -210,12 +210,12 @@ func TestReserve(t *testing.T) {
 				if err != nil {
 					t.Fatalf("CycleState.Read(rsReservationKey) err = %v", err)
 				}
-				rs, ok := data.(*rsReservationState)
+				rs, ok := data.(*RsReservationState)
 				if !ok {
 					t.Fatalf("reservation state type = %T, want *rsReservationState", data)
 				}
-				if rs.key != *tt.wantStateKey {
-					t.Fatalf("reservation key = %#v, want %#v", rs.key, *tt.wantStateKey)
+				if rs.Key != *tt.wantStateKey {
+					t.Fatalf("reservation key = %#v, want %#v", rs.Key, *tt.wantStateKey)
 				}
 			}
 		})
@@ -255,12 +255,12 @@ func TestUnreserve(t *testing.T) {
 		},
 		{
 			name:       "reservation state present but no active plan -> no panic / no-op",
-			cycleWrite: &rsReservationState{key: reservationKey{rsKey: "wk/ns/foo", nodeName: "node1"}},
+			cycleWrite: &RsReservationState{Key: ReservationKey{RsKey: "wk/ns/foo", NodeName: "node1"}},
 			activePlan: nil,
 		},
 		{
 			name:       "active plan present returns quota",
-			cycleWrite: &rsReservationState{key: reservationKey{rsKey: "rs:default/rs1", nodeName: "node1"}},
+			cycleWrite: &RsReservationState{Key: ReservationKey{RsKey: "rs:default/rs1", NodeName: "node1"}},
 			activePlan: func() *ActivePlan {
 				c := atomicInt(0)
 				return &ActivePlan{
@@ -279,7 +279,7 @@ func TestUnreserve(t *testing.T) {
 		},
 		{
 			name:       "active plan present but workload/node missing -> no panic / no-op",
-			cycleWrite: &rsReservationState{key: reservationKey{rsKey: "missing", nodeName: "node1"}},
+			cycleWrite: &RsReservationState{Key: ReservationKey{RsKey: "missing", NodeName: "node1"}},
 			activePlan: func() *ActivePlan {
 				return &ActivePlan{
 					ID:              "ap1",
@@ -324,18 +324,18 @@ func TestUnreserve(t *testing.T) {
 // -------------------------
 
 func TestRsReservationStateClone(t *testing.T) {
-	orig := &rsReservationState{
-		key: reservationKey{
-			rsKey:    "wk/ns/foo",
-			nodeName: "node1",
+	orig := &RsReservationState{
+		Key: ReservationKey{
+			RsKey:    "wk/ns/foo",
+			NodeName: "node1",
 		},
 	}
-	clone := orig.Clone().(*rsReservationState)
+	clone := orig.Clone().(*RsReservationState)
 
 	if clone == orig {
 		t.Fatalf("Clone() returned same pointer, want distinct instance")
 	}
-	if clone.key != orig.key {
-		t.Fatalf("Clone() key = %#v, want %#v", clone.key, orig.key)
+	if clone.Key != orig.Key {
+		t.Fatalf("Clone() key = %#v, want %#v", clone.Key, orig.Key)
 	}
 }

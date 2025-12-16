@@ -27,13 +27,13 @@ import (
 // Test Helpers
 // -------------------------
 
-type cmNSLister struct {
-	listFn func() ([]*v1.ConfigMap, error)
-	getFn  func(name string) (*v1.ConfigMap, error)
+type CmNSLister struct {
+	ListFn func() ([]*v1.ConfigMap, error)
+	GetFn  func(name string) (*v1.ConfigMap, error)
 }
 
-func (c cmNSLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) { return c.listFn() }
-func (c cmNSLister) Get(name string) (*v1.ConfigMap, error)          { return c.getFn(name) }
+func (c CmNSLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) { return c.ListFn() }
+func (c CmNSLister) Get(name string) (*v1.ConfigMap, error)          { return c.GetFn(name) }
 
 func nsLister(ns string, cms ...*v1.ConfigMap) corev1listers.ConfigMapNamespaceLister {
 	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
@@ -164,9 +164,9 @@ func TestListConfigMaps(t *testing.T) {
 
 	t.Run("propagates list error", func(t *testing.T) {
 		wantErr := fmt.Errorf("boom")
-		l := cmNSLister{
-			listFn: func() ([]*v1.ConfigMap, error) { return nil, wantErr },
-			getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
+		l := CmNSLister{
+			ListFn: func() ([]*v1.ConfigMap, error) { return nil, wantErr },
+			GetFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
 		}
 		_, err := listConfigMaps(l, labelKey)
 		if err == nil || !strings.Contains(err.Error(), "boom") {
@@ -260,9 +260,9 @@ func TestPruneConfigMaps(t *testing.T) {
 
 			var l corev1listers.ConfigMapNamespaceLister
 			if tt.listErr != nil {
-				l = cmNSLister{
-					listFn: func() ([]*v1.ConfigMap, error) { return nil, tt.listErr },
-					getFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
+				l = CmNSLister{
+					ListFn: func() ([]*v1.ConfigMap, error) { return nil, tt.listErr },
+					GetFn:  func(string) (*v1.ConfigMap, error) { t.Fatal("unexpected Get"); return nil, nil },
 				}
 			} else {
 				l = nsLister(ns, tt.listerCMs...)
@@ -579,9 +579,9 @@ func TestReadJson(t *testing.T) {
 	}{
 		{
 			name: "nil configmap treated as missing",
-			customLister: cmNSLister{
-				getFn:  func(string) (*v1.ConfigMap, error) { return nil, nil },
-				listFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
+			customLister: CmNSLister{
+				GetFn:  func(string) (*v1.ConfigMap, error) { return nil, nil },
+				ListFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
 			},
 			wantFound: false,
 			wantRaw:   nil,
@@ -600,9 +600,9 @@ func TestReadJson(t *testing.T) {
 		},
 		{
 			name: "get error propagates",
-			customLister: cmNSLister{
-				getFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("boom") },
-				listFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
+			customLister: CmNSLister{
+				GetFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("boom") },
+				ListFn: func() ([]*v1.ConfigMap, error) { t.Fatal("unexpected List"); return nil, nil },
 			},
 			wantErrSub: "boom",
 		},
@@ -806,9 +806,9 @@ func TestMutateJson(t *testing.T) {
 			run: func(t *testing.T, cms corev1client.ConfigMapInterface) error {
 				doc := cmDoc("ns", "cm", "", "dk")
 				called := false
-				l := cmNSLister{
-					getFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("read-fail") },
-					listFn: func() ([]*v1.ConfigMap, error) { return nil, nil },
+				l := CmNSLister{
+					GetFn:  func(string) (*v1.ConfigMap, error) { return nil, fmt.Errorf("read-fail") },
+					ListFn: func() ([]*v1.ConfigMap, error) { return nil, nil },
 				}
 				err := mutateJson(ctx, cms, l, doc, func(_ []int) ([]int, error) {
 					called = true

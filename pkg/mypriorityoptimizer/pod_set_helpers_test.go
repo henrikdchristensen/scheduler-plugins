@@ -208,7 +208,7 @@ func TestPrunePodSet_Branches(t *testing.T) {
 	)
 	errPerKey := map[string]error{"ns/err": fmt.Errorf("some lister error")}
 
-	withPodLister(&FakePodLister{store: store, errPerKey: errPerKey}, func() {
+	withPodLister(&FakePodLister{Store: store, ErrorPerKey: errPerKey}, func() {
 		removed := pl.prunePodSet(ps)
 		if removed != 4 {
 			t.Fatalf("removed=%d want 4", removed)
@@ -236,8 +236,8 @@ func TestPrunePodSet_ConservativeOnListerError(t *testing.T) {
 	ps.AddPod(p2)
 
 	withPodLister(&FakePodLister{
-		store: storeFromPods(p1, p2),
-		err:   errors.New("lister down"),
+		Store: storeFromPods(p1, p2),
+		Error: errors.New("lister down"),
 	}, func() {
 		if removed := pl.prunePodSet(ps); removed != 0 {
 			t.Fatalf("removed=%d want 0", removed)

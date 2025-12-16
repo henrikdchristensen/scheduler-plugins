@@ -161,7 +161,7 @@ func TestHTTP_Solve(t *testing.T) {
 	p1 := pod("ns", "p1")
 	p2 := pod("ns", "p2")
 	p3 := pod("ns", "p3", onNode("n1"))
-	fpl := &FakePodLister{store: map[string]map[string]*v1.Pod{
+	fpl := &FakePodLister{Store: map[string]map[string]*v1.Pod{
 		"ns": {"p1": p1, "p2": p2, "p3": p3},
 	}}
 

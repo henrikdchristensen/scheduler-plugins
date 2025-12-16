@@ -1,6 +1,5 @@
 // plan_completion_watch_test.go
 // with the help of AI tools to cover more branches/cases
-//TODO
 package mypriorityoptimizer
 
 import (
@@ -70,7 +69,7 @@ func TestStartPlanCompletionWatch_SpawnsWatcher(t *testing.T) {
 }
 
 // -------------------------
-// planCompletionWatch – active plan cleared
+// planCompletionWatch
 // -------------------------
 
 func TestPlanCompletionWatch_ActivePlanClearedStopsWatcher(t *testing.T) {
@@ -137,10 +136,6 @@ func TestPlanCompletionWatch_ActivePlanIDMismatchStopsWatcher(t *testing.T) {
 		t.Fatalf("onPlanCompletedFn was called, want not called when plan ID mismatches")
 	}
 }
-
-// -------------------------
-// planCompletionWatch – successful completion path
-// -------------------------
 
 func TestPlanCompletionWatch_PlanCompletesSuccessfully(t *testing.T) {
 	pl := &SharedState{}
@@ -219,10 +214,6 @@ func TestPlanCompletionWatch_IsPlanCompletedError_RetriesThenCompletes(t *testin
 	must(t, atomic.LoadInt32(&n) >= 2, "expected >=2 isPlanCompleted calls, got=%d", n)
 }
 
-// -------------------------
-// planCompletionWatch – timeout (DeadlineExceeded) -> Failed
-// -------------------------
-
 func TestPlanCompletionWatch_TimeoutMarksPlanFailed(t *testing.T) {
 	pl := &SharedState{}
 
@@ -279,11 +270,7 @@ func TestPlanCompletionWatch_TimeoutButPlanReplaced_DoesNotSettleFailed(t *testi
 	}
 }
 
-// -------------------------
-// planCompletionWatch – cancelled context (not DeadlineExceeded) -> no status
-// -------------------------
-
-func TestPlanCompletionWatch_CancelledContextDoesNotSettlePlan(t *testing.T) {
+func TestPlanCompletionWatch_CancelledContext_DoesNotSettlePlan(t *testing.T) {
 	pl := &SharedState{}
 
 	ctx, cancel := context.WithCancel(context.Background())

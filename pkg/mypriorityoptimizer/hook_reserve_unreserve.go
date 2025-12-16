@@ -67,7 +67,7 @@ func (pl *SharedState) Reserve(ctx context.Context, st fwk.CycleState, pending *
 		}
 		if workloadCntForNode.CompareAndSwap(currentCnt, currentCnt-1) { // successfully reserved quota
 			klog.V(MyV).InfoS(msg(stage, "workload node quota consumed"), "pod", klog.KObj(pending), "node", node)
-			st.Write(rsReservationKey, &rsReservationState{key: reservationKey{rsKey: workloadKey, nodeName: node}})
+			st.Write(rsReservationKey, &RsReservationState{Key: ReservationKey{RsKey: workloadKey, NodeName: node}})
 			return fwk.NewStatus(fwk.Success)
 		}
 	}
@@ -91,7 +91,7 @@ func (pl *SharedState) Unreserve(ctx context.Context, st fwk.CycleState, pending
 		return
 	}
 	// Get reservation info
-	reservationState, ok := stateData.(*rsReservationState)
+	reservationState, ok := stateData.(*RsReservationState)
 	if !ok {
 		klog.V(MyV).InfoS(msg(stage, "failed to cast reservation state"), "pod", klog.KObj(pending))
 		return
@@ -103,8 +103,8 @@ func (pl *SharedState) Unreserve(ctx context.Context, st fwk.CycleState, pending
 		return
 	}
 	// Return quota
-	if allWorkloadCnts, ok := ap.WorkloadQuotas[reservationState.key.rsKey]; ok {
-		if ctr, ok := allWorkloadCnts[reservationState.key.nodeName]; ok {
+	if allWorkloadCnts, ok := ap.WorkloadQuotas[reservationState.Key.RsKey]; ok {
+		if ctr, ok := allWorkloadCnts[reservationState.Key.NodeName]; ok {
 			ctr.Add(1) // return quota
 		}
 	}
@@ -112,19 +112,19 @@ func (pl *SharedState) Unreserve(ctx context.Context, st fwk.CycleState, pending
 
 const rsReservationKey fwk.StateKey = "myx/rsReservation"
 
-type reservationKey struct {
-	rsKey    string
-	nodeName string
+type ReservationKey struct {
+	RsKey    string
+	NodeName string
 }
 
-type rsReservationState struct {
-	key reservationKey
+type RsReservationState struct {
+	Key ReservationKey
 }
 
 // Clone returns a copy of the reservation state.
 // CHECKED
-func (s *rsReservationState) Clone() fwk.StateData {
-	return &rsReservationState{
-		key: s.key,
+func (s *RsReservationState) Clone() fwk.StateData {
+	return &RsReservationState{
+		Key: s.Key,
 	}
 }

@@ -1,6 +1,4 @@
 // solver_helpers_test.go
-// with the help of AI tools to cover more branches/cases
-// TODO
 package mypriorityoptimizer
 
 import (
@@ -676,7 +674,7 @@ func TestAppendSolverStatsCM_HookShortCircuit(t *testing.T) {
 }
 
 func TestAppendSolverStatsCM_NoClientset(t *testing.T) {
-	pl := &SharedState{Handle: &FakeHandle{client: nil, factory: nil}}
+	pl := &SharedState{Handle: &FakeHandle{Client: nil, Factory: nil}}
 	withAppendStatsHook(t, nil) // ensure hook disabled (explicitly)
 
 	err := pl.appendSolverStatsCM(context.Background(), ExportedSolverStats{BestName: "x"})
@@ -721,9 +719,9 @@ func TestAppendSolverStatsCM_UpsertAndAppend(t *testing.T) {
 			var pl *SharedState
 			var cleanup func()
 			if tc.initial == nil {
-				pl, cleanup = newSharedStateWithConfigMapInformer(t /* no objects */)
+				pl, cleanup = newSharedStateWithCmInformer(t /* no objects */)
 			} else {
-				pl, cleanup = newSharedStateWithConfigMapInformer(t, tc.initial)
+				pl, cleanup = newSharedStateWithCmInformer(t, tc.initial)
 			}
 			defer cleanup()
 
@@ -752,7 +750,7 @@ func (e errConfigMapNamespaceLister) Get(_ string) (*v1.ConfigMap, error) {
 func TestAppendSolverStatsCM_ReadJsonError(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
-	pl := &SharedState{Handle: &FakeHandle{client: client, factory: nil}}
+	pl := &SharedState{Handle: &FakeHandle{Client: client, Factory: nil}}
 
 	withAppendStatsHook(t, nil)
 

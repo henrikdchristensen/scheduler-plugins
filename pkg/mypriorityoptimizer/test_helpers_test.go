@@ -27,7 +27,7 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 	fwk "k8s.io/kube-scheduler/framework"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
+	Framework "k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
 // -------------------------
@@ -36,18 +36,18 @@ import (
 
 // FakePodLister is a fake implementation of PodLister for testing.
 type FakePodLister struct {
-	store     map[string]map[string]*v1.Pod
-	err       error
-	errPerKey map[string]error
+	Store       map[string]map[string]*v1.Pod
+	Error       error
+	ErrorPerKey map[string]error
 }
 
 // List lists all pods in the indexer.
 func (f *FakePodLister) List(_ labels.Selector) ([]*v1.Pod, error) {
-	if f.err != nil {
-		return nil, f.err
+	if f.Error != nil {
+		return nil, f.Error
 	}
 	var out []*v1.Pod
-	for _, nsMap := range f.store {
+	for _, nsMap := range f.Store {
 		for _, p := range nsMap {
 			out = append(out, p)
 		}
@@ -57,29 +57,29 @@ func (f *FakePodLister) List(_ labels.Selector) ([]*v1.Pod, error) {
 
 // FakePodNamespaceLister is a fake implementation of PodNamespaceLister for testing.
 type FakePodNamespaceLister struct {
-	ns        string
-	store     map[string]map[string]*v1.Pod
-	err       error
-	errPerKey map[string]error
+	Namespace   string
+	Store       map[string]map[string]*v1.Pod
+	Error       error
+	ErrorPerKey map[string]error
 }
 
 // Pods returns an object that can list and get pods in the given namespace.
 func (f *FakePodLister) Pods(namespace string) corev1listers.PodNamespaceLister {
 	return &FakePodNamespaceLister{
-		ns:        namespace,
-		store:     f.store,
-		err:       f.err,
-		errPerKey: f.errPerKey,
+		Namespace:   namespace,
+		Store:       f.Store,
+		Error:       f.Error,
+		ErrorPerKey: f.ErrorPerKey,
 	}
 }
 
 // List lists all pods in the indexer for a given namespace.
 func (f *FakePodNamespaceLister) List(_ labels.Selector) ([]*v1.Pod, error) {
-	if f.err != nil {
-		return nil, f.err
+	if f.Error != nil {
+		return nil, f.Error
 	}
 	var out []*v1.Pod
-	if nsMap, ok := f.store[f.ns]; ok {
+	if nsMap, ok := f.Store[f.Namespace]; ok {
 		for _, p := range nsMap {
 			out = append(out, p)
 		}
@@ -89,17 +89,17 @@ func (f *FakePodNamespaceLister) List(_ labels.Selector) ([]*v1.Pod, error) {
 
 // Get retrieves a pod by name.
 func (f *FakePodNamespaceLister) Get(name string) (*v1.Pod, error) {
-	key := f.ns + "/" + name
+	key := f.Namespace + "/" + name
 
 	// Per-key error overrides everything else.
-	if err, ok := f.errPerKey[key]; ok {
+	if err, ok := f.ErrorPerKey[key]; ok {
 		return nil, err
 	}
-	if f.err != nil {
-		return nil, f.err
+	if f.Error != nil {
+		return nil, f.Error
 	}
 
-	nsMap := f.store[f.ns]
+	nsMap := f.Store[f.Namespace]
 	if nsMap == nil {
 		return nil, apierrors.NewNotFound(schema.GroupResource{Group: "", Resource: "pods"}, name)
 	}
@@ -112,34 +112,34 @@ func (f *FakePodNamespaceLister) Get(name string) (*v1.Pod, error) {
 
 // FakeHandle is a fake implementation of framework.Handle for testing.
 type FakeHandle struct {
-	cfg *rest.Config
-	framework.Handle
-	client  kubernetes.Interface
-	factory informers.SharedInformerFactory
+	Cfg *rest.Config
+	Framework.Handle
+	Client  kubernetes.Interface
+	Factory informers.SharedInformerFactory
 }
 
 // makeHandle creates a FakeHandle with the given host string.
 func makeHandle(host string) *FakeHandle {
 	cfg := &rest.Config{Host: host}
 	return &FakeHandle{
-		cfg:     cfg,
-		factory: informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0),
+		Cfg:     cfg,
+		Factory: informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0),
 	}
 }
 
 // KubeConfig returns the kubeconfig.
 func (f *FakeHandle) KubeConfig() *rest.Config {
-	return f.cfg
+	return f.Cfg
 }
 
 // ClientSet returns the clientset.
 func (f *FakeHandle) ClientSet() kubernetes.Interface {
-	return f.client
+	return f.Client
 }
 
 // SharedInformerFactory returns the shared informer factory.
 func (f *FakeHandle) SharedInformerFactory() informers.SharedInformerFactory {
-	return f.factory
+	return f.Factory
 }
 
 // Fake node lister

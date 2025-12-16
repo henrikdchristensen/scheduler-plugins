@@ -1,5 +1,4 @@
 // plan_computation_test.go
-// TODO
 package mypriorityoptimizer
 
 import (
@@ -70,7 +69,7 @@ func TestPlanComputation_NilOutputNoError_IsFailedAttempt(t *testing.T) {
 	mustEq(t, gotTimeoutMs, int64(17), "TimeoutMs should include grace")
 }
 
-func TestPlanComputation_ErrorWithNonNilOutput_RecordsStatusAndScore(t *testing.T) {
+func TestPlanComputation_ErrorWithNonNilOutput(t *testing.T) {
 	pl := &SharedState{}
 
 	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)
@@ -113,7 +112,7 @@ func TestPlanComputation_ErrorWithNonNilOutput_RecordsStatusAndScore(t *testing.
 	mustEq(t, attempts[0].Score.PlacedByPriority["5"], 1, "score should be computed when out != nil")
 }
 
-func TestPlanComputation_NotUsableStatus_AttemptRecorded_NoBest(t *testing.T) {
+func TestPlanComputation_NotUsableStatus(t *testing.T) {
 	pl := &SharedState{}
 
 	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)
@@ -133,7 +132,7 @@ func TestPlanComputation_NotUsableStatus_AttemptRecorded_NoBest(t *testing.T) {
 	mustEq(t, attempts[0].Status, "INFEASIBLE", "attempt status")
 }
 
-func TestPlanComputation_UsableButNotImproving_NoBest(t *testing.T) {
+func TestPlanComputation_UsableButNotImproving(t *testing.T) {
 	pl := &SharedState{}
 
 	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)
@@ -154,7 +153,7 @@ func TestPlanComputation_UsableButNotImproving_NoBest(t *testing.T) {
 	mustEq(t, attempts[0].Status, "OPTIMAL", "attempt status")
 }
 
-func TestPlanComputation_UsesRunPythonSolverFnWhenHookNil_AndImproves(t *testing.T) {
+func TestPlanComputation_UsesRunPythonSolver_AndImproves(t *testing.T) {
 	pl := &SharedState{}
 
 	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)

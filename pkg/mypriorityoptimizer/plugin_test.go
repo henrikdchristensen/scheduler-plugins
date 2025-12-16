@@ -144,12 +144,12 @@ func TestNewFromHandle(t *testing.T) {
 			}
 
 			if tt.wantErrIs == nil {
-				wantInfs := expectedInformers(h.factory)
+				wantInfs := expectedInformers(h.Factory)
 				if !reflect.DeepEqual(readinessInfs, wantInfs) {
 					t.Fatalf("readiness informers mismatch:\n got:  %#v\n want: %#v", readinessInfs, wantInfs)
 				}
 
-				podsInf := h.factory.Core().V1().Pods().Informer()
+				podsInf := h.Factory.Core().V1().Pods().Informer()
 				if podsInf.GetIndexer().GetIndexers()[cache.NamespaceIndex] == nil {
 					t.Fatalf("pod informer missing %q indexer", cache.NamespaceIndex)
 				}
@@ -249,12 +249,12 @@ func TestNew_Success_CallsHooks_AndStoresHandle(t *testing.T) {
 		t.Fatalf("http addr=%q, want %q", gotHTTPAddr, HTTPAddr)
 	}
 
-	wantInfs := expectedInformers(h.factory)
+	wantInfs := expectedInformers(h.Factory)
 	if !reflect.DeepEqual(readinessInfs, wantInfs) {
 		t.Fatalf("readiness informers mismatch:\n got:  %#v\n want: %#v", readinessInfs, wantInfs)
 	}
 
-	podsInf := h.factory.Core().V1().Pods().Informer()
+	podsInf := h.Factory.Core().V1().Pods().Informer()
 	if podsInf.GetIndexer().GetIndexers()[cache.NamespaceIndex] == nil {
 		t.Fatalf("pod informer missing %q indexer", cache.NamespaceIndex)
 	}

@@ -1,6 +1,5 @@
 // optimization_flow_test.go
 // with the help of AI tools to cover more branches/cases
-// TODO
 package mypriorityoptimizer
 
 import (
@@ -12,7 +11,7 @@ import (
 )
 
 // -------------------------
-// Helpers
+// Test Helpers
 // -------------------------
 
 type flowCaptures struct {
@@ -22,49 +21,42 @@ type flowCaptures struct {
 		baseline SolverScore
 		bestName string
 		attempts []SolverResult
-		errMsg   string
+		errorMsg string
 	}
-	watchCalled bool
-	watchAP     *ActivePlan
-
+	watchCalled     bool
+	watchAP         *ActivePlan
 	completedCalled bool
 	completedStatus PlanStatus
 	completedAP     *ActivePlan
 }
 
 type flowHarness struct {
-	t  *testing.T
-	pl *SharedState
-
+	t     *testing.T
+	pl    *SharedState
 	async bool
-
 	// planContextFn
 	nodes         []*v1.Node
 	pods          []*v1.Pod
 	baselineEvict int
-	planCtxErr    error
-
+	planCtxError  error
 	// planComputationFn
 	bestName       string
 	hadImprovement bool
 	bestAttempt    *SolverResult
 	bestOut        *SolverOutput
 	attempts       []SolverResult
-
 	// isSolutionApplicableFn
 	applicable    bool
 	applicableWhy string
-
 	// computePlanPodCountsFn
 	pendingScheduled int
 	totalPrePlan     int
 	totalPostPlan    int
-
 	// planRegistrationFn / planActivationFn
-	regErr error
-	actErr error
-	plan   *Plan
-	ap     *ActivePlan
+	regError error
+	actError error
+	plan     *Plan
+	ap       *ActivePlan
 }
 
 func (h *flowHarness) install(t *testing.T) *flowCaptures {
@@ -101,8 +93,8 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 	isAsyncSolvingFn = func() bool { return h.async }
 
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		if h.planCtxErr != nil {
-			return nil, nil, SolverInput{}, h.planCtxErr
+		if h.planCtxError != nil {
+			return nil, nil, SolverInput{}, h.planCtxError
 		}
 		return h.nodes, h.pods, SolverInput{BaselineScore: SolverScore{Evicted: h.baselineEvict}}, nil
 	}
@@ -123,11 +115,11 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 		// If registration fails, some implementations still want to mark an already-created
 		// ActivePlan as failed. Your onPlanCompletedHook may only fire when ActivePlan != nil,
 		// so allow tests to seed one via h.ap.
-		if h.regErr != nil {
+		if h.regError != nil {
 			if h.ap != nil {
 				pl.ActivePlan.Store(h.ap)
 			}
-			return nil, nil, h.regErr
+			return nil, nil, h.regError
 		}
 
 		if h.plan == nil {
@@ -143,7 +135,7 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 	}
 
 	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
-		return h.actErr
+		return h.actError
 	}
 
 	startPlanCompletionWatchFn = func(_ *SharedState, ap *ActivePlan) {
@@ -157,7 +149,7 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 		caps.export.baseline = baseline
 		caps.export.bestName = bestName
 		caps.export.attempts = attempts
-		caps.export.errMsg = errMsg
+		caps.export.errorMsg = errMsg
 	}
 
 	onPlanCompletedHook = func(_ *SharedState, status PlanStatus, ap *ActivePlan) {
@@ -185,7 +177,7 @@ func assertPlanActiveReleased(t *testing.T, pl *SharedState) {
 }
 
 // -------------------------
-// 1) Optimization gate: ErrOptimizationInProgress
+// runOptimizationFlow
 // -------------------------
 
 func TestRunOptimizationFlow_OptimizationInProgress(t *testing.T) {
@@ -196,12 +188,10 @@ func TestRunOptimizationFlow_OptimizationInProgress(t *testing.T) {
 
 		async: false,
 
-		// Should never be used:
-		planCtxErr: errors.New("must-not-be-called"),
+		planCtxError: errors.New("must-not-be-called"),
 	}
 	caps := h.install(t)
 
-	// First caller "owns" optimization.
 	if !pl.tryEnterOptimizationFlow() {
 		t.Fatalf("precondition: tryEnterOptimizationFlow() should succeed on fresh SharedState")
 	}
@@ -219,21 +209,15 @@ func TestRunOptimizationFlow_OptimizationInProgress(t *testing.T) {
 	}
 }
 
-// -------------------------
-// Main non-async scenarios (table-driven)
-// -------------------------
-
 func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 	type want struct {
 		err error
-
 		// Returned values
 		planNonNil     bool
-		baselineEvict  *int // nil means baseline ptr expected to be nil
+		baselineEvict  *int
 		bestName       string
 		bestAttemptPtr *SolverResult
 		attemptsLen    int
-
 		// Side-effects
 		exportCalled        bool
 		exportErrMsg        string
@@ -244,7 +228,6 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 	}
 
 	mkPendingPods := func() []*v1.Pod {
-		// Make absolutely sure countPendingPods() treats this as pending.
 		return []*v1.Pod{pod("default", "p-pending", withPhase(v1.PodPending))}
 	}
 
@@ -256,11 +239,11 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "planContext_error",
 			h: flowHarness{
-				async:      false,
-				planCtxErr: errors.New("boom-plancontext"),
+				async:        false,
+				planCtxError: errors.New("boom-plancontext"),
 			},
 			want: want{
-				err:                 errors.New("boom-plancontext"), // compared via errors.Is below with a separate handle
+				err:                 errors.New("boom-plancontext"),
 				exportCalled:        false,
 				watchCalled:         false,
 				completedCalled:     false,
@@ -272,13 +255,13 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			h: flowHarness{
 				async:         false,
 				nodes:         []*v1.Node{},
-				pods:          []*v1.Pod{}, // <-- this makes pendingPrePlan == 0
+				pods:          []*v1.Pod{},
 				baselineEvict: 99,
 			},
 			want: want{
 				err:             ErrNoPendingPods,
 				planNonNil:      false,
-				baselineEvict:   ptr(99), // function returns &baselineScore on this path
+				baselineEvict:   ptr(99),
 				bestName:        "",
 				attemptsLen:     0,
 				exportCalled:    false,
@@ -309,7 +292,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 				planNonNil:          false,
 				baselineEvict:       ptr(42),
 				bestName:            "solverB",
-				bestAttemptPtr:      &SolverResult{Name: "attempt-1"}, // pointer equality checked separately below
+				bestAttemptPtr:      &SolverResult{Name: "attempt-1"},
 				attemptsLen:         2,
 				exportCalled:        true,
 				exportErrMsg:        ErrNoImprovingSolutionFromAnySolver.Error(),
@@ -392,7 +375,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 				pendingScheduled: 2,
 				totalPrePlan:     4,
 				totalPostPlan:    6,
-				regErr:           errors.New("boom-planreg"),
+				regError:         errors.New("boom-planreg"),
 
 				// Seed an active plan so onPlanCompletedHook is expected to fire
 				ap: &ActivePlan{ID: "ap-regerr"},
@@ -427,7 +410,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 				pendingScheduled: 1,
 				totalPrePlan:     3,
 				totalPostPlan:    4,
-				actErr:           errors.New("boom-activation"),
+				actError:         errors.New("boom-activation"),
 				ap:               &ActivePlan{ID: "plan-activation"},
 			},
 			want: want{
@@ -479,7 +462,6 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			pl := &SharedState{}
 			tc.h.t = t
@@ -496,13 +478,12 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 					t.Fatalf("err=%v, want nil", err)
 				}
 			} else {
-				// Special-case the planContext error test: we need the exact error instance.
 				if tc.name == "planContext_error" {
-					if tc.h.planCtxErr == nil {
+					if tc.h.planCtxError == nil {
 						t.Fatalf("test bug: missing planCtxErr")
 					}
-					if !errors.Is(err, tc.h.planCtxErr) {
-						t.Fatalf("err=%v, want %v", err, tc.h.planCtxErr)
+					if !errors.Is(err, tc.h.planCtxError) {
+						t.Fatalf("err=%v, want %v", err, tc.h.planCtxError)
 					}
 				} else if !errors.Is(err, tc.want.err) {
 					t.Fatalf("err=%v, want %v", err, tc.want.err)
@@ -533,12 +514,10 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			}
 
 			if tc.h.bestAttempt != nil && tc.want.bestAttemptPtr != nil {
-				// Pointer identity: must match the exact object returned by planComputationFn.
 				if bestAttemptOut != tc.h.bestAttempt {
 					t.Fatalf("bestAttempt pointer mismatch: got=%p want=%p", bestAttemptOut, tc.h.bestAttempt)
 				}
 			} else {
-				// Otherwise just ensure nilness is sensible.
 				if tc.h.bestAttempt == nil && bestAttemptOut != nil {
 					t.Fatalf("bestAttempt=%v, want nil", bestAttemptOut)
 				}
@@ -558,8 +537,8 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 			if caps.exportCalled != tc.want.exportCalled {
 				t.Fatalf("exportCalled=%v, want %v", caps.exportCalled, tc.want.exportCalled)
 			}
-			if tc.want.exportCalled && caps.export.errMsg != tc.want.exportErrMsg {
-				t.Fatalf("export errMsg=%q, want %q", caps.export.errMsg, tc.want.exportErrMsg)
+			if tc.want.exportCalled && caps.export.errorMsg != tc.want.exportErrMsg {
+				t.Fatalf("export errMsg=%q, want %q", caps.export.errorMsg, tc.want.exportErrMsg)
 			}
 
 			if caps.watchCalled != tc.want.watchCalled {
@@ -583,11 +562,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 	}
 }
 
-// -------------------------
-// 7) Non-async: Active plan already in progress -> ErrActiveInProgress
-// -------------------------
-
-func TestRunOptimizationFlow_ActivePlanAlreadyInProgress_NonAsync(t *testing.T) {
+func TestRunOptimizationFlow_NonAsync_ActivePlanAlreadyInProgress(t *testing.T) {
 	pl := &SharedState{}
 	pl.ActivePlanInProgress.Store(true)
 
@@ -597,7 +572,7 @@ func TestRunOptimizationFlow_ActivePlanAlreadyInProgress_NonAsync(t *testing.T) 
 		async: false,
 
 		// If planContext is called, the test should fail (must return early).
-		planCtxErr: errors.New("must-not-be-called"),
+		planCtxError: errors.New("must-not-be-called"),
 	}
 	caps := h.install(t)
 
@@ -623,10 +598,6 @@ func TestRunOptimizationFlow_ActivePlanAlreadyInProgress_NonAsync(t *testing.T) 
 			caps.exportCalled, caps.watchCalled, caps.completedCalled)
 	}
 }
-
-// -------------------------
-// 8) Async: Active plan in progress at apply-time -> ErrActiveInProgress (and stats exported)
-// -------------------------
 
 func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 	pl := &SharedState{}
@@ -686,7 +657,7 @@ func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 	if caps.export.bestName != "solverAsync" {
 		t.Fatalf("exported bestName=%q, want %q", caps.export.bestName, "solverAsync")
 	}
-	if caps.export.errMsg != ErrActiveInProgress.Error() {
-		t.Fatalf("exported errMsg=%q, want %q", caps.export.errMsg, ErrActiveInProgress.Error())
+	if caps.export.errorMsg != ErrActiveInProgress.Error() {
+		t.Fatalf("exported errMsg=%q, want %q", caps.export.errorMsg, ErrActiveInProgress.Error())
 	}
 }
