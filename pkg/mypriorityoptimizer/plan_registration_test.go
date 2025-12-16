@@ -1,5 +1,4 @@
 // plan_registration_test.go
-// TODO
 package mypriorityoptimizer
 
 import (
@@ -11,7 +10,7 @@ import (
 )
 
 // -------------------------
-// planRegistration – nil output
+// planRegistration
 // -------------------------
 
 func TestPlanRegistration_NilOutput(t *testing.T) {
@@ -20,7 +19,7 @@ func TestPlanRegistration_NilOutput(t *testing.T) {
 	plan, ap, err := pl.planRegistration(
 		context.Background(),
 		SolverResult{},
-		nil, // out is nil -> immediate error
+		nil,
 		nil,
 		nil,
 	)
@@ -36,10 +35,6 @@ func TestPlanRegistration_NilOutput(t *testing.T) {
 	}
 }
 
-// -------------------------
-// planRegistration – buildPlan error
-// -------------------------
-
 func TestPlanRegistration_BuildPlanError(t *testing.T) {
 	pl := &SharedState{}
 
@@ -51,23 +46,13 @@ func TestPlanRegistration_BuildPlanError(t *testing.T) {
 	}()
 
 	// Make buildPlan fail.
-	buildPlanFn = func(
-		_ *SharedState,
-		_ *SolverOutput,
-		_ *v1.Pod,
-		_ []*v1.Pod,
-	) (*Plan, error) {
+	buildPlanFn = func(_ *SharedState, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, error) {
 		return nil, errors.New("boom")
 	}
 
 	// If buildPlan fails, exportPlanToConfigMapFn must not be called.
 	exportCalled := false
-	exportPlanToConfigMapFn = func(
-		_ *SharedState,
-		_ context.Context,
-		_ string,
-		_ *StoredPlan,
-	) error {
+	exportPlanToConfigMapFn = func(_ *SharedState, _ context.Context, _ string, _ *StoredPlan) error {
 		exportCalled = true
 		return nil
 	}
@@ -104,10 +89,6 @@ func TestPlanRegistration_BuildPlanError(t *testing.T) {
 	}
 }
 
-// -------------------------
-// planRegistration – exportPlanToConfigMap error is ignored
-// -------------------------
-
 func TestPlanRegistration_ExportErrorIsIgnored(t *testing.T) {
 	pl := &SharedState{}
 
@@ -120,12 +101,7 @@ func TestPlanRegistration_ExportErrorIsIgnored(t *testing.T) {
 
 	// Stub buildPlan to return a simple plan.
 	dummyPlan := &Plan{}
-	buildPlanFn = func(
-		_ *SharedState,
-		_ *SolverOutput,
-		_ *v1.Pod,
-		_ []*v1.Pod,
-	) (*Plan, error) {
+	buildPlanFn = func(_ *SharedState, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, error) {
 		return dummyPlan, nil
 	}
 
@@ -135,12 +111,7 @@ func TestPlanRegistration_ExportErrorIsIgnored(t *testing.T) {
 		gotID        string
 		gotStored    *StoredPlan
 	)
-	exportPlanToConfigMapFn = func(
-		_ *SharedState,
-		_ context.Context,
-		id string,
-		stored *StoredPlan,
-	) error {
+	exportPlanToConfigMapFn = func(_ *SharedState, _ context.Context, id string, stored *StoredPlan) error {
 		exportCalled = true
 		gotID = id
 		gotStored = stored

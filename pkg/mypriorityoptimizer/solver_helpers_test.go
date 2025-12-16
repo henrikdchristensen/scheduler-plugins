@@ -676,7 +676,7 @@ func TestAppendSolverStatsCM_HookShortCircuit(t *testing.T) {
 }
 
 func TestAppendSolverStatsCM_NoClientset(t *testing.T) {
-	pl := &SharedState{Handle: &fakeHandle{client: nil, factory: nil}}
+	pl := &SharedState{Handle: &FakeHandle{client: nil, factory: nil}}
 	withAppendStatsHook(t, nil) // ensure hook disabled (explicitly)
 
 	err := pl.appendSolverStatsCM(context.Background(), ExportedSolverStats{BestName: "x"})
@@ -752,7 +752,7 @@ func (e errConfigMapNamespaceLister) Get(_ string) (*v1.ConfigMap, error) {
 func TestAppendSolverStatsCM_ReadJsonError(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
-	pl := &SharedState{Handle: &fakeHandle{client: client, factory: nil}}
+	pl := &SharedState{Handle: &FakeHandle{client: client, factory: nil}}
 
 	withAppendStatsHook(t, nil)
 

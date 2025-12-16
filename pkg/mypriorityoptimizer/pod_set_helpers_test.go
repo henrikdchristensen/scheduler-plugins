@@ -1,5 +1,4 @@
 // pod_set_helpers_test.go
-// TODO
 package mypriorityoptimizer
 
 import (
@@ -89,7 +88,7 @@ func TestPodSet_NewAndExistence(t *testing.T) {
 // AddPod / RemovePod / Snapshot contracts
 // -------------------------
 
-func TestPodSet_BasicOperations(t *testing.T) {
+func TestPodSet_Operations(t *testing.T) {
 	t.Run("AddPod(nil) is no-op", func(t *testing.T) {
 		ps := newPodSet("s")
 		ps.AddPod(nil)
@@ -176,25 +175,25 @@ func TestPrunePodSet_Branches(t *testing.T) {
 	pl := &SharedState{}
 	ps := newPodSet("blocked")
 
-	// 1) NotFound => pruned
+	// NotFound => pruned
 	pGone := pod("ns", "gone", withUID("u-gone"))
 
-	// 2) Recreated (same ns/name, different UID) => pruned
+	// Recreated (same ns/name, different UID) => pruned
 	pOld := pod("ns", "recreated", withUID("u-old"))
 	pNew := pod("ns", "recreated", withUID("u-new"))
 
-	// 3) Terminating => pruned
+	// Terminating => pruned
 	pTerm := pod("ns", "term", withUID("u-term"))
 	now := metav1.Now()
 	pTerm.DeletionTimestamp = &now
 
-	// 4) Bound => pruned
+	// Bound => pruned
 	pBound := pod("ns", "bound", withUID("u-bound"), onNode("node1"))
 
-	// 5) Lister error => kept
+	// Lister error => kept
 	pErr := pod("ns", "err", withUID("u-err"))
 
-	// 6) Valid pending => kept
+	// Valid pending => kept
 	pKeep := pod("ns", "keep", withUID("u-keep"))
 
 	for _, p := range []*v1.Pod{pGone, pOld, pTerm, pBound, pErr, pKeep} {
@@ -209,7 +208,7 @@ func TestPrunePodSet_Branches(t *testing.T) {
 	)
 	errPerKey := map[string]error{"ns/err": fmt.Errorf("some lister error")}
 
-	withPodLister(&fakePodLister{store: store, errPerKey: errPerKey}, func() {
+	withPodLister(&FakePodLister{store: store, errPerKey: errPerKey}, func() {
 		removed := pl.prunePodSet(ps)
 		if removed != 4 {
 			t.Fatalf("removed=%d want 4", removed)
@@ -236,7 +235,7 @@ func TestPrunePodSet_ConservativeOnListerError(t *testing.T) {
 	ps.AddPod(p1)
 	ps.AddPod(p2)
 
-	withPodLister(&fakePodLister{
+	withPodLister(&FakePodLister{
 		store: storeFromPods(p1, p2),
 		err:   errors.New("lister down"),
 	}, func() {
@@ -256,8 +255,8 @@ func TestPrunePodSet_ConservativeOnListerError(t *testing.T) {
 func TestPodSet_ConcurrentAccess_NoPanic(t *testing.T) {
 	ps := newPodSet("blocked")
 
-	const workers = 8
-	const iters = 200
+	const workers = 8      // concurrent workers
+	const iterations = 200 // iterations per worker
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -269,7 +268,7 @@ func TestPodSet_ConcurrentAccess_NoPanic(t *testing.T) {
 			uid := types.UID(fmt.Sprintf("u-%d", i))
 			p := pod("ns", fmt.Sprintf("p-%d", i), withUID(string(uid)))
 
-			for j := 0; j < iters; j++ {
+			for j := 0; j < iterations; j++ {
 				ps.AddPod(p)
 				_ = ps.Snapshot()
 				ps.RemovePod(uid)
@@ -278,6 +277,6 @@ func TestPodSet_ConcurrentAccess_NoPanic(t *testing.T) {
 	}
 
 	wg.Wait()
-	// After all removes, should be empty (best-effort; deterministic here).
+	// After all removes, should be empty.
 	mustSize(t, ps, 0)
 }

@@ -83,7 +83,7 @@ func newSharedStateWithConfigMapInformer(t *testing.T, objects ...runtime.Object
 		t.Fatalf("ConfigMap informer failed to sync")
 	}
 
-	h := &fakeHandle{client: client, factory: factory}
+	h := &FakeHandle{client: client, factory: factory}
 	pl := &SharedState{Client: client, Handle: h}
 
 	return pl, func() { close(stopCh) }
@@ -516,12 +516,12 @@ func TestWaitPodsGone_NotFound_UIDChange_Terminating(t *testing.T) {
 	term.DeletionTimestamp = &now
 
 	// Case 1: NotFound via empty store
-	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+	withPodLister(&FakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
 		mustNoErr(t, pl.waitPodsGone(ctx, []*v1.Pod{orig}), "expected nil (NotFound)")
 	})
 
 	// Case 2/3: UID changed + terminating treated as gone
-	withPodLister(&fakePodLister{store: storeFromPods(changed, term)}, func() {
+	withPodLister(&FakePodLister{store: storeFromPods(changed, term)}, func() {
 		mustNoErr(t, pl.waitPodsGone(ctx, []*v1.Pod{orig}), "expected nil (uid changed)")
 		mustNoErr(t, pl.waitPodsGone(ctx, []*v1.Pod{term}), "expected nil (terminating)")
 	})
@@ -529,7 +529,7 @@ func TestWaitPodsGone_NotFound_UIDChange_Terminating(t *testing.T) {
 	// Case 4: transient lister error should keep polling; we make ctx cancel quickly and ensure it returns ctx error.
 	ctx2, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	withPodLister(&fakePodLister{
+	withPodLister(&FakePodLister{
 		store: storeFromPods(orig),
 		err:   errors.New("transient"),
 	}, func() {
@@ -593,7 +593,7 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 	var got map[string]*v1.Pod
 	withVar(t, &activatePods, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
 
-	withPodLister(&fakePodLister{store: storeFromPods(pOld, pHigh, pKeep)}, func() {
+	withPodLister(&FakePodLister{store: storeFromPods(pOld, pHigh, pKeep)}, func() {
 		tried := pl.activatePods(set, true, 2)
 		mustEq(t, tried, []types.UID{pHigh.UID, pOld.UID}, "tried order mismatch")
 		must(t, got != nil, "expected activation set")
@@ -617,7 +617,7 @@ func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 	withVar(t, &activatePods, func(_ *SharedState, toAct map[string]*v1.Pod) { got = toAct })
 
 	// NotFound pruning for p-gone
-	withPodLister(&fakePodLister{store: storeFromPods(pOK)}, func() {
+	withPodLister(&FakePodLister{store: storeFromPods(pOK)}, func() {
 		tried := pl.activatePods(set, false, -1)
 		mustEq(t, tried, []types.UID{pOK.UID}, "tried mismatch")
 		mustEq(t, keysOfPods(got), []string{"default/p-ok"}, "activation keys mismatch")
@@ -627,7 +627,7 @@ func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 	// lister error => no activation, no tried, entry kept
 	set2 := newPodSet("blocked")
 	set2.AddPod(pOK)
-	withPodLister(&fakePodLister{store: storeFromPods(pOK), err: errors.New("boom")}, func() {
+	withPodLister(&FakePodLister{store: storeFromPods(pOK), err: errors.New("boom")}, func() {
 		got = nil
 		tried := pl.activatePods(set2, false, -1)
 		mustEq(t, tried, []types.UID(nil), "tried should be empty on lister err")
@@ -768,7 +768,7 @@ func TestIsPlanCompleted_ErrorPaths(t *testing.T) {
 		ID:              "x",
 		PlacementByName: map[string]string{"not-a-nsname": "n1"},
 	}
-	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+	withPodLister(&FakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
 		ok, err := pl.isPlanCompleted(ap)
 		must(t, err != nil, "expected error")
 		must(t, !ok, "expected not completed on error")
@@ -779,7 +779,7 @@ func TestIsPlanCompleted_ErrorPaths(t *testing.T) {
 		ID:              "x",
 		PlacementByName: map[string]string{mergeNsName("ns", "p"): "n1"},
 	}
-	withPodLister(&fakePodLister{
+	withPodLister(&FakePodLister{
 		store:     map[string]map[string]*v1.Pod{"ns": {"p": pod("ns", "p")}},
 		errPerKey: map[string]error{"ns/p": errors.New("boom")},
 	}, func() {
@@ -798,7 +798,7 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 			PlacementByName: map[string]string{mergeNsName("ns", "p-gone"): "n1"},
 			WorkloadQuotas:  WorkloadQuotasAtomics{},
 		}
-		withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+		withPodLister(&FakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
 			ok, err := pl.isPlanCompleted(ap)
 			mustNoErr(t, err, "isPlanCompleted err")
 			must(t, ok, "expected completed")
@@ -811,7 +811,7 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 			PlacementByName: map[string]string{mergeNsName("ns", "p"): "n-expected"},
 		}
 		p := pod("ns", "p", onNode("n-other"))
-		withPodLister(&fakePodLister{store: storeFromPods(p)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(p)}, func() {
 			ok, err := pl.isPlanCompleted(ap)
 			mustNoErr(t, err, "isPlanCompleted err")
 			must(t, !ok, "expected not completed")
@@ -827,7 +827,7 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 		p := pod("ns", "p", onNode("n1"))
 		now := metav1.Now()
 		p.DeletionTimestamp = &now
-		withPodLister(&fakePodLister{store: storeFromPods(p)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(p)}, func() {
 			ok, err := pl.isPlanCompleted(ap)
 			mustNoErr(t, err, "isPlanCompleted err")
 			must(t, ok, "expected completed")
@@ -844,7 +844,7 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 			ID:             "x",
 			WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 3}}),
 		}
-		withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+		withPodLister(&FakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
 			ok, err := pl.isPlanCompleted(ap)
 			mustNoErr(t, err, "isPlanCompleted err")
 			must(t, ok, "expected completed")
@@ -861,7 +861,7 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 			ID:             "x",
 			WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 1}}),
 		}
-		withPodLister(&fakePodLister{store: storeFromPods(pRun, pPend)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(pRun, pPend)}, func() {
 			ok, err := pl.isPlanCompleted(ap)
 			mustNoErr(t, err, "isPlanCompleted err")
 			must(t, !ok, "expected not completed")
@@ -877,7 +877,7 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 			ID:             "x",
 			WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 2}}),
 		}
-		withPodLister(&fakePodLister{store: storeFromPods(pRun)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(pRun)}, func() {
 			ok, err := pl.isPlanCompleted(ap)
 			mustNoErr(t, err, "isPlanCompleted err")
 			must(t, ok, "expected completed")
@@ -895,7 +895,7 @@ func TestIsPlanCompleted_PinnedCorrectNode_Succeeds(t *testing.T) {
 	}
 	p := pod("ns", "p", onNode("n1"))
 
-	withPodLister(&fakePodLister{store: storeFromPods(p)}, func() {
+	withPodLister(&FakePodLister{store: storeFromPods(p)}, func() {
 		ok, err := pl.isPlanCompleted(ap)
 		mustNoErr(t, err, "isPlanCompleted err")
 		must(t, ok, "expected completed")
@@ -910,7 +910,7 @@ func TestIsPlanCompleted_QuotaZero_IsSatisfiedBranch(t *testing.T) {
 		WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{"wk": {"n1": 0}}), // totalRemaining <= 0 => satisfied
 	}
 
-	withPodLister(&fakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
+	withPodLister(&FakePodLister{store: map[string]map[string]*v1.Pod{}}, func() {
 		ok, err := pl.isPlanCompleted(ap)
 		mustNoErr(t, err, "isPlanCompleted err")
 		must(t, ok, "expected completed")
@@ -921,7 +921,7 @@ func TestIsPlanCompleted_GetPodsErrorPropagates(t *testing.T) {
 	pl := &SharedState{}
 	ap := &ActivePlan{ID: "x"}
 
-	withPodLister(&fakePodLister{err: errors.New("boom")}, func() {
+	withPodLister(&FakePodLister{err: errors.New("boom")}, func() {
 		ok, err := pl.isPlanCompleted(ap)
 		must(t, !ok, "expected not completed on error")
 		must(t, err != nil, "expected error")

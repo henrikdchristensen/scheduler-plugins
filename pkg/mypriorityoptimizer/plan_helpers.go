@@ -1,5 +1,4 @@
 // plan_helpers.go
-// TODO
 package mypriorityoptimizer
 
 import (
@@ -31,6 +30,10 @@ var (
 	onPlanCompletedHook           func(pl *SharedState, status PlanStatus, ap *ActivePlan)
 	exportPlanToConfigMapHook     func(pl *SharedState, ctx context.Context, name string, sp *StoredPlan) error
 	markPlanStatusToConfigMapHook func(pl *SharedState, ctx context.Context, planCM string, status PlanStatus) bool
+
+	activatePods = func(pl *SharedState, toAct map[string]*v1.Pod) {
+		pl.Handle.Activate(klog.Background(), toAct)
+	}
 )
 
 // -------------------------
@@ -461,12 +464,6 @@ func (pl *SharedState) waitPodsGone(ctx context.Context, pods []*v1.Pod) error {
 // activatePods
 // -------------------------
 
-// activatePods performs the actual framework.Handle.Activate call.
-// In tests we override this to capture which pods would be activated.
-var activatePods = func(pl *SharedState, toAct map[string]*v1.Pod) {
-	pl.Handle.Activate(klog.Background(), toAct)
-}
-
 // activatePods activates up to 'max' pods from the blocked set; clear only the
 // ones activated. It returns the UIDs of the pods that were attempted to be
 // activated (in priority/time order). If max <= 0, all pods are activated.
@@ -570,7 +567,7 @@ func (pl *SharedState) activatePlannedPods(plan *Plan, pods []*v1.Pod) {
 
 	klog.InfoS(InfoActivatingPlannedPendingPods, "count", len(toAct))
 
-	// Test hook: let unit tests observe the activation set without a real Handle.
+	// Let tests observe the activation set without a real Handle.
 	if activatePlannedPodsHook != nil {
 		activatePlannedPodsHook(pl, toAct)
 		return
@@ -988,7 +985,7 @@ func (pl *SharedState) setPlanStatusInConfigMap(ctx context.Context, planCM stri
 // clusterFingerprint returns a deterministic fingerprint of the "relevant"
 // cluster state for scheduling/plan-cancellation purposes.
 func clusterFingerprint(nodes []*v1.Node, pods []*v1.Pod) string {
-	// 1) Keep only usable nodes; dedupe by name; sort for determinism.
+	// Keep only usable nodes; dedupe by name; sort for determinism.
 	usable := make(map[string]*v1.Node, len(nodes))
 	nodeNames := make([]string, 0, len(nodes))
 
@@ -1007,7 +1004,7 @@ func clusterFingerprint(nodes []*v1.Node, pods []*v1.Pod) string {
 	}
 	sort.Strings(nodeNames)
 
-	// 2) Keep only assigned+alive pods on usable nodes; sort for determinism.
+	// Keep only assigned+alive pods on usable nodes; sort for determinism.
 	type podEntry struct {
 		node string
 		ns   string
@@ -1055,7 +1052,7 @@ func clusterFingerprint(nodes []*v1.Node, pods []*v1.Pod) string {
 		return a.uid < b.uid
 	})
 
-	// 3) Hash a stable textual representation.
+	// Hash a stable textual representation.
 	h := fnv.New64a()
 
 	for _, name := range nodeNames {

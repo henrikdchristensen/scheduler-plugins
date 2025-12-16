@@ -1,5 +1,5 @@
 // plan_computation_test.go
-//TODO
+// TODO
 package mypriorityoptimizer
 
 import (
@@ -9,12 +9,20 @@ import (
 	"time"
 )
 
+// -------------------------
+// Test Helpers
+// -------------------------
+
 func withPythonAttemptConfig(t *testing.T, enabled bool, timeout time.Duration, graceMs int) {
 	t.Helper()
 	withVar(t, &SolverPythonEnabled, enabled)
 	withVar(t, &SolverPythonTimeout, timeout)
 	withVar(t, &SolverPythonGraceMs, graceMs)
 }
+
+// -------------------------
+// planComputation
+// -------------------------
 
 func TestPlanComputation_NoEnabledSolvers(t *testing.T) {
 	pl := &SharedState{}

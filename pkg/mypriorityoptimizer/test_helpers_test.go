@@ -1,5 +1,4 @@
 // test_helpers_test.go
-//TODO
 package mypriorityoptimizer
 
 import (
@@ -31,15 +30,19 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
-func ptr[T any](v T) *T { return &v }
+// -------------------------
+// Fake listers and handles
+// -------------------------
 
-type fakePodLister struct {
+// FakePodLister is a fake implementation of PodLister for testing.
+type FakePodLister struct {
 	store     map[string]map[string]*v1.Pod
 	err       error
 	errPerKey map[string]error
 }
 
-func (f *fakePodLister) List(_ labels.Selector) ([]*v1.Pod, error) {
+// List lists all pods in the indexer.
+func (f *FakePodLister) List(_ labels.Selector) ([]*v1.Pod, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -52,15 +55,17 @@ func (f *fakePodLister) List(_ labels.Selector) ([]*v1.Pod, error) {
 	return out, nil
 }
 
-type fakePodNamespaceLister struct {
+// FakePodNamespaceLister is a fake implementation of PodNamespaceLister for testing.
+type FakePodNamespaceLister struct {
 	ns        string
 	store     map[string]map[string]*v1.Pod
 	err       error
 	errPerKey map[string]error
 }
 
-func (f *fakePodLister) Pods(namespace string) corev1listers.PodNamespaceLister {
-	return &fakePodNamespaceLister{
+// Pods returns an object that can list and get pods in the given namespace.
+func (f *FakePodLister) Pods(namespace string) corev1listers.PodNamespaceLister {
+	return &FakePodNamespaceLister{
 		ns:        namespace,
 		store:     f.store,
 		err:       f.err,
@@ -68,7 +73,8 @@ func (f *fakePodLister) Pods(namespace string) corev1listers.PodNamespaceLister 
 	}
 }
 
-func (f *fakePodNamespaceLister) List(_ labels.Selector) ([]*v1.Pod, error) {
+// List lists all pods in the indexer for a given namespace.
+func (f *FakePodNamespaceLister) List(_ labels.Selector) ([]*v1.Pod, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -81,7 +87,8 @@ func (f *fakePodNamespaceLister) List(_ labels.Selector) ([]*v1.Pod, error) {
 	return out, nil
 }
 
-func (f *fakePodNamespaceLister) Get(name string) (*v1.Pod, error) {
+// Get retrieves a pod by name.
+func (f *FakePodNamespaceLister) Get(name string) (*v1.Pod, error) {
 	key := f.ns + "/" + name
 
 	// Per-key error overrides everything else.
@@ -103,44 +110,52 @@ func (f *fakePodNamespaceLister) Get(name string) (*v1.Pod, error) {
 	return p, nil
 }
 
-type fakeHandle struct {
+// FakeHandle is a fake implementation of framework.Handle for testing.
+type FakeHandle struct {
 	cfg *rest.Config
 	framework.Handle
 	client  kubernetes.Interface
 	factory informers.SharedInformerFactory
 }
 
-func mkHandle(host string) *fakeHandle {
+// makeHandle creates a FakeHandle with the given host string.
+func makeHandle(host string) *FakeHandle {
 	cfg := &rest.Config{Host: host}
-	return &fakeHandle{
+	return &FakeHandle{
 		cfg:     cfg,
 		factory: informers.NewSharedInformerFactory(fake.NewSimpleClientset(), 0),
 	}
 }
 
-func (f *fakeHandle) KubeConfig() *rest.Config {
+// KubeConfig returns the kubeconfig.
+func (f *FakeHandle) KubeConfig() *rest.Config {
 	return f.cfg
 }
 
-func (f *fakeHandle) ClientSet() kubernetes.Interface {
+// ClientSet returns the clientset.
+func (f *FakeHandle) ClientSet() kubernetes.Interface {
 	return f.client
 }
 
-func (f *fakeHandle) SharedInformerFactory() informers.SharedInformerFactory {
+// SharedInformerFactory returns the shared informer factory.
+func (f *FakeHandle) SharedInformerFactory() informers.SharedInformerFactory {
 	return f.factory
 }
 
-type fakeNodeLister struct {
-	nodes []*v1.Node
-	err   error
+// Fake node lister
+type FakeNodeLister struct {
+	Nodes []*v1.Node
+	Error error
 }
 
-func (f *fakeNodeLister) List(selector labels.Selector) ([]*v1.Node, error) {
-	return f.nodes, f.err
+// List lists all nodes.
+func (f *FakeNodeLister) List(selector labels.Selector) ([]*v1.Node, error) {
+	return f.Nodes, f.Error
 }
 
-func (f *fakeNodeLister) Get(name string) (*v1.Node, error) {
-	for _, n := range f.nodes {
+// Get retrieves a node by name.
+func (f *FakeNodeLister) Get(name string) (*v1.Node, error) {
+	for _, n := range f.Nodes {
 		if n.Name == name {
 			return n, nil
 		}
@@ -148,6 +163,7 @@ func (f *fakeNodeLister) Get(name string) (*v1.Node, error) {
 	return nil, fmt.Errorf("not found")
 }
 
+// withNodeLister temporarily replaces nodesListerFor with the given lister
 func withNodeLister(nl corev1listers.NodeLister, fn func()) {
 	orig := nodesListerFor
 	nodesListerFor = func(pl *SharedState) corev1listers.NodeLister { return nl }
@@ -155,6 +171,7 @@ func withNodeLister(nl corev1listers.NodeLister, fn func()) {
 	fn()
 }
 
+// withPodLister temporarily replaces podsListerFor with the given lister
 func withPodLister(plister corev1listers.PodLister, fn func()) {
 	orig := podsListerFor
 	podsListerFor = func(pl *SharedState) corev1listers.PodLister { return plister }
@@ -162,6 +179,7 @@ func withPodLister(plister corev1listers.PodLister, fn func()) {
 	fn()
 }
 
+// withEvictHook temporarily replaces evictPodFor with the given hook function
 func withEvictHook(hook func(pl *SharedState, ctx context.Context, pod *v1.Pod, ev *policyv1.Eviction) error, fn func()) {
 	orig := evictPodFor
 	evictPodFor = hook
@@ -169,108 +187,14 @@ func withEvictHook(hook func(pl *SharedState, ctx context.Context, pod *v1.Pod, 
 	fn()
 }
 
-func atomicInt(v int32) *atomic.Int32 {
-	a := new(atomic.Int32)
-	a.Store(v)
-	return a
-}
-
 // -------------------------
-// withMode
+// node test helpers
 // -------------------------
 
-// withMode is a small helper to temporarily set the mode during a test and
-// restore to the original values.
-func withMode(mode ModeType, synch bool, fn func()) {
-	oldMode := OptimizeMode
-	oldSynch := OptimizeSolveSynch
-
-	OptimizeMode = mode
-	OptimizeSolveSynch = synch
-	defer func() {
-		OptimizeMode = oldMode
-		OptimizeSolveSynch = oldSynch
-	}()
-	fn()
-}
-
-// -------------------------
-// pod
-// -------------------------
-
-type PodOpt func(*v1.Pod)
-
-func pod(ns, name string, opts ...PodOpt) *v1.Pod {
-	p := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: ns,
-			Name:      name,
-		},
-	}
-	for _, o := range opts {
-		o(p)
-	}
-	return p
-}
-
-func withUID(uid string) PodOpt {
-	return func(p *v1.Pod) { p.UID = types.UID(uid) }
-}
-
-func onNode(node string) PodOpt {
-	return func(p *v1.Pod) { p.Spec.NodeName = node }
-}
-
-func withPrio(prio int32) PodOpt {
-	return func(p *v1.Pod) { p.Spec.Priority = &prio }
-}
-
-func withOwner(kind, name string) PodOpt {
-	return func(p *v1.Pod) {
-		controller := true
-		p.OwnerReferences = append(p.OwnerReferences, metav1.OwnerReference{
-			APIVersion: "apps/v1",
-			Kind:       kind,
-			Name:       name,
-			Controller: &controller,
-		})
-	}
-}
-
-func withReqs(cpuReq, memReq string) PodOpt {
-	return func(p *v1.Pod) {
-		p.Spec.Containers = []v1.Container{{
-			Resources: v1.ResourceRequirements{
-				Requests: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse(cpuReq),
-					v1.ResourceMemory: resource.MustParse(memReq),
-				},
-			},
-		}}
-	}
-}
-
-func withPhase(ph v1.PodPhase) PodOpt {
-	return func(p *v1.Pod) { p.Status.Phase = ph }
-}
-
-func withCreationTimestamp(ts metav1.Time) PodOpt {
-	return func(p *v1.Pod) { p.CreationTimestamp = ts }
-}
-
-func withDeletionTimestamp(ts metav1.Time) PodOpt {
-	return func(p *v1.Pod) {
-		t := ts // ensure a unique address per pod
-		p.DeletionTimestamp = &t
-	}
-}
-
-// -------------------------
-// node
-// -------------------------
-
+// NodeOpt is a functional option for node test helpers.
 type NodeOpt func(*v1.Node)
 
+// node creates a node with the given name and options.
 func node(name string, opts ...NodeOpt) *v1.Node {
 	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -284,6 +208,7 @@ func node(name string, opts ...NodeOpt) *v1.Node {
 	return n
 }
 
+// withAllocatable sets the node's allocatable CPU and memory.
 func withAllocatable(cpu, mem string) NodeOpt {
 	return func(n *v1.Node) {
 		if n.Status.Allocatable == nil {
@@ -294,20 +219,24 @@ func withAllocatable(cpu, mem string) NodeOpt {
 	}
 }
 
+// withNodeLabels sets the node's labels.
 func withNodeLabels(labels map[string]string) NodeOpt {
 	return func(n *v1.Node) { n.Labels = labels }
 }
 
+// withNodeTaints sets the node's taints.
 func withNodeTaints(taints ...v1.Taint) NodeOpt {
 	return func(n *v1.Node) {
 		n.Spec.Taints = append([]v1.Taint(nil), taints...)
 	}
 }
 
+// unschedulable marks the node as unschedulable.
 func unschedulable() NodeOpt {
 	return func(n *v1.Node) { n.Spec.Unschedulable = true }
 }
 
+// notReady marks the node as not ready.
 func notReady() NodeOpt {
 	return func(n *v1.Node) {
 		n.Status.Conditions = []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionFalse}}
@@ -315,7 +244,88 @@ func notReady() NodeOpt {
 }
 
 // -------------------------
-// helper functions
+// pod test helpers
+// -------------------------
+
+// PodOpt is a functional option for pod test helpers.
+type PodOpt func(*v1.Pod)
+
+// pod creates a pod with the given namespace, name, and options.
+func pod(ns, name string, opts ...PodOpt) *v1.Pod {
+	p := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: ns,
+			Name:      name,
+		},
+	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
+}
+
+// withUID sets the pod UID.
+func withUID(uid string) PodOpt {
+	return func(p *v1.Pod) { p.UID = types.UID(uid) }
+}
+
+// onNode sets the pod's NodeName.
+func onNode(node string) PodOpt {
+	return func(p *v1.Pod) { p.Spec.NodeName = node }
+}
+
+// withPrio sets the pod's priority.
+func withPrio(prio int32) PodOpt {
+	return func(p *v1.Pod) { p.Spec.Priority = &prio }
+}
+
+// withOwner adds an owner reference to the pod.
+func withOwner(kind, name string) PodOpt {
+	return func(p *v1.Pod) {
+		controller := true
+		p.OwnerReferences = append(p.OwnerReferences, metav1.OwnerReference{
+			APIVersion: "apps/v1",
+			Kind:       kind,
+			Name:       name,
+			Controller: &controller,
+		})
+	}
+}
+
+// withReqs sets the pod's CPU and memory requests.
+func withReqs(cpuReq, memReq string) PodOpt {
+	return func(p *v1.Pod) {
+		p.Spec.Containers = []v1.Container{{
+			Resources: v1.ResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse(cpuReq),
+					v1.ResourceMemory: resource.MustParse(memReq),
+				},
+			},
+		}}
+	}
+}
+
+// withPhase sets the pod's phase.
+func withPhase(ph v1.PodPhase) PodOpt {
+	return func(p *v1.Pod) { p.Status.Phase = ph }
+}
+
+// withCreationTimestamp sets the pod's creation timestamp.
+func withCreationTimestamp(ts metav1.Time) PodOpt {
+	return func(p *v1.Pod) { p.CreationTimestamp = ts }
+}
+
+// withDeletionTimestamp sets the pod's deletion timestamp.
+func withDeletionTimestamp(ts metav1.Time) PodOpt {
+	return func(p *v1.Pod) {
+		t := ts // ensure a unique address per pod
+		p.DeletionTimestamp = &t
+	}
+}
+
+// -------------------------
+// Other helper functions
 // -------------------------
 
 // mustHookStatus asserts the framework status code and (optionally) that the message contains a substring.
@@ -414,4 +424,29 @@ func testCtx(t *testing.T) (context.Context, context.CancelFunc) {
 		return context.WithDeadline(context.Background(), dl.Add(-200*time.Millisecond))
 	}
 	return context.WithTimeout(context.Background(), 1*time.Second)
+}
+
+// ptr is a small helper to get a pointer to a value.
+func ptr[T any](v T) *T { return &v }
+
+// atomicInt is a small helper to create an *atomic.Int32 with the given initial value.
+func atomicInt(v int32) *atomic.Int32 {
+	a := new(atomic.Int32)
+	a.Store(v)
+	return a
+}
+
+// withMode is a small helper to temporarily set the mode during a test and
+// restore to the original values.
+func withMode(mode ModeType, synch bool, fn func()) {
+	oldMode := OptimizeMode
+	oldSynch := OptimizeSolveSynch
+
+	OptimizeMode = mode
+	OptimizeSolveSynch = synch
+	defer func() {
+		OptimizeMode = oldMode
+		OptimizeSolveSynch = oldSynch
+	}()
+	fn()
 }

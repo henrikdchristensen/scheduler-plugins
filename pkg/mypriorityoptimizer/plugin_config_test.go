@@ -1,5 +1,5 @@
 // plugin_config_test.go
-// TODO
+// with the help of AI tools to cover more branches/cases
 package mypriorityoptimizer
 
 import (
@@ -19,7 +19,7 @@ import (
 )
 
 // -------------------------
-// Helpers
+// Test Helpers
 // -------------------------
 
 func mustGetPluginCfgCM(t *testing.T, ctx context.Context, client *fake.Clientset) *v1.ConfigMap {
@@ -107,7 +107,7 @@ func TestPersistPluginConfig_NoOpOnNilReceiverOrNilClient(t *testing.T) {
 	}
 }
 
-func TestPersistPluginConfig_CreateThenUpdate_UpdatesSnapshot(t *testing.T) {
+func TestPersistPluginConfig_CreateThenUpdate(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 

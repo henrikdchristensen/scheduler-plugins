@@ -487,8 +487,8 @@ func TestBuildPendingSnapshot(t *testing.T) {
 		},
 	}
 
-	withNodeLister(&fakeNodeLister{nodes: []*v1.Node{n}}, func() {
-		withPodLister(&fakePodLister{store: store}, func() {
+	withNodeLister(&FakeNodeLister{Nodes: []*v1.Node{n}}, func() {
+		withPodLister(&FakePodLister{store: store}, func() {
 			snap, err := pl.buildPendingSnapshot()
 			if err != nil {
 				t.Fatalf("buildPendingSnapshot() unexpected error: %v", err)
@@ -518,8 +518,8 @@ func TestBuildPendingSnapshot_NodesErrorPropagated(t *testing.T) {
 	pl := &SharedState{}
 	sentinel := errors.New("nodes boom")
 
-	withNodeLister(&fakeNodeLister{err: sentinel}, func() {
-		withPodLister(&fakePodLister{}, func() {
+	withNodeLister(&FakeNodeLister{Error: sentinel}, func() {
+		withPodLister(&FakePodLister{}, func() {
 			snap, err := pl.buildPendingSnapshot()
 			if snap != nil {
 				t.Fatalf("expected nil snapshot on error, got %#v", snap)
@@ -546,8 +546,8 @@ func TestBuildPendingSnapshot_PodsErrorPropagated(t *testing.T) {
 		},
 	}
 
-	withNodeLister(&fakeNodeLister{nodes: []*v1.Node{n}}, func() {
-		withPodLister(&fakePodLister{err: sentinel}, func() {
+	withNodeLister(&FakeNodeLister{Nodes: []*v1.Node{n}}, func() {
+		withPodLister(&FakePodLister{err: sentinel}, func() {
 			snap, err := pl.buildPendingSnapshot()
 			if snap != nil {
 				t.Fatalf("expected nil snapshot on error, got %#v", snap)

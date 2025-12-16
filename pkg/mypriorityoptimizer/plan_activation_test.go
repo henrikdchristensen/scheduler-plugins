@@ -1,5 +1,4 @@
 // plan_activation_test.go
-//TODO
 package mypriorityoptimizer
 
 import (
@@ -47,7 +46,7 @@ func TestPlanActivation_NoMovesOrEvicts_OnlyActivates(t *testing.T) {
 	must(t, called, "activatePlannedPodsFn not called")
 }
 
-func TestPlanActivation_WithTargets_Dedup_EvictWait_Activate_UsesWithoutCancel(t *testing.T) {
+func TestPlanActivation_MovesAndEvicts_EvictsWaitsActivates(t *testing.T) {
 	pl := &SharedState{}
 
 	// Cancel the active-plan ctx; planActivation must use WithoutCancel(ap.Ctx)
@@ -64,8 +63,8 @@ func TestPlanActivation_WithTargets_Dedup_EvictWait_Activate_UsesWithoutCancel(t
 	plan := &Plan{
 		Moves: []SolverPod{
 			{UID: p1.UID, Namespace: p1.Namespace, Name: p1.Name, OldNode: "n1", Node: "n2"},
-			{UID: p1.UID, Namespace: p1.Namespace, Name: p1.Name, OldNode: "n1", Node: "n2"},           // dup UID (hits seen[] early-return)
-			{UID: types.UID("u-missing"), Namespace: "ns", Name: "missing", OldNode: "n1", Node: "n2"}, // resolves to nil (hits pod==nil branch)
+			{UID: p1.UID, Namespace: p1.Namespace, Name: p1.Name, OldNode: "n1", Node: "n2"},
+			{UID: types.UID("u-missing"), Namespace: "ns", Name: "missing", OldNode: "n1", Node: "n2"},
 		},
 		Evicts: []SolverPod{
 			{UID: p2.UID, Namespace: p2.Namespace, Name: p2.Name, Node: "n1"},
@@ -120,7 +119,7 @@ func TestPlanActivation_WithTargets_Dedup_EvictWait_Activate_UsesWithoutCancel(t
 	mustEq(t, lookups[p2.UID], 1, "p2 lookup count wrong")
 }
 
-func TestPlanActivation_MovesEvictsButNoResolvedTargets_SkipsEvictWait_StillActivates(t *testing.T) {
+func TestPlanActivation_MovesAndEvicts_NoEvictOrWait(t *testing.T) {
 	pl := &SharedState{}
 	plan := &Plan{
 		Moves:  []SolverPod{{UID: types.UID("u-missing"), Namespace: "ns", Name: "missing", OldNode: "a", Node: "b"}},
@@ -151,7 +150,7 @@ func TestPlanActivation_MovesEvictsButNoResolvedTargets_SkipsEvictWait_StillActi
 	must(t, activated, "activatePlannedPodsFn not called")
 }
 
-func TestPlanActivation_TargetFlowErrors_StopProgression(t *testing.T) {
+func TestPlanActivation_EvictOrWaitErrors_StopBeforeActivate(t *testing.T) {
 	pl := &SharedState{}
 	p1 := pod("ns", "p1", withUID("u1"))
 	pods := []*v1.Pod{p1}

@@ -56,8 +56,8 @@ func TestListersAndGetters(t *testing.T) {
 	pl := &SharedState{}
 
 	t.Run("nodesLister/podsLister can be injected", func(t *testing.T) {
-		nl := &fakeNodeLister{}
-		plst := &fakePodLister{}
+		nl := &FakeNodeLister{}
+		plst := &FakePodLister{}
 		withNodeLister(nl, func() {
 			if got := pl.nodesLister(); got != nl {
 				t.Fatalf("nodesLister() != injected")
@@ -71,7 +71,7 @@ func TestListersAndGetters(t *testing.T) {
 	})
 
 	t.Run("getNodes success + error", func(t *testing.T) {
-		withNodeLister(&fakeNodeLister{nodes: []*v1.Node{node("n1")}}, func() {
+		withNodeLister(&FakeNodeLister{Nodes: []*v1.Node{node("n1")}}, func() {
 			got, err := pl.getNodes()
 			if err != nil {
 				t.Fatalf("getNodes() err=%v", err)
@@ -82,7 +82,7 @@ func TestListersAndGetters(t *testing.T) {
 		})
 
 		sentinel := errors.New("boom")
-		withNodeLister(&fakeNodeLister{err: sentinel}, func() {
+		withNodeLister(&FakeNodeLister{Error: sentinel}, func() {
 			_, err := pl.getNodes()
 			if !errors.Is(err, sentinel) {
 				t.Fatalf("getNodes() err=%v want %v", err, sentinel)
@@ -135,7 +135,7 @@ func TestListersAndGetters(t *testing.T) {
 		// Case where for lister error
 		t.Run("lister error", func(t *testing.T) {
 			sentinel := errors.New("boom")
-			withPodLister(&fakePodLister{err: sentinel}, func() {
+			withPodLister(&FakePodLister{err: sentinel}, func() {
 				_, err := pl.getPods()
 				if !errors.Is(err, sentinel) {
 					t.Fatalf("getPods err=%v want %v", err, sentinel)
@@ -145,7 +145,7 @@ func TestListersAndGetters(t *testing.T) {
 
 		for _, tt := range tests[1:] {
 			t.Run(tt.name, func(t *testing.T) {
-				lister := &fakePodLister{store: storeFromPods(tt.listerPods...)}
+				lister := &FakePodLister{store: storeFromPods(tt.listerPods...)}
 				withPodLister(lister, func() {
 					if tt.clientPods != nil {
 						cs := fake.NewSimpleClientset(toRuntimeObjs(tt.clientPods...)...)
@@ -411,7 +411,7 @@ func TestPodLookup(t *testing.T) {
 	pOther := pod("other-ns", "other", withUID("uid-target"))
 
 	t.Run("getPodByName success + per-key error", func(t *testing.T) {
-		withPodLister(&fakePodLister{store: storeFromPods(pName)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(pName)}, func() {
 			got, err := pl.getPodByName("ns", "p")
 			if err != nil || got != pName {
 				t.Fatalf("getPodByName got=%#v err=%v", got, err)
@@ -419,7 +419,7 @@ func TestPodLookup(t *testing.T) {
 		})
 
 		sentinel := errors.New("boom")
-		withPodLister(&fakePodLister{errPerKey: map[string]error{"ns/p": sentinel}}, func() {
+		withPodLister(&FakePodLister{errPerKey: map[string]error{"ns/p": sentinel}}, func() {
 			got, err := pl.getPodByName("ns", "p")
 			if !errors.Is(err, sentinel) || got != nil {
 				t.Fatalf("got=%#v err=%v", got, err)
@@ -428,14 +428,14 @@ func TestPodLookup(t *testing.T) {
 	})
 
 	t.Run("getPodByUID success / notfound / list error", func(t *testing.T) {
-		withPodLister(&fakePodLister{store: storeFromPods(pName, pOther)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(pName, pOther)}, func() {
 			got, err := pl.getPodByUID(types.UID("uid-target"))
 			if err != nil || got != pOther {
 				t.Fatalf("getPodByUID got=%#v err=%v", got, err)
 			}
 		})
 
-		withPodLister(&fakePodLister{store: storeFromPods(pName)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(pName)}, func() {
 			got, err := pl.getPodByUID(types.UID("nope"))
 			if err == nil || got != nil {
 				t.Fatalf("expected notfound err, got=%#v err=%v", got, err)
@@ -443,7 +443,7 @@ func TestPodLookup(t *testing.T) {
 		})
 
 		sentinel := errors.New("list boom")
-		withPodLister(&fakePodLister{err: sentinel}, func() {
+		withPodLister(&FakePodLister{err: sentinel}, func() {
 			got, err := pl.getPodByUID(types.UID("uid-1"))
 			if !errors.Is(err, sentinel) || got != nil {
 				t.Fatalf("got=%#v err=%v", got, err)
@@ -452,7 +452,7 @@ func TestPodLookup(t *testing.T) {
 	})
 
 	t.Run("getPod: fast path by name, then fallback by UID", func(t *testing.T) {
-		withPodLister(&fakePodLister{store: storeFromPods(pName)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(pName)}, func() {
 			got := pl.getPod(types.UID("uid-1"), "ns", "p")
 			if got != pName {
 				t.Fatalf("fast path got=%#v", got)
@@ -461,7 +461,7 @@ func TestPodLookup(t *testing.T) {
 
 		// Name exists but UID mismatch -> fallback to UID scan.
 		pWrong := pod("ns", "p") // empty UID
-		withPodLister(&fakePodLister{store: storeFromPods(pWrong, pOther)}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods(pWrong, pOther)}, func() {
 			got := pl.getPod(types.UID("uid-target"), "ns", "p")
 			if got != pOther {
 				t.Fatalf("fallback got=%#v want other", got)
@@ -470,7 +470,7 @@ func TestPodLookup(t *testing.T) {
 
 		// Get(ns/p) errors -> fallback to UID scan.
 		sentinel := errors.New("boom")
-		withPodLister(&fakePodLister{
+		withPodLister(&FakePodLister{
 			store:     storeFromPods(pName),
 			errPerKey: map[string]error{"ns/p": sentinel},
 		}, func() {
@@ -480,7 +480,7 @@ func TestPodLookup(t *testing.T) {
 			}
 		})
 
-		withPodLister(&fakePodLister{store: storeFromPods()}, func() {
+		withPodLister(&FakePodLister{store: storeFromPods()}, func() {
 			got := pl.getPod(types.UID("missing"), "ns", "p")
 			if got != nil {
 				t.Fatalf("expected nil, got=%#v", got)

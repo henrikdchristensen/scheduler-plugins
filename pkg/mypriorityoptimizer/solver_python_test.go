@@ -1,5 +1,4 @@
 // solver_python_test.go
-// TODO
 package mypriorityoptimizer
 
 import (

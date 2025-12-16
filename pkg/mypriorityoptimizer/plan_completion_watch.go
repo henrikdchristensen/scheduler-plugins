@@ -1,5 +1,4 @@
 // plan_completion_watch.go
-// TODO
 package mypriorityoptimizer
 
 import (

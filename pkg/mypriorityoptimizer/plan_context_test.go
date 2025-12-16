@@ -1,5 +1,4 @@
 // plan_context_test.go
-//TODO
 package mypriorityoptimizer
 
 import (
@@ -14,7 +13,7 @@ func TestPlanContext(t *testing.T) {
 
 	n1 := node("n1")
 	p1 := pod("ns", "p1", onNode("n1"), withPhase(v1.PodRunning))
-	wantInp := SolverInput{} // doesn’t matter here; buildSolverInput has its own tests
+	wantInp := SolverInput{}
 
 	t.Run("node list error", func(t *testing.T) {
 		withVar(t, &getNodesForPlanContext, func(*SharedState) ([]*v1.Node, error) {

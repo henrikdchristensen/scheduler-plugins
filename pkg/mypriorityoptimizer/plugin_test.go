@@ -1,5 +1,4 @@
 // plugin_test.go
-// TODO
 package mypriorityoptimizer
 
 import (
@@ -81,7 +80,7 @@ func TestNewFromHandle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			h := mkHandle("https://localhost")
+			h := makeHandle("https://localhost")
 
 			clientFn := func(*rest.Config) (kubernetes.Interface, error) {
 				if tt.clientErr != nil {
@@ -178,7 +177,7 @@ func TestNew_InvalidKubeConfig_NoHooks(t *testing.T) {
 	ctx := context.Background()
 
 	// Must be a framework.Handle; mkHandle provides that (via embedding).
-	h := mkHandle("://bad")
+	h := makeHandle("://bad")
 
 	withVar(t, &solverEnabled, func(*SharedState) bool { return true })
 	withVar(t, &pluginReadinessStarter, func(*SharedState, context.Context, ...cache.SharedIndexInformer) {
@@ -199,7 +198,7 @@ func TestNew_InvalidKubeConfig_NoHooks(t *testing.T) {
 
 func TestNew_Success_CallsHooks_AndStoresHandle(t *testing.T) {
 	ctx := context.Background()
-	h := mkHandle("https://localhost")
+	h := makeHandle("https://localhost")
 
 	var (
 		readinessCalled bool
