@@ -47,13 +47,13 @@ var (
 // -------------------------
 
 // runOptimizationFlow runs the optimisation flow for the given phase (AllSynch,
-// AllAsynch, Single). For Single phase, the preemptor must be provided.
-// Returns the target node name for the preemptor pod (if any) and error (if any).
+// AllAsynch, Single). For Single phase, the preemptor must be provided. Returns
+// the target node name for the preemptor pod (if any) and error (if any).
 func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Pod) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
 	strategy := getModeCombinedAsString()
 
-	// Periodic-sync/Per-pod: take PlanActive early.
-	// Async modes: take PlanActive later.
+	// Sync modes: take PlanActive now.
+	// Async modes: will take PlanActive later, after plan computation.
 	if !isAsyncSolvingFn() {
 		if !pl.tryEnterActivePlan() {
 			klog.InfoS(msg(strategy, InfoActivePlanInProgress))

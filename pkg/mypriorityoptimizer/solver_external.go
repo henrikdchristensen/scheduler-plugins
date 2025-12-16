@@ -12,6 +12,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// -------------------------
+// Test Hooks
+// -------------------------
+
 var (
 	execCommandContext   = exec.CommandContext
 	readAllStdout        = io.ReadAll

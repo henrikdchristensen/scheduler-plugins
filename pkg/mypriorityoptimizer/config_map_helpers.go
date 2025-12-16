@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	apiv1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -23,7 +23,7 @@ import (
 // listConfigMaps lists config maps in the namespace with the given label key,
 // sorted by creation timestamp descending.
 // CHECKED
-func listConfigMaps(nsLister corev1listers.ConfigMapNamespaceLister, labelKey string) ([]apiv1.ConfigMap, error) {
+func listConfigMaps(nsLister corev1listers.ConfigMapNamespaceLister, labelKey string) ([]v1.ConfigMap, error) {
 	// List with label selector
 	sel := labels.SelectorFromSet(labels.Set{labelKey: "true"})
 	items, err := nsLister.List(sel)
@@ -32,7 +32,7 @@ func listConfigMaps(nsLister corev1listers.ConfigMapNamespaceLister, labelKey st
 	}
 
 	// Make a copy and sort by creation timestamp descending
-	cms := make([]apiv1.ConfigMap, len(items))
+	cms := make([]v1.ConfigMap, len(items))
 	for i := range items {
 		cms[i] = *items[i].DeepCopy()
 	}
@@ -148,7 +148,7 @@ func (d ConfigMapDoc) ensureJson(
 	cm, err := cms.Get(ctx, d.Name, metav1.GetOptions{})
 	switch {
 	case apierrors.IsNotFound(err): // create new
-		cm = &apiv1.ConfigMap{
+		cm = &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      d.Name,
 				Namespace: d.Namespace,

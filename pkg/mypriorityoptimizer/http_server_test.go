@@ -332,9 +332,9 @@ func TestStartHttpServer_ListenAndServeError(t *testing.T) {
 	pl := &SharedState{}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // avoid leaking shutdown goroutine
+	cancel() // cancel immediately
 
-	// Invalid port -> ListenAndServe returns immediately with an error
+	// Invalid port to trigger ListenAndServe error.
 	pl.startHttpServer(ctx, "127.0.0.1:-1")
 }
 

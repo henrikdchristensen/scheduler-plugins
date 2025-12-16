@@ -1,4 +1,5 @@
 // loop_helpers_test.go
+// with the help of AI tools to cover more branches/cases
 package mypriorityoptimizer
 
 import (
@@ -46,7 +47,7 @@ func withBackgroundHooks(
 	body()
 }
 
-// small “eventually” helper to avoid flaky sleeps
+// helper that retries until timeout for a condition to become true
 func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -97,7 +98,7 @@ func TestStartLoops_DoesNothingWhenNotReady(t *testing.T) {
 	)
 }
 
-func TestStartLoops_LaunchesPeriodicLoopWhenModePeriodic(t *testing.T) {
+func TestStartLoops_StartsPeriodicLoopWhenModePeriodic(t *testing.T) {
 	withVar(t, &OptimizeMode, ModePeriodic)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -124,7 +125,7 @@ func TestStartLoops_LaunchesPeriodicLoopWhenModePeriodic(t *testing.T) {
 	)
 }
 
-func TestStartLoops_LaunchesInterludeLoopWhenModeInterlude(t *testing.T) {
+func TestStartLoops_StartsInterludeLoopWhenModeInterlude(t *testing.T) {
 	withVar(t, &OptimizeMode, ModeInterlude)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -155,7 +156,7 @@ func TestStartLoops_LaunchesInterludeLoopWhenModeInterlude(t *testing.T) {
 // optimizeBackgroundLoop
 // -------------------------
 
-func TestOptimizeBackgroundLoop_DefaultInterval_ImmediateCancel(t *testing.T) {
+func TestOptimizeBackgroundLoop_ImmediateCancel(t *testing.T) {
 	pl := &SharedState{}
 	pl.PluginReady.Store(true)
 
@@ -264,7 +265,7 @@ func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 				close(done)
 			}()
 
-			// ---- Run 1: must start, then be cancelled due to pending set change.
+			// Run 1: must start, then be cancelled due to pending set change.
 			var run1 context.Context
 			select {
 			case run1 = <-run1CtxCh:
@@ -277,7 +278,7 @@ func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 				t.Fatalf("run #1 was not cancelled (expected cancel-on-change)")
 			}
 
-			// ---- Run 2: must start.
+			// Run 2: must start.
 			eventually(t, 2*time.Second, func() bool {
 				return runCount.Load() >= 2
 			}, "run #2 did not start")
@@ -290,12 +291,12 @@ func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 				t.Fatalf("expected skip to prevent extra runs; runCount=%d, want 2", got)
 			}
 
-			// ---- pendingCount==0 path resets internal state.
+			// pendingCount==0 path resets internal state.
 			serveEmpty.Store(true)
 			time.Sleep(20 * time.Millisecond)
 			serveEmpty.Store(false)
 
-			// ---- Run 3: serve u3, let it start, then cancel outer ctx to hit ctx.Done cleanup.
+			// Run 3: serve u3, let it start, then cancel outer ctx to hit ctx.Done cleanup.
 			serveU3.Store(true)
 
 			var run3 context.Context
@@ -406,14 +407,14 @@ func TestIsAlreadyComputedForPendingSet_NonOptimalStatus(t *testing.T) {
 	}
 }
 
-func TestIsAlreadyComputedForPendingSet_OptimalWithNoImprovementErr(t *testing.T) {
+func TestIsAlreadyComputedForPendingSet_OptimalWithNoImprovementError(t *testing.T) {
 	best := &SolverResult{Status: "OPTIMAL"}
 	if got := isAlreadyComputedForPendingSet(ErrNoImprovingSolutionFromAnySolver, best); !got {
 		t.Fatalf("isAlreadyComputedForPendingSet(OPTIMAL, ErrNoImprovingSolutionFromAnySolver) = false, want true")
 	}
 }
 
-func TestIsAlreadyComputedForPendingSet_OptimalWithNoPendingPodsErr(t *testing.T) {
+func TestIsAlreadyComputedForPendingSet_OptimalWithNoPendingPodsError(t *testing.T) {
 	best := &SolverResult{Status: "OPTIMAL"}
 	if got := isAlreadyComputedForPendingSet(ErrNoPendingPodsScheduled, best); !got {
 		t.Fatalf("isAlreadyComputedForPendingSet(OPTIMAL, ErrNoPendingPodsScheduled) = false, want true")

@@ -1,8 +1,9 @@
+// solver_python_types.go
 package mypriorityoptimizer
 
 // PythonSolverOutput is the output from the Python solver, extending SolverOutput.
 type PythonSolverOutput struct {
-	// Embed the generic solver fields (status, placements, evictions, duration)
+	// Solver fields (status, placements, evictions, duration)
 	SolverOutput
 	// SolvePhases of the solver (Python-specific)
 	SolvePhases []SolverPhase `json:"phases,omitempty"`

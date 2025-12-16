@@ -75,7 +75,8 @@ func (pl *SharedState) getPods() ([]*v1.Pod, error) {
 		return nil, err
 	}
 	// Prefer the lister for performance, but fall back to a direct API list
-	// when the lister appears to contain only pending/unbound pods.
+	// when the lister does not have assigned pods (indicating possible
+	// staleness).
 	hasAssigned := false
 	for _, p := range pods {
 		if isPodAssigned(p) {

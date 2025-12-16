@@ -1,4 +1,6 @@
 // solver_helpers_test.go
+// with the help of AI tools to cover more branches/cases
+// TODO
 package mypriorityoptimizer
 
 import (
@@ -57,8 +59,6 @@ func readStatsArr(t *testing.T, ctx context.Context, pl *SharedState) []Exported
 	return arr
 }
 
-// kvToMap converts the alternating key/value slice returned by solverConfigArgs
-// into a map for easier assertions in tests.
 func kvToMap(t *testing.T, args []any) map[string]any {
 	t.Helper()
 	must(t, len(args)%2 == 0, "expected even len kv args, got %d: %v", len(args), args)
@@ -70,6 +70,13 @@ func kvToMap(t *testing.T, args []any) map[string]any {
 		m[k] = args[i+1]
 	}
 	return m
+}
+
+func withAppendStatsHook(t *testing.T, hook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)) {
+	t.Helper()
+	orig := appendSolverStatsCMHook
+	appendSolverStatsCMHook = hook
+	t.Cleanup(func() { appendSolverStatsCMHook = orig })
 }
 
 // -------------------------
@@ -113,8 +120,8 @@ func TestBuildSolverInput(t *testing.T) {
 
 	t.Run("filters_nodes_dedups_pods_sets_preemptor_and_protected_and_baseline", func(t *testing.T) {
 		// Nodes
-		n1 := node("n1")                  // usable
-		n2 := node("n2", unschedulable()) // unusable -> ignored
+		n1 := node("n1", withAllocatable("1000m", "1Gi"))                  // usable
+		n2 := node("n2", withAllocatable("1000m", "1Gi"), unschedulable()) // unusable -> ignored
 
 		// Pods
 		pPending := pod("ns", "p-pending",
@@ -164,7 +171,6 @@ func TestBuildSolverInput(t *testing.T) {
 			t.Fatalf("unexpected err: %v", err)
 		}
 
-		// SolverInput defaults
 		if !in.IgnoreAffinity {
 			t.Fatalf("IgnoreAffinity=%v, want true", in.IgnoreAffinity)
 		}
@@ -221,9 +227,7 @@ func TestBuildSolverInput(t *testing.T) {
 			t.Fatalf("system pod must be Protected=true")
 		}
 
-		// Baseline score: counts all currently assigned pods (even those on unusable nodes),
-		// because buildBaselineScore() runs over the full pods slice.
-		// We set u-run prio=1 and u-bad prio=2 (both assigned).
+		// Baseline score: only counts placed pods (u-pending and u-run), not protected (u-sys)
 		if in.BaselineScore.Evicted != 0 || in.BaselineScore.Moved != 0 {
 			t.Fatalf("baseline Evicted/Moved=%d/%d, want 0/0", in.BaselineScore.Evicted, in.BaselineScore.Moved)
 		}
@@ -275,10 +279,10 @@ func TestSolverConfigArgs(t *testing.T) {
 
 	t.Run("python_enabled_includes_all_python_fields_with_expected_formats", func(t *testing.T) {
 		withVar(t, &SolverPythonEnabled, true)
-		withVar(t, &SolverPythonTimeout, 123*time.Millisecond)
+		withVar(t, &SolverPythonTimeout, 250*time.Millisecond)
 		withVar(t, &SolverPythonGapLimit, 0.125)
 		withVar(t, &SolverPythonGuaranteedTierFraction, 0.5)
-		withVar(t, &SolverPythonMoveFractionOfTier, 0.75)
+		withVar(t, &SolverPythonMoveFractionOfTier, 0.25)
 
 		args := solverConfigArgs()
 		kv := kvToMap(t, args)
@@ -286,8 +290,8 @@ func TestSolverConfigArgs(t *testing.T) {
 		if kv["pythonSolver"] != true {
 			t.Fatalf("pythonSolver=%v, want true", kv["pythonSolver"])
 		}
-		if kv["pythonTimeout"] != "123ms" {
-			t.Fatalf("pythonTimeout=%v, want %q", kv["pythonTimeout"], "123ms")
+		if kv["pythonTimeout"] != "250ms" {
+			t.Fatalf("pythonTimeout=%v, want %q", kv["pythonTimeout"], "250ms")
 		}
 		if kv["pythonGapLimit"] != "0.12" {
 			t.Fatalf("pythonGapLimit=%v, want %q", kv["pythonGapLimit"], "0.12")
@@ -295,8 +299,8 @@ func TestSolverConfigArgs(t *testing.T) {
 		if kv["pythonGuaranteedTierFraction"] != "0.50" {
 			t.Fatalf("pythonGuaranteedTierFraction=%v, want %q", kv["pythonGuaranteedTierFraction"], "0.50")
 		}
-		if kv["pythonMoveFractionOfTier"] != "0.75" {
-			t.Fatalf("pythonMoveFractionOfTier=%v, want %q", kv["pythonMoveFractionOfTier"], "0.75")
+		if kv["pythonMoveFractionOfTier"] != "0.25" {
+			t.Fatalf("pythonMoveFractionOfTier=%v, want %q", kv["pythonMoveFractionOfTier"], "0.25")
 		}
 		if v, ok := kv["saveFailedAttempts"]; !ok || v != SolverSaveAllAttempts {
 			t.Fatalf("saveFailedAttempts missing or wrong: got=%v ok=%v want=%v", v, ok, SolverSaveAllAttempts)
@@ -305,7 +309,7 @@ func TestSolverConfigArgs(t *testing.T) {
 }
 
 // -------------------------
-// isSolutionBetter / isSolutionUsable
+// isSolutionBetter
 // -------------------------
 
 func TestIsSolutionBetter(t *testing.T) {
@@ -341,12 +345,19 @@ func TestIsSolutionBetter(t *testing.T) {
 	}
 }
 
+// -------------------------
+// isSolutionUsable
+// -------------------------
+
 func TestIsSolutionUsable(t *testing.T) {
 	cases := map[string]bool{
 		"":           false,
 		"OPTIMAL":    true,
+		"optimal":    true,
 		"FEASIBLE":   true,
+		"feasible":   true,
 		"INFEASIBLE": false,
+		"infeasible": false,
 		"something":  false,
 	}
 	for st, want := range cases {
@@ -418,7 +429,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 	})
 
 	t.Run("success_move_branch", func(t *testing.T) {
-		// u1 moves from n1 -> n1 (no-op move) but still exercises OldNode branch
+		// u1 move from n1 to n1 (no-op move, but precondition matches)
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u1", Namespace: "ns", Name: "p1", OldNode: "n1", Node: "n1"}},
 		}
@@ -493,9 +504,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 // logLeaderboard
 // -------------------------
 
-func TestLogLeaderboard_SmokeScenarios(t *testing.T) {
-	// We intentionally treat this as a smoke test, since logLeaderboard only logs.
-	// The value here is ensuring it stays panic-free across the main branches.
+func TestLogLeaderboard(t *testing.T) {
 	baseline := SolverScore{PlacedByPriority: map[string]int{"1": 1}, Evicted: 0, Moved: 0}
 
 	tests := []struct {
@@ -532,15 +541,15 @@ func TestLogLeaderboard_SmokeScenarios(t *testing.T) {
 }
 
 // -------------------------
-// scoreSolution / toSolverPod
+// scoreSolution
 // -------------------------
 
 func TestScoreSolution(t *testing.T) {
 	in := SolverInput{
 		Pods: []SolverPod{
-			{UID: "u1", Priority: 1, Node: "n1"},
+			{UID: "u1", Priority: 1, Node: "n1"}, // running
 			{UID: "u2", Priority: 2, Node: ""},   // pending
-			{UID: "u3", Priority: 1, Node: "n1"}, // placed
+			{UID: "u3", Priority: 1, Node: "n1"}, // running
 		},
 		Preemptor: &SolverPod{UID: "u-pre", Priority: 5},
 	}
@@ -559,7 +568,7 @@ func TestScoreSolution(t *testing.T) {
 				{UID: "u3", Node: "n2"},    // move
 				{UID: "uX", Node: "n1"},    // unknown ignored
 				{UID: "u-pre", Node: "n1"}, // place preemptor
-				{UID: "u2", Node: ""},      // covers plm.Node=="" continue (ignored)
+				{UID: "u2", Node: ""},      // covers plm.Node=="" continue
 				{UID: "u3", Node: "n2"},    // idempotent
 				{UID: "u-pre", Node: "n1"}, // idempotent
 			},
@@ -600,6 +609,10 @@ func TestScoreSolution_PreemptorAlreadyIncludedAndEmptyPlacementNode(t *testing.
 	}
 }
 
+// -------------------------
+// toSolverPod
+// -------------------------
+
 func TestToSolverPod(t *testing.T) {
 	p := pod("ns", "mypod", withUID("uid-1"), withPrio(7), withReqs("250m", "64Mi"))
 	sp := toSolverPod(p, "nodeX")
@@ -620,17 +633,10 @@ func TestToSolverPod(t *testing.T) {
 }
 
 // -------------------------
-// exportSolverStatsToConfigMap + appendSolverStatsCM
+// exportSolverStatsToConfigMap
 // -------------------------
 
-func withAppendStatsHook(t *testing.T, hook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)) {
-	t.Helper()
-	orig := appendSolverStatsCMHook
-	appendSolverStatsCMHook = hook
-	t.Cleanup(func() { appendSolverStatsCMHook = orig })
-}
-
-func TestExportSolverStatsToConfigMap_UsesHook(t *testing.T) {
+func TestExportSolverStatsToConfigMap(t *testing.T) {
 	pl := &SharedState{}
 	var got ExportedSolverStats
 
@@ -651,6 +657,10 @@ func TestExportSolverStatsToConfigMap_UsesHook(t *testing.T) {
 		t.Fatalf("attempts=%v", got.Attempts)
 	}
 }
+
+// -------------------------
+// appendSolverStatsCM
+// -------------------------
 
 func TestAppendSolverStatsCM_HookShortCircuit(t *testing.T) {
 	pl := &SharedState{}

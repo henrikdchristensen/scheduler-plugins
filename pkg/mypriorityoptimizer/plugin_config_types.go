@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// PluginConfigSnapshot captures a single, human-readable snapshot of the
-// plugin's configuration (constants + env/args). Add new fields here as needed.
+// PluginConfigSnapshot captures a single snapshot of the plugin's configuration
+// (constants + env/args). Add new fields here as needed.
 type PluginConfigSnapshot struct {
 	Timestamp time.Time `json:"timestamp"`
 

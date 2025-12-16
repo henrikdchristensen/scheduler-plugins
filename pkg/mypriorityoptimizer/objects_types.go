@@ -5,9 +5,13 @@ package mypriorityoptimizer
 type WorkloadKind int
 
 const (
+	// Workload is a ReplicaSet
 	wkReplicaSet WorkloadKind = iota
+	// Workload is a StatefulSet
 	wkStatefulSet
+	// Workload is a DaemonSet
 	wkDaemonSet
+	// Workload is a Job
 	wkJob
 )
 
@@ -22,9 +26,9 @@ type WorkloadKey struct {
 }
 
 // WorkloadStatus represents the status of a workload.
-//   - hasLive:    at least one live pod (not terminating) for this workload
-//   - hasPending: at least one live *pending* pod for this workload
 type wkStatus struct {
-	HasLive    bool
+	// HasLive means at least one live pod (not terminating) for this workload
+	HasLive bool
+	// HasPending means at least one live pending pod for this workload
 	HasPending bool
 }

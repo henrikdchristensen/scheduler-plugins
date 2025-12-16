@@ -77,7 +77,6 @@ func (pl *SharedState) persistPluginConfig(ctx context.Context) error {
 
 	snap := buildPluginConfigSnapshot()
 
-	// ConfigMap client (namespaced interface)
 	cms := pl.Client.CoreV1().ConfigMaps(SystemNamespace)
 
 	if err := doc.ensureJson(ctx, cms, snap); err != nil {

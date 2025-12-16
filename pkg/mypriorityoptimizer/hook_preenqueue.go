@@ -18,19 +18,19 @@ import (
 func (pl *SharedState) PreEnqueue(ctx context.Context, pending *v1.Pod) *fwk.Status {
 	const stage = "PreEnqueue"
 
-	// 1) Always allow protected pods (e.g., kube-system).
+	// Always allow protected pods (e.g., kube-system).
 	if isPodProtected(pending) {
 		return fwk.NewStatus(fwk.Success)
 	}
 
-	// 2) If plugin is not ready, block the pod. It will be re-queued when ready.
+	// If plugin is not ready, block the pod. It will be re-queued when ready.
 	if !pl.PluginReady.Load() {
 		pl.BlockedWhileActive.AddPod(pending)
 		klog.V(MyV).Info(msg(stage, "plugin not ready yet; waiting"))
 		return fwk.NewStatus(fwk.Pending, msg(stage, "plugin not ready yet; waiting"))
 	}
 
-	// 3) If there is an active plan, enforce it.
+	// If there is an active plan, enforce it.
 	if ap := pl.getActivePlan(); ap != nil {
 		if !pl.isPodAllowedByPlan(pending) {
 			// Plan exists and pod is NOT allowed by the plan -> block.
@@ -50,7 +50,7 @@ func (pl *SharedState) PreEnqueue(ctx context.Context, pending *v1.Pod) *fwk.Sta
 		return fwk.NewStatus(fwk.Success)
 	}
 
-	// 4) No active plan:
+	// No active plan:
 	//	- In ManualBlocking mode, block the pod to accumulate work for the solver.
 	if isManualBlockingMode() {
 		klog.V(MyV).InfoS(msg(stage, InfoPendingPod), "pod", klog.KObj(pending))

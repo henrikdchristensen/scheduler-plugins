@@ -1,4 +1,5 @@
 // test_helpers_test.go
+//TODO
 package mypriorityoptimizer
 
 import (
@@ -200,15 +201,10 @@ func withMode(mode ModeType, synch bool, fn func()) {
 type PodOpt func(*v1.Pod)
 
 func pod(ns, name string, opts ...PodOpt) *v1.Pod {
-	// sensible defaults for tests
-	prio := int32(0)
 	p := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: ns,
 			Name:      name,
-		},
-		Spec: v1.PodSpec{
-			Priority: &prio,
 		},
 	}
 	for _, o := range opts {
@@ -280,10 +276,6 @@ func node(name string, opts ...NodeOpt) *v1.Node {
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Status: v1.NodeStatus{
 			Conditions: []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionTrue}},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("1000m"),
-				v1.ResourceMemory: resource.MustParse("1Gi"),
-			},
 		},
 	}
 	for _, o := range opts {
@@ -323,7 +315,7 @@ func notReady() NodeOpt {
 }
 
 // -------------------------
-// mustHookStatus
+// helper functions
 // -------------------------
 
 // mustHookStatus asserts the framework status code and (optionally) that the message contains a substring.
@@ -339,10 +331,6 @@ func mustHookStatus(t *testing.T, stage string, st *fwk.Status, want fwk.Code, c
 		t.Fatalf("%s() message = %q, want to contain %q", stage, st.Message(), contains)
 	}
 }
-
-// -------------------------
-// storeFromPods
-// -------------------------
 
 // storeFromPods creates a nested map from a list of pods for easy lookup by namespace and name.
 func storeFromPods(pods ...*v1.Pod) map[string]map[string]*v1.Pod {
@@ -366,10 +354,6 @@ func withVar[T any](t *testing.T, ptr *T, v T) {
 	*ptr = v
 	t.Cleanup(func() { *ptr = old })
 }
-
-// -------------------------
-// writeFakeSolverScript
-// -------------------------
 
 // writeFakeSolverScript writes a fake solver script to the specified directory
 // with the specified body, and returns the full path to the script.

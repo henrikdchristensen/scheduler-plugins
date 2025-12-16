@@ -123,7 +123,7 @@ type ExportedSolverStats struct {
 	BestName string `json:"best_name,omitempty"`
 	// Baseline score
 	Baseline SolverScore `json:"baseline,omitempty"`
-	// Best score
+	// Solver attempts made
 	Attempts []SolverResult `json:"attempts,omitempty"`
 }
 

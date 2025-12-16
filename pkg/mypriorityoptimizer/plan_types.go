@@ -1,9 +1,11 @@
+// plan_types.go
 package mypriorityoptimizer
 
 import (
 	"time"
 )
 
+// Plan represents the optimization plan with evictions and moves.
 type Plan struct {
 	// Evicted pods
 	Evicts []SolverPod `json:"evicts"`

@@ -173,7 +173,7 @@ func TestReserve(t *testing.T) {
 			st := pl.Reserve(context.Background(), cs, pod, node)
 			mustHookStatus(t, "Reserve", st, tt.wantCode, tt.wantMsgSub)
 
-			// If this case is the "consumes quota" case, assert quota + state using the real wkKey.
+			// If test is about quota consumption, verify it.
 			if tt.name == "consumes quota and writes reservation state" {
 				wk, ok := getTopWorkload(pod)
 				if !ok {
@@ -204,7 +204,7 @@ func TestReserve(t *testing.T) {
 				}
 			}
 
-			// If caller asked for a reservation key, enforce it.
+			// If test specifies state key expectation, verify it.
 			if tt.wantStateKey != nil && tt.name != "consumes quota and writes reservation state" {
 				data, err := cs.Read(rsReservationKey)
 				if err != nil {
@@ -232,14 +232,14 @@ func (b *badState) Clone() fwk.StateData { return &badState{} }
 
 func TestUnreserve(t *testing.T) {
 	type tc struct {
-		name string
+		name       string
 		cycleWrite fwk.StateData // written under rsReservationKey; nil => don't write
 		activePlan *ActivePlan
-		wantQuota bool
-		wkKey     string
-		node      string
-		start     int32
-		want      int32
+		wantQuota  bool
+		wkKey      string
+		node       string
+		start      int32
+		want       int32
 	}
 
 	tests := []tc{

@@ -1,4 +1,6 @@
 // optimization_flow_test.go
+// with the help of AI tools to cover more branches/cases
+// TODO
 package mypriorityoptimizer
 
 import (
@@ -12,13 +14,6 @@ import (
 // -------------------------
 // Helpers
 // -------------------------
-
-// dummySolverInput returns a minimal SolverInput with a specific baseline.
-func dummySolverInput(evicted int) SolverInput {
-	return SolverInput{
-		BaselineScore: SolverScore{Evicted: evicted},
-	}
-}
 
 type flowCaptures struct {
 	exportCalled bool
@@ -109,7 +104,7 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 		if h.planCtxErr != nil {
 			return nil, nil, SolverInput{}, h.planCtxErr
 		}
-		return h.nodes, h.pods, dummySolverInput(h.baselineEvict), nil
+		return h.nodes, h.pods, SolverInput{BaselineScore: SolverScore{Evicted: h.baselineEvict}}, nil
 	}
 
 	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {

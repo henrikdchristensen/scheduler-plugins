@@ -1,4 +1,5 @@
 // objects_helpers_test.go
+// with the help of AI tools to cover more branches/cases
 package mypriorityoptimizer
 
 import (
@@ -131,8 +132,8 @@ func TestListersAndGetters(t *testing.T) {
 			},
 		}
 
-		// Special-case: lister error test uses fakePodLister.err.
-		t.Run("lister error bubbles", func(t *testing.T) {
+		// Case where for lister error
+		t.Run("lister error", func(t *testing.T) {
 			sentinel := errors.New("boom")
 			withPodLister(&fakePodLister{err: sentinel}, func() {
 				_, err := pl.getPods()
@@ -144,10 +145,8 @@ func TestListersAndGetters(t *testing.T) {
 
 		for _, tt := range tests[1:] {
 			t.Run(tt.name, func(t *testing.T) {
-				// install lister view
 				lister := &fakePodLister{store: storeFromPods(tt.listerPods...)}
 				withPodLister(lister, func() {
-					// install client if requested
 					if tt.clientPods != nil {
 						cs := fake.NewSimpleClientset(toRuntimeObjs(tt.clientPods...)...)
 						if tt.clientListErr != nil {
@@ -193,8 +192,8 @@ func TestNamespaceNameHelpers(t *testing.T) {
 		wantErr  bool
 	}{
 		{"ns/name", "ns", "name", false},
-		{"ns/name/extra", "ns", "name/extra", false}, // SplitN(2) keeps remainder
-		{"/name", "", "name", false},                 // your current implementation allows empty ns
+		{"ns/name/extra", "ns", "name/extra", false},
+		{"/name", "", "name", false},
 		{"invalid", "", "", true},
 	}
 
@@ -284,7 +283,7 @@ func TestEvictPod(t *testing.T) {
 }
 
 // -------------------------
-// node helpers
+// Node helpers
 // -------------------------
 
 func TestNodeHelpers(t *testing.T) {
@@ -402,7 +401,7 @@ func TestNodeHelpers(t *testing.T) {
 }
 
 // -------------------------
-// pod lookup (getPodByName/UID/getPod)
+// Pod lookup (getPodByName/UID/getPod)
 // -------------------------
 
 func TestPodLookup(t *testing.T) {
@@ -491,7 +490,7 @@ func TestPodLookup(t *testing.T) {
 }
 
 // -------------------------
-// resource + pod predicate helpers
+// Pod resource and predicate helpers
 // -------------------------
 
 func TestPodResourceAndPredicateHelpers(t *testing.T) {

@@ -16,39 +16,33 @@ import (
 // Test Hooks
 // -------------------------
 
-// pluginReadinessStarter is a hook so tests can avoid starting goroutines and
-// can assert that readiness wiring was invoked.
-var pluginReadinessStarter = func(pl *SharedState, ctx context.Context, infs ...cache.SharedIndexInformer) {
-	go pl.pluginReadiness(ctx, infs...)
-}
+var (
+	pluginReadinessStarter = func(pl *SharedState, ctx context.Context, infs ...cache.SharedIndexInformer) {
+		go pl.pluginReadiness(ctx, infs...)
+	}
 
-// httpServerStarter is a hook so tests can avoid starting the HTTP server and
-// can assert that it would have been started.
-var httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
-	go pl.startHttpServer(ctx, addr)
-}
+	httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
+		go pl.startHttpServer(ctx, addr)
+	}
 
-// solverEnabled is a tiny indirection around (*SharedState).isAnySolverEnabled
-// so tests can force either branch without poking global solver flags.
-var solverEnabled = func(pl *SharedState) bool {
-	return pl.isAnySolverEnabled()
-}
+	solverEnabled = func(pl *SharedState) bool {
+		return pl.isAnySolverEnabled()
+	}
+)
 
 // -------------------------
 // Name
 // -------------------------
 
-// Name returns name of the plugin. It is used in logs and configurations.
+// Name returns name of the plugin.
 func (pl *SharedState) Name() string { return Name }
 
 // -------------------------
 // newFromHandle
 // -------------------------
 
-// newFromHandle contains the real logic of New, parameterized over:
-//   - clientFn: how to build a client from a kubeconfig
-//   - h: a minimal handleDeps interface
-//   - fullHandle: the real framework.Handle to store in SharedState (can be nil in tests)
+// newFromHandle contains the real logic of New, parameterized by the client
+// constructor and the full framework.Handle (to allow tests to pass a fake).
 func newFromHandle(
 	ctx context.Context,
 	obj runtime.Object,
@@ -56,8 +50,8 @@ func newFromHandle(
 	h HandleDeps,
 	fullHandle framework.Handle,
 ) (framework.Plugin, error) {
-	// obj is not used by the current implementation, but the factory
-	// signature requires it; assign to _ to keep the compiler happy.
+	// obj is not used by the current implementation, but the factory signature
+	// requires it; assign to _ to keep the compiler happy.
 	_ = obj
 
 	// Build client from kubeconfig

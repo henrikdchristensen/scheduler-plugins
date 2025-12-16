@@ -11,7 +11,7 @@ import (
 )
 
 // -------------------------
-// Test Helpers
+// Test Hooks
 // -------------------------
 
 var (
@@ -48,7 +48,7 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 	overallCtx, cancel := context.WithTimeout(baseCtx, PlanOverallTimeout)
 	defer cancel()
 
-	// 1) Resolve unique targets (pods that are moved or evicted)
+	// Resolve unique targets (pods that are moved or evicted)
 	seen := map[types.UID]bool{}
 	var targets []*v1.Pod
 	add := func(uid types.UID, ns, name string) {
@@ -67,7 +67,7 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 		add(e.UID, e.Namespace, e.Name)
 	}
 
-	// 2) Log plan details and evict (if any)
+	// Log plan details and evict (if any)
 	if len(plan.Moves) == 0 && len(plan.Evicts) == 0 {
 		klog.V(MyV).Info("plan has no moves or evictions")
 	} else {
@@ -97,7 +97,7 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 		}
 	}
 
-	// 3) Activate planned pending
+	// Activate planned pending
 	activatePlannedPodsFn(pl, plan, pods)
 
 	return nil

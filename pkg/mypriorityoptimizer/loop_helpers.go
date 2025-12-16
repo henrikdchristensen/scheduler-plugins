@@ -47,8 +47,12 @@ var (
 	}
 )
 
-// startLoops launches background loops exactly once, after caches are warm.
-// It is safe to call multiple times; only the first call does anything.
+// -------------------------
+// startLoops
+// -------------------------
+
+// startLoops launches background loops exactly once, after plugin is ready. It
+// is safe to call multiple times; only the first call does anything.
 func (pl *SharedState) startLoops(ctx context.Context) {
 	if !pl.PluginReady.Load() {
 		return
@@ -60,6 +64,10 @@ func (pl *SharedState) startLoops(ctx context.Context) {
 		go pl.loopInterlude(ctx)
 	}
 }
+
+// -------------------------
+// optimizeBackgroundLoop
+// -------------------------
 
 // optimizeBackgroundLoop runs optimization in the background periodically or
 // in interludes, based on the provided configuration.
@@ -105,7 +113,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 			return
 
 		case <-timer.C:
-			// 1) Cache warm-up
+			// Plugin ready check
 			if !pl.PluginReady.Load() {
 				klog.V(MyV).InfoS(msg(cfg.Label, InfoCachesNotWarmedUp))
 				lastPendingSet = nil
@@ -116,14 +124,14 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 2) If a plan is active, let it finish.
+			// If a plan is active, let it finish.
 			if ap := pl.getActivePlan(); ap != nil {
 				klog.V(MyV).InfoS(msg(cfg.Label, InfoActivePlanInProgress))
 				timer.Reset(interval)
 				continue
 			}
 
-			// 3) Snapshot
+			// Snapshot pending pods and cluster state.
 			snap, err := buildPendingSnapshotHook(pl)
 			if err != nil {
 				klog.V(MyV).InfoS(msg(cfg.Label, "buildPendingSnapshot failed"),
@@ -136,7 +144,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 			pendingCount := snap.PendingCount
 			currentFingerprint := snap.Fingerprint
 
-			// 4) In-flight run handling
+			// Check for background run completion
 			if runDone != nil {
 				select {
 				case solved := <-runDone:
@@ -165,7 +173,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				}
 			}
 
-			// 5) If we already solved exactly this set + fingerprint, skip.
+			// If we already solved exactly this set + fingerprint, skip.
 			if lastSolvedSet != nil &&
 				lastSolvedFingerprint != "" &&
 				isSameUIDSet(currentSet, lastSolvedSet) &&
@@ -178,7 +186,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 6) No pending -> reset state
+			// No pending -> reset state
 			if pendingCount == 0 {
 				if lastPendingSet != nil || lastSolvedSet != nil || lastSolvedFingerprint != "" {
 					lastPendingSet = nil
@@ -190,7 +198,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 7) Track whether the pending set changed
+			// Track whether the pending set changed
 			if !isSameUIDSet(currentSet, lastPendingSet) {
 				lastPendingSet = cloneUIDSet(currentSet)
 				lastChange = time.Now()
@@ -202,7 +210,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 8) Free-time gating: require a stable window if FreeTimeDelay > 0
+			// Free-time gating: require a stable window if InterludeDelay > 0
 			if cfg.InterludeDelay > 0 {
 				idleFor := time.Since(lastChange)
 				if idleFor < cfg.InterludeDelay {
@@ -211,7 +219,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				}
 			}
 
-			// 9) Start a background run
+			// Start a background run
 			klog.InfoS(msg(cfg.Label, InfoCycleStarted),
 				"pendingPods", pendingCount)
 
@@ -228,6 +236,10 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 		}
 	}
 }
+
+// -------------------------
+// isSameUIDSet
+// -------------------------
 
 // isSameUIDSet returns true if a and b contain exactly the same UIDs.
 func isSameUIDSet(a, b map[types.UID]struct{}) bool {
@@ -248,6 +260,10 @@ func isSameUIDSet(a, b map[types.UID]struct{}) bool {
 	return true
 }
 
+// -------------------------
+// cloneUIDSet
+// -------------------------
+
 // cloneUIDSet shallow-copies a UID set (so we don't alias maps by accident).
 func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 	if in == nil {
@@ -259,6 +275,10 @@ func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 	}
 	return out
 }
+
+// -------------------------
+// isAlreadyComputedForPendingSet
+// -------------------------
 
 // isAlreadyComputedForPendingSet decides whether a optimization run has "fully
 // solved" the current pending set, i.e. there is nothing better to do for this
@@ -277,6 +297,10 @@ func isAlreadyComputedForPendingSet(err error, bestAttempt *SolverResult) bool {
 	return err == ErrNoImprovingSolutionFromAnySolver ||
 		err == ErrNoPendingPodsScheduled
 }
+
+// -------------------------
+// buildPendingSnapshot
+// -------------------------
 
 // buildPendingSnapshot:
 //   - lists current pods and nodes via informers

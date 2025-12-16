@@ -74,4 +74,12 @@ const (
 	// Degree of parallelism for pod recreation operations.
 	RecreatePodParallelism = 8
 	// =========================================================
+
+	// ================ Solver constants =======================
+
+	// Solver optimal status string.
+	SolverStatusOptimal = "OPTIMAL"
+	// Solver feasible status string.
+	SolverStatusFeasible = "FEASIBLE"
+	// =========================================================
 )

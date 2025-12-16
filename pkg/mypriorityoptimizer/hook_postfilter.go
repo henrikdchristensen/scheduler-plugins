@@ -50,6 +50,7 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 	klog.InfoS(msg(stage, "start"), "pod", klog.KObj(pending))
 	postFilterSleep(1 * time.Second)
 
+	// Run optimization to get a plan for this pod.
 	plan, err := postFilterRunOptimization(pl, ctx, pending)
 	if err != nil {
 		switch err {
@@ -61,6 +62,7 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 		}
 	}
 
+	// Nominate the pod if plan provides a nomination.
 	return &framework.PostFilterResult{
 		NominatingInfo: &framework.NominatingInfo{
 			NominatedNodeName: plan.NominatedNode,

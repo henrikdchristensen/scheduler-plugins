@@ -51,6 +51,8 @@ type WorkloadQuotasAtomics map[string]map[string]*atomic.Int32
 // actually depend on. This lets tests provide a tiny fake without implementing
 // the whole framework.Handle interface.
 type HandleDeps interface {
+	// KubeConfig returns the Kubernetes REST configuration.
 	KubeConfig() *rest.Config
+	// SharedInformerFactory returns the shared informer factory.
 	SharedInformerFactory() informers.SharedInformerFactory
 }

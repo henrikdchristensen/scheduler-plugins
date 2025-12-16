@@ -29,6 +29,7 @@ var (
 // -------------------------
 
 // pluginReadiness waits for all informers to sync and until a usable node is found.
+// CHECKED
 func (pl *SharedState) pluginReadiness(ctx context.Context, informers ...cache.SharedIndexInformer) {
 	label := "Plugin Readiness"
 	klog.InfoS(msg(label, InfoWaitingForInformers))
@@ -74,6 +75,7 @@ func (pl *SharedState) pluginReadiness(ctx context.Context, informers ...cache.S
 // -------------------------
 
 // isCacheReady waits for all provided informers to sync.
+// CHECKED
 func isCacheReady(ctx context.Context, informers ...cache.SharedIndexInformer) bool {
 	if len(informers) == 0 {
 		return true
@@ -96,6 +98,7 @@ func isCacheReady(ctx context.Context, informers ...cache.SharedIndexInformer) b
 
 // waitForUsableNode waits until at least one usable node is found, or the
 // context is done.
+// CHECKED
 func (pl *SharedState) waitForUsableNode(ctx context.Context) bool {
 	label := "Wait for Usable Node"
 	t := time.NewTicker(readinessUsableNodeInterval)

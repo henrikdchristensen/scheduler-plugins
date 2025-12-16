@@ -1,4 +1,5 @@
 // plan_helpers_test.go
+// TODO
 package mypriorityoptimizer
 
 import (
@@ -68,6 +69,26 @@ func keysOfPods(m map[string]*v1.Pod) []string {
 	return out
 }
 
+func newSharedStateWithConfigMapInformer(t *testing.T, objects ...runtime.Object) (*SharedState, func()) {
+	t.Helper()
+
+	client := fake.NewSimpleClientset(objects...)
+	factory := informers.NewSharedInformerFactory(client, 0)
+	cmInformer := factory.Core().V1().ConfigMaps().Informer()
+
+	stopCh := make(chan struct{})
+	factory.Start(stopCh)
+	if ok := cache.WaitForCacheSync(stopCh, cmInformer.HasSynced); !ok {
+		close(stopCh)
+		t.Fatalf("ConfigMap informer failed to sync")
+	}
+
+	h := &fakeHandle{client: client, factory: factory}
+	pl := &SharedState{Client: client, Handle: h}
+
+	return pl, func() { close(stopCh) }
+}
+
 // -------------------------
 // Active plan / optimization flow flags
 // -------------------------
@@ -117,7 +138,7 @@ func TestGetAndClearActivePlan(t *testing.T) {
 }
 
 // -------------------------
-// Test Small Plan Helpers
+// Test plan pod helpers
 // -------------------------
 
 func TestPlanPodHelpers(t *testing.T) {
@@ -144,7 +165,7 @@ func TestPlanPodHelpers(t *testing.T) {
 }
 
 // -------------------------
-// increaseWorkloadQuota + sorting
+// increaseWorkloadQuota
 // -------------------------
 
 func TestIncreaseWorkloadQuota(t *testing.T) {
@@ -160,6 +181,10 @@ func TestIncreaseWorkloadQuota(t *testing.T) {
 	mustEq(t, wq[key]["n2"], int32(1), "n2 count wrong")
 }
 
+// -------------------------
+// sortPlacementsByPod
+// -------------------------
+
 func TestSortPlacementsByPod(t *testing.T) {
 	in := []SolverPod{
 		{Namespace: "ns-b", Name: "x"},
@@ -171,6 +196,10 @@ func TestSortPlacementsByPod(t *testing.T) {
 	want := []string{"ns-a/a", "ns-a/z", "ns-b/x"}
 	mustEq(t, got, want, "sortPlacementsByPod order wrong")
 }
+
+// -------------------------
+// sortPodSetItemsByPriorityAndCreation
+// -------------------------
 
 func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 	prioLow := int32(1)
@@ -352,7 +381,7 @@ func TestBuildPlan_PreemptorDeleted_IsIgnored(t *testing.T) {
 }
 
 // -------------------------
-// setActivePlan + buildWorkloadQuotas
+// setActivePlan
 // -------------------------
 
 func TestSetActivePlan_NilPlan_NoActivePlanStored(t *testing.T) {
@@ -382,6 +411,10 @@ func TestSetActivePlan_ReplacesOldAndInitializesQuotas(t *testing.T) {
 	mustEq(t, ap.WorkloadQuotas["wk1"]["n1"].Load(), int32(2), "quota atomics n1 wrong")
 	mustEq(t, ap.WorkloadQuotas["wk1"]["n2"].Load(), int32(0), "quota atomics n2 wrong")
 }
+
+// -------------------------
+// buildWorkloadQuotas
+// -------------------------
 
 func TestBuildWorkloadQuotas_NilAndCounts(t *testing.T) {
 	must(t, buildWorkloadQuotas(nil) == nil, "expected nil output for nil input")
@@ -1042,6 +1075,35 @@ func TestIsPodAllowedByPlan_AndFilterNodes(t *testing.T) {
 	mustContains(t, reason, "quotas exhausted")
 }
 
+func TestIsPodAllowedByPlan_MissingWorkload_QuotaZero_NodeNotInQuota(t *testing.T) {
+	pl := &SharedState{}
+
+	// Set an active plan with quotas only for rs-1
+	pOwned := pod("ns", "owned", withOwner("ReplicaSet", "rs-1"))
+	wk, _ := getTopWorkload(pOwned)
+	wkStr := wk.String()
+
+	ap := &ActivePlan{
+		ID:              "plan",
+		PlacementByName: map[string]string{},
+		WorkloadQuotas:  buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 1}}),
+	}
+	pl.ActivePlan.Store(ap)
+
+	// (A) workload not present in plan => false
+	pOther := pod("ns", "other", withOwner("ReplicaSet", "rs-other"))
+	must(t, !pl.isPodAllowedByPlan(pOther), "expected false for workload not in plan")
+
+	// (B) node is set, but NOT present in quota map => false
+	pOnNX := pod("ns", "owned-nx", withOwner("ReplicaSet", "rs-1"), onNode("nx"))
+	must(t, !pl.isPodAllowedByPlan(pOnNX), "expected false when node not present in perNode quotas")
+
+	// (C) no node selected, but all quotas are 0 => false
+	ap.WorkloadQuotas = buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 0}})
+	pPending := pod("ns", "owned-pend", withOwner("ReplicaSet", "rs-1")) // pending
+	must(t, !pl.isPodAllowedByPlan(pPending), "expected false when all quotas exhausted and pod has no node")
+}
+
 // -------------------------
 // computePlanPodCounts
 // -------------------------
@@ -1113,7 +1175,7 @@ func TestComputePlanPodCounts_ClampsNegative(t *testing.T) {
 }
 
 // -------------------------
-// exportPlanToConfigMap + setPlanStatusInConfigMap
+// exportPlanToConfigMap
 // -------------------------
 
 func TestExportPlanToConfigMap_UsesHook(t *testing.T) {
@@ -1168,25 +1230,73 @@ func TestExportPlanToConfigMap_DefaultPath_CreatesConfigMap(t *testing.T) {
 	mustEq(t, got.PluginVersion, "test", "plugin version mismatch")
 }
 
-func newSharedStateWithConfigMapInformer(t *testing.T, objects ...runtime.Object) (*SharedState, func()) {
-	t.Helper()
+func TestExportPlanToConfigMap_DefaultPath_CreateErrorPropagates(t *testing.T) {
+	orig := exportPlanToConfigMapHook
+	exportPlanToConfigMapHook = nil
+	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
 
-	client := fake.NewSimpleClientset(objects...)
-	factory := informers.NewSharedInformerFactory(client, 0)
-	cmInformer := factory.Core().V1().ConfigMaps().Informer()
+	ctx := context.Background()
+	pl, cleanup := newSharedStateWithConfigMapInformer(t)
+	defer cleanup()
 
-	stopCh := make(chan struct{})
-	factory.Start(stopCh)
-	if ok := cache.WaitForCacheSync(stopCh, cmInformer.HasSynced); !ok {
-		close(stopCh)
-		t.Fatalf("ConfigMap informer failed to sync")
+	// Make ConfigMap create fail inside ensureJson()
+	client := pl.Client.(*fake.Clientset)
+	client.PrependReactor("create", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("create boom")
+	})
+
+	name := fmt.Sprintf("%s%s", PlanConfigMapNamePrefix, "unit-create-fail")
+	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
+
+	err := pl.exportPlanToConfigMap(ctx, name, sp)
+	must(t, err != nil, "expected error")
+	mustContains(t, err.Error(), "create boom")
+}
+
+func TestExportPlanToConfigMap_DefaultPath_PruneDeleteErrorPropagates(t *testing.T) {
+	orig := exportPlanToConfigMapHook
+	exportPlanToConfigMapHook = nil
+	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
+
+	// Create enough existing plan CMs so pruneConfigMaps tries to delete at least one.
+	var objs []runtime.Object
+	for i := 0; i < PlansToRetain+2; i++ {
+		cm := &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:         SystemNamespace,
+				Name:              fmt.Sprintf("%sold-%02d", PlanConfigMapNamePrefix, i),
+				Labels:            map[string]string{PlanConfigMapLabelKey: "true"},
+				CreationTimestamp: metav1.NewTime(time.Unix(int64(i+1), 0).UTC()),
+			},
+			Data: map[string]string{PlanConfigMapLabelKey + ".json": `{}`},
+		}
+		objs = append(objs, cm)
 	}
 
-	h := &fakeHandle{client: client, factory: factory}
-	pl := &SharedState{Client: client, Handle: h}
+	ctx := context.Background()
+	pl, cleanup := newSharedStateWithConfigMapInformer(t, objs...)
+	defer cleanup()
 
-	return pl, func() { close(stopCh) }
+	// Make delete fail during pruning.
+	client := pl.Client.(*fake.Clientset)
+	client.PrependReactor("delete", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("delete boom")
+	})
+	client.PrependReactor("delete-collection", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("delete boom")
+	})
+
+	name := fmt.Sprintf("%s%s", PlanConfigMapNamePrefix, "unit-prune-fail")
+	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
+
+	err := pl.exportPlanToConfigMap(ctx, name, sp)
+	must(t, err != nil, "expected error")
+	mustContains(t, err.Error(), "delete boom")
 }
+
+// -------------------------
+// setPlanStatusInConfigMap
+// -------------------------
 
 func TestSetPlanStatusInConfigMap_UsesHook(t *testing.T) {
 	pl := &SharedState{}
@@ -1422,105 +1532,4 @@ func TestCollectEvictions_SkipsMissingPendingAndDeleting(t *testing.T) {
 	mustEq(t, len(ev), 1, "only running+alive should be evicted")
 	mustEq(t, ev[0].UID, pRun.UID, "wrong evicted UID")
 	mustEq(t, ev[0].Node, "n1", "wrong node for evicted placement")
-}
-
-// -------------------------
-// isPodAllowedByPlan corner branches
-// -------------------------
-
-func TestIsPodAllowedByPlan_MissingWorkload_QuotaZero_NodeNotInQuota(t *testing.T) {
-	pl := &SharedState{}
-
-	// Set an active plan with quotas only for rs-1
-	pOwned := pod("ns", "owned", withOwner("ReplicaSet", "rs-1"))
-	wk, _ := getTopWorkload(pOwned)
-	wkStr := wk.String()
-
-	ap := &ActivePlan{
-		ID:              "plan",
-		PlacementByName: map[string]string{},
-		WorkloadQuotas:  buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 1}}),
-	}
-	pl.ActivePlan.Store(ap)
-
-	// (A) workload not present in plan => false
-	pOther := pod("ns", "other", withOwner("ReplicaSet", "rs-other"))
-	must(t, !pl.isPodAllowedByPlan(pOther), "expected false for workload not in plan")
-
-	// (B) node is set, but NOT present in quota map => false
-	pOnNX := pod("ns", "owned-nx", withOwner("ReplicaSet", "rs-1"), onNode("nx"))
-	must(t, !pl.isPodAllowedByPlan(pOnNX), "expected false when node not present in perNode quotas")
-
-	// (C) no node selected, but all quotas are 0 => false
-	ap.WorkloadQuotas = buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 0}})
-	pPending := pod("ns", "owned-pend", withOwner("ReplicaSet", "rs-1")) // pending
-	must(t, !pl.isPodAllowedByPlan(pPending), "expected false when all quotas exhausted and pod has no node")
-}
-
-// -------------------------
-// exportPlanToConfigMap error paths
-// -------------------------
-
-func TestExportPlanToConfigMap_DefaultPath_CreateErrorPropagates(t *testing.T) {
-	orig := exportPlanToConfigMapHook
-	exportPlanToConfigMapHook = nil
-	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
-
-	ctx := context.Background()
-	pl, cleanup := newSharedStateWithConfigMapInformer(t)
-	defer cleanup()
-
-	// Make ConfigMap create fail inside ensureJson()
-	client := pl.Client.(*fake.Clientset)
-	client.PrependReactor("create", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("create boom")
-	})
-
-	name := fmt.Sprintf("%s%s", PlanConfigMapNamePrefix, "unit-create-fail")
-	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
-
-	err := pl.exportPlanToConfigMap(ctx, name, sp)
-	must(t, err != nil, "expected error")
-	mustContains(t, err.Error(), "create boom")
-}
-
-func TestExportPlanToConfigMap_DefaultPath_PruneDeleteErrorPropagates(t *testing.T) {
-	orig := exportPlanToConfigMapHook
-	exportPlanToConfigMapHook = nil
-	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
-
-	// Create enough existing plan CMs so pruneConfigMaps tries to delete at least one.
-	var objs []runtime.Object
-	for i := 0; i < PlansToRetain+2; i++ {
-		cm := &v1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:         SystemNamespace,
-				Name:              fmt.Sprintf("%sold-%02d", PlanConfigMapNamePrefix, i),
-				Labels:            map[string]string{PlanConfigMapLabelKey: "true"},
-				CreationTimestamp: metav1.NewTime(time.Unix(int64(i+1), 0).UTC()),
-			},
-			Data: map[string]string{PlanConfigMapLabelKey + ".json": `{}`},
-		}
-		objs = append(objs, cm)
-	}
-
-	ctx := context.Background()
-	pl, cleanup := newSharedStateWithConfigMapInformer(t, objs...)
-	defer cleanup()
-
-	// Make delete fail during pruning.
-	client := pl.Client.(*fake.Clientset)
-	client.PrependReactor("delete", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("delete boom")
-	})
-	client.PrependReactor("delete-collection", "configmaps", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("delete boom")
-	})
-
-	name := fmt.Sprintf("%s%s", PlanConfigMapNamePrefix, "unit-prune-fail")
-	sp := &StoredPlan{PluginVersion: "test", GeneratedAt: time.Unix(1, 0).UTC(), PlanStatus: PlanStatusActive, Plan: &Plan{}}
-
-	err := pl.exportPlanToConfigMap(ctx, name, sp)
-	must(t, err != nil, "expected error")
-	mustContains(t, err.Error(), "delete boom")
 }

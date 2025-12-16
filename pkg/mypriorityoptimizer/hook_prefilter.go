@@ -76,6 +76,7 @@ func (pl *SharedState) PreFilter(ctx context.Context, st fwk.CycleState, pending
 // -------------------------
 
 // PreFilterExtensions returns nil as we don't implement PreFilterExtensions.
+// Must be implemented to fully satisfy the PreFilterPlugin interface.
 // CHECKED
 func (pl *SharedState) PreFilterExtensions() framework.PreFilterExtensions {
 	return nil

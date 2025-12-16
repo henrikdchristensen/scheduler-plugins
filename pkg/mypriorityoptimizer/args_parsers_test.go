@@ -7,7 +7,7 @@ import (
 )
 
 // -------------------------
-// getenv
+// getEnv
 // -------------------------
 
 func TestGetEnv(t *testing.T) {

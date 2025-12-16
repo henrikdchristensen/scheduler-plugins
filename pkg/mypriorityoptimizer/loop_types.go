@@ -10,18 +10,31 @@ import (
 
 // OptimizeLoopConfig holds configuration for an optimization loop.
 type OptimizeLoopConfig struct {
-	Label          string        // log label
-	Interval       time.Duration // base tick interval
-	InterludeDelay time.Duration // 0 => no "idle window"; >0 => require this long of stability
-	CancelOnChange bool          // cancel in-flight run if pending set changes
+	// Label used for logging.
+	Label string
+	// Tick interval for the loop.
+	Interval time.Duration
+	// InterludeDelay is the duration of the idle window required for stability.
+	// 0 means no idle window; >0 means require this long of stability.
+	InterludeDelay time.Duration
+	// CancelOnChange indicates whether to cancel in-flight run if pending set changes.
+	CancelOnChange bool
 }
 
-// PendingSnapshot represents a snapshot of the current pending pods
-// and nodes in the cluster.
+// PendingSnapshot represents a snapshot of the current pending pods and nodes
+// in the cluster.
 type PendingSnapshot struct {
-	PendingUIDs  map[types.UID]struct{}
+	// UIDs of pending pods
+	PendingUIDs map[types.UID]struct{}
+	// Number of pending pods
 	PendingCount int
-	Fingerprint  string     // clusterFingerprint(nodes, pods)
-	Pods         []*v1.Pod  // live snapshot (for solver input)
-	Nodes        []*v1.Node // live snapshot (for solver input)
+	// Fingerprint of the cluster state. Meaning a combination of:
+	// - cluster state (nodes, pods)
+	// - pending set (uids)
+	// Used to detect changes in the cluster state.
+	Fingerprint string
+	// Current live pods
+	Pods []*v1.Pod
+	// Current live nodes
+	Nodes []*v1.Node
 }
