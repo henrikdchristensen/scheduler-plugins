@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 #test_kwok_trace_generator.py
 #TODO: finalize tests
-import argparse
-import math
-from pathlib import Path
 
 import pytest
 
+import argparse
+import math
+from pathlib import Path
 
 pytest.importorskip("numpy")
 pytest.importorskip("matplotlib")

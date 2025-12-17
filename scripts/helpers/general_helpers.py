@@ -22,7 +22,7 @@ MEM_UNIT_TABLE = {
 }
 
 ##############################################
-# ------------ Time helpers----------------
+# ------------ Time helpers ------------------
 ##############################################
 def get_timestamp() -> str:
     """
@@ -30,9 +30,12 @@ def get_timestamp() -> str:
     """
     return time.strftime("%Y/%m/%d/%H:%M:%S", time.localtime())
 
-def format_hms(seconds: int) -> str:
+def format_seconds_to_hms(seconds: int) -> str:
     """
     Format seconds into a human-readable string.
+    Examples:
+    3661 -> "1h1m1s"
+    45   -> "45s"
     """
     seconds = max(0, int(seconds))
     h, r = divmod(seconds, 3600)
@@ -44,7 +47,7 @@ def format_hms(seconds: int) -> str:
     return "".join(parts)
 
 ##############################################
-# ------------ Logging helpers----------------
+# ------------ Logging/Info helpers ----------
 ##############################################
 class PrefixFilter(logging.Filter):
     """
@@ -117,9 +120,9 @@ def get_git_info(cwd: Optional[Path] = None) -> Dict[str, Any]:
 def build_cli_cmd() -> str:
     """
     Return the full CLI command used to invoke the current script,
-    prefixed with 'python3 ' (for reproducible info bundles).
+    prefixed with 'python ' (for reproducible info bundles).
     """
-    return "python3 " + " ".join(shlex.quote(a) for a in sys.argv)
+    return "python " + " ".join(shlex.quote(a) for a in sys.argv)
 
 def write_info_file(
     out_path: Path | str,
@@ -543,7 +546,7 @@ def generate_seeds(gen_seeds_to_file: Optional[List[str]]) -> None:
     print(f"wrote {written_total} seeds across {parts} file(s)")
     
 #############################################
-# Solver HTTP trigger helper
+# HTTP trigger helpers
 #############################################
 
 def solver_trigger_http(logger: logging.Logger, url: str, timeout: float) -> tuple[int, str]:
@@ -609,6 +612,10 @@ def parse_json_cell(raw):
         except Exception:
             continue
     return None
+
+#############################################
+# Placement compare helpers
+#############################################
 
 def prio_map(raw) -> Dict[int, int]:
     out: Dict[int, int] = {}

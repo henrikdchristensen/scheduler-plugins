@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 #test_utils.py
 #TODO: finalize tests
-import contextlib
-import io
-import logging
+
+import contextlib, io, logging
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Iterator, List, Tuple
-
 
 def make_logger_stream(name_prefix: str, level: int = logging.DEBUG) -> Tuple[logging.Logger, io.StringIO]:
     """Create an isolated logger + backing StringIO stream for assertions."""

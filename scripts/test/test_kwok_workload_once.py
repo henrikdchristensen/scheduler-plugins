@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 #test_kwok_workload_once.py
 #TODO: finalize tests
-import argparse
-import builtins
-import csv
-import json
-import random
-from pathlib import Path
 
 import pytest
 
-from scripts.kwok_workload_once import test_runner as tr
+import argparse, builtins, csv, json, random
+from pathlib import Path
 
+from scripts.kwok_workload_once import test_runner as tr
 
 
 # ---------------------------------------------------------------------------

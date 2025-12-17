@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 #test_kwokctl_helpers.py
 #TODO: finalize tests
-import logging
-import os
-import subprocess
+
 import pytest
+
+import os, subprocess
 
 from scripts.helpers import kwokctl_helpers as kh
 from scripts.test.test_utils import make_logger_stream, null_lock
-
 
 # ---------------------------------------------------------------------------
 # YAML helpers

@@ -2,10 +2,10 @@
 #test_python_solver.py
 #TODO: finalize tests
 
-import io
-import json
-
 import pytest
+
+import io, json
+
 from ortools.sat.python import cp_model
 
 from scripts.python_solver.main import (

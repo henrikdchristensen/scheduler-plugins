@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 #test_kwok_trace_helpers.py
 #TODO: finalize tests
-import numpy as np
+
 import pytest
 
+import numpy as np
 
 pytest.importorskip("matplotlib")
 pytest.importorskip("scipy")

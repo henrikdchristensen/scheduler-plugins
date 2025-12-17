@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 #test_general_helpers.py.
-#TODO: finalize tests
-
-import io
-import logging
-import re
-import sys
-from pathlib import Path
 
 import pytest
+
+import io, logging, re, sys
+from pathlib import Path
 
 from scripts.helpers import general_helpers as gh
 
@@ -16,7 +12,7 @@ from scripts.helpers import general_helpers as gh
 # Time helpers
 # ---------------------------------------------------------------------------
 
-def test_get_timestamp_format():
+def test_get_timestamp():
     ts = gh.get_timestamp()
     # Format: YYYY/MM/DD/HH:MM:SS
     assert isinstance(ts, str)
@@ -36,11 +32,11 @@ def test_get_timestamp_format():
         (-5, "0s"),
     ],
 )
-def test_format_hms(seconds, expected):
-    assert gh.format_hms(seconds) == expected
+def test_format_seconds_to_hms(seconds, expected):
+    assert gh.format_seconds_to_hms(seconds) == expected
 
 # ---------------------------------------------------------------------------
-# Logging helpers
+# Logging/Info helpers
 # ---------------------------------------------------------------------------
 
 def test_prefix_filter_injects_prefix():
@@ -57,13 +53,40 @@ def test_prefix_filter_injects_prefix():
     assert f.filter(rec) is True
     assert getattr(rec, "prefix") == "[pfx] "
 
-def test_setup_logging_formats_with_prefix_and_level(capsys):
+def test_setup_logging(capsys):
     logger = gh.setup_logging("test-gh-logger", prefix="[w1] ", level="DEBUG")
     logger.debug("hello")
     out = capsys.readouterr().out
     assert "[w1] hello" in out
 
-def test_make_header_footer_basic():
+def test_get_git_info(tmp_path: Path, monkeypatch):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    (repo_path / ".git").mkdir()
+    class Run:
+        def __init__(self, returncode=0, stdout=b""):
+            self.returncode = returncode
+            self.stdout = stdout
+
+    def fake_run(cmd, cwd=None, stdout=None, stderr=None, check=False, **kwargs):
+        assert cwd == str(repo_path)
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return Run(0, b"abc123def4567890\n")
+        if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            return Run(0, b"main\n")
+        if cmd == ["git", "status", "--porcelain"]:
+            return Run(0, b"")
+        return Run(1, b"")
+
+    # Patch the subprocess used inside the module under test
+    monkeypatch.setattr(gh.subprocess, "run", fake_run)
+
+    git_info = gh.get_git_info(cwd=repo_path)
+    assert git_info.get("commit") == "abc123def4567890"
+    assert git_info.get("branch") == "main"
+    assert "remote_url" not in git_info 
+
+def test_make_header_footer():
     header, footer = gh.make_header_footer("Running tests", width=20, border="=")
     assert isinstance(header, str) and isinstance(footer, str)
     # Same width
@@ -73,21 +96,43 @@ def test_make_header_footer_basic():
     # Footer is all border characters
     assert set(footer) == {"="}
 
-# ---------------------------------------------------------------------------
-# CLI / info bundle helpers
-# ---------------------------------------------------------------------------
-
 def test_build_cli_cmd(monkeypatch):
     # Simulate a simple argv
     monkeypatch.setattr(sys, "argv", ["myscript.py", "arg1", "arg two"])
     cmd = gh.build_cli_cmd()
-    # Should start with "python3 " and contain proper quoting
-    assert cmd.startswith("python3 ")
+    # Should start with "python " and contain proper quoting
+    assert cmd.startswith("python ")
     # Ensure script name and args appear
     assert "myscript.py" in cmd
     assert "arg1" in cmd
     # "arg two" should appear as a single quoted argument
     assert "'arg two'" in cmd or '"arg two"' in cmd
+
+def test_write_info_file(tmp_path: Path, monkeypatch, capsys):
+    # Patch the functions that write_info_file imports dynamically
+    monkeypatch.setattr(gh, "get_timestamp", lambda: "2025/01/02/03:04:05")
+    monkeypatch.setattr(gh, "get_git_info", lambda cwd=None: {"commit": "c1", "branch": "main"})
+
+    out_path = tmp_path / "nested" / "info.yaml"
+    logger = gh.setup_logging("test-gh-write-info", prefix="[t] ", level="INFO")
+
+    gh.write_info_file(
+        out_path,
+        meta_extra={"experiment": "e1"},
+        inputs={"alpha": 1, "beta": "x"},
+        logger=logger,
+    )
+
+    assert out_path.exists()
+
+    payload = gh.yaml.safe_load(out_path.read_text(encoding="utf-8"))
+    assert payload["meta"]["timestamp"] == "2025/01/02/03:04:05"
+    assert payload["meta"]["git"] == {"commit": "c1", "branch": "main"}
+    assert payload["meta"]["experiment"] == "e1"
+    assert payload["inputs"] == {"alpha": 1, "beta": "x"}
+
+    out = capsys.readouterr().out
+    assert "wrote info bundle to" in out
 
 @pytest.mark.parametrize(
     "value,expected",
@@ -101,6 +146,54 @@ def test_build_cli_cmd(monkeypatch):
 
 def test_log_field_fmt(value, expected):
     assert gh.log_field_fmt(value) == expected
+
+def test_log_kv_block(capsys):
+    logger = gh.setup_logging("test-gh-kv", prefix="[kv] ", level="INFO")
+
+    # Non-empty fields: should render key/value lines and format <unset>
+    gh.log_kv_block(logger, "MYTITLE", [("a", 1), ("longkey", None)])
+    out = capsys.readouterr().out
+    assert "MYTITLE" in out
+    assert re.search(r"\ba\s*=\s*1\b", out)
+    assert re.search(r"\blongkey\s*=\s*<unset>", out)
+
+    # Empty fields: should print <no fields>
+    gh.log_kv_block(logger, "EMPTY", [])
+    out2 = capsys.readouterr().out
+    assert "EMPTY" in out2
+    assert "<no fields>" in out2
+
+def test_log_args_block(capsys):
+    logger = gh.setup_logging("test-gh-args", prefix="[args] ", level="INFO")
+
+    class Obj:
+        pass
+
+    # Build object with deliberate insertion order: b then a then skip
+    o = Obj()
+    o.b = 2
+    o.a = 1
+    o.skip = 999
+
+    # sort_keys=True => keys.sort() then exclude applied
+    gh.log_args_block(logger, o, title="ARGS_SORTED", include=None, exclude={"skip"}, sort_keys=True)
+    out = capsys.readouterr().out
+    assert "ARGS_SORTED" in out
+    assert "skip" not in out
+
+    # Extract kv-line keys in printed order
+    keys_sorted = re.findall(r"^\s*([A-Za-z_]\w*)\s*=\s*", out, flags=re.M)
+    assert keys_sorted == ["a", "b"]
+
+    # sort_keys=False => preserve insertion order (b before a), then exclude applied
+    gh.log_args_block(logger, o, title="ARGS_UNSORTED", include=None, exclude={"skip"}, sort_keys=False)
+    out2 = capsys.readouterr().out
+    assert "ARGS_UNSORTED" in out2
+    assert "skip" not in out2
+
+    keys_unsorted = re.findall(r"^\s*([A-Za-z_]\w*)\s*=\s*", out2, flags=re.M)
+    assert keys_unsorted == ["b", "a"]
+
 
 # ---------------------------------------------------------------------------
 # Parser helpers
@@ -317,7 +410,7 @@ def test_qty_to_bytes_int_invalid(token):
         (100, "100m"),
         (1000, "1"),
         (1500, "1500m"),
-        (0, "0"),  # 0m → 0 cores, consistent with function
+        (0, "0"),  # 0m → 0 cores
     ],
 )
 
@@ -471,7 +564,7 @@ def test_generate_seeds_non_template_parts_add_suffix(tmp_path: Path, monkeypatc
     assert p1.exists() and p2.exists()
 
 # ---------------------------------------------------------------------------
-# HTTP helper functions (no real network)
+# HTTP trigger helper
 # ---------------------------------------------------------------------------
 
 
@@ -529,7 +622,7 @@ def test_get_solver_active_status_http_success(monkeypatch):
     assert code == 200
     assert "active" in body
 
-def test_get_solver_active_status_http_http_error(monkeypatch):
+def test_get_solver_active_status_http_error(monkeypatch):
     monkeypatch.setattr(gh._urlreq, "urlopen", _raise_http_error(404, b"missing"))
     code, body = gh.get_solver_active_status_http("http://example/active", timeout=0.1)
     assert code == 404
@@ -541,11 +634,34 @@ def test_get_solver_active_status_http_connect_failure(monkeypatch):
     assert code == 0
     assert "connect-failed" in body
 
-def test_prio_map_and_place_compare():
+# ---------------------------------------------------------------------------
+# Placement compare helpers
+# ---------------------------------------------------------------------------
+
+def test_prio_map():
     assert gh.prio_map(None) == {}
     assert gh.prio_map({"p1": 2, "2": 3}) == {1: 2, 2: 3}
     assert gh.prio_map('{"p1": 2, "p2": 0}') == {1: 2, 2: 0}
 
+def test_place_compare():
     assert gh.place_compare({2: 1}, {2: 0}) == 1
     assert gh.place_compare({2: 0}, {2: 1}) == -1
     assert gh.place_compare({2: 0, 1: 1}, {2: 0, 1: 1}) == 0
+
+def test_cmp_placed_by_prio_row():
+    row_win = {
+        "placed_by_prio_solver": '{"1": 2, "2": 1}',
+        "placed_by_prio_default": '{"1": 2, "2": 0}',
+    }
+    row_lose = {
+        "placed_by_prio_solver": '{"1": 2, "2": 0}',
+        "placed_by_prio_default": '{"1": 2, "2": 1}',
+    }
+    row_tie = {
+        "placed_by_prio_solver": '{"1": 2, "2": 0}',
+        "placed_by_prio_default": '{"1": 2, "2": 0}',
+    }
+
+    assert gh.cmp_placed_by_prio_row(row_win) == 1
+    assert gh.cmp_placed_by_prio_row(row_lose) == -1
+    assert gh.cmp_placed_by_prio_row(row_tie) == 0

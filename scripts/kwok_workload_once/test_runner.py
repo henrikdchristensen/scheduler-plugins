@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib import request as _urlreq, error as _urlerr
 from scripts.helpers.general_helpers import (
     seeded_random, generate_seeds,
-    get_timestamp, setup_logging, format_hms, make_header_footer,
+    get_timestamp, setup_logging, format_seconds_to_hms, make_header_footer,
     csv_append_row, csv_read_header,
     qty_to_mcpu_str, qty_to_bytes_str, qty_to_bytes_int, qty_to_mcpu_int,
     normalize_interval, parse_int_interval, parse_qty_interval, parse_timeout_s,
@@ -888,7 +888,7 @@ class TestRunner:
         left_s = max(0, int(round(eta_epoch - now)))
         eta_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(eta_epoch))
         block = ("ETA %s (in %s) | seeds left: %d%s | avg/seed=%.1fs (%d sample%s)") % (
-            eta_str, format_hms(left_s), seeds_left, not_all_seg, avg, len(self.seed_durations), "" if len(self.seed_durations) == 1 else "s",
+            eta_str, format_seconds_to_hms(left_s), seeds_left, not_all_seg, avg, len(self.seed_durations), "" if len(self.seed_durations) == 1 else "s",
         )
         LOG.info("\n%s\n%s\n%s", header, block, footer)
 

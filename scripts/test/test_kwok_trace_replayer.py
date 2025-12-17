@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 #test_kwok_trace_replayer.py
 #TODO: finalize tests
-import argparse
-import csv
-import json
-from pathlib import Path
 
 import pytest
 
+import argparse, csv, json
+from pathlib import Path
 
 pytest.importorskip("yaml")
 
