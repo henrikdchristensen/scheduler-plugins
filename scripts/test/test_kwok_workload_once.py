@@ -84,7 +84,6 @@ def test_build_argparser_parses_minimal_seed_run():
 # ===========================================================================
 
 def test_initialize_loads_job_file_and_configs_and_sets_state(monkeypatch, tmp_path):
-    # Minimal valid workload config (must pass _validate_workload_config)
     wl = tmp_path / "wl.yaml"
     wl.write_text(
         """\
@@ -129,11 +128,10 @@ override-kwokctl-envs:
 
     out_dir = tmp_path / "out"
 
-    # Reduce coupling to logging + helper internals
     monkeypatch.setattr(tr, "setup_logging", lambda **_k: None)
     monkeypatch.setattr(tr, "build_cli_cmd", lambda: "CMD")
 
-    # Avoid depending on kwokctl env merge behavior; just ensure env shows up after merge.
+    # Avoid depending on kwokctl env merge behavior
     def fake_merge_kwokctl_envs(doc, override_envs):
         doc = dict(doc)
         cps = list(doc.get("componentsPatches") or [])
@@ -181,7 +179,7 @@ override-kwokctl-envs:
 
     runner = tr.TestRunner(args)
     assert runner.workload_config is not None
-    assert runner.workload_config.namespace == "ns2"  # override applied
+    assert runner.workload_config.namespace == "ns2"
     assert runner.ctx == f"kwok-{runner.args.cluster_name}"
 
     assert captured["info"] is not None
@@ -696,13 +694,13 @@ def test_eta_summary(monkeypatch):
     runner.args = ns(seeds_not_all_running=0)
     runner.seed_durations = []
 
-    # unknown/infinite -> early return
+    # unknown/infinite
     runner._eta_summary(next_seed_idx=1, seeds_total=-1)
 
-    # valid totals but no durations -> "collecting first duration sample"
+    # valid totals but no durations
     runner._eta_summary(next_seed_idx=1, seeds_total=10)
 
-    # force the "eta_epoch is None" branch
+    # force "eta_epoch is None" branch
     runner.seed_durations = [1.0]
     runner.args = ns(seeds_not_all_running=2)
     runner.saved_not_all_running = 1
@@ -936,7 +934,7 @@ def test_append_result_csv_prune_failure_logs_warning(tmp_path, monkeypatch):
     # Make a valid header so _purge_mismatched_results_csv doesn't try to delete.
     runner.results_f.write_text(",".join(tr.RESULTS_HEADER) + "\n", encoding="utf-8")
 
-    # Avoid touching filesystem in csv_read_header / csv_append_row
+    # Avoid touching filesystem
     monkeypatch.setattr(tr, "csv_read_header", lambda *_a, **_k: [c.strip() for c in tr.RESULTS_HEADER])
 
     appended = {"n": 0}
@@ -1025,7 +1023,7 @@ def test_extract_best_attempt_fields_handles_missing_or_invalid():
     score, dur, status = tr.TestRunner._extract_best_attempt_fields("nope", attempts=[{"name": "a"}])
     assert (score, dur, status) == (None, None, "")
 
-    # invalid duration_ms + non-json score still should not raise
+    # invalid duration_ms
     attempts = [{"name": "b", "score": object(), "duration_ms": "nope", "status": None}]
     score, dur, status = tr.TestRunner._extract_best_attempt_fields("b", attempts)
     assert dur is None
@@ -1215,7 +1213,6 @@ def test_get_latest_configmap_label_selector_accepts_any(monkeypatch):
     def run_ok(*_a, **_k):
         return R(0, json.dumps(items).encode("utf-8"))
 
-    # label_selector set => _matches returns True for all items => pick newest
     cm = tr.TestRunner._get_latest_configmap(
         "ctx",
         "ns",
@@ -1230,7 +1227,6 @@ def test_get_latest_configmap_label_selector_accepts_any(monkeypatch):
     assert cm is not None
     assert cm["metadata"]["name"] == "y"
 
-    # accept_prefix=False and no exact base_name => None
     cm2 = tr.TestRunner._get_latest_configmap(
         "ctx",
         "ns",
@@ -1435,7 +1431,7 @@ def test_solver_directly_exports_and_preplace(tmp_path, monkeypatch):
     assert meta["total_pods"] == 6
     assert meta["total_node_cpu"] == 2000
     assert meta["total_node_mem"] == 4000
-    assert meta["initial_running_uids"]  # pre-place created some "running" pods
+    assert meta["initial_running_uids"]
 
     inst = json.loads((tmp_path / "in.json").read_text(encoding="utf-8"))
     assert any((p.get("node") or "") for p in inst.get("pods", []))
@@ -1566,10 +1562,9 @@ def test_wait_solver_inactive_http_timeout(monkeypatch):
 
 def test_wait_solver_inactive_http_logs_and_non_str_body(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
-    tc = TimeController(now=3.0)  # ensure now-last_log > 2 on first loop
+    tc = TimeController(now=3.0)
 
     def fake_status(_url):
-        # advance time a bit each poll to avoid infinite loop
         tc.now += 0.6
         return (500, b"bytes")
 
@@ -1655,7 +1650,6 @@ def test_run_mode_count(monkeypatch):
     runner.quota_reached = False
     runner.args = ns(count=2, re_run_seeds=False, repeats=1, pause=False, seed=None)
 
-    # Provide deterministic seeds: 1 (skip), 1 (skip), 2, 3 -> should run 2 seeds total
     seq = {"vals": [1, 1, 2, 3]}
 
     class RNG:
@@ -1869,7 +1863,7 @@ def test_execute_seed_on_cluster_snapshot_validation_mismatch_fails(monkeypatch)
         lambda *_a, **_k: [{"name": "rs", "priority": 1, "req_cpu_m": 1, "req_mem_bytes": 1, "replicas": 1}],
     )
 
-    # running+unsched != expected -> fail early (before any tuple unpacking)
+    # running+unsched != expected -> fail early
     class Snap:
         pods_running = ["p1"]
         pods_unscheduled = []
@@ -1916,7 +1910,7 @@ def test_execute_seed_on_cluster_happy_path(monkeypatch, tmp_path):
         solver_trigger=False,
         save_solver_stats=True,
         save_scheduler_logs=True,
-        seeds_not_all_running=1,  # enforce quota when unscheduled != 0
+        seeds_not_all_running=1,
     )
 
     monkeypatch.setattr(tr, "ensure_kwok_cluster", lambda *a, **k: None)
