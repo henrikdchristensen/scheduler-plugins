@@ -8,9 +8,6 @@ import argparse
 import math
 from pathlib import Path
 
-pytest.importorskip("numpy")
-pytest.importorskip("matplotlib")
-
 from scripts.kwok_trace_replayer import trace_generator as tg
 
 

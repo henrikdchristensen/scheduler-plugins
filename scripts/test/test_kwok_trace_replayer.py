@@ -7,8 +7,6 @@ import pytest
 import argparse, csv, json
 from pathlib import Path
 
-pytest.importorskip("yaml")
-
 from scripts.kwok_trace_replayer import trace_replayer as tr
 
 
