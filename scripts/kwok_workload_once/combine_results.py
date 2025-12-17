@@ -6,14 +6,14 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple, Union
+
 from scripts.helpers.general_helpers import (
     cmp_placed_by_prio_row,
     parse_json_cell,
-    strip_outer_quotes,
 )
 
-import pandas as pd
 
 # Matching directory names
 DIR_RE_SOLVER = re.compile(r"^nodes(?P<nodes>\d+)_pods(?P<pods>\d+)_prio(?P<prio>\d+)_util(?P<util>\d{3})_timeout(?P<timeout>\d{2})$")

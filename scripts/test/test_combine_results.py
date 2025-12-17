@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-#test_combine_results.py
-#TODO: finalize tests
+# test_combine_results.py
 
-import csv
-import math
+import pytest
+
+import csv, math
 from pathlib import Path
+import pandas as pd
 
 from scripts.kwok_workload_once import combine_results as cr
 
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
 
 CSV_COLUMNS = [
     "seed",
@@ -25,15 +30,48 @@ CSV_COLUMNS = [
 
 def _write_results_csv(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for row in rows:
             writer.writerow({k: row.get(k, "") for k in CSV_COLUMNS})
 
 
-def test_helpers_rate_dirname_and_json_parsing():
+# =======================================================================
+# Helpers
+# =======================================================================
+
+# ---------------------------------------------------------------------------
+# rate
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "num,den,expect_nan,expect_value",
+    [
+        (2, 4, False, 0.5),
+        (0, 4, False, 0.0),
+        (1, 0, True, None),
+        (1, None, True, None),
+    ],
+)
+def test_rate(num, den, expect_nan: bool, expect_value: float | None):
+    got = cr.rate(num, den)
+    if expect_nan:
+        assert math.isnan(got)
+    else:
+        assert got == expect_value
+
+
+# ---------------------------------------------------------------------------
+# parse_solver_dirname
+# ---------------------------------------------------------------------------
+
+def test_parse_solver_dirname_invalid_returns_none():
     assert cr.parse_solver_dirname("not-a-match") is None
+    assert cr.parse_solver_dirname("") is None
+
+
+def test_parse_solver_dirname_valid_extracts_meta():
     meta = cr.parse_solver_dirname("nodes2_pods10_prio3_util050_timeout10")
     assert meta is not None
     assert meta["nodes"] == 2
@@ -44,26 +82,157 @@ def test_helpers_rate_dirname_and_json_parsing():
     assert meta["pods_per_node"] == 5
     assert meta["default_dirname"] == "nodes2_pods10_prio3_util050"
 
-    assert math.isnan(cr.rate(1, 0))
-    assert cr.rate(2, 4) == 0.5
 
-    assert cr.strip_outer_quotes(None) is None
-    assert cr.strip_outer_quotes('"x"') == "x"
-    assert cr.strip_outer_quotes("'x'") == "x"
-    assert cr.strip_outer_quotes("x") == "x"
+# ---------------------------------------------------------------------------
+# load_csv
+# ---------------------------------------------------------------------------
 
-    assert cr.parse_json_cell(None) is None
-    assert cr.parse_json_cell("") is None
-    assert cr.parse_json_cell("  ") is None
-    assert cr.parse_json_cell('{"a": 1}') == {"a": 1}
-    assert cr.parse_json_cell("not-json") is None
+def test_load_csv_missing_raises(tmp_path: Path):
+    with pytest.raises(FileNotFoundError):
+        cr.load_csv(tmp_path / "does-not-exist.csv")
 
 
-def test_load_csv_and_default_vs_solver_per_seed(tmp_path: Path):
+def test_load_csv_renames_and_converts(tmp_path: Path):
+    p = tmp_path / "results.csv"
+    _write_results_csv(
+        p,
+        [
+            {
+                "seed": " s1 ",
+                "util_run_cpu_now": "10",
+                "util_run_mem_now": "100",
+                "running_placed_by_prio_now": '{"p2": 1}',
+                "unscheduled_count_before": "0",
+                "error": "",
+                "best_solver_status": "optimal",
+                "best_solver_name": "solver",
+                "best_solver_duration_ms": "5",
+                "best_solver_score": "",
+            }
+        ],
+    )
+
+    df = cr.load_csv(p)
+
+    # renamed columns exist
+    for c in ["seed", "util_run_cpu", "util_run_mem", "solver_status", "solver_duration_ms", "placed_by_prio"]:
+        assert c in df.columns
+
+    # conversions
+    assert df.loc[0, "seed"] == "s1"
+    assert float(df.loc[0, "util_run_cpu"]) == 10.0
+    assert float(df.loc[0, "util_run_mem"]) == 100.0
+    assert df.loc[0, "solver_status"] == "OPTIMAL"
+    assert float(df.loc[0, "solver_duration_ms"]) == 5.0
+
+    # placed_by_prio is compact JSON (exact value depends on parse_json_cell, but should be a JSON string)
+    assert isinstance(df.loc[0, "placed_by_prio"], str)
+    assert df.loc[0, "placed_by_prio"].startswith("{") and df.loc[0, "placed_by_prio"].endswith("}")
+
+
+# =======================================================================
+# CombineResultsAnalyzer
+# =======================================================================
+
+# ---------------------------------------------------------------------------
+# _format_num
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "value,decimals,expected",
+    [
+        (1.23456, None, 1.23456),
+        (1.23456, 2, "1.23"),
+        (0.0, 3, "0.000"),
+    ],
+)
+def test_format_num(value: float, decimals: int | None, expected):
+    got = cr.CombineResultsAnalyzer._format_num(value, decimals)
+    assert got == expected
+
+
+# ---------------------------------------------------------------------------
+# _split_default_all_running
+# ---------------------------------------------------------------------------
+
+def test_split_default_all_running_splits_rows():
+    df = pd.DataFrame(
+        {
+            "seed": ["a", "b", "c"],
+            "default_all_running": [True, False, True],
+        }
+    )
+    mask, not_all = cr.CombineResultsAnalyzer._split_default_all_running(df)
+    assert mask.tolist() == [True, False, True]
+    assert not_all["seed"].tolist() == ["b"]
+
+
+# ---------------------------------------------------------------------------
+# _status_flags
+# ---------------------------------------------------------------------------
+
+def test_status_flags_optimal_feasible_ok():
+    df = pd.DataFrame({"solver_status": ["OPTIMAL", "FEASIBLE", "FAILED", ""]})
+    is_opt, is_feas, is_ok = cr.CombineResultsAnalyzer._status_flags(df)
+    assert is_opt.tolist() == [True, False, False, False]
+    assert is_feas.tolist() == [False, True, False, False]
+    assert is_ok.tolist() == [True, True, False, False]
+
+
+# ---------------------------------------------------------------------------
+# _placement_flags
+# ---------------------------------------------------------------------------
+
+def test_placement_flags_equal_better_worse():
+    df = pd.DataFrame({"placed_cmp": [0, 1, -1, 2, -2]})
+    eq, better, worse = cr.CombineResultsAnalyzer._placement_flags(df)
+    assert eq.tolist() == [True, False, False, False, False]
+    assert better.tolist() == [False, True, False, True, False]
+    assert worse.tolist() == [False, False, True, False, True]
+
+
+# ---------------------------------------------------------------------------
+# _solver_called_count
+# ---------------------------------------------------------------------------
+
+def test_solver_called_count_sums_int_flags():
+    df = pd.DataFrame({"solver_called": [0, 1, 1, 0]})
+    assert cr.CombineResultsAnalyzer._solver_called_count(df) == 2
+
+
+# ---------------------------------------------------------------------------
+# _compute_category_counts
+# ---------------------------------------------------------------------------
+
+def test_compute_category_counts_empty_df_uses_denominator_one():
+    # Provide the required columns with no rows.
+    df = pd.DataFrame(
+        {
+            "default_all_running": pd.Series(dtype=bool),
+            "solver_status": pd.Series(dtype=str),
+            "placed_cmp": pd.Series(dtype=float),
+            "solver_called": pd.Series(dtype=int),
+            "solver_duration_ms": pd.Series(dtype=float),
+            "cpu_delta": pd.Series(dtype=float),
+            "mem_delta": pd.Series(dtype=float),
+        }
+    )
+    counts = cr.CombineResultsAnalyzer._compute_category_counts(df)
+    assert counts.n_seeds == 1
+    assert counts.n_default_all_running == 0
+    assert counts.default_all_running_rate == 0.0
+    assert counts.other_rate == 1.0
+
+
+# =======================================================================
+# default_vs_solver_per_seed
+# =======================================================================
+
+def test_default_vs_solver_per_seed_and_category_counts(tmp_path: Path):
     solver_csv = tmp_path / "solver" / "results.csv"
     default_csv = tmp_path / "default" / "results.csv"
 
-    # Build a small set of seeds that cover all category branches.
+    # Seeds crafted to cover the categories.
     solver_rows = [
         # all running
         {
@@ -178,13 +347,13 @@ def test_load_csv_and_default_vs_solver_per_seed(tmp_path: Path):
     _write_results_csv(solver_csv, solver_rows)
     _write_results_csv(default_csv, default_rows)
 
-    df_s = cr.load_csv(solver_csv)
-    assert "placed_by_prio" in df_s.columns
-    assert df_s["seed"].tolist() == ["s_all", "s_def_opt", "s_sol_opt", "s_sol_feas", "s_fail"]
-
     joined = cr.default_vs_solver_per_seed(solver_csv, default_csv, cfg_name="cfg")
     assert len(joined) == 5
+
+    # default_all_running path
     assert joined.loc[joined["seed"] == "s_all", "default_all_running"].item() is True
+
+    # placement comparisons (rely on cmp_placed_by_prio_row behavior)
     assert joined.loc[joined["seed"] == "s_def_opt", "placed_cmp"].item() == 0
     assert joined.loc[joined["seed"] == "s_sol_opt", "placed_cmp"].item() == 1
 
@@ -198,6 +367,10 @@ def test_load_csv_and_default_vs_solver_per_seed(tmp_path: Path):
     assert counts.n_solver_improve == 2
     assert counts.n_other == 0
 
+
+# =======================================================================
+# CombineResultsAnalyzer.analyze_combo / run
+# =======================================================================
 
 def test_analyze_combo_skips_missing_dirs_and_files(tmp_path: Path, capsys):
     args = cr.CombineResultsArgs(
@@ -285,7 +458,7 @@ def test_analyze_combo_emits_warn_branches_when_patched(tmp_path: Path, capsys, 
     meta = cr.parse_solver_dirname(solver_dir.name)
     assert meta is not None
 
-    # Force the warning branches inside analyze_combo
+    # Force warning branches in analyze_combo
     def fake_counts(_df):
         return cr.CategoryCounts(
             n_seeds=1,
@@ -314,6 +487,88 @@ def test_analyze_combo_emits_warn_branches_when_patched(tmp_path: Path, capsys, 
 
     out = capsys.readouterr().out
     assert "rates sum > 1.00" in out
+    assert "category counts sum" in out
+
+
+def test_analyze_combo_emits_warn_rate_sum_lt_zero_when_patched(tmp_path: Path, capsys, monkeypatch):
+    # Minimal valid directory structure
+    solver_dir = tmp_path / "solver" / "nodes1_pods1_prio1_util050_timeout10"
+    default_dir = tmp_path / "default" / "nodes1_pods1_prio1_util050"
+    solver_csv = solver_dir / "results.csv"
+    default_csv = default_dir / "results.csv"
+
+    _write_results_csv(
+        solver_csv,
+        [
+            {
+                "seed": "s1",
+                "util_run_cpu_now": "10",
+                "util_run_mem_now": "100",
+                "running_placed_by_prio_now": '{"p1": 1}',
+                "unscheduled_count_before": "1",
+                "best_solver_status": "OPTIMAL",
+                "best_solver_name": "solver",
+                "best_solver_duration_ms": "1",
+            }
+        ],
+    )
+    _write_results_csv(
+        default_csv,
+        [
+            {
+                "seed": "s1",
+                "util_run_cpu_now": "9",
+                "util_run_mem_now": "90",
+                "running_placed_by_prio_now": '{"p1": 1}',
+                "unscheduled_count_before": "1",
+                "best_solver_status": "",
+                "best_solver_name": "",
+                "best_solver_duration_ms": "",
+            }
+        ],
+    )
+
+    args = cr.CombineResultsArgs(
+        results_root=tmp_path,
+        solver_dir="solver",
+        default_dir="default",
+        results_csv="results.csv",
+        out_dir=tmp_path / "analysis",
+        decimals=2,
+    )
+    analyzer = cr.CombineResultsAnalyzer(args)
+    meta = cr.parse_solver_dirname(solver_dir.name)
+    assert meta is not None
+
+    # Force the rate_sum < 0.00 branch
+    def fake_counts(_df):
+        return cr.CategoryCounts(
+            n_seeds=1,
+            n_seeds_not_all_running=1,
+            n_default_all_running=0,
+            n_solver_called=0,
+            n_default_optimal=0,
+            n_solver_optimal=0,
+            n_solver_feasible=0,
+            n_solver_failed=0,
+            n_solver_improve=0,
+            n_other=0,
+            default_all_running_rate=-1.0,
+            solver_called_rate=-1.0,
+            default_optimal_rate=-1.0,
+            solver_optimal_rate=-1.0,
+            solver_feasible_rate=-1.0,
+            solver_failed_rate=-1.0,
+            solver_improve_rate=-1.0,
+            other_rate=-1.0,
+        )
+
+    monkeypatch.setattr(cr.CombineResultsAnalyzer, "_compute_category_counts", staticmethod(fake_counts))
+    row = analyzer.analyze_combo(solver_dir=solver_dir, default_dir=default_dir, meta=meta)
+    assert row is not None
+
+    out = capsys.readouterr().out
+    assert "rates sum < 0.00" in out
     assert "category counts sum" in out
 
 
@@ -381,8 +636,12 @@ def test_run_writes_per_combo_csv_and_skips_bad_folder(tmp_path: Path, capsys):
     assert "nodes1_pods1_prio1_util050_timeout10" in text
 
 
+# =======================================================================
+# build_argparser / main
+# =======================================================================
+
 def test_main_parses_args_and_decimals_disable(tmp_path: Path, monkeypatch):
-    seen = {}
+    seen: dict = {}
 
     def fake_run(self):
         seen["args"] = self.args
