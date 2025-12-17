@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 #test_python_solver.py
-#TODO: finalize tests
 
 import pytest
 

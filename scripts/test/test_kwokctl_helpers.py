@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 #test_kwokctl_helpers.py
-#TODO: finalize tests
 
 import pytest
 
@@ -10,10 +9,10 @@ from scripts.helpers import kwokctl_helpers as kh
 from scripts.test.test_utils import make_logger_stream, null_lock
 
 # ---------------------------------------------------------------------------
-# YAML helpers
+# YAML Helpers
 # ---------------------------------------------------------------------------
 
-def test_yaml_kwok_node_contains_expected_fields():
+def test_yaml_kwok_node():
 	y = kh.yaml_kwok_node("kwok-node-1", cpu="4", mem="8Gi", pods_cap=123)
 	assert "kind: Node" in y
 	assert "name: kwok-node-1" in y
@@ -24,7 +23,7 @@ def test_yaml_kwok_node_contains_expected_fields():
 	assert y.strip().endswith("---")
 
 
-def test_yaml_kwok_rs_contains_expected_fields():
+def test_yaml_kwok_rs():
 	y = kh.yaml_kwok_rs("ns1", "rs1", replicas=3, cpu="250m", mem="64Mi", pc="p10")
 	assert "kind: ReplicaSet" in y
 	assert "namespace: ns1" in y
@@ -37,7 +36,7 @@ def test_yaml_kwok_rs_contains_expected_fields():
 	assert y.strip().endswith("---")
 
 
-def test_yaml_kwok_pod_contains_expected_fields():
+def test_yaml_kwok_pod():
 	y = kh.yaml_kwok_pod("ns1", "pod1", cpu="100m", mem="32Mi", pc="p5")
 	assert "kind: Pod" in y
 	assert "namespace: ns1" in y
@@ -48,7 +47,7 @@ def test_yaml_kwok_pod_contains_expected_fields():
 
 
 # ---------------------------------------------------------------------------
-# KWOK helpers
+# KWOK Helpers
 # ---------------------------------------------------------------------------
 
 
