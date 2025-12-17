@@ -13,7 +13,6 @@ from scripts.test.test_utils import make_logger_stream, null_lock
 # YAML helpers
 # ---------------------------------------------------------------------------
 
-
 def test_yaml_kwok_node_contains_expected_fields():
 	y = kh.yaml_kwok_node("kwok-node-1", cpu="4", mem="8Gi", pods_cap=123)
 	assert "kind: Node" in y

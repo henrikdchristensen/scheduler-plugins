@@ -15,7 +15,7 @@ from scripts.helpers.general_helpers import (
     csv_append_row, csv_read_header,
     qty_to_mcpu_str, qty_to_bytes_str, qty_to_bytes_int, qty_to_mcpu_int,
     normalize_interval, parse_int_interval, parse_qty_interval, parse_timeout_s,
-    get_int_from_dict, get_float_from_dict, get_str, get_str_from_dict, coerce_bool,
+    get_int_from_dict, get_float_from_dict, get_str_from_dict,
     log_field_fmt, write_info_file, build_cli_cmd,
     solver_trigger_http, get_solver_active_status_http,
     SystemClock, Runner, Clock,
@@ -933,7 +933,7 @@ class TestRunner:
             )
             file_path = self.output_dir_resolved / file_name
 
-            # write a tiny payload
+            # write a small payload to eta file
             with open(file_path, "w", encoding="utf-8") as fh:
                 payload = {
                     "eta_epoch": int(eta_epoch) if isinstance(eta_epoch, (int, float)) else None,

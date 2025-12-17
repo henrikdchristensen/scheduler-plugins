@@ -15,7 +15,7 @@ from scripts.kwok_workload_once import test_runner as tr
 # ---------------------------------------------------------------------------
 
 
-def test_build_argparser_parses_basic_args():
+def test_build_argparser():
 	ap = tr.build_argparser()
 	args = ap.parse_args([
 		"--workload-config-file", "wl.yaml",
@@ -73,7 +73,6 @@ override-kwokctl-envs:
 
 	out_dir = tmp_path / "out"
 
-	# Keep init deterministic and side-effect free.
 	monkeypatch.setattr(tr, "setup_logging", lambda **_k: None)
 	monkeypatch.setattr(tr, "build_cli_cmd", lambda: "CMD")
 
@@ -123,7 +122,6 @@ def test_initialize_job_file_must_be_mapping(tmp_path, monkeypatch):
 	job = tmp_path / "job.yaml"
 	job.write_text("- 1\n- 2\n", encoding="utf-8")
 
-	# Stub out logging so failures are only about job parsing/type.
 	monkeypatch.setattr(tr, "setup_logging", lambda **_k: None)
 
 	ap = tr.build_argparser()
@@ -138,7 +136,7 @@ def test_initialize_job_file_must_be_mapping(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# TestRunner.ensure_default_args
+# ensure_default_args
 # ---------------------------------------------------------------------------
 
 
@@ -376,7 +374,7 @@ def test_ensure_default_args_solver_trigger_requires_binary_runtime(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Seed helpers: _read_seeds_file
+# _read_seeds_file
 # ---------------------------------------------------------------------------
 
 
@@ -405,7 +403,7 @@ def test_read_seeds_file_missing_raises_value_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Config helpers: _parse_config_doc, _validate_workload_config
+# _parse_config_doc
 # ---------------------------------------------------------------------------
 
 
@@ -428,6 +426,10 @@ def test_parse_config_doc_applies_override_first():
 	assert cfg.num_nodes == 3
 	assert cfg.wait_pod_mode == "ready"
 
+
+# ---------------------------------------------------------------------------
+# _validate_workload_config
+# ---------------------------------------------------------------------------
 
 def test_validate_workload_config_reports_multiple_errors():
 	bad = tr.TestConfigRaw(
@@ -464,6 +466,10 @@ def test_validate_workload_config_ok():
 	assert msg == ""
 
 
+# ---------------------------------------------------------------------------
+# _resolve_config_for_seed
+# ---------------------------------------------------------------------------
+
 def test_resolve_config_for_seed_requires_num_replicas_per_rs():
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
 	runner.workload_config = tr.TestConfigRaw(
@@ -482,7 +488,7 @@ def test_resolve_config_for_seed_requires_num_replicas_per_rs():
 
 
 # ---------------------------------------------------------------------------
-# Logging helpers: _write_info_file, _combined_job_configs_seed_str
+# _write_info_file
 # ---------------------------------------------------------------------------
 
 
@@ -533,8 +539,11 @@ def test_write_info_file_logs_warning_on_exception(monkeypatch, tmp_path):
 	runner._write_info_file()
 	assert seen["warn"] == 1
 
+# ---------------------------------------------------------------------------
+# _combined_job_configs_seed_str
+# ---------------------------------------------------------------------------
 
-def test_combined_job_configs_seed_str_formats_optional_fields():
+def test_combined_job_configs_seed_str():
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
 	runner.args = argparse.Namespace(
 		job_file=None,
@@ -555,7 +564,113 @@ def test_combined_job_configs_seed_str_formats_optional_fields():
 
 
 # ---------------------------------------------------------------------------
-# Parsing helpers: _parse_waits, _get_wait_pod_mode_from_dict
+# _log_workload_config
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _log_args
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _log_kwokctl_envs
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _record_failure
+# ---------------------------------------------------------------------------
+
+def test_record_failure(tmp_path):
+	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
+	runner.suppress_fail_log = True
+	runner.failure = None
+	runner.failed_f = tmp_path / "failed.tsv"
+
+	runner._record_failure("cat", 7, "phase", "msg", details="d")
+	assert runner.failure is not None
+	assert runner.failure.category == "cat"
+	assert runner.failure.seed == 7
+	assert runner.failure.phase == "phase"
+	assert runner.failure.message == "msg"
+	assert runner.failure.details == "d"
+	assert not runner.failed_f.exists()
+
+# ---------------------------------------------------------------------------
+# _log_seed_run
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _log_seed_summary
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _eta_record_seed_duration
+# ---------------------------------------------------------------------------
+
+def test_eta_record_seed_duration(monkeypatch):
+	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
+	runner.seed_durations = []
+
+	monkeypatch.setattr(tr.time, "time", lambda: 100.0)
+	runner._eta_record_seed_duration(started_at=90.0)
+	assert runner.seed_durations == [10.0]
+
+# ---------------------------------------------------------------------------
+# _eta_estimation
+# ---------------------------------------------------------------------------
+
+def test_eta_estimation_returns_none_when_unknown_or_no_samples():
+	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
+	runner.seed_durations = []
+	assert runner._eta_estimation(1, 10) is None
+
+	runner.seed_durations = [1.0]
+	assert runner._eta_estimation(1, -1) is None
+	assert runner._eta_estimation(1, 0) is None
+
+
+def test_eta_estimation_returns_epoch(monkeypatch):
+	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
+	runner.seed_durations = [2.0, 4.0]  # avg = 3s
+	monkeypatch.setattr(tr.time, "time", lambda: 100.0)
+	# seed_idx=3 => seeds_done=2 => left=8 (for total=10) => eta=100+8*3
+	assert runner._eta_estimation(3, 10) == 124.0
+
+# ---------------------------------------------------------------------------
+# _eta_summary
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _eta_write_file
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _eta_update_marker
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _parse_waits
+# ---------------------------------------------------------------------------
+
+#TODO
+
+# ---------------------------------------------------------------------------
+# _get_wait_pod_mode_from_dict
 # ---------------------------------------------------------------------------
 
 
@@ -598,68 +713,22 @@ def test_parse_waits_defaults_and_none_mode():
 	assert settle_max == 0
 
 
-# ---------------------------------------------------------------------------
-# Logging helpers: _record_failure
-# ---------------------------------------------------------------------------
-
-
-def test_record_failure_suppressed_stores_failure_object(tmp_path):
-	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
-	runner.suppress_fail_log = True
-	runner.failure = None
-	runner.failed_f = tmp_path / "failed.tsv"
-
-	runner._record_failure("cat", 7, "phase", "msg", details="d")
-	assert runner.failure is not None
-	assert runner.failure.category == "cat"
-	assert runner.failure.seed == 7
-	assert runner.failure.phase == "phase"
-	assert runner.failure.message == "msg"
-	assert runner.failure.details == "d"
-	assert not runner.failed_f.exists()
 
 # ---------------------------------------------------------------------------
-# ETA helpers
+# merge_job_fields_into_args
 # ---------------------------------------------------------------------------
 
 
-def test_eta_record_seed_duration_appends_non_negative(monkeypatch):
-	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
-	runner.seed_durations = []
-
-	monkeypatch.setattr(tr.time, "time", lambda: 100.0)
-	runner._eta_record_seed_duration(started_at=90.0)
-	assert runner.seed_durations == [10.0]
-
-
-def test_eta_estimation_returns_none_when_unknown_or_no_samples():
-	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
-	runner.seed_durations = []
-	assert runner._eta_estimation(1, 10) is None
-
-	runner.seed_durations = [1.0]
-	assert runner._eta_estimation(1, -1) is None
-	assert runner._eta_estimation(1, 0) is None
-
-
-def test_eta_estimation_returns_epoch(monkeypatch):
-	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
-	runner.seed_durations = [2.0, 4.0]  # avg = 3s
-	monkeypatch.setattr(tr.time, "time", lambda: 100.0)
-	# seed_idx=3 => seeds_done=2 => left=8 (for total=10) => eta=100+8*3
-	assert runner._eta_estimation(3, 10) == 124.0
-
-# ---------------------------------------------------------------------------
-# Job file helpers: _merge_doc, merge_job_fields_into_args, _get_kwokctl_envs
-# ---------------------------------------------------------------------------
-
-
-def test_merge_doc_shallow_overwrite():
+def test_merge_doc():
 	dst = {"a": 1, "b": 2}
 	src = {"b": 3, "c": 4}
 	out = tr.TestRunner._merge_doc(dst, src)
 	assert out is dst
 	assert dst == {"a": 1, "b": 3, "c": 4}
+
+# ---------------------------------------------------------------------------
+# merge_job_fields_into_args
+# ---------------------------------------------------------------------------
 
 
 def test_merge_job_fields_into_args_only_fills_missing():
@@ -717,6 +786,9 @@ def test_merge_job_fields_into_args_only_fills_missing():
 	assert overrides["workload_config"] == {"namespace": "ns"}
 	assert overrides["kwokctl_envs"] == [{"name": "X", "value": "1"}]
 
+# ---------------------------------------------------------------------------
+# _get_kwokctl_envs
+# ---------------------------------------------------------------------------
 
 def test_get_kwokctl_envs_extracts_and_sorts():
 	doc = {
@@ -737,7 +809,7 @@ def test_get_kwokctl_envs_extracts_and_sorts():
 
 
 # ---------------------------------------------------------------------------
-# Seed outcome tracking: _record_seed_outcome
+# _record_seed_outcome
 # ---------------------------------------------------------------------------
 
 
@@ -753,7 +825,7 @@ def test_record_seed_outcome_appends_to_correct_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# CSV/helpers: _prepare_output_dir
+# _prepare_output_dir
 # ---------------------------------------------------------------------------
 
 
@@ -782,9 +854,31 @@ def test_prepare_output_dir_no_clean_start_keeps_existing(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# CSV/helpers: _append_result_csv, _purge_mismatched_results_csv, _load_seen_results_csv
+# _append_result_csv
 # ---------------------------------------------------------------------------
 
+def test_append_result_csv_rerun_seeds_removes_old_rows(tmp_path):
+	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
+	runner.args = argparse.Namespace(clean_start=False, re_run_seeds=True)
+	runner.results_f = tmp_path / "results.csv"
+
+	# Precreate with correct header and two rows, one matching seed.
+	with open(runner.results_f, "w", encoding="utf-8", newline="") as fh:
+		w = csv.DictWriter(fh, fieldnames=tr.RESULTS_HEADER)
+		w.writeheader()
+		w.writerow({"timestamp": "t1", "seed": "5"})
+		w.writerow({"timestamp": "t2", "seed": "6"})
+
+	runner._append_result_csv({"timestamp": "t3", "seed": "5"})
+	with open(runner.results_f, "r", encoding="utf-8", newline="") as fh:
+		rows = list(csv.DictReader(fh))
+	seeds = [r.get("seed") for r in rows]
+	assert seeds.count("5") == 1
+	assert "6" in seeds
+
+# ---------------------------------------------------------------------------
+# _purge_mismatched_results_csv
+# ---------------------------------------------------------------------------
 
 def test_purge_mismatched_results_csv_deletes_when_clean_start(tmp_path):
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
@@ -807,26 +901,9 @@ def test_purge_mismatched_results_csv_keeps_when_not_clean_start(tmp_path):
 	assert deleted is False
 	assert p.exists()
 
-
-def test_append_result_csv_rerun_seeds_removes_old_rows(tmp_path):
-	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
-	runner.args = argparse.Namespace(clean_start=False, re_run_seeds=True)
-	runner.results_f = tmp_path / "results.csv"
-
-	# Precreate with correct header and two rows, one matching seed.
-	with open(runner.results_f, "w", encoding="utf-8", newline="") as fh:
-		w = csv.DictWriter(fh, fieldnames=tr.RESULTS_HEADER)
-		w.writeheader()
-		w.writerow({"timestamp": "t1", "seed": "5"})
-		w.writerow({"timestamp": "t2", "seed": "6"})
-
-	runner._append_result_csv({"timestamp": "t3", "seed": "5"})
-	with open(runner.results_f, "r", encoding="utf-8", newline="") as fh:
-		rows = list(csv.DictReader(fh))
-	seeds = [r.get("seed") for r in rows]
-	assert seeds.count("5") == 1
-	assert "6" in seeds
-
+# ---------------------------------------------------------------------------
+# _load_seen_results_csv
+# ---------------------------------------------------------------------------
 
 def test_load_seen_results_csv_parses_seed_set(tmp_path):
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
@@ -841,7 +918,7 @@ def test_load_seen_results_csv_parses_seed_set(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Solver attempt helpers: _extract_best_attempt_fields, _get_solver_attempts
+# _extract_best_attempt_fields
 # ---------------------------------------------------------------------------
 
 
@@ -860,6 +937,10 @@ def test_extract_best_attempt_fields_extracts_values():
 	assert dur == 7
 	assert status == "FAIL"
 
+
+# ---------------------------------------------------------------------------
+# _get_solver_attempts
+# ---------------------------------------------------------------------------
 
 def test_get_solver_attempts_prefers_last_solver_result():
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
@@ -896,9 +977,37 @@ def test_get_solver_attempts_falls_back_to_configmap_runs_json(monkeypatch):
 	assert attempts == [{"name": "b"}]
 	assert error == "E"
 
+# ---------------------------------------------------------------------------
+# _write_solver_stats_json
+# ---------------------------------------------------------------------------
+
+
+def test_write_solver_stats_json_writes_runs_raw(tmp_path, monkeypatch):
+	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
+	runner.ctx = "ctx"
+	runner.solver_stats_dir = tmp_path / "solver-stats"
+
+	runs_raw = "[{\"best_name\":\"x\"}]"
+	cm = {"data": {"runs.json": runs_raw}}
+	monkeypatch.setattr(runner, "_get_latest_configmap", lambda *a, **k: cm)
+
+	runner._write_solver_stats_json(seed=7, run_idx=2)
+	out = runner.solver_stats_dir / "solver_stats_seed-7_run-2.json"
+	assert out.exists()
+	assert out.read_text(encoding="utf-8") == runs_raw
+
+
+def test_write_solver_stats_json_skips_when_missing(monkeypatch, tmp_path):
+	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
+	runner.ctx = "ctx"
+	runner.solver_stats_dir = tmp_path / "solver-stats"
+	monkeypatch.setattr(runner, "_get_latest_configmap", lambda *a, **k: None)
+	# should not raise
+	runner._write_solver_stats_json(seed=1, run_idx=1)
+	assert not runner.solver_stats_dir.exists()
 
 # ---------------------------------------------------------------------------
-# ConfigMap helpers: _get_latest_configmap
+# _get_latest_configmap
 # ---------------------------------------------------------------------------
 
 
@@ -937,34 +1046,8 @@ def test_get_latest_configmap_retries_then_returns_latest(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Solver stats/log dump helpers: _write_solver_stats_json, _save_scheduler_logs
+# _save_scheduler_logs
 # ---------------------------------------------------------------------------
-
-
-def test_write_solver_stats_json_writes_runs_raw(tmp_path, monkeypatch):
-	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
-	runner.ctx = "ctx"
-	runner.solver_stats_dir = tmp_path / "solver-stats"
-
-	runs_raw = "[{\"best_name\":\"x\"}]"
-	cm = {"data": {"runs.json": runs_raw}}
-	monkeypatch.setattr(runner, "_get_latest_configmap", lambda *a, **k: cm)
-
-	runner._write_solver_stats_json(seed=7, run_idx=2)
-	out = runner.solver_stats_dir / "solver_stats_seed-7_run-2.json"
-	assert out.exists()
-	assert out.read_text(encoding="utf-8") == runs_raw
-
-
-def test_write_solver_stats_json_skips_when_missing(monkeypatch, tmp_path):
-	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
-	runner.ctx = "ctx"
-	runner.solver_stats_dir = tmp_path / "solver-stats"
-	monkeypatch.setattr(runner, "_get_latest_configmap", lambda *a, **k: None)
-	# should not raise
-	runner._write_solver_stats_json(seed=1, run_idx=1)
-	assert not runner.solver_stats_dir.exists()
-
 
 def test_save_scheduler_logs_prunes_collision_and_writes_bytes(tmp_path, monkeypatch):
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
@@ -985,7 +1068,7 @@ def test_save_scheduler_logs_prunes_collision_and_writes_bytes(tmp_path, monkeyp
 
 
 # ---------------------------------------------------------------------------
-# Small JSON helpers: _build_node_info
+# _build_node_info
 # ---------------------------------------------------------------------------
 
 
@@ -999,7 +1082,7 @@ def test_build_node_info_json():
 
 
 # ---------------------------------------------------------------------------
-# Pod list helper: _build_pod_list
+# _build_pod_list
 # ---------------------------------------------------------------------------
 
 
@@ -1017,18 +1100,8 @@ def test_build_pod_list_maps_rs_prefix_fields():
 
 
 # ---------------------------------------------------------------------------
-# Workload helpers: _gen_rs_sizes
+# _make_replicaset_specs_only
 # ---------------------------------------------------------------------------
-
-
-def test_gen_rs_sizes_hits_total_pods_and_bounds():
-	rng = random.Random(0)
-	sizes = tr.TestRunner._gen_rs_sizes(rng, num_pods=20, replicas_per_set=(6, 8))
-	assert sum(sizes) == 20
-	assert all(s >= 1 for s in sizes)
-	assert all(s <= 8 for s in sizes)
-	# First sizes should typically be >= lo; last may drift smaller.
-	assert sizes[0] >= 6
 
 
 def test_make_replicaset_specs_only_builds_specs():
@@ -1067,6 +1140,10 @@ def test_make_replicaset_specs_only_rejects_empty_rs_sets():
 		runner._make_replicaset_specs_only(random.Random(0), ta)
 
 
+# ---------------------------------------------------------------------------
+# _apply_replicasets
+# ---------------------------------------------------------------------------
+
 def test_apply_replicasets_calls_kubectl_and_optional_wait(monkeypatch):
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
 	runner.ctx = "ctx"
@@ -1099,9 +1176,21 @@ def test_apply_replicasets_calls_kubectl_and_optional_wait(monkeypatch):
 	assert calls["apply"] == [("ctx", "YAML")]
 	assert calls["wait"] == [("rs-01-p1", "ready")]
 
+# ---------------------------------------------------------------------------
+# _gen_rs_sizes
+# ---------------------------------------------------------------------------
+
+def test_gen_rs_sizes_hits_total_pods_and_bounds():
+	rng = random.Random(0)
+	sizes = tr.TestRunner._gen_rs_sizes(rng, num_pods=20, replicas_per_set=(6, 8))
+	assert sum(sizes) == 20
+	assert all(s >= 1 for s in sizes)
+	assert all(s <= 8 for s in sizes)
+	# First sizes should typically be >= lo; last may drift smaller.
+	assert sizes[0] >= 6
 
 # ---------------------------------------------------------------------------
-# Solver helpers: _solver_directly
+# _solver_directly
 # ---------------------------------------------------------------------------
 
 
@@ -1201,7 +1290,7 @@ def test_solver_directly_preplace_sets_initial_running_uids(tmp_path, monkeypatc
 
 
 # ---------------------------------------------------------------------------
-# Solver helpers: _wait_solver_inactive_http
+# _wait_solver_inactive_http
 # ---------------------------------------------------------------------------
 
 
@@ -1263,7 +1352,7 @@ def test_wait_solver_inactive_http_parses_invalid_json_and_then_inactive(monkeyp
 
 
 # ---------------------------------------------------------------------------
-# Seed run helpers: _pause
+# _pause
 # ---------------------------------------------------------------------------
 
 
@@ -1309,7 +1398,7 @@ def test_pause_skips_when_not_tty(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Seed execution: _run_single_seed, _execute_seed_direct, _execute_seed_on_cluster
+# _run_single_seed
 # ---------------------------------------------------------------------------
 
 
@@ -1336,6 +1425,10 @@ def test_run_single_seed_retries_then_succeeds(monkeypatch):
 	assert runner.suppress_fail_log is False
 	assert runner.failure is None
 
+
+# ---------------------------------------------------------------------------
+# _execute_seed_direct
+# ---------------------------------------------------------------------------
 
 def test_execute_seed_direct_logs_summary_and_returns_true(monkeypatch):
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)
@@ -1396,6 +1489,9 @@ def test_execute_seed_direct_logs_summary_and_returns_true(monkeypatch):
 	assert "running=" in (seen["note"] or "")
 	assert "unscheduled=" in (seen["note"] or "")
 
+# ---------------------------------------------------------------------------
+# _execute_seed_on_cluster
+# ---------------------------------------------------------------------------
 
 def test_execute_seed_on_cluster_ensure_cluster_failure_records_failure(monkeypatch):
 	runner = tr.TestRunner(argparse.Namespace(), initialize=False)

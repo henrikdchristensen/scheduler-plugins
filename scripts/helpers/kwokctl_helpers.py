@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover
 # YAML helpers.
 # Due to proper indentation, we keep them outside class
 # ====================================================================
+
 def yaml_kwok_node(name: str, cpu: str, mem: str, pods_cap: int) -> str:
     return textwrap.dedent(f"""\
     apiVersion: v1
@@ -111,6 +112,7 @@ def yaml_kwok_pod(ns: str, name: str, cpu: str, mem: str, pc: str) -> str:
 ##############################################
 # ------------ KWOK helpers --------
 ##############################################
+
 def run_kwokctl_logged(logger: logging.Logger, *args: str, input_bytes: bytes | None = None, check: bool = True) -> subprocess.CompletedProcess:
     """
     Run `kwokctl <args...>` and stream its combined output into LOG.
