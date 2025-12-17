@@ -5,6 +5,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Any, List
 
+from scripts.kwok_trace_replayer.trace_helpers import (
+    MC_MEAN_SEED, MC_MEAN_SAMPLES,
+    AXIS_LABEL_FONTSIZE, TICK_LABEL_FONTSIZE,
+    TITLE_FONTSIZE, LEGEND_FONTSIZE,
+)
+
 # ----------------------------------------------------------------------
 # Plot helpers
 # ----------------------------------------------------------------------

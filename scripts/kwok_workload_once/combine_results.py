@@ -200,7 +200,7 @@ class CombineResultsAnalyzer:
             return None
 
         per_seed_df = default_vs_solver_per_seed(solver_csv, default_csv, solver_dir.name)
-        mask_default_all, not_all_running = self._split_default_all_running(per_seed_df)
+        _, not_all_running = self._split_default_all_running(per_seed_df)
         counts = self._compute_category_counts(per_seed_df)
 
         # Sanity warnings (keep behavior)
