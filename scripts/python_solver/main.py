@@ -3,22 +3,22 @@
 
 import time, sys, json
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Optional, Final
 from ortools.sat.python import cp_model
 
 #################################################
 # --- Constants ---------------------------------
 #################################################
-STATUS_MAP = {
+NO_NODES: Final[str] = "NO_NODES"
+NO_PODS: Final[str] = "NO_PODS"
+
+STATUS_MAP: Final[dict[int, str]] = {
     cp_model.UNKNOWN:       "UNKNOWN",
     cp_model.MODEL_INVALID: "MODEL_INVALID",
     cp_model.INFEASIBLE:    "INFEASIBLE",
     cp_model.FEASIBLE:      "FEASIBLE",
     cp_model.OPTIMAL:       "OPTIMAL",
 }
-NO_NODES = "NO_NODES"
-NO_PODS = "NO_PODS"
-
 
 @dataclass(frozen=True)
 class SolverOptions:
@@ -97,13 +97,15 @@ class CPSATSolver:
     #################################################
     # --- Helpers -----------------------------------
     #################################################
+
     @classmethod
-    def _status_str(cls, st: Union[int, str]) -> str:
+    def _status_str(cls, st: int) -> str:
         """
         Convert solver status to string.
+        Only accepts OR-Tools status integers.
         """
-        if isinstance(st, str):
-            return st
+        if not isinstance(st, int):
+            raise TypeError(f"status must be int (OR-Tools CpSolver status), got {type(st).__name__}")
         return STATUS_MAP.get(st, "UNKNOWN")
 
     def solve(self, instance: dict) -> dict:
@@ -364,9 +366,9 @@ class CPSATSolver:
         num_nodes = len(nodes)
         num_pods = len(pods)
         if num_nodes == 0:
-            return {"status": self._status_str(NO_NODES)}
+            return {"status": NO_NODES}
         if num_pods == 0:
-            return {"status": self._status_str(NO_PODS)}
+            return {"status": NO_PODS}
 
         node_idx = {n["name"]: j for j, n in enumerate(nodes)}
 
