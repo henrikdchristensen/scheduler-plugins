@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 #test_cluster_stats.py
-#TODO: finalize tests
 
 import pytest
 
@@ -40,7 +39,6 @@ def test_sum_pod_requests_adds_max_init_container_requests():
 		}
 	}
 	cpu_m, mem_b = cs.sum_pod_requests(pod)
-	# initContainers contribute max(cpu), max(mem)
 	assert cpu_m == 250 + 1000
 	assert mem_b == (128 * 1024**2) + (1 * 1024**3)
 
@@ -88,7 +86,6 @@ def test_get_running_and_unscheduled_timeout(monkeypatch):
 		]
 	}
 
-	# Make time advance deterministically: start=0, then immediate timeout.
 	fake_time = time_sequence([0.0, 0.0, 999.0])
 
 	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
@@ -107,53 +104,50 @@ def test_get_running_and_unscheduled_timeout(monkeypatch):
 
 
 def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
-	# Provide deterministic running/unscheduled via helper.
-	monkeypatch.setattr(
-		cs,
-		"get_running_and_unscheduled",
+	monkeypatch.setattr(cs, "get_running_and_unscheduled",
 		lambda ctx, ns, expected: ("all_running", [("p1", "n1"), ("p2", "n2")], ["p3"]),
 	)
 
-	nodes = {
-		"items": [
-			{"metadata": {"name": "n1"}, "status": {"allocatable": {"cpu": "2", "memory": "1Gi"}}},
-			{"metadata": {"name": "n2"}, "status": {"allocatable": {"cpu": "1", "memory": "1Gi"}}},
-		]
-	}
-	pods = {
-		"items": [
-			{
-				"metadata": {"name": "p1"},
-				"spec": {
-					"nodeName": "n1",
-					"priorityClassName": "p5",
-					"containers": [
-						{"resources": {"requests": {"cpu": "500m", "memory": "512Mi"}}},
-					],
-				},
-				"status": {"phase": "Running"},
-			},
-			{
-				"metadata": {"name": "p2"},
-				"spec": {
-					"nodeName": "n2",
-					"priorityClassName": "",
-					"containers": [
-						{"resources": {"requests": {"cpu": "1", "memory": "1Gi"}}},
-					],
-				},
-				"status": {"phase": "Running"},
-			},
-			{
-				"metadata": {"name": "p3"},
-				"spec": {"priorityClassName": "p10", "containers": []},
-				"status": {"phase": "Pending"},
-			},
-		]
-	}
-
 	def fake_get_json_ctx(ctx, cmd):
-		# cmd is a list like ["get","nodes","-o","json"] or ["-n", ns, "get", "pods", "-o", "json"]
+		nodes = {
+			"items": [
+				{"metadata": {"name": "n1"}, "status": {"allocatable": {"cpu": "2", "memory": "1Gi"}}},
+				{"metadata": {"name": "n2"}, "status": {"allocatable": {"cpu": "1", "memory": "1Gi"}}},
+			]
+		}
+
+		pods = {
+			"items": [
+				{
+					"metadata": {"name": "p1"},
+					"spec": {
+						"nodeName": "n1",
+						"priorityClassName": "p5",
+						"containers": [
+							{"resources": {"requests": {"cpu": "500m", "memory": "512Mi"}}},
+						],
+					},
+					"status": {"phase": "Running"},
+				},
+				{
+					"metadata": {"name": "p2"},
+					"spec": {
+						"nodeName": "n2",
+						"priorityClassName": "",
+						"containers": [
+							{"resources": {"requests": {"cpu": "1", "memory": "1Gi"}}},
+						],
+					},
+					"status": {"phase": "Running"},
+				},
+				{
+					"metadata": {"name": "p3"},
+					"spec": {"priorityClassName": "p10", "containers": []},
+					"status": {"phase": "Pending"},
+				},
+			]
+		}
+
 		if cmd[:2] == ["get", "nodes"]:
 			return nodes
 		if "pods" in cmd:
