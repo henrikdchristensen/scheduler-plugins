@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py
+#main.py
 
 import time, sys, json
 from dataclasses import dataclass
@@ -20,6 +20,10 @@ STATUS_MAP: Final[dict[int, str]] = {
     cp_model.OPTIMAL:       "OPTIMAL",
 }
 
+#################################################
+# --- Solver Options Class ----------------------
+#################################################
+
 @dataclass(frozen=True)
 class SolverOptions:
     """Parsed solver options.
@@ -36,6 +40,9 @@ class SolverOptions:
     move_fraction_of_tier: float
     gap_limit: float
 
+#################################################
+# --- Problem Class -----------------------------
+#################################################
 
 @dataclass(frozen=True)
 class Problem:
@@ -85,6 +92,9 @@ class Problem:
     preemptor_uid: Optional[str]
     preemptor_idx: Optional[int]
 
+#################################################
+# --- Decision Vars Class -----------------------
+#################################################
 
 @dataclass(frozen=True)
 class DecisionVars:
@@ -92,6 +102,10 @@ class DecisionVars:
 
     placed: list[cp_model.IntVar]
     assign: list[list[cp_model.IntVar]]
+
+#################################################
+# --- CP-SAT Solver Class -----------------------
+#################################################
 
 class CPSATSolver:
     #################################################

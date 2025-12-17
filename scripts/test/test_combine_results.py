@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+#test_combine_results.py
+#TODO: finalize tests
+
 import csv
 import math
 from pathlib import Path

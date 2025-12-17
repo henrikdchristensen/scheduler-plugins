@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-# test_cluster_stats.py
-
-import json
-import time as _time
+#test_cluster_stats.py
+#TODO: finalize tests
 
 import pytest
 

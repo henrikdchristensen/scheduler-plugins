@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+#test_kwokctl_helpers.py
+#TODO: finalize tests
 import logging
 import os
 import subprocess

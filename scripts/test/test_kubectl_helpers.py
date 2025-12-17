@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+#test_kubectl_helpers.py
+#TODO: finalize tests
 import json
 import subprocess
 

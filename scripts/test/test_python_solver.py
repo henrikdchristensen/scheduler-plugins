@@ -1,6 +1,6 @@
-# scripts/test/test_python_solver.py
 #!/usr/bin/env python3
-# test_python_solver.py
+#test_python_solver.py
+#TODO: finalize tests
 
 import io
 import json
