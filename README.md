@@ -4,8 +4,7 @@
 - [Priority Optimizer Plugin](#priority-optimizer-plugin)
   - [Overview](#overview)
   - [Building](#building)
-  - [Running](#running)
-    - [KWOK](#kwok)
+  - [Running on a KWOK cluster](#running-on-a-kwok-cluster)
   - [Testing](#testing)
     - [Workload Once Generator](#workload-once-generator)
       - [Deterministic scheduling](#deterministic-scheduling)
@@ -52,17 +51,14 @@ make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64'
 
 The built binary will be located in `bin/kube-scheduler`.
 
-## Running
+## Running on a KWOK cluster
 
-To run the scheduler with the plugin, you can e.g. run it in a **KWOK** cluster.
+To run the scheduler with the plugin on a **KWOK** cluster.
 
 The following tools are required (tools already mentioned in [Building](#building) are omitted):
 
 - `kubectl` (tested with client v.1.32.7)
-- When running in a KWOK cluster:
-  - `kwok`+`kwokctl` (tested with v0.7.0)
-
-### KWOK
+- `kwok`+`kwokctl` (tested with v0.7.0)
 
 To set up a KWOK cluster with the scheduler+plugin one needs to provide a configuration file to KWOK. An example of a configuration file is `data/configs-kwokctl/plugin-scheduler.yaml`.
 
@@ -158,7 +154,7 @@ python -m scripts.kwok_workload_once.test_runner \
 --kwokctl-config-file data/configs-kwokctl/<kwokctl_config_file>.yaml
 ```
 
-The idea is that `<job_file>.yaml` contains the specific configuration for a job, `<workload_config_file>.yaml` contains the workload configuration to use, and `<kwokctl_config_file>.yaml` contains the KWOK cluster configuration to use (see above [KWOK](#kwok) for more details on this file). In the following sections the [job file](#job-file) and the [workload configuration file](#workload-configuration-file) are described, however, first we shortly describe the deterministic scheduling setup.
+The idea is that `<job_file>.yaml` contains the specific configuration for a job, `<workload_config_file>.yaml` contains the workload configuration to use, and `<kwokctl_config_file>.yaml` contains the KWOK cluster configuration to use (see above) for more details on this file). In the following sections the [job file](#job-file) and the [workload configuration file](#workload-configuration-file) are described, however, first we shortly describe the deterministic scheduling setup.
 
 #### Deterministic scheduling
 
