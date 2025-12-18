@@ -42,7 +42,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ steps.load-env.outputs.PYTHON_VERSION }}
+          python-version: ${{ steps['load-env'].outputs.PYTHON_VERSION }}
 
       - name: Install Python test deps
         run: |
@@ -54,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ steps.load-env.outputs.GO_VERSION }}
+          go-version: ${{ steps['load-env'].outputs.GO_VERSION }}
 
       - name: Prepare coverage directories
         run: |
@@ -134,7 +134,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ steps.load-env.outputs.GO_VERSION }}
+          go-version: ${{ steps['load-env'].outputs.GO_VERSION }}
 
       - name: Build kube-scheduler binary
         run: |
@@ -171,7 +171,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ steps.load-env.outputs.PYTHON_VERSION }}
+          python-version: ${{ steps['load-env'].outputs.PYTHON_VERSION }}
 
       - name: Set up solver Python environment
         run: |
