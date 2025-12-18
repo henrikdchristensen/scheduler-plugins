@@ -4,8 +4,6 @@
 - [Priority Optimizer Plugin](#priority-optimizer-plugin)
   - [Overview](#overview)
   - [Building](#building)
-    - [Binary (recommended)](#binary-recommended)
-    - [Docker image](#docker-image)
   - [Running](#running)
     - [KWOK (recommended)](#kwok-recommended)
   - [Testing](#testing)
@@ -34,7 +32,7 @@ The code for the **MyPriorityOptimizer** plugin is located under `pkg/mypriority
 
 ## Building
 
-The scheduler+plugin can be built either as a **binary** (recommended) or as a **docker image** and can then be run in a cluster (e.g. using KWOK or Kind).
+The scheduler+plugin can be built as a **binary** and can then be run in a cluster (e.g. using KWOK).
 
 The following tools are required (if Windows host, use WSL2 w/ e.g. Ubuntu) to build the scheduler+plugin:
 
@@ -44,14 +42,7 @@ The following tools are required (if Windows host, use WSL2 w/ e.g. Ubuntu) to b
 - `pip` (tested with 24.0)
 - `Go` (tested with 1.24.3)
 
-When building as a docker image:
-
-- `docker` (tested with v28.3.2)
-- `docker-buildx-plugin` (tested with v0.25.0)
-
 Currently, it is only tested on **amd64** architecture and some code may need to be modified to run on other architectures (should not be a problem).
-
-### Binary (recommended)
 
 To build the binary, run the following command in the root of the repo:
 
@@ -61,25 +52,13 @@ make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64'
 
 The built binary will be located in `bin/kube-scheduler`.
 
-### Docker image
-
-We have **modified** the default Dockerfile used to build the scheduler image to include the plugin.
-
-To build the docker image, ensure Docker is running, then run the following command in the root of the repo:
-
-```bash
-docker build -t localhost:5000/scheduler-plugins/kube-scheduler:dev -f build/scheduler/Dockerfile .
-```
-
 ## Running
 
-To run the scheduler with the plugin, you can e.g. run it in a **KWOK** (recommended) or in a **Kind** cluster.
+To run the scheduler with the plugin, you can e.g. run it in a **KWOK** (recommended) cluster.
 
 The following tools are required (tools already mentioned in [Building](#building) are omitted):
 
 - `kubectl` (tested with client v.1.32.7)
-- When running in a Kind cluster:
-  - `kind` (tested with v0.20.0)
 - When running in a KWOK cluster:
   - `kwok`+`kwokctl` (tested with v0.7.0)
 
