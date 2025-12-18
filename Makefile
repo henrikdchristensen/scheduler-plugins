@@ -43,67 +43,9 @@ EXTRA_ARGS=""
 VERSION=$(shell echo $(RELEASE_VERSION) | awk -F - '{print $$2}')
 VERSION:=$(or $(VERSION),v0.0.$(shell date +%Y%m%d))
 
-.PHONY: all
-all: build
-
-.PHONY: build
-build: build-controller build-scheduler
-
-.PHONY: build-controller
-build-controller:
-	$(GO_BUILD_ENV) go build -ldflags '-X k8s.io/component-base/version.gitVersion=$(VERSION) -w' -o bin/controller cmd/controller/controller.go
-
 .PHONY: build-scheduler
 build-scheduler:
 	$(GO_BUILD_ENV) go build -ldflags '-X k8s.io/component-base/version.gitVersion=$(VERSION) -w' -o bin/kube-scheduler cmd/scheduler/main.go
-
-.PHONY: build-images
-build-images:
-	BUILDER=$(BUILDER) \
-	PLATFORMS=$(PLATFORMS) \
-	RELEASE_VERSION=$(RELEASE_VERSION) \
-	REGISTRY=$(REGISTRY) \
-	IMAGE=$(RELEASE_IMAGE) \
-	CONTROLLER_IMAGE=$(RELEASE_CONTROLLER_IMAGE) \
-	GO_BASE_IMAGE=$(GO_BASE_IMAGE) \
-	DISTROLESS_BASE_IMAGE=$(DISTROLESS_BASE_IMAGE) \
-	DOCKER_BUILDX_CMD=$(DOCKER_BUILDX_CMD) \
-	EXTRA_ARGS=$(EXTRA_ARGS) hack/build-images.sh
-
-.PHONY: local-image
-local-image: PLATFORMS="linux/$$(uname -m)"
-local-image: RELEASE_VERSION="v0.0.0"
-local-image: REGISTRY="localhost:5000/scheduler-plugins"
-local-image: EXTRA_ARGS="--load"
-local-image: clean build-images
-
-.PHONY: release-images
-push-images: EXTRA_ARGS="--push"
-push-images: build-images
-
-.PHONY: update-gomod
-update-gomod:
-	hack/update-gomod.sh
-
-.PHONY: unit-test
-unit-test: install-envtest
-	hack/unit-test.sh $(ARGS)
-
-.PHONY: install-envtest
-install-envtest:
-	hack/install-envtest.sh
-
-.PHONY: integration-test
-integration-test: install-envtest
-	$(INTEGTESTENVVAR) hack/integration-test.sh $(ARGS)
-
-.PHONY: verify
-verify:
-	hack/verify-gomod.sh
-	hack/verify-gofmt.sh
-	hack/verify-crdgen.sh
-	hack/verify-structured-logging.sh
-	hack/verify-toc.sh
 
 .PHONY: clean
 clean:
