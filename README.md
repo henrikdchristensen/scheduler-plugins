@@ -25,8 +25,6 @@
 
 This project introduces an **optimized, priority-based** approach for placing pods optimally onto nodes via the **MyPriorityOptimizer** plugin for the Kubernetes scheduler. The project is a fork of the Kubernetes-sigs project [scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) and extends it with a new plugin.
 
-<center><img src="./scheduling-framework.png" alt="Scheduling Framework" width="60%"/></center>
-
 Our goal is to schedule as many *high-priority* pods as possible, especially when the *default scheduler* fails to do so (a possibly side effect of our approach is better resource utilization). The plugin enables integration of an *external* solver—here, a Python solver using [Google's CP-SAT](https://developers.google.com/optimization/cp/cp_solver)—to compute an optimal placement plan that maximizes high-priority pods while *minimizing disruption* by reducing the number of preemptions (*movements* and *evictions*). Given the solver's solution, the plugin applies it by evicting and moving pods, possibly across multiple nodes in the cluster (Note: default scheduler can only preempt pods within a *single* node, which may lead to more preemptions than necessary).
 
 The following sections describe how to **build, run, and test** the scheduler with the plugin.
