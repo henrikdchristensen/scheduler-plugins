@@ -5,7 +5,6 @@
 /build/kube-scheduler
 bin
 testbin/*
-hack/tools/bin/*
 
 # macOS
 .DS_Store
@@ -22,19 +21,14 @@ hack/tools/bin/*
 # Ignore vendor/
 vendor
 
-# TODO: added
+# added
 *pytest_cache/
 __pycache__/
-.VSCodeCounter
-.vagrant/
 /bootstrap/
 output/
 results/
-/trace/
 eta*
 results.csv
 *.log
 /tmp/
 *coverage*
-/scripts/kwok_integration_tests/**/*.csv
-/scripts/kwok_integration_tests/**/*.json
