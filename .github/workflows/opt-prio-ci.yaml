@@ -11,6 +11,7 @@ jobs:
   # Unit tests (Python + Go)
   # -------------------------------------------------------
   unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 4
 
@@ -98,6 +99,7 @@ jobs:
   # Integration tests
   # -------------------------------------------------------
   integration-tests:
+    name: Integration Tests
     needs: ["unit-tests"]
     runs-on: ubuntu-latest
     timeout-minutes: 8
