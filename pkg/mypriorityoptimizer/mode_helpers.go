@@ -18,39 +18,39 @@ func isPerPodMode() bool { return OptimizeMode == ModePerPod }
 func isManualBlockingMode() bool { return OptimizeMode == ModeManualBlocking }
 
 // -------------------------
-// isAsyncSolving
+// isNonBlockingSolving
 // -------------------------
 
-// isAsyncSolving is true for modes where we:
+// isNonBlockingSolving is true for modes where we:
 // - collect pods at PostFilter, and
 // - take Active only after we know a plan is worthwhile.
-// PerPod is always treated as synchronous.
+// PerPod is always treated as blocking.
 // CHECKED
-func isAsyncSolving() bool {
-	return OptimizeMode != ModePerPod && !OptimizeSolveSynch
+func isNonBlockingSolving() bool {
+	return OptimizeMode != ModePerPod && !OptimizeBlockingSolving
 }
 
 // -------------------------
-// getSyncAsString
+// getBlockingAsString
 // -------------------------
 
-// getSyncAsString returns "Synch" or "Asynch".
+// getBlockingAsString returns "Blocking" or "Non-Blocking".
 // CHECKED
-func getSyncAsString() string {
-	if isAsyncSolving() {
-		return "Asynch"
+func getBlockingAsString() string {
+	if isNonBlockingSolving() {
+		return "Non-Blocking"
 	}
-	return "Synch"
+	return "Blocking"
 }
 
 // -------------------------
 // getModeCombinedAsString
 // -------------------------
 
-// getModeCombinedAsString returns "<Mode>/<Synch|Asynch>".
+// getModeCombinedAsString returns "<Mode>/<Blocking|Non-Blocking>".
 // CHECKED
 func getModeCombinedAsString() string {
-	return OptimizeMode.String() + "/" + getSyncAsString()
+	return OptimizeMode.String() + "/" + getBlockingAsString()
 }
 
 // -------------------------

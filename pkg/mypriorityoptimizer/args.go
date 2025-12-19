@@ -7,12 +7,9 @@ package mypriorityoptimizer
 // "per_pod", "periodic", "interlude", "manual", "manual_blocking"
 var OptimizeMode = parseOptimizeMode(getEnv("OPTIMIZE_MODE", "periodic"))
 
-// OptimizeSolveSynch controls whether solver runs use the synchronous or
-// asynchronous flow w.r.t. taking the Active lock.
-//
-// true = "synchronous" (take Active before planContext). false = "asynchronous"
-// (take Active only when we know a plan is worth applying)
-var OptimizeSolveSynch = parseBool(getEnv("OPTIMIZE_SOLVE_SYNCH", "true"))
+// OptimizeBlockingSolving controls whether solver runs blocks normal scheduling
+// during execution. Determines when to take the Active lock.
+var OptimizeBlockingSolving = parseBool(getEnv("OPTIMIZE_BLOCKING_SOLVING", "true"))
 
 // OptimizePeriodicInterval is the duration between consecutive optimization
 // runs in periodic mode. If a plan is currently active, the loop is skipped.

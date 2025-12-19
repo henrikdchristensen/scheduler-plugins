@@ -31,9 +31,9 @@ type flowCaptures struct {
 }
 
 type flowHarness struct {
-	t     *testing.T
-	pl    *SharedState
-	async bool
+	t           *testing.T
+	pl          *SharedState
+	nonblocking bool
 	// planContextFn
 	nodes         []*v1.Node
 	pods          []*v1.Pod
@@ -63,7 +63,7 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 	t.Helper()
 
 	// Save originals and restore on cleanup.
-	origAsync := isAsyncSolvingFn
+	origNonBlocking := isNonBlockingSolvingFn
 	origPlanCtx := planContextFn
 	origPlanComp := planComputationFn
 	origApplicable := isSolutionApplicableFn
@@ -75,7 +75,7 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 	origOnCompleted := onPlanCompletedHook
 
 	t.Cleanup(func() {
-		isAsyncSolvingFn = origAsync
+		isNonBlockingSolvingFn = origNonBlocking
 		planContextFn = origPlanCtx
 		planComputationFn = origPlanComp
 		isSolutionApplicableFn = origApplicable
@@ -90,7 +90,7 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 	caps := &flowCaptures{}
 
 	// Hooks
-	isAsyncSolvingFn = func() bool { return h.async }
+	isNonBlockingSolvingFn = func() bool { return h.nonblocking }
 
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		if h.planCtxError != nil {
@@ -186,7 +186,7 @@ func TestRunOptimizationFlow_OptimizationInProgress(t *testing.T) {
 		t:  t,
 		pl: pl,
 
-		async: false,
+		nonblocking: false,
 
 		planCtxError: errors.New("must-not-be-called"),
 	}
@@ -209,7 +209,7 @@ func TestRunOptimizationFlow_OptimizationInProgress(t *testing.T) {
 	}
 }
 
-func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
+func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 	type want struct {
 		err error
 		// Returned values
@@ -239,7 +239,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "planContext_error",
 			h: flowHarness{
-				async:        false,
+				nonblocking:  false,
 				planCtxError: errors.New("boom-plancontext"),
 			},
 			want: want{
@@ -253,7 +253,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "no_pending_pods",
 			h: flowHarness{
-				async:         false,
+				nonblocking:   false,
 				nodes:         []*v1.Node{},
 				pods:          []*v1.Pod{},
 				baselineEvict: 99,
@@ -274,7 +274,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "no_improving_solution",
 			h: flowHarness{
-				async:          false,
+				nonblocking:    false,
 				nodes:          nil,
 				pods:           mkPendingPods(),
 				baselineEvict:  42,
@@ -304,7 +304,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "plan_not_applicable",
 			h: flowHarness{
-				async:          false,
+				nonblocking:    false,
 				nodes:          []*v1.Node{},
 				pods:           mkPendingPods(),
 				baselineEvict:  7,
@@ -332,7 +332,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "no_pending_scheduled",
 			h: flowHarness{
-				async:            false,
+				nonblocking:      false,
 				nodes:            []*v1.Node{},
 				pods:             mkPendingPods(),
 				baselineEvict:    10,
@@ -362,7 +362,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "plan_registration_error_calls_onPlanCompleted",
 			h: flowHarness{
-				async:            false,
+				nonblocking:      false,
 				nodes:            []*v1.Node{},
 				pods:             mkPendingPods(),
 				baselineEvict:    5,
@@ -397,7 +397,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "plan_activation_error_calls_onPlanCompleted",
 			h: flowHarness{
-				async:            false,
+				nonblocking:      false,
 				nodes:            []*v1.Node{},
 				pods:             mkPendingPods(),
 				baselineEvict:    2,
@@ -430,7 +430,7 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 		{
 			name: "success",
 			h: flowHarness{
-				async:            false,
+				nonblocking:      false,
 				nodes:            []*v1.Node{},
 				pods:             mkPendingPods(),
 				baselineEvict:    0,
@@ -562,14 +562,14 @@ func TestRunOptimizationFlow_NonAsync_Scenarios(t *testing.T) {
 	}
 }
 
-func TestRunOptimizationFlow_NonAsync_ActivePlanAlreadyInProgress(t *testing.T) {
+func TestRunOptimizationFlow_NonBlocking_ActivePlanAlreadyInProgress(t *testing.T) {
 	pl := &SharedState{}
 	pl.ActivePlanInProgress.Store(true)
 
 	h := &flowHarness{
-		t:     t,
-		pl:    pl,
-		async: false,
+		t:           t,
+		pl:          pl,
+		nonblocking: false,
 
 		// If planContext is called, the test should fail (must return early).
 		planCtxError: errors.New("must-not-be-called"),
@@ -599,23 +599,23 @@ func TestRunOptimizationFlow_NonAsync_ActivePlanAlreadyInProgress(t *testing.T) 
 	}
 }
 
-func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
+func TestRunOptimizationFlow_NonBlocking_ActivePlanInProgressAtApply(t *testing.T) {
 	pl := &SharedState{}
 
 	h := &flowHarness{
-		t:     t,
-		pl:    pl,
-		async: true,
+		t:           t,
+		pl:          pl,
+		nonblocking: true,
 
 		nodes:         []*v1.Node{},
 		pods:          []*v1.Pod{pod("default", "p-pending", withPhase(v1.PodPending))},
 		baselineEvict: 11,
 
-		bestName:       "solverAsync",
+		bestName:       "solverNonBlocking",
 		hadImprovement: true,
-		bestAttempt:    &SolverResult{Name: "attempt-async"},
+		bestAttempt:    &SolverResult{Name: "attempt-nonblocking"},
 		bestOut:        &SolverOutput{Status: "OPTIMAL"},
-		attempts:       []SolverResult{{Name: "solverAsync"}},
+		attempts:       []SolverResult{{Name: "solverNonBlocking"}},
 		applicable:     true,
 
 		pendingScheduled: 1,
@@ -627,17 +627,17 @@ func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 	// Simulate that an Active plan is already in progress at apply-time.
 	pl.ActivePlanInProgress.Store(true)
 
-	// These must not be reached if async tryEnterActivePlan fails.
+	// These must not be reached if nonblocking tryEnterActivePlan fails.
 	planRegistrationFn = func(_ *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
-		t.Fatalf("planRegistrationFn must not be called when async tryEnterActivePlan fails")
+		t.Fatalf("planRegistrationFn must not be called when nonblocking tryEnterActivePlan fails")
 		return nil, nil, nil
 	}
 	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
-		t.Fatalf("planActivationFn must not be called when async tryEnterActivePlan fails")
+		t.Fatalf("planActivationFn must not be called when nonblocking tryEnterActivePlan fails")
 		return nil
 	}
 	startPlanCompletionWatchFn = func(_ *SharedState, _ *ActivePlan) {
-		t.Fatalf("startPlanCompletionWatchFn must not be called when async tryEnterActivePlan fails")
+		t.Fatalf("startPlanCompletionWatchFn must not be called when nonblocking tryEnterActivePlan fails")
 	}
 
 	plan, baselinePtr, bestName, bestAttemptOut, attemptsOut, err :=
@@ -649,13 +649,13 @@ func TestRunOptimizationFlow_Async_ActivePlanInProgressAtApply(t *testing.T) {
 	assertZeroReturns(t, plan, baselinePtr, bestName, bestAttemptOut, attemptsOut)
 
 	if !caps.exportCalled {
-		t.Fatalf("exportSolverStatsFn must be called on async ActiveInProgress path")
+		t.Fatalf("exportSolverStatsFn must be called on nonblocking ActiveInProgress path")
 	}
 	if caps.export.baseline.Evicted != 11 {
 		t.Fatalf("exported baseline Evicted=%d, want %d", caps.export.baseline.Evicted, 11)
 	}
-	if caps.export.bestName != "solverAsync" {
-		t.Fatalf("exported bestName=%q, want %q", caps.export.bestName, "solverAsync")
+	if caps.export.bestName != "solverNonBlocking" {
+		t.Fatalf("exported bestName=%q, want %q", caps.export.bestName, "solverNonBlocking")
 	}
 	if caps.export.errorMsg != ErrActiveInProgress.Error() {
 		t.Fatalf("exported errMsg=%q, want %q", caps.export.errorMsg, ErrActiveInProgress.Error())

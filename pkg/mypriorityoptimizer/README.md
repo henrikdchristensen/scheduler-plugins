@@ -156,7 +156,7 @@ componentsPatches:
     extraEnvs:
       - name: OPTIMIZE_MODE
         value: "periodic" # choices: per_pod, periodic, interlude, manual, manual_blocking
-      - name: OPTIMIZE_SOLVE_SYNCH
+      - name: OPTIMIZE_BLOCKING_SOLVING
         value: "true" # choices: true, false
       - name: OPTIMIZE_PERIODIC_INTERVAL
         value: 30s # e.g. 10s, 30s, 60s

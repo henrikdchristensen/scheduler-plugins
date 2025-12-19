@@ -19,23 +19,23 @@ func TestModePredicates(t *testing.T) {
 		ModeManualBlocking,
 		ModeType(999),
 	}
-	syncFlags := []bool{true, false}
+	blockingFlags := []bool{true, false}
 
 	for _, mode := range modes {
-		for _, synch := range syncFlags {
-			name := fmt.Sprintf("mode=%s synch=%v", mode.String(), synch)
+		for _, blocking := range blockingFlags {
+			name := fmt.Sprintf("mode=%s blocking=%v", mode.String(), blocking)
 			t.Run(name, func(t *testing.T) {
-				withMode(mode, synch, func() {
+				withMode(mode, blocking, func() {
 					// Expected behavior derived directly from implementation contracts.
 					wantPerPod := mode == ModePerPod
 					wantManualBlocking := mode == ModeManualBlocking
-					wantAsync := (mode != ModePerPod) && !synch
+					wantNonBlocking := (mode != ModePerPod) && !blocking
 
-					wantSyncStr := "Synch"
-					if wantAsync {
-						wantSyncStr = "Asynch"
+					wantBlockingStr := "Blocking"
+					if wantNonBlocking {
+						wantBlockingStr = "Non-Blocking"
 					}
-					wantCombined := mode.String() + "/" + wantSyncStr
+					wantCombined := mode.String() + "/" + wantBlockingStr
 
 					if got := isPerPodMode(); got != wantPerPod {
 						t.Fatalf("isPerPodMode()=%v want %v", got, wantPerPod)
@@ -43,11 +43,11 @@ func TestModePredicates(t *testing.T) {
 					if got := isManualBlockingMode(); got != wantManualBlocking {
 						t.Fatalf("isManualBlockingMode()=%v want %v", got, wantManualBlocking)
 					}
-					if got := isAsyncSolving(); got != wantAsync {
-						t.Fatalf("isAsyncSolving()=%v want %v", got, wantAsync)
+					if got := isNonBlockingSolving(); got != wantNonBlocking {
+						t.Fatalf("isNonBlockingSolving()=%v want %v", got, wantNonBlocking)
 					}
-					if got := getSyncAsString(); got != wantSyncStr {
-						t.Fatalf("getSyncAsString()=%q want %q", got, wantSyncStr)
+					if got := getBlockingAsString(); got != wantBlockingStr {
+						t.Fatalf("getBlockingAsString()=%q want %q", got, wantBlockingStr)
 					}
 					if got := getModeCombinedAsString(); got != wantCombined {
 						t.Fatalf("getModeCombinedAsString()=%q want %q", got, wantCombined)

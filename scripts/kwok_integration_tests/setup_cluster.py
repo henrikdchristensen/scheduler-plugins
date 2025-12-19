@@ -174,7 +174,7 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--optimize-sync",
         action="store_true",
-        help="Set OPTIMIZE_SOLVE_SYNCH=true (default: false)",
+        help="Set OPTIMIZE_BLOCKING_SOLVING=true (default: false)",
     )
     ap.add_argument(
         "--workload-id",

@@ -14,7 +14,7 @@ import (
 // -------------------------
 
 var (
-	isAsyncSolvingFn = isAsyncSolving
+	isNonBlockingSolvingFn = isNonBlockingSolving
 
 	planContextFn = func(pl *SharedState, preemptor *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		return pl.planContext(preemptor)
@@ -46,15 +46,15 @@ var (
 // runOptimizationFlow
 // -------------------------
 
-// runOptimizationFlow runs the optimisation flow for the given phase (AllSynch,
-// AllAsynch, Single). For Single phase, the preemptor must be provided. Returns
-// the target node name for the preemptor pod (if any) and error (if any).
+// runOptimizationFlow runs the optimisation flow for the given phase. For
+// Single phase, the preemptor must be provided. Returns the target node name
+// for the preemptor pod (if any) and error (if any).
 func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Pod) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
 	strategy := getModeCombinedAsString()
 
 	// Sync modes: take PlanActive now.
 	// Async modes: will take PlanActive later, after plan computation.
-	if !isAsyncSolvingFn() {
+	if !isNonBlockingSolvingFn() {
 		if !pl.tryEnterActivePlan() {
 			klog.InfoS(msg(strategy, InfoActivePlanInProgress))
 			return nil, nil, "", nil, nil, ErrActiveInProgress
@@ -109,7 +109,7 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 	}
 
 	// Async modes: take PlanActive now that we know it is worth applying the plan.
-	if isAsyncSolvingFn() {
+	if isNonBlockingSolvingFn() {
 		if !pl.tryEnterActivePlan() {
 			klog.InfoS(msg(strategy, InfoActivePlanInProgress))
 			exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrActiveInProgress.Error())

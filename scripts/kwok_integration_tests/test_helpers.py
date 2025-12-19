@@ -278,7 +278,7 @@ def build_kwokctl_config_for_mode(
     """
     envs = [
         {"name": "OPTIMIZE_MODE", "value": opt_mode},
-        {"name": "OPTIMIZE_SOLVE_SYNCH", "value": "true" if opt_sync else "false"},
+        {"name": "OPTIMIZE_BLOCKING_SOLVING", "value": "true" if opt_sync else "false"},
     ]
     return merge_kwokctl_envs(base_doc, envs, component="kube-scheduler")
 

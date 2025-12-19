@@ -440,13 +440,13 @@ func atomicInt(v int32) *atomic.Int32 {
 // restore to the original values.
 func withMode(mode ModeType, synch bool, fn func()) {
 	oldMode := OptimizeMode
-	oldSynch := OptimizeSolveSynch
+	oldSynch := OptimizeBlockingSolving
 
 	OptimizeMode = mode
-	OptimizeSolveSynch = synch
+	OptimizeBlockingSolving = synch
 	defer func() {
 		OptimizeMode = oldMode
-		OptimizeSolveSynch = oldSynch
+		OptimizeBlockingSolving = oldSynch
 	}()
 	fn()
 }
