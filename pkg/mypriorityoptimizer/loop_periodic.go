@@ -19,8 +19,8 @@ func (pl *SharedState) loopPeriodic(ctx context.Context) {
 	cfg := OptimizeLoopConfig{
 		Label:          "PeriodicLoop",
 		Interval:       OptimizePeriodicInterval,
-		InterludeDelay: 0,     // no "idle window" -> behave like periodic
-		CancelOnChange: false, // do NOT cancel if new pods arrive (can be made configurable later)
+		InterludeDelay: 0,                              // no "idle window" -> behave like periodic
+		CancelOnChange: OptimizePeriodicCancelOnChange, // do NOT cancel if new pods arrive (can be made configurable later)
 	}
 	optimizeBackgroundLoopFunc(pl, ctx, cfg)
 }

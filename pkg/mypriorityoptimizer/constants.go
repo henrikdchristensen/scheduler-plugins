@@ -81,5 +81,15 @@ const (
 	SolverStatusOptimal = "OPTIMAL"
 	// Solver feasible status string.
 	SolverStatusFeasible = "FEASIBLE"
+
+	// =========================================================
+
+	// ================ Loop config defaults ===================
+	// OptimizeInterludeCancelOnChange indicates whether interlude optimization
+	// runs should be cancelled if the pending set changes.
+	OptimizeInterludeCancelOnChange = true
+	// OptimizePeriodicCancelOnChange indicates whether periodic optimization
+	// runs should be cancelled if the pending set changes.
+	OptimizePeriodicCancelOnChange = false // do NOT cancel if new pods arrive (can be made configurable later)
 	// =========================================================
 )

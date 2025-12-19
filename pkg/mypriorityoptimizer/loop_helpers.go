@@ -95,10 +95,10 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 	lastChange := time.Now()
 
 	var (
-		runCancel           context.CancelFunc
-		runDone             chan bool
-		baselineSet         map[types.UID]struct{}
-		baselineFingerprint string
+		runCancel      context.CancelFunc
+		runDone        chan bool
+		runSet         map[types.UID]struct{}
+		runFingerprint string
 	)
 
 	for {
@@ -150,18 +150,18 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				case solved := <-runDone:
 					klog.InfoS(msg(cfg.Label, "background run finished"), "solved", solved)
 
-					if solved && baselineSet != nil && baselineFingerprint != "" {
-						lastSolvedSet = cloneUIDSet(baselineSet)
-						lastSolvedFingerprint = baselineFingerprint
+					if solved && runSet != nil && runFingerprint != "" {
+						lastSolvedSet = cloneUIDSet(runSet)
+						lastSolvedFingerprint = runFingerprint
 					}
 					runDone = nil
 					runCancel = nil
-					baselineSet = nil
-					baselineFingerprint = ""
+					runSet = nil
+					runFingerprint = ""
 
 				default:
 					// Still running
-					if cfg.CancelOnChange && !isSameUIDSet(currentSet, baselineSet) {
+					if cfg.CancelOnChange && runCancel != nil && !isSameUIDSet(currentSet, runSet) {
 						klog.V(MyV).InfoS(
 							msg(cfg.Label, "pending set changed; cancelling run"),
 							"pending", pendingCount,
@@ -202,6 +202,8 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 			if !isSameUIDSet(currentSet, lastPendingSet) {
 				lastPendingSet = cloneUIDSet(currentSet)
 				lastChange = time.Now()
+				lastSolvedSet = nil
+				lastSolvedFingerprint = ""
 				klog.V(MyV).InfoS(
 					msg(cfg.Label, "pending set changed; reset idle timer"),
 					"pending", pendingCount,
@@ -223,8 +225,8 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 			klog.InfoS(msg(cfg.Label, InfoCycleStarted),
 				"pendingPods", pendingCount)
 
-			baselineSet = cloneUIDSet(currentSet)
-			baselineFingerprint = currentFingerprint
+			runSet = cloneUIDSet(currentSet)
+			runFingerprint = currentFingerprint
 
 			ctxRun, cancelRun := context.WithCancel(ctx)
 			runCancel = cancelRun
