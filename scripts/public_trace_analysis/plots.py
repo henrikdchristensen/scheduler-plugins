@@ -267,7 +267,7 @@ def make_combined_grid() -> None:
         h_pad=0.2,  # height padding between subplots (inches)
     )
 
-    out_path = "analysis/figures/public_trace_histograms.png"
+    out_path = "analysis/kwok_trace_replayer/figures/public_trace_histograms.png"
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"[OK] Saved combined grid to {out_path}")

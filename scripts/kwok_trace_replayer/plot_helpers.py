@@ -9,6 +9,7 @@ from scripts.kwok_trace_replayer.trace_helpers import (
     MC_MEAN_SEED, MC_MEAN_SAMPLES,
     AXIS_LABEL_FONTSIZE, TICK_LABEL_FONTSIZE,
     TITLE_FONTSIZE, LEGEND_FONTSIZE,
+    estimate_pareto_params,
 )
 
 # ----------------------------------------------------------------------
@@ -117,7 +118,7 @@ def plot_histogram_with_pareto(
                 r"Pareto: "
                 rf"$\alpha\!=\!{pareto_alpha:.3f}$, "
                 rf"$x_{{\min}}\!=\!{pareto_xmin:.3f}$"
-                f"{mean_str}"
+                # f"{mean_str}"
             )
             legend_handles.append(pareto_line)
             legend_labels.append(label)
@@ -127,7 +128,7 @@ def plot_histogram_with_pareto(
         mean_line = ax.axvline(mean_val, linestyle="--", alpha=0.8)
         legend_handles.append(mean_line)
 
-    mean_label = f"True mean={mean_val:.3f}"
+    mean_label = f"mean={mean_val:.3f}"
     legend_labels.append(mean_label)
 
     # Axis scales and labels
