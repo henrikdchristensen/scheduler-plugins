@@ -1,4 +1,5 @@
 // common_helpers_test.go
+// CHECKED
 package mypriorityoptimizer
 
 import (

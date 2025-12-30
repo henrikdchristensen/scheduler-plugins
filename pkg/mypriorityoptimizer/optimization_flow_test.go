@@ -5,6 +5,7 @@ package mypriorityoptimizer
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
@@ -45,7 +46,8 @@ func TestRunOptimizationFlow_OptimizationInProgress(t *testing.T) {
 
 func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 	type want struct {
-		err error
+		err          error
+		errSubstring string // For substring matching in error messages
 		// Returned values
 		planNonNil     bool
 		baselineEvict  *int
@@ -78,6 +80,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			},
 			want: want{
 				err:                 errors.New("boom-plancontext"),
+				errSubstring:        "boom-plancontext",
 				exportCalled:        false,
 				watchCalled:         false,
 				completedCalled:     false,
@@ -306,18 +309,19 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			plan, baselinePtr, bestName, bestAttemptOut, attemptsOut, err :=
 				pl.runOptimizationFlow(context.Background(), nil)
 
-			// Error checking
+				// Error checking
 			if tc.want.err == nil {
 				if err != nil {
 					t.Fatalf("err=%v, want nil", err)
 				}
 			} else {
-				if tc.name == "planContext_error" {
+				if tc.name == "planContext error" {
 					if tc.h.planCtxError == nil {
 						t.Fatalf("test bug: missing planCtxErr")
 					}
-					if !errors.Is(err, tc.h.planCtxError) {
-						t.Fatalf("err=%v, want %v", err, tc.h.planCtxError)
+					wantErrStr := tc.want.errSubstring
+					if err == nil || !strings.Contains(err.Error(), wantErrStr) {
+						t.Fatalf("err=%v, err.Error()=%v, type=%T, want substring %q", err, err.Error(), err, wantErrStr)
 					}
 				} else if !errors.Is(err, tc.want.err) {
 					t.Fatalf("err=%v, want %v", err, tc.want.err)

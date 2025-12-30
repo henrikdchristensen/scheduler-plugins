@@ -1,4 +1,5 @@
 // common_helpers.go
+// CHECKED
 package mypriorityoptimizer
 
 import (
@@ -7,12 +8,6 @@ import (
 	"strconv"
 	"time"
 )
-
-// -------------------------
-// Test Hooks
-// -------------------------
-
-var nowUnixNano = func() int64 { return time.Now().UnixNano() }
 
 // -------------------------
 // getUniqueId
@@ -115,3 +110,9 @@ func cmpLexi(a, b map[string]int) int {
 
 	return cmpLexiByKeys(keys, a, b)
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var nowUnixNano = func() int64 { return time.Now().UnixNano() }

@@ -74,73 +74,64 @@ func TestListConfigMaps(t *testing.T) {
 func TestPruneConfigMaps(t *testing.T) {
 	ctx := context.Background()
 	base := time.Unix(700_000_000, 0)
-
-	type tc struct {
-		name          string
-		keep          int
-		listerCMs     []*v1.ConfigMap
-		clientObjs    []runtime.Object
-		listErr       error
-		deleteErr     map[string]error
-		wantErrSubstr string
-		wantDeletes   []string
-	}
-
 	ns := "ns"
 	labelKey := "myx/prune"
 
-	// newest to oldest cms
+	// Helper configmaps, newest to oldest
 	cm1 := cm(ns, "cm1", map[string]string{labelKey: "true"}, nil, base.Add(-3*time.Hour))
 	cm2 := cm(ns, "cm2", map[string]string{labelKey: "true"}, nil, base.Add(-2*time.Hour))
 	cm3 := cm(ns, "cm3", map[string]string{labelKey: "true"}, nil, base.Add(-1*time.Hour))
 	cm4 := cm(ns, "cm4", map[string]string{labelKey: "true"}, nil, base)
 
-	tests := []tc{
+	tests := []struct {
+		name        string
+		keep        int
+		listerCMs   []*v1.ConfigMap
+		clientObjs  []runtime.Object
+		listErr     error
+		deleteErr   map[string]error
+		wantErr     string
+		wantDeletes []string
+	}{
 		{
-			name:          "keep<=0 returns immediately",
-			keep:          0,
-			listerCMs:     []*v1.ConfigMap{cm1, cm2},
-			clientObjs:    []runtime.Object{cm1, cm2},
-			wantDeletes:   nil,
-			wantErrSubstr: "",
+			name:       "returns immediately if keep <= 0",
+			keep:       0,
+			listerCMs:  []*v1.ConfigMap{cm1, cm2},
+			clientObjs: []runtime.Object{cm1, cm2},
 		},
 		{
-			name:        "len(items)<=keep is a no-op",
-			keep:        10,
-			listerCMs:   []*v1.ConfigMap{cm1, cm2, cm3},
-			clientObjs:  []runtime.Object{cm1, cm2, cm3},
-			wantDeletes: nil,
+			name:       "no-op if len(items) <= keep",
+			keep:       10,
+			listerCMs:  []*v1.ConfigMap{cm1, cm2, cm3},
+			clientObjs: []runtime.Object{cm1, cm2, cm3},
 		},
 		{
-			name:        "deletes older beyond keep",
+			name:        "deletes older configmaps beyond keep",
 			keep:        2,
 			listerCMs:   []*v1.ConfigMap{cm1, cm2, cm3, cm4},
 			clientObjs:  []runtime.Object{cm1, cm2, cm3, cm4},
-			wantDeletes: []string{"cm2", "cm1"}, // keep cm4,cm3; delete cm2,cm1
+			wantDeletes: []string{"cm2", "cm1"},
 		},
 		{
-			name:          "list error propagates",
-			keep:          1,
-			listErr:       fmt.Errorf("boom"),
-			wantErrSubstr: "boom",
+			name:    "propagates list error",
+			keep:    1,
+			listErr: fmt.Errorf("boom"),
+			wantErr: "boom",
 		},
 		{
-			name: "delete NotFound is ignored",
-			keep: 1,
-			// lister sees 3 labeled, but client only has newest
+			name:        "ignores NotFound on delete",
+			keep:        1,
 			listerCMs:   []*v1.ConfigMap{cm2, cm3, cm4},
 			clientObjs:  []runtime.Object{cm4},
 			wantDeletes: []string{"cm3", "cm2"},
-			// fake client will return NotFound for deletes of cm3/cm2
 		},
 		{
-			name:          "delete other error is returned",
-			keep:          1,
-			listerCMs:     []*v1.ConfigMap{cm2, cm3, cm4},
-			clientObjs:    []runtime.Object{cm2, cm3, cm4},
-			deleteErr:     map[string]error{"cm3": fmt.Errorf("delete-fail")},
-			wantErrSubstr: "delete-fail",
-			// delete attempts: starts at cm3 then cm2, but should stop on cm3 error
+			name:        "returns error on delete failure",
+			keep:        1,
+			listerCMs:   []*v1.ConfigMap{cm2, cm3, cm4},
+			clientObjs:  []runtime.Object{cm2, cm3, cm4},
+			deleteErr:   map[string]error{"cm3": fmt.Errorf("delete-fail")},
+			wantErr:     "delete-fail",
 			wantDeletes: []string{"cm3"},
 		},
 	}
@@ -160,35 +151,38 @@ func TestPruneConfigMaps(t *testing.T) {
 				l = nsLister(ns, tt.listerCMs...)
 			}
 
-			// Per-name delete errors (and explicit NotFound behavior when object not present)
 			if len(tt.deleteErr) > 0 {
 				cli.Fake.PrependReactor("delete", "configmaps", func(a k8stesting.Action) (bool, runtime.Object, error) {
 					da := a.(k8stesting.DeleteAction)
 					if err, ok := tt.deleteErr[da.GetName()]; ok {
 						return true, nil, err
 					}
-					return false, nil, nil // fall through to default fake behavior
+					return false, nil, nil
 				})
 			}
 
 			err := pruneConfigMaps(ctx, cms, l, labelKey, tt.keep)
 
-			if tt.wantErrSubstr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
-					t.Fatalf("err=%v, want substring %q", err, tt.wantErrSubstr)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err=%v, want substring %q", err, tt.wantErr)
 				}
 			} else if err != nil {
 				t.Fatalf("unexpected err: %v", err)
 			}
 
-			gotDeletes := deleteActions(cli)
-			if !reflect.DeepEqual(gotDeletes, tt.wantDeletes) {
-				t.Fatalf("delete actions=%v, want %v", gotDeletes, tt.wantDeletes)
+			if tt.wantDeletes != nil {
+				if got := deleteActions(cli); !reflect.DeepEqual(got, tt.wantDeletes) {
+					t.Fatalf("delete actions=%v, want %v", got, tt.wantDeletes)
+				}
+			} else {
+				if got := deleteActions(cli); len(got) != 0 {
+					t.Fatalf("expected no deletes, got %v", got)
+				}
 			}
 		})
 	}
 
-	// Prove fake client NotFound path behaves like apiserver
 	t.Run("fake delete of missing returns NotFound", func(t *testing.T) {
 		cli := fake.NewSimpleClientset()
 		err := cli.CoreV1().ConfigMaps(ns).Delete(ctx, "missing", metav1.DeleteOptions{})
