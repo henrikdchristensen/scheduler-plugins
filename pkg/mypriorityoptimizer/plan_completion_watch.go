@@ -1,5 +1,4 @@
 // plan_completion_watch.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -106,19 +105,15 @@ var (
 	planCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
 		pl.planCompletionWatch(ap)
 	}
-
 	getActivePlanForWatch = func(pl *SharedState) *ActivePlan {
 		return pl.getActivePlan()
 	}
-
 	isPlanCompletedFn = func(pl *SharedState, ap *ActivePlan) (bool, error) {
 		return pl.isPlanCompleted(ap)
 	}
-
 	onPlanCompletedFn = func(pl *SharedState, status PlanStatus) {
 		pl.onPlanCompleted(status)
 	}
-
 	getPlanCompletionCheckInterval = func() time.Duration {
 		return PlanCompletionCheckInterval
 	}

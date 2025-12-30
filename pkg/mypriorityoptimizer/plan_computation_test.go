@@ -1,5 +1,4 @@
 // plan_computation_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -32,7 +31,7 @@ func TestPlanComputation_NoEnabledSolvers(t *testing.T) {
 	mustEq(t, len(attempts), 0, "attempts len")
 }
 
-func TestPlanComputation_NilOutputNoError_IsFailedAttempt(t *testing.T) {
+func TestPlanComputation_NilOutputNoError(t *testing.T) {
 	pl := &SharedState{}
 
 	withPythonAttemptConfig(t, true, 10*time.Millisecond, 7)
@@ -76,13 +75,11 @@ func TestPlanComputation_ErrorWithNonNilOutput(t *testing.T) {
 		return &SolverOutput{
 			Status: "OPTIMAL",
 			Placements: []SolverPod{
-				// Include Priority to make scoreSolution independent of any lookup strategy.
 				{UID: pre.UID, Namespace: pre.Namespace, Name: pre.Name, Priority: pre.Priority, Node: "n1"},
 			},
 		}, errors.New("boom")
 	})
 
-	// Provide Pods[] as well (some scoreSolution implementations look up priority from input pods).
 	in := SolverInput{
 		Preemptor:     pre,
 		Pods:          []SolverPod{*pre},
@@ -143,7 +140,7 @@ func TestPlanComputation_UsableButNotImproving(t *testing.T) {
 	mustEq(t, attempts[0].Status, "OPTIMAL", "attempt status")
 }
 
-func TestPlanComputation_UsesRunPythonSolver_AndImproves(t *testing.T) {
+func TestPlanComputation_UsesRunPythonSolver(t *testing.T) {
 	pl := &SharedState{}
 
 	withPythonAttemptConfig(t, true, 10*time.Millisecond, 0)

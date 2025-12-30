@@ -1,5 +1,4 @@
 // plan_activation_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -21,7 +20,7 @@ func TestPlanActivation_NilPlan(t *testing.T) {
 	must(t, errors.Is(err, ErrNoPlanProvided), "err=%v want %v", err, ErrNoPlanProvided)
 }
 
-func TestPlanActivation_NoMovesOrEvicts_OnlyActivates(t *testing.T) {
+func TestPlanActivation_NoMovesOrEvicts(t *testing.T) {
 	pl := &SharedState{}
 	plan := &Plan{}
 	pods := []*v1.Pod{pod("ns", "p1")}
@@ -155,7 +154,7 @@ func TestPlanActivation_MovesAndEvicts_NoEvictOrWait(t *testing.T) {
 	must(t, activated, "activatePlannedPodsFn not called")
 }
 
-func TestPlanActivation_EvictOrWaitErrors_StopBeforeActivate(t *testing.T) {
+func TestPlanActivation_EvictOrWaitErrors(t *testing.T) {
 	pl := &SharedState{}
 	p1 := pod("ns", "p1", withUID("u1"))
 	pods := []*v1.Pod{p1}

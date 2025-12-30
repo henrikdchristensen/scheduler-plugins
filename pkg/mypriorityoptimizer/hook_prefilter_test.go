@@ -133,7 +133,7 @@ func TestPreFilter(t *testing.T) {
 // PreFilter Extensions
 // -------------------------
 
-func TestPreFilterExtensions_IsNil(t *testing.T) {
+func TestPreFilterExtensions(t *testing.T) {
 	pl := &SharedState{}
 	if ext := pl.PreFilterExtensions(); ext != nil {
 		t.Fatalf("PreFilterExtensions() = %#v, want nil", ext)

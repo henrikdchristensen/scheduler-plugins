@@ -1,6 +1,4 @@
 // plan_completion_watch_test.go
-// with the help of AI tools to cover more branches/cases
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -73,7 +71,7 @@ func TestStartPlanCompletionWatch_SpawnsWatcher(t *testing.T) {
 // planCompletionWatch
 // -------------------------
 
-func TestPlanCompletionWatch_ActivePlanClearedStopsWatcher(t *testing.T) {
+func TestPlanCompletionWatch_ActivePlan(t *testing.T) {
 	pl := &SharedState{}
 
 	// Context that never finishes (so only ticker drives the loop).
@@ -114,7 +112,7 @@ func TestPlanCompletionWatch_ActivePlanClearedStopsWatcher(t *testing.T) {
 	}
 }
 
-func TestPlanCompletionWatch_ActivePlanIDMismatchStopsWatcher(t *testing.T) {
+func TestPlanCompletionWatch_ActivePlanIDMismatch(t *testing.T) {
 	pl := &SharedState{}
 
 	ap := &ActivePlan{ID: "plan-a", Ctx: context.Background(), Cancel: func() {}}
@@ -184,7 +182,7 @@ func TestPlanCompletionWatch_PlanCompletesSuccessfully(t *testing.T) {
 	}
 }
 
-func TestPlanCompletionWatch_IsPlanCompletedError_RetriesThenCompletes(t *testing.T) {
+func TestPlanCompletionWatch_IsPlanCompletedError(t *testing.T) {
 	pl := &SharedState{}
 	ap := &ActivePlan{ID: "plan-retry", Ctx: context.Background(), Cancel: func() {}}
 
@@ -214,10 +212,10 @@ func TestPlanCompletionWatch_IsPlanCompletedError_RetriesThenCompletes(t *testin
 	must(t, atomic.LoadInt32(&n) >= 2, "expected >=2 isPlanCompleted calls, got=%d", n)
 }
 
-func TestPlanCompletionWatch_TimeoutMarksPlanFailed(t *testing.T) {
+func TestPlanCompletionWatch_Timeout(t *testing.T) {
 	pl := &SharedState{}
 
-	// Already-expired deadline -> Done triggers immediately with DeadlineExceeded.
+	// Already-expired deadline
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 
@@ -246,10 +244,10 @@ func TestPlanCompletionWatch_TimeoutMarksPlanFailed(t *testing.T) {
 	}
 }
 
-func TestPlanCompletionWatch_TimeoutButPlanReplaced_DoesNotSettleFailed(t *testing.T) {
+func TestPlanCompletionWatch_TimeoutButPlanReplaced(t *testing.T) {
 	pl := &SharedState{}
 
-	// Already-expired deadline -> Done triggers immediately with DeadlineExceeded.
+	// Already-expired deadline
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 
@@ -270,7 +268,7 @@ func TestPlanCompletionWatch_TimeoutButPlanReplaced_DoesNotSettleFailed(t *testi
 	}
 }
 
-func TestPlanCompletionWatch_CancelledContext_DoesNotSettlePlan(t *testing.T) {
+func TestPlanCompletionWatch_CancelledContext(t *testing.T) {
 	pl := &SharedState{}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -294,13 +292,13 @@ func TestPlanCompletionWatch_CancelledContext_DoesNotSettlePlan(t *testing.T) {
 	}
 }
 
-func TestPlanCompletionWatch_IntervalNonPositive_DefaultsAndStillExits(t *testing.T) {
+func TestPlanCompletionWatch_IntervalNonPositive(t *testing.T) {
 	pl := &SharedState{}
 
 	// Force interval <= 0 branch.
 	withVar(t, &getPlanCompletionCheckInterval, func() time.Duration { return 0 })
 
-	// Exit immediately via cancellation (so we don't wait for the 500ms ticker).
+	// Exit immediately via cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

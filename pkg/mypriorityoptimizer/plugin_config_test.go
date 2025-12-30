@@ -1,6 +1,4 @@
 // plugin_config_test.go
-// with the help of AI tools to cover more branches/cases
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -114,8 +112,18 @@ func TestPersistPluginConfig_PropagatesErrors(t *testing.T) {
 	}
 
 	tests := []tc{
-		{name: "get fails", verb: "get", seed: nil, wantSubstr: "get-fail"},
-		{name: "create fails", verb: "create", seed: nil, wantSubstr: "create-fail"},
+		{
+			name:       "get fails",
+			verb:       "get",
+			seed:       nil,
+			wantSubstr: "get-fail",
+		},
+		{
+			name:       "create fails",
+			verb:       "create",
+			seed:       nil,
+			wantSubstr: "create-fail",
+		},
 		{
 			name: "update fails",
 			verb: "update",

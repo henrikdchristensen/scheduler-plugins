@@ -1,5 +1,4 @@
 // plugin_readiness_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -19,44 +18,61 @@ import (
 // isCacheReady
 // -------------------------
 
-func TestIsCacheReady_NoInformers_ReturnsTrue(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if got := isCacheReady(ctx); !got {
-		t.Fatalf("isCacheReady() = %v, want true", got)
+func TestIsCacheReadyn(t *testing.T) {
+	tests := []struct {
+		name      string
+		ctxFn     func() (context.Context, context.CancelFunc)
+		informers []cache.SharedIndexInformer
+		startInf  bool
+		want      bool
+	}{
+		{
+			name:  "no informers",
+			ctxFn: func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+			want:  true,
+		},
+		{
+			name:      "all nil informers",
+			ctxFn:     func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+			informers: []cache.SharedIndexInformer{nil, nil},
+			want:      true,
+		},
+		{
+			name: "context canceled returns false",
+			ctxFn: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			informers: []cache.SharedIndexInformer{newTestPodInformer()},
+			want:      false,
+		},
+		{
+			name: "running informer returns true",
+			ctxFn: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 500*time.Millisecond)
+			},
+			informers: []cache.SharedIndexInformer{newTestPodInformer()},
+			startInf:  true,
+			want:      true,
+		},
 	}
-}
 
-func TestIsCacheReady_AllNilInformers_ReturnsTrue(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.ctxFn()
+			defer cancel()
+			infs := tt.informers
 
-	if got := isCacheReady(ctx, nil, nil); !got {
-		t.Fatalf("isCacheReady(nil informers) = %v, want true", got)
-	}
-}
+			if tt.startInf && len(infs) > 0 && infs[0] != nil {
+				startInformer(t, infs[0])
+			}
 
-func TestIsCacheReady_ContextCanceled_ReturnsFalse(t *testing.T) {
-	inf := newTestPodInformer()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if got := isCacheReady(ctx, inf); got {
-		t.Fatalf("isCacheReady(canceled ctx) = %v, want false", got)
-	}
-}
-
-func TestIsCacheReady_RunningInformer_ReturnsTrue(t *testing.T) {
-	inf := newTestPodInformer()
-	startInformer(t, inf)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	if got := isCacheReady(ctx, inf); !got {
-		t.Fatalf("isCacheReady(running informer) = %v, want true", got)
+			got := isCacheReady(ctx, infs...)
+			if got != tt.want {
+				t.Fatalf("isCacheReady() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -64,7 +80,7 @@ func TestIsCacheReady_RunningInformer_ReturnsTrue(t *testing.T) {
 // waitForUsableNode
 // -------------------------
 
-func TestWaitForUsableNode_ContextCanceled_ReturnsFalse(t *testing.T) {
+func TestWaitForUsableNode_ContextCanceled(t *testing.T) {
 	pl := &SharedState{}
 	withReadinessEnv(t, ReadinessEnvs{
 		GetNodes: func(*SharedState) ([]*v1.Node, error) { return []*v1.Node{node("nodeA")}, nil },
@@ -199,7 +215,7 @@ func TestPluginReadiness_WarmupCanceled(t *testing.T) {
 	})
 }
 
-func TestPluginReadiness_UsableNodeNeverFound(t *testing.T) {
+func TestPluginReadiness_WithWarmup(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
@@ -232,7 +248,7 @@ func TestPluginReadiness_UsableNodeNeverFound(t *testing.T) {
 	})
 }
 
-func TestPluginReadiness_Success_WithInformer(t *testing.T) {
+func TestPluginReadiness_CompletesWithInformer(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
@@ -275,7 +291,7 @@ func TestPluginReadiness_Success_WithInformer(t *testing.T) {
 	})
 }
 
-func TestPluginReadiness_Success(t *testing.T) {
+func TestPluginReadiness_CompletesWithWarmup(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)

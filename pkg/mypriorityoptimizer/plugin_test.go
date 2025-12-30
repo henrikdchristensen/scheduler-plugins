@@ -1,5 +1,4 @@
 // plugin_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -158,7 +157,7 @@ func TestName(t *testing.T) {
 // New
 // -------------------------
 
-func TestNew_InvalidKubeConfig_NoHooks(t *testing.T) {
+func TestNew_InvalidKubeConfig(t *testing.T) {
 	ctx := context.Background()
 
 	// Must be a framework.Handle; mkHandle provides that (via embedding).
@@ -181,7 +180,7 @@ func TestNew_InvalidKubeConfig_NoHooks(t *testing.T) {
 	}
 }
 
-func TestNew_Success_CallsHooks_AndStoresHandle(t *testing.T) {
+func TestNew_Success(t *testing.T) {
 	ctx := context.Background()
 	h := makeHandle("https://localhost")
 

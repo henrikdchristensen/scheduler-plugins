@@ -1,6 +1,4 @@
 // loop_helpers_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
-// with the help of AI tools to cover more branches/cases
 package mypriorityoptimizer
 
 import (
@@ -20,7 +18,7 @@ import (
 // startLoops
 // -------------------------
 
-func TestStartLoops_DoesNothingWhenNotReady(t *testing.T) {
+func TestStartLoops_NotReady(t *testing.T) {
 	withVar(t, &OptimizeMode, ModePeriodic)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -119,7 +117,7 @@ func TestOptimizeBackgroundLoop_ImmediateCancel(t *testing.T) {
 	pl.optimizeBackgroundLoop(ctx, cfg)
 }
 
-func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
+func TestOptimizeBackgroundLoop_Scenarios(t *testing.T) {
 	pl := &SharedState{}
 
 	cfg := OptimizeLoopConfig{
@@ -272,40 +270,57 @@ func TestOptimizeBackgroundLoop_BranchScript(t *testing.T) {
 // isSameUIDSet
 // -------------------------
 
-func TestIsSameUIDSet_NilVsNil(t *testing.T) {
-	if !isSameUIDSet(nil, nil) {
-		t.Fatalf("isSameUIDSet(nil, nil) = false, want true")
+func TestIsSameUIDSet(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b map[types.UID]struct{}
+		want bool
+	}{
+		{
+			name: "nil vs nil",
+			a:    nil,
+			b:    nil,
+			want: true,
+		},
+		{
+			name: "nil vs non-nil",
+			a:    nil,
+			b:    uidSet("u1"),
+			want: false,
+		},
+		{
+			name: "non-nil vs nil",
+			a:    uidSet("u1"),
+			b:    nil,
+			want: false,
+		},
+		{
+			name: "different lengths",
+			a:    uidSet("u1"),
+			b:    uidSet("u1", "u2"),
+			want: false,
+		},
+		{
+			name: "same elements",
+			a:    uidSet("u1", "u2"),
+			b:    uidSet("u2", "u1"),
+			want: true,
+		},
+		{
+			name: "different elements",
+			a:    uidSet("u1", "u2"),
+			b:    uidSet("u1", "u3"),
+			want: false,
+		},
 	}
-}
 
-func TestIsSameUIDSet_NilVsNonNil(t *testing.T) {
-	a := uidSet("u1")
-	if isSameUIDSet(nil, a) || isSameUIDSet(a, nil) {
-		t.Fatalf("isSameUIDSet(nil, non-nil) or reverse = true, want false")
-	}
-}
-
-func TestIsSameUIDSet_DifferentLengths(t *testing.T) {
-	a := uidSet("u1")
-	b := uidSet("u1", "u2")
-	if isSameUIDSet(a, b) {
-		t.Fatalf("isSameUIDSet() with different lengths = true, want false")
-	}
-}
-
-func TestIsSameUIDSet_SameElements(t *testing.T) {
-	a := uidSet("u1", "u2")
-	b := uidSet("u2", "u1")
-	if !isSameUIDSet(a, b) {
-		t.Fatalf("isSameUIDSet() with same elements = false, want true")
-	}
-}
-
-func TestIsSameUIDSet_DifferentElements(t *testing.T) {
-	a := uidSet("u1", "u2")
-	b := uidSet("u1", "u3")
-	if isSameUIDSet(a, b) {
-		t.Fatalf("isSameUIDSet() with different elements = true, want false")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSameUIDSet(tt.a, tt.b)
+			if got != tt.want {
+				t.Fatalf("isSameUIDSet(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -339,37 +354,52 @@ func TestCloneUIDSet_Independence(t *testing.T) {
 // isAlreadyComputedForPendingSet
 // -------------------------
 
-func TestIsAlreadyComputedForPendingSet_BestAttemptNil(t *testing.T) {
-	if got := isAlreadyComputedForPendingSet(nil, nil); got {
-		t.Fatalf("isAlreadyComputedForPendingSet(nil, nil) = true, want false")
+func TestIsAlreadyComputedForPendingSet(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		best *SolverResult
+		want bool
+	}{
+		{
+			name: "BestAttemptNil",
+			err:  nil,
+			best: nil,
+			want: false,
+		},
+		{
+			name: "NonOptimalStatus",
+			err:  ErrNoImprovingSolutionFromAnySolver,
+			best: &SolverResult{Status: "FEASIBLE"},
+			want: false,
+		},
+		{
+			name: "OptimalWithNoImprovementError",
+			err:  ErrNoImprovingSolutionFromAnySolver,
+			best: &SolverResult{Status: "OPTIMAL"},
+			want: true,
+		},
+		{
+			name: "OptimalWithNoPendingPodsError",
+			err:  ErrNoPendingPodsScheduled,
+			best: &SolverResult{Status: "OPTIMAL"},
+			want: true,
+		},
+		{
+			name: "OptimalWithOtherError",
+			err:  context.DeadlineExceeded,
+			best: &SolverResult{Status: "OPTIMAL"},
+			want: false,
+		},
 	}
-}
 
-func TestIsAlreadyComputedForPendingSet_NonOptimalStatus(t *testing.T) {
-	best := &SolverResult{Status: "FEASIBLE"}
-	if got := isAlreadyComputedForPendingSet(ErrNoImprovingSolutionFromAnySolver, best); got {
-		t.Fatalf("isAlreadyComputedForPendingSet(non-OPTIMAL) = true, want false")
-	}
-}
-
-func TestIsAlreadyComputedForPendingSet_OptimalWithNoImprovementError(t *testing.T) {
-	best := &SolverResult{Status: "OPTIMAL"}
-	if got := isAlreadyComputedForPendingSet(ErrNoImprovingSolutionFromAnySolver, best); !got {
-		t.Fatalf("isAlreadyComputedForPendingSet(OPTIMAL, ErrNoImprovingSolutionFromAnySolver) = false, want true")
-	}
-}
-
-func TestIsAlreadyComputedForPendingSet_OptimalWithNoPendingPodsError(t *testing.T) {
-	best := &SolverResult{Status: "OPTIMAL"}
-	if got := isAlreadyComputedForPendingSet(ErrNoPendingPodsScheduled, best); !got {
-		t.Fatalf("isAlreadyComputedForPendingSet(OPTIMAL, ErrNoPendingPodsScheduled) = false, want true")
-	}
-}
-
-func TestIsAlreadyComputedForPendingSet_OptimalWithOtherError(t *testing.T) {
-	best := &SolverResult{Status: "OPTIMAL"}
-	if got := isAlreadyComputedForPendingSet(context.DeadlineExceeded, best); got {
-		t.Fatalf("isAlreadyComputedForPendingSet(OPTIMAL, other error) = true, want false")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isAlreadyComputedForPendingSet(tt.err, tt.best)
+			if got != tt.want {
+				t.Fatalf("isAlreadyComputedForPendingSet(%v, %v) = %v, want %v", tt.err, tt.best, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -459,7 +489,7 @@ func TestBuildPendingSnapshot(t *testing.T) {
 	})
 }
 
-func TestBuildPendingSnapshot_NodesErrorPropagated(t *testing.T) {
+func TestBuildPendingSnapshot_NodesError(t *testing.T) {
 	pl := &SharedState{}
 	sentinel := errors.New("nodes boom")
 
@@ -476,7 +506,7 @@ func TestBuildPendingSnapshot_NodesErrorPropagated(t *testing.T) {
 	})
 }
 
-func TestBuildPendingSnapshot_PodsErrorPropagated(t *testing.T) {
+func TestBuildPendingSnapshot_PodsError(t *testing.T) {
 	pl := &SharedState{}
 	sentinel := errors.New("pods boom")
 

@@ -229,7 +229,7 @@ func TestHTTP_Solve(t *testing.T) {
 // startHttpServer
 // -------------------------
 
-func TestStartHttpServer_ShutsDownOnContextCancel(t *testing.T) {
+func TestStartHttpServer_ContextCancel(t *testing.T) {
 	pl := &SharedState{}
 	pl.PluginReady.Store(true) // makes /healthz return 200 once reachable
 

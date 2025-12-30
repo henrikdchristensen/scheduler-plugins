@@ -1,6 +1,4 @@
 // plan_helpers_test.go
-// with the help of AI tools to cover more branches/cases
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -26,67 +24,6 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 )
-
-// -------------------------
-// Test Helpers
-// -------------------------
-
-func must(t *testing.T, cond bool, msg string, args ...any) {
-	t.Helper()
-	if !cond {
-		t.Fatalf(msg, args...)
-	}
-}
-
-func mustNoErr(t *testing.T, err error, msg string, args ...any) {
-	t.Helper()
-	if err != nil {
-		t.Fatalf(msg+": %v", append(args, err)...)
-	}
-}
-
-func mustEq[T any](t *testing.T, got, want T, msg string, args ...any) {
-	t.Helper()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf(msg+" (got=%#v want=%#v)", append(args, got, want)...)
-	}
-}
-
-func mustContains(t *testing.T, s, sub string) {
-	t.Helper()
-	if !strings.Contains(s, sub) {
-		t.Fatalf("want %q to contain %q", s, sub)
-	}
-}
-
-func keysOfPods(m map[string]*v1.Pod) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func newSharedStateWithCmInformer(t *testing.T, objects ...runtime.Object) (*SharedState, func()) {
-	t.Helper()
-
-	client := fake.NewSimpleClientset(objects...)
-	factory := informers.NewSharedInformerFactory(client, 0)
-	cmInformer := factory.Core().V1().ConfigMaps().Informer()
-
-	stopCh := make(chan struct{})
-	factory.Start(stopCh)
-	if ok := cache.WaitForCacheSync(stopCh, cmInformer.HasSynced); !ok {
-		close(stopCh)
-		t.Fatalf("ConfigMap informer failed to sync")
-	}
-
-	h := &FakeHandle{Client: client, Factory: factory}
-	pl := &SharedState{Client: client, Handle: h}
-
-	return pl, func() { close(stopCh) }
-}
 
 // -------------------------
 // ActivePlan flag
@@ -134,13 +71,10 @@ func TestGetAndClearActivePlan(t *testing.T) {
 	pl.ActivePlan.Store(ap1)
 
 	must(t, pl.getActivePlan() == ap1, "expected getActivePlan() to return stored plan")
-
 	must(t, !pl.tryClearActivePlan(ap2), "tryClearActivePlan(wrong ptr) want false")
 	must(t, pl.getActivePlan() == ap1, "plan changed after wrong clear")
-
 	must(t, pl.tryClearActivePlan(ap1), "tryClearActivePlan(correct ptr) want true")
 	must(t, pl.getActivePlan() == nil, "plan not cleared")
-
 	must(t, !pl.tryClearActivePlan(nil), "tryClearActivePlan(nil) want false")
 }
 
@@ -230,7 +164,7 @@ func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 	sortPodSetItemsByPriorityAndCreation(items)
 	mustEq(t, items[0].p.Name, "old", "timestamp sort wrong")
 
-	// zero timestamps => name fallback (just don't set CreationTimestamp)
+	// zero timestamps => name fallback
 	pA := pod("ns", "a", withPrio(prio))
 	pC := pod("ns", "c", withPrio(prio))
 	items = []PodSetItem{{p: pC}, {p: pA}}
@@ -242,7 +176,7 @@ func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 // buildPlan
 // -------------------------
 
-func TestBuildPlan(t *testing.T) {
+func TestBuildPlan_Scenarios(t *testing.T) {
 	pl := &SharedState{}
 
 	// pRunEvict: running, evicted
@@ -257,7 +191,7 @@ func TestBuildPlan(t *testing.T) {
 	// pOwnedPending: controller-owned pending -> scheduled => goes to WorkloadQuotas
 	pOwnedPending := pod("ns", "owned", withUID("u-owned"), withOwner("ReplicaSet", "rs-1"))
 
-	// pUnchanged: running already on n1, solver says n1 => not “changed”
+	// pUnchanged: running already on n1, solver says n1 => not "changed"
 	pUnchanged := pod("ns", "unchanged", withUID("u-unch"), onNode("n1"), withOwner("ReplicaSet", "rs-1"))
 
 	// pDeleted: should be ignored
@@ -322,7 +256,7 @@ func TestBuildPlan(t *testing.T) {
 	}
 }
 
-func TestBuildPlan_NilOutputReturnsEmptyPlan(t *testing.T) {
+func TestBuildPlan_NilOutput(t *testing.T) {
 	pl := &SharedState{}
 	plan, err := pl.buildPlan(nil, nil, nil)
 	must(t, err == nil, "err=%v", err)
@@ -330,7 +264,7 @@ func TestBuildPlan_NilOutputReturnsEmptyPlan(t *testing.T) {
 	must(t, len(plan.Evicts) == 0 && len(plan.Moves) == 0 && len(plan.NewPlacements) == 0, "expected empty plan, got=%#v", plan)
 }
 
-func TestBuildPlan_WithPreemptorNomination(t *testing.T) {
+func TestBuildPlan_WithPreemptor(t *testing.T) {
 	pl := &SharedState{}
 	pre := pod("ns", "pre", withUID("u-pre"))
 
@@ -344,7 +278,7 @@ func TestBuildPlan_WithPreemptorNomination(t *testing.T) {
 	mustEq(t, len(plan.Moves), 0, "preemptor-only plan should not report moves")
 }
 
-func TestBuildPlan_PreemptorNotInPodsStillNominates(t *testing.T) {
+func TestBuildPlan_PreemptorNotInPods(t *testing.T) {
 	pl := &SharedState{}
 	pre := pod("ns", "pre", withUID("u-pre")) // pending
 	out := &SolverOutput{Placements: []SolverPod{{UID: pre.UID, Node: "n1"}}}
@@ -391,7 +325,7 @@ func TestBuildPlan_PreemptorDeleted(t *testing.T) {
 // setActivePlan
 // -------------------------
 
-func TestSetActivePlan_NilPlan_NoActivePlanStored(t *testing.T) {
+func TestSetActivePlan_NilPlan(t *testing.T) {
 	pl := &SharedState{}
 	pl.setActivePlan(nil, "id", nil)
 	must(t, pl.getActivePlan() == nil, "expected no plan stored")
@@ -504,14 +438,14 @@ func TestWaitPodsGone_UsesHookWhenNonEmpty(t *testing.T) {
 	must(t, called, "hook not called")
 }
 
-func TestWaitPodsGone_EmptyOrNilPodFastPath(t *testing.T) {
+func TestWaitPodsGone_EmptyOrNilPod(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 	mustNoErr(t, pl.waitPodsGone(ctx, nil), "expected nil")
 	mustNoErr(t, pl.waitPodsGone(ctx, []*v1.Pod{nil}), "expected nil")
 }
 
-func TestWaitPodsGone_NotFound_UIDChange(t *testing.T) {
+func TestWaitPodsGone_NotFound(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 
@@ -549,7 +483,7 @@ func TestWaitPodsGone_NotFound_UIDChange(t *testing.T) {
 // activatePods
 // -------------------------
 
-func TestActivatePods_NilOrEmptySetDoesNothing(t *testing.T) {
+func TestActivatePods_NilOrEmptySet(t *testing.T) {
 	pl := &SharedState{}
 
 	var called bool
@@ -609,7 +543,7 @@ func TestActivatePods_SortsLimitsAndRemovesActivated(t *testing.T) {
 	})
 }
 
-func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
+func TestActivatePods_PruneNotFound(t *testing.T) {
 	pl := &SharedState{}
 	set := newPodSet("blocked")
 
@@ -647,7 +581,7 @@ func TestActivatePods_PruneNotFound_ConservativeOnListerErr(t *testing.T) {
 // activatePlannedPods
 // -------------------------
 
-func TestActivatePlannedPods_HookAndDefaultPaths(t *testing.T) {
+func TestActivatePlannedPods_OverridesDefault(t *testing.T) {
 	pl := &SharedState{}
 
 	uidAllowed := "u-allowed"
@@ -691,14 +625,14 @@ func TestActivatePlannedPods_HookAndDefaultPaths(t *testing.T) {
 	})
 }
 
-func TestActivatePlannedPods_Guards(t *testing.T) {
+func TestActivatePlannedPods_HandlesNilAndEmptyInputs(t *testing.T) {
 	pl := &SharedState{}
 	pl.activatePlannedPods(nil, nil)
 	pl.activatePlannedPods(&Plan{}, nil)
 	pl.activatePlannedPods(&Plan{NewPlacements: nil}, []*v1.Pod{})
 }
 
-func TestActivatePlannedPods_NoNewlyScheduledPlacements_NoActivation(t *testing.T) {
+func TestActivatePlannedPods_SkipsNonPendingPlacements(t *testing.T) {
 	pl := &SharedState{}
 
 	// Only a move => allow-set becomes empty => early return branch.
@@ -715,7 +649,7 @@ func TestActivatePlannedPods_NoNewlyScheduledPlacements_NoActivation(t *testing.
 	must(t, !called, "expected no activation when no newly-scheduled placements exist")
 }
 
-func TestActivatePlannedPods_AllowButNoMatchingPending_NoActivation(t *testing.T) {
+func TestActivatePlannedPods_NoEligiblePendingPods(t *testing.T) {
 	pl := &SharedState{}
 
 	uid := types.UID("u-allow")
@@ -742,7 +676,7 @@ func TestActivatePlannedPods_AllowButNoMatchingPending_NoActivation(t *testing.T
 // isPlanCompleted
 // -------------------------
 
-func TestIsPlanCompleted_UsesHook(t *testing.T) {
+func TestIsPlanCompleted_OverridesDefault(t *testing.T) {
 	pl := &SharedState{}
 	ap := &ActivePlan{ID: PlanConfigMapNamePrefix + "1"}
 
@@ -892,7 +826,7 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 	})
 }
 
-func TestIsPlanCompleted_PinnedCorrectNode_Succeeds(t *testing.T) {
+func TestIsPlanCompleted_Succeeds(t *testing.T) {
 	pl := &SharedState{}
 
 	ap := &ActivePlan{
@@ -909,7 +843,7 @@ func TestIsPlanCompleted_PinnedCorrectNode_Succeeds(t *testing.T) {
 	})
 }
 
-func TestIsPlanCompleted_QuotaZero_IsSatisfied(t *testing.T) {
+func TestIsPlanCompleted_QuotaZero(t *testing.T) {
 	pl := &SharedState{}
 
 	ap := &ActivePlan{
@@ -924,7 +858,7 @@ func TestIsPlanCompleted_QuotaZero_IsSatisfied(t *testing.T) {
 	})
 }
 
-func TestIsPlanCompleted_GetPodsErrorPropagates(t *testing.T) {
+func TestIsPlanCompleted_GetPodsError(t *testing.T) {
 	pl := &SharedState{}
 	ap := &ActivePlan{ID: "x"}
 
@@ -1004,7 +938,7 @@ func TestOnPlanCompleted_HookAndDefaultPaths(t *testing.T) {
 	})
 }
 
-func TestOnPlanCompleted_CASFail_ReturnsFalseAndKeepsState(t *testing.T) {
+func TestOnPlanCompleted_CompareAndSwapFail(t *testing.T) {
 	pl := &SharedState{}
 	pl.ActivePlanInProgress.Store(true)
 
@@ -1012,13 +946,13 @@ func TestOnPlanCompleted_CASFail_ReturnsFalseAndKeepsState(t *testing.T) {
 	pl.ActivePlan.Store(ap)
 
 	withVar(t, &activePlanCompareAndSwap, func(_ *SharedState, _, _ *ActivePlan) bool {
-		return false // simulate someone else winning the race
+		return false
 	})
 
 	ok := pl.onPlanCompleted(PlanStatusCompleted)
-	must(t, !ok, "want ok=false when CAS fails")
-	must(t, pl.getActivePlan() == ap, "active plan should remain when CAS fails")
-	must(t, pl.ActivePlanInProgress.Load(), "active flag should remain true when CAS fails")
+	must(t, !ok, "want ok=false when compare and swap fails")
+	must(t, pl.getActivePlan() == ap, "active plan should remain when compare and swap fails")
+	must(t, pl.ActivePlanInProgress.Load(), "active flag should remain true when compare and swap fails")
 }
 
 // -------------------------
@@ -1082,7 +1016,7 @@ func TestIsPodAllowedByPlan_AndFilterNodes(t *testing.T) {
 	mustContains(t, reason, "quotas exhausted")
 }
 
-func TestIsPodAllowedByPlan_MissingWorkload_QuotaZero_NodeNotInQuota(t *testing.T) {
+func TestIsPodAllowedByPlan_MissingWorkload_QuotaZero(t *testing.T) {
 	pl := &SharedState{}
 
 	// Set an active plan with quotas only for rs-1
@@ -1115,7 +1049,7 @@ func TestIsPodAllowedByPlan_MissingWorkload_QuotaZero_NodeNotInQuota(t *testing.
 // computePlanPodCounts
 // -------------------------
 
-func TestComputePlanPodCounts(t *testing.T) {
+func TestComputePlanPodCounts_BasicScenarios(t *testing.T) {
 	// nil output
 	a, b, c := computePlanPodCounts(nil, nil)
 	mustEq(t, []int{a, b, c}, []int{0, 0, 0}, "nil out mismatch")
@@ -1148,7 +1082,7 @@ func TestComputePlanPodCounts(t *testing.T) {
 	mustEq(t, post2, 0, "post2 wrong")
 }
 
-func TestComputePlanPodCounts_IgnoresPendingEvictions_AndRunningPlacements(t *testing.T) {
+func TestComputePlanPodCounts_PendingEvictionsIgnored(t *testing.T) {
 	run := pod("ns", "run", withUID("u-run"), onNode("n1"))
 	pend := pod("ns", "pend", withUID("u-pend")) // pending (no node)
 
@@ -1168,7 +1102,7 @@ func TestComputePlanPodCounts_IgnoresPendingEvictions_AndRunningPlacements(t *te
 	mustEq(t, post, 2, "runningAfter wrong")
 }
 
-func TestComputePlanPodCounts_ClampsNegative(t *testing.T) {
+func TestComputePlanPodCounts_ClampNegativeCounts(t *testing.T) {
 	run := pod("ns", "run", withUID("u-run"), onNode("n1"))
 
 	out := &SolverOutput{
@@ -1185,7 +1119,7 @@ func TestComputePlanPodCounts_ClampsNegative(t *testing.T) {
 // exportPlanToConfigMap
 // -------------------------
 
-func TestExportPlanToConfigMap_UsesHook(t *testing.T) {
+func TestExportPlanToConfigMap_OverridesDefault(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 	sp := &StoredPlan{}
@@ -1205,8 +1139,7 @@ func TestExportPlanToConfigMap_UsesHook(t *testing.T) {
 	must(t, called, "hook not called")
 }
 
-func TestExportPlanToConfigMap_DefaultPath_CreatesConfigMap(t *testing.T) {
-	// Ensure hook is disabled to exercise real code.
+func TestExportPlanToConfigMap_CreatesConfigMap(t *testing.T) {
 	orig := exportPlanToConfigMapHook
 	exportPlanToConfigMapHook = nil
 	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
@@ -1237,7 +1170,7 @@ func TestExportPlanToConfigMap_DefaultPath_CreatesConfigMap(t *testing.T) {
 	mustEq(t, got.PluginVersion, "test", "plugin version mismatch")
 }
 
-func TestExportPlanToConfigMap_DefaultPath_CreateErrorPropagates(t *testing.T) {
+func TestExportPlanToConfigMap_CreateError(t *testing.T) {
 	orig := exportPlanToConfigMapHook
 	exportPlanToConfigMapHook = nil
 	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
@@ -1260,7 +1193,7 @@ func TestExportPlanToConfigMap_DefaultPath_CreateErrorPropagates(t *testing.T) {
 	mustContains(t, err.Error(), "create boom")
 }
 
-func TestExportPlanToConfigMap_DefaultPath_PruneDeleteErrorPropagates(t *testing.T) {
+func TestExportPlanToConfigMap_PruneDeleteError(t *testing.T) {
 	orig := exportPlanToConfigMapHook
 	exportPlanToConfigMapHook = nil
 	t.Cleanup(func() { exportPlanToConfigMapHook = orig })
@@ -1305,7 +1238,7 @@ func TestExportPlanToConfigMap_DefaultPath_PruneDeleteErrorPropagates(t *testing
 // setPlanStatusInConfigMap
 // -------------------------
 
-func TestSetPlanStatusInConfigMap(t *testing.T) {
+func TestSetPlanStatusInConfigMap_OverridesDefault(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 
@@ -1323,7 +1256,7 @@ func TestSetPlanStatusInConfigMap(t *testing.T) {
 	must(t, called, "hook not called")
 }
 
-func TestSetPlanStatusInConfigMap_Default_SetsAndStickyAndBadJson(t *testing.T) {
+func TestSetPlanStatusInConfigMap_DefaultBehavior(t *testing.T) {
 	orig := markPlanStatusToConfigMapHook
 	markPlanStatusToConfigMapHook = nil
 	t.Cleanup(func() { markPlanStatusToConfigMapHook = orig })
@@ -1470,7 +1403,7 @@ func TestClusterFingerprint_NodeCapacityChangeAffectsFingerprint(t *testing.T) {
 	must(t, fp1 != fp2, "fingerprint must change when node allocatable changes")
 }
 
-func TestClusterFingerprint_SortTieBreakersCovered(t *testing.T) {
+func TestClusterFingerprint_SortTieBreakers(t *testing.T) {
 	n1 := node("n1", withAllocatable("2000m", "2Gi"))
 	n2 := node("n2", withAllocatable("2000m", "2Gi"))
 
@@ -1536,4 +1469,65 @@ func TestCollectEvictions_SkipsMissingPendingAndDeleting(t *testing.T) {
 	mustEq(t, len(ev), 1, "only running+alive should be evicted")
 	mustEq(t, ev[0].UID, pRun.UID, "wrong evicted UID")
 	mustEq(t, ev[0].Node, "n1", "wrong node for evicted placement")
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func must(t *testing.T, cond bool, msg string, args ...any) {
+	t.Helper()
+	if !cond {
+		t.Fatalf(msg, args...)
+	}
+}
+
+func mustNoErr(t *testing.T, err error, msg string, args ...any) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf(msg+": %v", append(args, err)...)
+	}
+}
+
+func mustEq[T any](t *testing.T, got, want T, msg string, args ...any) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf(msg+" (got=%#v want=%#v)", append(args, got, want)...)
+	}
+}
+
+func mustContains(t *testing.T, s, sub string) {
+	t.Helper()
+	if !strings.Contains(s, sub) {
+		t.Fatalf("want %q to contain %q", s, sub)
+	}
+}
+
+func keysOfPods(m map[string]*v1.Pod) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func newSharedStateWithCmInformer(t *testing.T, objects ...runtime.Object) (*SharedState, func()) {
+	t.Helper()
+
+	client := fake.NewSimpleClientset(objects...)
+	factory := informers.NewSharedInformerFactory(client, 0)
+	cmInformer := factory.Core().V1().ConfigMaps().Informer()
+
+	stopCh := make(chan struct{})
+	factory.Start(stopCh)
+	if ok := cache.WaitForCacheSync(stopCh, cmInformer.HasSynced); !ok {
+		close(stopCh)
+		t.Fatalf("ConfigMap informer failed to sync")
+	}
+
+	h := &FakeHandle{Client: client, Factory: factory}
+	pl := &SharedState{Client: client, Handle: h}
+
+	return pl, func() { close(stopCh) }
 }

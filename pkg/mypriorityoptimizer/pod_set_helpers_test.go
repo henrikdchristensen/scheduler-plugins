@@ -1,5 +1,4 @@
 // pod_set_helpers_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -12,40 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
-
-// -------------------------
-// Test Helpers
-// -------------------------
-
-func mustContainsUID(t *testing.T, snap map[types.UID]SolverPod, uid types.UID) SolverPod {
-	t.Helper()
-	got, ok := snap[uid]
-	if !ok {
-		t.Fatalf("snapshot missing uid=%q; snap=%v", uid, snap)
-	}
-	return got
-}
-
-func mustNotContainsUID(t *testing.T, snap map[types.UID]SolverPod, uid types.UID) {
-	t.Helper()
-	if _, ok := snap[uid]; ok {
-		t.Fatalf("snapshot unexpectedly contains uid=%q; snap=%v", uid, snap)
-	}
-}
-
-func mustSize(t *testing.T, ps *PodSet, want int) {
-	t.Helper()
-	if got := ps.Size(); got != want {
-		t.Fatalf("Size()=%d want %d", got, want)
-	}
-}
-
-func mustMapLen(t *testing.T, m map[types.UID]SolverPod, want int) {
-	t.Helper()
-	if got := len(m); got != want {
-		t.Fatalf("len(snapshot)=%d want %d", got, want)
-	}
-}
 
 // -------------------------
 // newPodSet + doesPodSetExist
@@ -227,7 +192,7 @@ func TestPrunePodSet_Branches(t *testing.T) {
 	})
 }
 
-func TestPrunePodSet_ConservativeOnListerError(t *testing.T) {
+func TestPrunePodSet_ListerError(t *testing.T) {
 	pl := &SharedState{}
 	ps := newPodSet("blocked")
 
@@ -253,7 +218,7 @@ func TestPrunePodSet_ConservativeOnListerError(t *testing.T) {
 // Concurrency
 // -------------------------
 
-func TestPodSet_ConcurrentAccess_NoPanic(t *testing.T) {
+func TestPodSet_ConcurrentAccess(t *testing.T) {
 	ps := newPodSet("blocked")
 
 	const workers = 8      // concurrent workers
@@ -280,4 +245,38 @@ func TestPodSet_ConcurrentAccess_NoPanic(t *testing.T) {
 	wg.Wait()
 	// After all removes, should be empty.
 	mustSize(t, ps, 0)
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func mustContainsUID(t *testing.T, snap map[types.UID]SolverPod, uid types.UID) SolverPod {
+	t.Helper()
+	got, ok := snap[uid]
+	if !ok {
+		t.Fatalf("snapshot missing uid=%q; snap=%v", uid, snap)
+	}
+	return got
+}
+
+func mustNotContainsUID(t *testing.T, snap map[types.UID]SolverPod, uid types.UID) {
+	t.Helper()
+	if _, ok := snap[uid]; ok {
+		t.Fatalf("snapshot unexpectedly contains uid=%q; snap=%v", uid, snap)
+	}
+}
+
+func mustSize(t *testing.T, ps *PodSet, want int) {
+	t.Helper()
+	if got := ps.Size(); got != want {
+		t.Fatalf("Size()=%d want %d", got, want)
+	}
+}
+
+func mustMapLen(t *testing.T, m map[types.UID]SolverPod, want int) {
+	t.Helper()
+	if got := len(m); got != want {
+		t.Fatalf("len(snapshot)=%d want %d", got, want)
+	}
 }

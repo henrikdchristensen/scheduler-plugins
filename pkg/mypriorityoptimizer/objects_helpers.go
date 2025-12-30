@@ -1,5 +1,4 @@
 // objects_helpers.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (

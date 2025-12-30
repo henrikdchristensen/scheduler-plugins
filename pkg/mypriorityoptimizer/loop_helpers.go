@@ -1,5 +1,4 @@
 // loop_helpers.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -313,11 +312,9 @@ var (
 	optimizeBackgroundLoopFunc = func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
 		pl.optimizeBackgroundLoop(ctx, cfg)
 	}
-
 	buildPendingSnapshotHook = func(pl *SharedState) (*PendingSnapshot, error) {
 		return pl.buildPendingSnapshot()
 	}
-
 	startBackgroundOptimization = func(
 		pl *SharedState,
 		cfg OptimizeLoopConfig,

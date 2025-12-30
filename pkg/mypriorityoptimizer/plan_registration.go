@@ -1,5 +1,4 @@
 // plan_registration.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -57,7 +56,6 @@ var (
 	buildPlanFn = func(pl *SharedState, out *SolverOutput, preemptor *v1.Pod, pods []*v1.Pod) (*Plan, error) {
 		return pl.buildPlan(out, preemptor, pods)
 	}
-
 	exportPlanToConfigMapFn = func(pl *SharedState, ctx context.Context, id string, stored *StoredPlan) error {
 		return pl.exportPlanToConfigMap(ctx, id, stored)
 	}

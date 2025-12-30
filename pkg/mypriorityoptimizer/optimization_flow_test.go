@@ -1,6 +1,4 @@
 // optimization_flow_test.
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
-// with the help of AI tools to cover more branches/cases
 package mypriorityoptimizer
 
 import (

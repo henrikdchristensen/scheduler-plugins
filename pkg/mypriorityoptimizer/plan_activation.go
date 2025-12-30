@@ -1,5 +1,4 @@
 // plan_activation.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
@@ -98,7 +97,6 @@ var (
 	activatePlannedPodsFn = func(pl *SharedState, plan *Plan, pods []*v1.Pod) {
 		pl.activatePlannedPods(plan, pods)
 	}
-
 	getPodForPlanActivation = func(pl *SharedState, uid types.UID, ns, name string) *v1.Pod {
 		return pl.getPod(uid, ns, name)
 	}
