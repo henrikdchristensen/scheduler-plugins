@@ -1,5 +1,4 @@
-// solver_external_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
+// solver_external_test.gos
 package mypriorityoptimizer
 
 import (
@@ -16,22 +15,10 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-// withReadAllStdout temporarily replaces readAllStdout for the duration of the test.
-func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
-	t.Helper()
-	orig := readAllStdout
-	readAllStdout = f
-	t.Cleanup(func() { readAllStdout = orig })
-}
-
-// -------------------------
 // runSolverExternal
 // -------------------------
 
-func TestRunSolverExternal_Success_AndScansStderr(t *testing.T) {
+func TestRunSolverExternal_Success(t *testing.T) {
 	requireBash(t)
 
 	// Script that writes to stderr and stdout.
@@ -50,7 +37,7 @@ printf '{"status":"OPTIMAL"}'
 	}
 }
 
-func TestRunSolverExternal_WaitError_NonZeroExit(t *testing.T) {
+func TestRunSolverExternal_WaitError(t *testing.T) {
 	requireBash(t)
 
 	script := `#!/usr/bin/env bash
@@ -159,7 +146,7 @@ func TestRunSolverExternal_StartError(t *testing.T) {
 	defer cancel()
 
 	// Non-existent binary triggers cmd.Start() error branch.
-	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "definitely-not-a-real-executable-xyz", "unused")
+	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "not-a-real-executable-xyz", "unused")
 	if err == nil || !strings.Contains(err.Error(), "solver start") {
 		t.Fatalf("err=%v, want contains %q", err, "solver start")
 	}
@@ -212,4 +199,16 @@ func TestStreamSolverStderr_TokenTooLong(t *testing.T) {
 	if !errors.Is(err, bufio.ErrTooLong) {
 		t.Fatalf("err=%v, want bufio.ErrTooLong", err)
 	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+// withReadAllStdout temporarily replaces readAllStdout for the duration of the test.
+func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
+	t.Helper()
+	orig := readAllStdout
+	readAllStdout = f
+	t.Cleanup(func() { readAllStdout = orig })
 }

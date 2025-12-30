@@ -1,5 +1,4 @@
 // solver_python_test.go
-// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (
