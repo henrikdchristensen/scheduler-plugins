@@ -323,7 +323,6 @@ func (pl *SharedState) buildPendingSnapshot() (*PendingSnapshot, error) {
 		if p == nil || p.DeletionTimestamp != nil {
 			continue
 		}
-		// You currently check Status.Phase == "Pending" – use constant for clarity.
 		if p.Status.Phase != v1.PodPending {
 			continue
 		}

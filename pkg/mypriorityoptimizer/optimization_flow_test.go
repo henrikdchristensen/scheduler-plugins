@@ -112,9 +112,6 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 	}
 
 	planRegistrationFn = func(pl *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
-		// If registration fails, some implementations still want to mark an already-created
-		// ActivePlan as failed. Your onPlanCompletedHook may only fire when ActivePlan != nil,
-		// so allow tests to seed one via h.ap.
 		if h.regError != nil {
 			if h.ap != nil {
 				pl.ActivePlan.Store(h.ap)
@@ -129,7 +126,6 @@ func (h *flowHarness) install(t *testing.T) *flowCaptures {
 			h.ap = &ActivePlan{ID: "ap-1"}
 		}
 
-		// Mimic production: registration makes ActivePlan visible.
 		pl.ActivePlan.Store(h.ap)
 		return h.plan, h.ap, nil
 	}
@@ -576,7 +572,7 @@ func TestRunOptimizationFlow_NonBlocking_ActivePlanAlreadyInProgress(t *testing.
 	}
 	caps := h.install(t)
 
-	// Hard fail if any of the heavy hooks are reached.
+	// Hard fail if any of the big hooks are reached.
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		t.Fatalf("planContextFn must not be called when ActivePlan is already in progress")
 		return nil, nil, SolverInput{}, nil
