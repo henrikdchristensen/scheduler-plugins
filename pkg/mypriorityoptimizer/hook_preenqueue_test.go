@@ -16,7 +16,6 @@ import (
 func TestPreEnqueue(t *testing.T) {
 	type tc struct {
 		name string
-
 		// inputs
 		pod          *v1.Pod
 		pluginReady  bool
@@ -24,7 +23,6 @@ func TestPreEnqueue(t *testing.T) {
 		synch        bool
 		activePlan   *ActivePlan
 		placementMap map[string]string
-
 		// expected
 		wantCode    fwk.Code
 		wantBlocked int
@@ -59,7 +57,7 @@ func TestPreEnqueue(t *testing.T) {
 			wantBlocked: 0,
 		},
 		{
-			name:        "default-like mode pass-through when no active plan",
+			name:        "default mode pass-through when no active plan",
 			pod:         pod("default", "work-pod"),
 			pluginReady: true,
 			mode:        ModePeriodic,

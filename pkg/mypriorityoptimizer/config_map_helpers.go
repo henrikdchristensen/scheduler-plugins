@@ -22,7 +22,6 @@ import (
 
 // listConfigMaps lists config maps in the namespace with the given label key,
 // sorted by creation timestamp descending.
-// CHECKED
 func listConfigMaps(nsLister corev1listers.ConfigMapNamespaceLister, labelKey string) ([]v1.ConfigMap, error) {
 	// List with label selector
 	sel := labels.SelectorFromSet(labels.Set{labelKey: "true"})
@@ -49,7 +48,6 @@ func listConfigMaps(nsLister corev1listers.ConfigMapNamespaceLister, labelKey st
 // -------------------------
 
 // pruneConfigMaps keeps first K newest config maps with label, deletes the rest.
-// CHECKED
 func pruneConfigMaps(
 	ctx context.Context,
 	cms corev1client.ConfigMapInterface,
@@ -85,7 +83,6 @@ func pruneConfigMaps(
 // -------------------------
 
 // marshalJsonIndented marshals an object to JSON with indentation.
-// CHECKED
 func marshalJsonIndented(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ")
 }
@@ -95,7 +92,6 @@ func marshalJsonIndented(v any) ([]byte, error) {
 // -------------------------
 
 // marshalToJsonString pretty-prints v to JSON and returns it as a string.
-// CHECKED
 func marshalToJsonString(v any) (string, error) {
 	b, err := marshalJsonIndented(v)
 	if err != nil {
@@ -109,7 +105,6 @@ func marshalToJsonString(v any) (string, error) {
 // -------------------------
 
 // patchDataString patches a single DataKey with the given raw JSON string.
-// CHECKED
 func (d ConfigMapDoc) patchDataString(
 	ctx context.Context,
 	cms corev1client.ConfigMapInterface,
@@ -132,7 +127,6 @@ func (d ConfigMapDoc) patchDataString(
 // -------------------------
 
 // ensureJson creates or updates config map, storing data as JSON at DataKey.
-// CHECKED
 func (d ConfigMapDoc) ensureJson(
 	ctx context.Context,
 	cms corev1client.ConfigMapInterface,
@@ -177,7 +171,6 @@ func (d ConfigMapDoc) ensureJson(
 // -------------------------
 
 // patchJson patches only DataKey via merge patch.
-// CHECKED
 func (d ConfigMapDoc) patchJson(
 	ctx context.Context,
 	cms corev1client.ConfigMapInterface,
@@ -197,7 +190,6 @@ func (d ConfigMapDoc) patchJson(
 // -------------------------
 
 // readJson reads DataKey as JSON bytes.
-// CHECKED
 func (d ConfigMapDoc) readJson(
 	nsLister corev1listers.ConfigMapNamespaceLister,
 ) (raw []byte, found bool, err error) {
@@ -224,7 +216,6 @@ func (d ConfigMapDoc) readJson(
 // -------------------------
 
 // mutateJson loads -> mutates -> patches an array JSON.
-// CHECKED
 func mutateJson[T any](
 	ctx context.Context,
 	cms corev1client.ConfigMapInterface,
@@ -257,7 +248,6 @@ func mutateJson[T any](
 // -------------------------
 
 // mutateRaw loads JSON string at DataKey, mutates it, and writes result back.
-// CHECKED
 func (d ConfigMapDoc) mutateRaw(
 	ctx context.Context,
 	cms corev1client.ConfigMapInterface,

@@ -10,22 +10,12 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	solverBinary     = SolverPythonBin
-	solverScriptPath = SolverPythonScriptPath
-)
-
-// -------------------------
 // runPythonSolver
 // -------------------------
 
 // runPythonSolver is the Python-specific wrapper that prepares the payload,
 // invokes the external process, decodes the PythonSolverOutput and returns the
 // embedded generic SolverOutput.
-// CHECKED
 func (pl *SharedState) runPythonSolver(
 	ctx context.Context,
 	in SolverInput,
@@ -90,3 +80,12 @@ func (pl *SharedState) runPythonSolver(
 
 	return out, nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	solverBinary     = SolverPythonBin
+	solverScriptPath = SolverPythonScriptPath
+)

@@ -9,32 +9,6 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	planCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
-		pl.planCompletionWatch(ap)
-	}
-
-	getActivePlanForWatch = func(pl *SharedState) *ActivePlan {
-		return pl.getActivePlan()
-	}
-
-	isPlanCompletedFn = func(pl *SharedState, ap *ActivePlan) (bool, error) {
-		return pl.isPlanCompleted(ap)
-	}
-
-	onPlanCompletedFn = func(pl *SharedState, status PlanStatus) {
-		pl.onPlanCompleted(status)
-	}
-
-	getPlanCompletionCheckInterval = func() time.Duration {
-		return PlanCompletionCheckInterval
-	}
-)
-
-// -------------------------
 // planCompletionWatch
 // -------------------------
 
@@ -122,3 +96,29 @@ func (pl *SharedState) planCompletionWatch(ap *ActivePlan) {
 		}
 	}
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	planCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
+		pl.planCompletionWatch(ap)
+	}
+
+	getActivePlanForWatch = func(pl *SharedState) *ActivePlan {
+		return pl.getActivePlan()
+	}
+
+	isPlanCompletedFn = func(pl *SharedState, ap *ActivePlan) (bool, error) {
+		return pl.isPlanCompleted(ap)
+	}
+
+	onPlanCompletedFn = func(pl *SharedState, status PlanStatus) {
+		pl.onPlanCompleted(status)
+	}
+
+	getPlanCompletionCheckInterval = func() time.Duration {
+		return PlanCompletionCheckInterval
+	}
+)

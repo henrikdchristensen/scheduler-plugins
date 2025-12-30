@@ -9,7 +9,6 @@ import (
 
 // buildPluginConfigSnapshot collects the current plugin configuration into a
 // PluginConfigSnapshot structure.
-// CHECKED
 func buildPluginConfigSnapshot() PluginConfigSnapshot {
 	return PluginConfigSnapshot{
 		Timestamp: getTimestampNowUtc(),
@@ -61,7 +60,6 @@ func buildPluginConfigSnapshot() PluginConfigSnapshot {
 
 // persistPluginConfig writes the PluginConfigSnapshot to a ConfigMap in
 // SystemNamespace using ConfigMapDoc.ensureJson.
-// CHECKED
 func (pl *SharedState) persistPluginConfig(ctx context.Context) error {
 	if pl == nil || pl.Client == nil {
 		// In tests we often have a nil Client; treat as no-op.

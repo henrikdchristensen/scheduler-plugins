@@ -16,22 +16,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func expectedInformers(f informers.SharedInformerFactory) []cache.SharedIndexInformer {
-	return []cache.SharedIndexInformer{
-		f.Core().V1().Pods().Informer(),
-		f.Core().V1().Nodes().Informer(),
-		f.Core().V1().ConfigMaps().Informer(),
-		f.Apps().V1().ReplicaSets().Informer(),
-		f.Apps().V1().StatefulSets().Informer(),
-		f.Apps().V1().DaemonSets().Informer(),
-		f.Batch().V1().Jobs().Informer(),
-	}
-}
-
-// -------------------------
 // newFromHandle
 // -------------------------
 
@@ -257,5 +241,21 @@ func TestNew_Success_CallsHooks_AndStoresHandle(t *testing.T) {
 	podsInf := h.Factory.Core().V1().Pods().Informer()
 	if podsInf.GetIndexer().GetIndexers()[cache.NamespaceIndex] == nil {
 		t.Fatalf("pod informer missing %q indexer", cache.NamespaceIndex)
+	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func expectedInformers(f informers.SharedInformerFactory) []cache.SharedIndexInformer {
+	return []cache.SharedIndexInformer{
+		f.Core().V1().Pods().Informer(),
+		f.Core().V1().Nodes().Informer(),
+		f.Core().V1().ConfigMaps().Informer(),
+		f.Apps().V1().ReplicaSets().Informer(),
+		f.Apps().V1().StatefulSets().Informer(),
+		f.Apps().V1().DaemonSets().Informer(),
+		f.Batch().V1().Jobs().Informer(),
 	}
 }

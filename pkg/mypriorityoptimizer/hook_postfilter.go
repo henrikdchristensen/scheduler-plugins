@@ -29,7 +29,6 @@ var (
 // -------------------------
 
 // PostFilter is called if no nodes are found to run the Pod in the filtering phase.
-// CHECKED
 func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pending *v1.Pod, m framework.NodeToStatusMap) (*framework.PostFilterResult, *fwk.Status) {
 	stage := "PostFilter"
 

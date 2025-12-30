@@ -20,35 +20,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func mustPodSet(t *testing.T, got []*v1.Pod, want ...string) {
-	t.Helper()
-	gotSet := map[string]struct{}{}
-	for _, p := range got {
-		gotSet[mergeNsName(p.Namespace, p.Name)] = struct{}{}
-	}
-	wantSet := map[string]struct{}{}
-	for _, k := range want {
-		wantSet[k] = struct{}{}
-	}
-	if !reflect.DeepEqual(gotSet, wantSet) {
-		t.Fatalf("pods=%v want=%v", gotSet, wantSet)
-	}
-}
-
-func toRuntimeObjs(pods ...*v1.Pod) []runtime.Object {
-	out := make([]runtime.Object, 0, len(pods))
-	for _, p := range pods {
-		if p != nil {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// -------------------------
 // Listers + getNodes/getPods
 // -------------------------
 
@@ -667,4 +638,33 @@ func TestGetTopWorkload(t *testing.T) {
 			}
 		})
 	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func mustPodSet(t *testing.T, got []*v1.Pod, want ...string) {
+	t.Helper()
+	gotSet := map[string]struct{}{}
+	for _, p := range got {
+		gotSet[mergeNsName(p.Namespace, p.Name)] = struct{}{}
+	}
+	wantSet := map[string]struct{}{}
+	for _, k := range want {
+		wantSet[k] = struct{}{}
+	}
+	if !reflect.DeepEqual(gotSet, wantSet) {
+		t.Fatalf("pods=%v want=%v", gotSet, wantSet)
+	}
+}
+
+func toRuntimeObjs(pods ...*v1.Pod) []runtime.Object {
+	out := make([]runtime.Object, 0, len(pods))
+	for _, p := range pods {
+		if p != nil {
+			out = append(out, p)
+		}
+	}
+	return out
 }

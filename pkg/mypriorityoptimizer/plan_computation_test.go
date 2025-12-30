@@ -9,17 +9,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func withPythonAttemptConfig(t *testing.T, enabled bool, timeout time.Duration, graceMs int) {
-	t.Helper()
-	withVar(t, &SolverPythonEnabled, enabled)
-	withVar(t, &SolverPythonTimeout, timeout)
-	withVar(t, &SolverPythonGraceMs, graceMs)
-}
-
-// -------------------------
 // planComputation
 // -------------------------
 
@@ -191,4 +180,15 @@ func TestPlanComputation_UsesRunPythonSolver_AndImproves(t *testing.T) {
 	must(t, bestOutput != nil, "bestOutput want non-nil")
 	mustEq(t, len(attempts), 1, "attempts len")
 	mustEq(t, attempts[0].Score.PlacedByPriority["5"], 1, "placedByPriority")
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func withPythonAttemptConfig(t *testing.T, enabled bool, timeout time.Duration, graceMs int) {
+	t.Helper()
+	withVar(t, &SolverPythonEnabled, enabled)
+	withVar(t, &SolverPythonTimeout, timeout)
+	withVar(t, &SolverPythonGraceMs, graceMs)
 }

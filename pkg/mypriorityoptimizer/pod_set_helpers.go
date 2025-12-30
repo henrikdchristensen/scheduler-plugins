@@ -13,7 +13,6 @@ import (
 // -------------------------
 
 // newPodSet creates a new PodSet.
-// CHECKED
 func newPodSet(name string) *PodSet {
 	return &PodSet{Name: name, m: make(map[types.UID]SolverPod)}
 }
@@ -22,8 +21,7 @@ func newPodSet(name string) *PodSet {
 // doesPodSetExist
 // -------------------------
 
-// doesPodSetExist returns true if pod set is non-nil and has at least one pod.
-// CHECKED
+// doesPodSetExist returns true if pod set is non-nil and has at least one pod.s
 func doesPodSetExist(podSet *PodSet) bool {
 	if podSet == nil {
 		return false
@@ -37,7 +35,6 @@ func doesPodSetExist(podSet *PodSet) bool {
 
 // prunePending removes from `set` any pod that is no longer pending. It returns
 // the number of removed pods.
-// CHECKED
 func (pl *SharedState) prunePodSet(podSet *PodSet) int {
 	if !doesPodSetExist(podSet) {
 		return 0
@@ -72,7 +69,6 @@ func (pl *SharedState) prunePodSet(podSet *PodSet) int {
 
 // AddPod adds a pod to the set. Use mutex to protect the map such that only one
 // goroutine can modify the map at a time.
-// CHECKED
 func (s *PodSet) AddPod(p *v1.Pod) {
 	if p == nil {
 		return
@@ -88,7 +84,6 @@ func (s *PodSet) AddPod(p *v1.Pod) {
 
 // RemovePod removes a pod from the set. Use mutex to protect the map such that
 // only one goroutine can modify the map at a time.
-// CHECKED
 func (s *PodSet) RemovePod(uid types.UID) {
 	s.mu.Lock()
 	delete(s.m, uid)
@@ -101,7 +96,6 @@ func (s *PodSet) RemovePod(uid types.UID) {
 
 // Size returns the number of pods in the set. Use mutex so that we can read the
 // map safely.
-// CHECKED
 func (s *PodSet) Size() int {
 	s.mu.RLock()
 	n := len(s.m)
@@ -115,7 +109,6 @@ func (s *PodSet) Size() int {
 
 // Snapshot returns a snapshot of the current pods in the set. Use mutex so that
 // we can read the map safely.
-// CHECKED
 func (s *PodSet) Snapshot() map[types.UID]SolverPod {
 	s.mu.RLock()
 	out := make(map[types.UID]SolverPod, len(s.m))

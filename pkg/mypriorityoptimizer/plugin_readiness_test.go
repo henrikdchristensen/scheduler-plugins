@@ -15,73 +15,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-type ReadinessEnvs struct {
-	Interval   time.Duration
-	Warmup     time.Duration
-	GetNodes   func(*SharedState) ([]*v1.Node, error)
-	IsUsable   func(*v1.Node) bool
-	Persist    func(*SharedState, context.Context) error
-	Activate   func(*SharedState)
-	StartLoops func(*SharedState, context.Context)
-}
-
-func withReadinessEnv(t *testing.T, env ReadinessEnvs, fn func()) {
-	t.Helper()
-
-	if env.Interval <= 0 {
-		env.Interval = 2 * time.Millisecond
-	}
-	if env.GetNodes == nil {
-		env.GetNodes = func(*SharedState) ([]*v1.Node, error) { return nil, nil }
-	}
-	if env.IsUsable == nil {
-		env.IsUsable = func(*v1.Node) bool { return false }
-	}
-	if env.Persist == nil {
-		env.Persist = func(*SharedState, context.Context) error { return nil }
-	}
-	if env.Activate == nil {
-		env.Activate = func(*SharedState) {}
-	}
-	if env.StartLoops == nil {
-		env.StartLoops = func(*SharedState, context.Context) {}
-	}
-
-	withVar(t, &readinessUsableNodeInterval, env.Interval)
-	withVar(t, &cacheWarmupDelay, env.Warmup)
-	withVar(t, &getNodesForReadiness, env.GetNodes)
-	withVar(t, &isNodeUsableForReadiness, env.IsUsable)
-	withVar(t, &persistPluginConfigForReadiness, env.Persist)
-	withVar(t, &activateBlockedPodsForReadiness, env.Activate)
-	withVar(t, &startLoopsForReadiness, env.StartLoops)
-
-	fn()
-}
-
-func newTestPodInformer() cache.SharedIndexInformer {
-	lw := &cache.ListWatch{
-		ListFunc: func(_ metav1.ListOptions) (runtime.Object, error) {
-			return &v1.PodList{}, nil
-		},
-		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
-			return watch.NewFake(), nil
-		},
-	}
-	return cache.NewSharedIndexInformer(lw, &v1.Pod{}, 0, cache.Indexers{})
-}
-
-func startInformer(t *testing.T, inf cache.SharedIndexInformer) chan struct{} {
-	t.Helper()
-	stopCh := make(chan struct{})
-	go inf.Run(stopCh)
-	t.Cleanup(func() { close(stopCh) })
-	return stopCh
-}
-
-// -------------------------
 // isCacheReady
 // -------------------------
 
@@ -203,7 +136,7 @@ func TestWaitForUsableNode_GetNodesErrorThenSucceeds(t *testing.T) {
 // pluginReadiness
 // -------------------------
 
-func TestPluginReadiness_InformerSyncCanceled_DoesNotMarkReady(t *testing.T) {
+func TestPluginReadiness_InformerSyncCanceled(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
@@ -232,7 +165,7 @@ func TestPluginReadiness_InformerSyncCanceled_DoesNotMarkReady(t *testing.T) {
 	})
 }
 
-func TestPluginReadiness_WarmupCanceled_DoesNotMarkReady(t *testing.T) {
+func TestPluginReadiness_WarmupCanceled(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
@@ -265,7 +198,7 @@ func TestPluginReadiness_WarmupCanceled_DoesNotMarkReady(t *testing.T) {
 	})
 }
 
-func TestPluginReadiness_UsableNodeNeverFound_DoesNotMarkReady(t *testing.T) {
+func TestPluginReadiness_UsableNodeNeverFound(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
@@ -298,7 +231,7 @@ func TestPluginReadiness_UsableNodeNeverFound_DoesNotMarkReady(t *testing.T) {
 	})
 }
 
-func TestPluginReadiness_Success_WithInformer_MarksReady(t *testing.T) {
+func TestPluginReadiness_Success_WithInformer(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
@@ -341,7 +274,7 @@ func TestPluginReadiness_Success_WithInformer_MarksReady(t *testing.T) {
 	})
 }
 
-func TestPluginReadiness_Success_MarksReady(t *testing.T) {
+func TestPluginReadiness_Success(t *testing.T) {
 	pl := &SharedState{}
 	pl.BlockedWhileActive = newPodSet("blocked")
 	pl.PluginReady.Store(false)
@@ -382,4 +315,71 @@ func TestPluginReadiness_Success_MarksReady(t *testing.T) {
 			t.Fatalf("expected warmup delay to be honored, warmup=%v elapsed=%v", warmup, elapsed)
 		}
 	})
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+type ReadinessEnvs struct {
+	Interval   time.Duration
+	Warmup     time.Duration
+	GetNodes   func(*SharedState) ([]*v1.Node, error)
+	IsUsable   func(*v1.Node) bool
+	Persist    func(*SharedState, context.Context) error
+	Activate   func(*SharedState)
+	StartLoops func(*SharedState, context.Context)
+}
+
+func withReadinessEnv(t *testing.T, env ReadinessEnvs, fn func()) {
+	t.Helper()
+
+	if env.Interval <= 0 {
+		env.Interval = 2 * time.Millisecond
+	}
+	if env.GetNodes == nil {
+		env.GetNodes = func(*SharedState) ([]*v1.Node, error) { return nil, nil }
+	}
+	if env.IsUsable == nil {
+		env.IsUsable = func(*v1.Node) bool { return false }
+	}
+	if env.Persist == nil {
+		env.Persist = func(*SharedState, context.Context) error { return nil }
+	}
+	if env.Activate == nil {
+		env.Activate = func(*SharedState) {}
+	}
+	if env.StartLoops == nil {
+		env.StartLoops = func(*SharedState, context.Context) {}
+	}
+
+	withVar(t, &readinessUsableNodeInterval, env.Interval)
+	withVar(t, &cacheWarmupDelay, env.Warmup)
+	withVar(t, &getNodesForReadiness, env.GetNodes)
+	withVar(t, &isNodeUsableForReadiness, env.IsUsable)
+	withVar(t, &persistPluginConfigForReadiness, env.Persist)
+	withVar(t, &activateBlockedPodsForReadiness, env.Activate)
+	withVar(t, &startLoopsForReadiness, env.StartLoops)
+
+	fn()
+}
+
+func newTestPodInformer() cache.SharedIndexInformer {
+	lw := &cache.ListWatch{
+		ListFunc: func(_ metav1.ListOptions) (runtime.Object, error) {
+			return &v1.PodList{}, nil
+		},
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+			return watch.NewFake(), nil
+		},
+	}
+	return cache.NewSharedIndexInformer(lw, &v1.Pod{}, 0, cache.Indexers{})
+}
+
+func startInformer(t *testing.T, inf cache.SharedIndexInformer) chan struct{} {
+	t.Helper()
+	stopCh := make(chan struct{})
+	go inf.Run(stopCh)
+	t.Cleanup(func() { close(stopCh) })
+	return stopCh
 }

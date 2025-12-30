@@ -10,6 +10,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// -------------------------
+// planActivation
+// -------------------------
+
 func TestPlanActivation_NilPlan(t *testing.T) {
 	pl := &SharedState{}
 	err := pl.planActivation(nil, nil)

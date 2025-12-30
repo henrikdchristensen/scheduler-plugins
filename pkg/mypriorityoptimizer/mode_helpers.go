@@ -6,7 +6,6 @@ package mypriorityoptimizer
 // -------------------------
 
 // isPerPodMode is the optimizer cadence that optimizes for every new pod.
-// CHECKED
 func isPerPodMode() bool { return OptimizeMode == ModePerPod }
 
 // -------------------------
@@ -14,7 +13,6 @@ func isPerPodMode() bool { return OptimizeMode == ModePerPod }
 // -------------------------
 
 // isManualBlockingMode is true if the mode is ManualBlocking.
-// CHECKED
 func isManualBlockingMode() bool { return OptimizeMode == ModeManualBlocking }
 
 // -------------------------
@@ -25,7 +23,6 @@ func isManualBlockingMode() bool { return OptimizeMode == ModeManualBlocking }
 // - collect pods at PostFilter, and
 // - take Active only after we know a plan is worthwhile.
 // PerPod is always treated as blocking.
-// CHECKED
 func isNonBlockingSolving() bool {
 	return OptimizeMode != ModePerPod && !OptimizeBlockingSolving
 }
@@ -35,7 +32,6 @@ func isNonBlockingSolving() bool {
 // -------------------------
 
 // getBlockingAsString returns "Blocking" or "Non-Blocking".
-// CHECKED
 func getBlockingAsString() string {
 	if isNonBlockingSolving() {
 		return "Non-Blocking"
@@ -48,7 +44,6 @@ func getBlockingAsString() string {
 // -------------------------
 
 // getModeCombinedAsString returns "<Mode>/<Blocking|Non-Blocking>".
-// CHECKED
 func getModeCombinedAsString() string {
 	return OptimizeMode.String() + "/" + getBlockingAsString()
 }
@@ -58,7 +53,6 @@ func getModeCombinedAsString() string {
 // -------------------------
 
 // String returns the string representation of the ModeType.
-// CHECKED
 func (m ModeType) String() string {
 	switch m {
 	case ModePerPod:

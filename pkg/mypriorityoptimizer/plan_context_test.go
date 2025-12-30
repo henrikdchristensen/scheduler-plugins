@@ -8,6 +8,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
+// -------------------------
+// planContext
+// -------------------------
+
 func TestPlanContext(t *testing.T) {
 	pl := &SharedState{}
 

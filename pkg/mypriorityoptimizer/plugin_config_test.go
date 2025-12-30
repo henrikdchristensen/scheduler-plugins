@@ -19,52 +19,10 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func mustGetPluginCfgCM(t *testing.T, ctx context.Context, client *fake.Clientset) *v1.ConfigMap {
-	t.Helper()
-	cm, err := client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, PluginCfgConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get(%s/%s) failed: %v", SystemNamespace, PluginCfgConfigMapName, err)
-	}
-	return cm
-}
-
-func mustDecodePluginCfgSnap(t *testing.T, cm *v1.ConfigMap) PluginConfigSnapshot {
-	t.Helper()
-
-	if cm == nil {
-		t.Fatal("nil ConfigMap")
-	}
-	key := PluginCfgConfigMapLabelKey + ".json"
-	if cm.Data == nil {
-		t.Fatalf("expected cm.Data to be non-nil (missing key %q)", key)
-	}
-	raw, ok := cm.Data[key]
-	if !ok || raw == "" {
-		t.Fatalf("expected data key %q to be present and non-empty; data=%v", key, cm.Data)
-	}
-
-	var snap PluginConfigSnapshot
-	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
-		t.Fatalf("unmarshal snapshot failed: %v (raw=%q)", err, raw)
-	}
-	return snap
-}
-
-func mustLabelTrue(t *testing.T, cm *v1.ConfigMap, labelKey string) {
-	t.Helper()
-	if cm.Labels == nil || cm.Labels[labelKey] != "true" {
-		t.Fatalf("expected label %q=true, got labels=%v", labelKey, cm.Labels)
-	}
-}
-
-// -------------------------
 // buildPluginConfigSnapshot
 // -------------------------
 
-func TestBuildPluginConfigSnapshot_Invariants(t *testing.T) {
+func TestBuildPluginConfigSnapshot(t *testing.T) {
 	snap := buildPluginConfigSnapshot()
 
 	if snap.Name != Name {
@@ -92,7 +50,7 @@ func TestBuildPluginConfigSnapshot_Invariants(t *testing.T) {
 // persistPluginConfig
 // -------------------------
 
-func TestPersistPluginConfig_NoOpOnNilReceiverOrNilClient(t *testing.T) {
+func TestPersistPluginConfig_NoOpOnNil(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
@@ -143,7 +101,7 @@ func TestPersistPluginConfig_CreateThenUpdate(t *testing.T) {
 	}
 }
 
-func TestPersistPluginConfig_PropagatesClientErrors(t *testing.T) {
+func TestPersistPluginConfig_PropagatesErrors(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
@@ -204,5 +162,47 @@ func TestPersistPluginConfig_PropagatesClientErrors(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func mustGetPluginCfgCM(t *testing.T, ctx context.Context, client *fake.Clientset) *v1.ConfigMap {
+	t.Helper()
+	cm, err := client.CoreV1().ConfigMaps(SystemNamespace).Get(ctx, PluginCfgConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get(%s/%s) failed: %v", SystemNamespace, PluginCfgConfigMapName, err)
+	}
+	return cm
+}
+
+func mustDecodePluginCfgSnap(t *testing.T, cm *v1.ConfigMap) PluginConfigSnapshot {
+	t.Helper()
+
+	if cm == nil {
+		t.Fatal("nil ConfigMap")
+	}
+	key := PluginCfgConfigMapLabelKey + ".json"
+	if cm.Data == nil {
+		t.Fatalf("expected cm.Data to be non-nil (missing key %q)", key)
+	}
+	raw, ok := cm.Data[key]
+	if !ok || raw == "" {
+		t.Fatalf("expected data key %q to be present and non-empty; data=%v", key, cm.Data)
+	}
+
+	var snap PluginConfigSnapshot
+	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+		t.Fatalf("unmarshal snapshot failed: %v (raw=%q)", err, raw)
+	}
+	return snap
+}
+
+func mustLabelTrue(t *testing.T, cm *v1.ConfigMap, labelKey string) {
+	t.Helper()
+	if cm.Labels == nil || cm.Labels[labelKey] != "true" {
+		t.Fatalf("expected label %q=true, got labels=%v", labelKey, cm.Labels)
 	}
 }

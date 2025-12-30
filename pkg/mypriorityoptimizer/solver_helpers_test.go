@@ -19,79 +19,20 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func statsCMWithRaw(t *testing.T, raw string) *v1.ConfigMap {
-	t.Helper()
-	key := SolverStatsConfigMapLabelKey + ".json"
-	return &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      SolverStatsConfigMapName,
-			Namespace: SystemNamespace,
-			Labels:    map[string]string{SolverStatsConfigMapLabelKey: "true"},
-		},
-		Data: map[string]string{key: raw},
-	}
-}
-
-func statsCMWithEntries(t *testing.T, entries []ExportedSolverStats) *v1.ConfigMap {
-	t.Helper()
-	b, err := json.MarshalIndent(entries, "", "  ")
-	mustNoErr(t, err, "marshal entries")
-	return statsCMWithRaw(t, string(b))
-}
-
-func readStatsArr(t *testing.T, ctx context.Context, pl *SharedState) []ExportedSolverStats {
-	t.Helper()
-	key := SolverStatsConfigMapLabelKey + ".json"
-	cm, err := pl.Handle.ClientSet().CoreV1().ConfigMaps(SystemNamespace).
-		Get(ctx, SolverStatsConfigMapName, metav1.GetOptions{})
-	mustNoErr(t, err, "get stats CM")
-
-	raw := cm.Data[key]
-	must(t, raw != "", "expected non-empty json payload at %q", key)
-
-	var arr []ExportedSolverStats
-	mustNoErr(t, json.Unmarshal([]byte(raw), &arr), "unmarshal stats json (raw=%q)", raw)
-	return arr
-}
-
-func kvToMap(t *testing.T, args []any) map[string]any {
-	t.Helper()
-	must(t, len(args)%2 == 0, "expected even len kv args, got %d: %v", len(args), args)
-
-	m := make(map[string]any, len(args)/2)
-	for i := 0; i < len(args); i += 2 {
-		k, ok := args[i].(string)
-		must(t, ok, "kv key at %d is not string: %T (%v)", i, args[i], args[i])
-		m[k] = args[i+1]
-	}
-	return m
-}
-
-func withAppendStatsHook(t *testing.T, hook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)) {
-	t.Helper()
-	orig := appendSolverStatsCMHook
-	appendSolverStatsCMHook = hook
-	t.Cleanup(func() { appendSolverStatsCMHook = orig })
-}
-
-// -------------------------
 // isAnySolverEnabled
 // -------------------------
 
 func TestIsAnySolverEnabled(t *testing.T) {
 	pl := &SharedState{}
 
-	t.Run("all_disabled", func(t *testing.T) {
+	t.Run("all disabled", func(t *testing.T) {
 		withVar(t, &SolverPythonEnabled, false)
 		if pl.isAnySolverEnabled() {
 			t.Fatalf("want false when all disabled")
 		}
 	})
 
-	t.Run("python_enabled", func(t *testing.T) {
+	t.Run("python enabled", func(t *testing.T) {
 		withVar(t, &SolverPythonEnabled, true)
 		if !pl.isAnySolverEnabled() {
 			t.Fatalf("want true when python enabled")
@@ -106,7 +47,7 @@ func TestIsAnySolverEnabled(t *testing.T) {
 func TestBuildSolverInput(t *testing.T) {
 	pl := &SharedState{}
 
-	t.Run("no_usable_nodes", func(t *testing.T) {
+	t.Run("no usable nodes", func(t *testing.T) {
 		in, err := pl.buildSolverInput(nil, nil, nil)
 		if !errors.Is(err, ErrNoUsableNodes) {
 			t.Fatalf("err=%v, want ErrNoUsableNodes", err)
@@ -116,7 +57,7 @@ func TestBuildSolverInput(t *testing.T) {
 		}
 	})
 
-	t.Run("filters_nodes_dedups_pods_sets_preemptor_and_protected_and_baseline", func(t *testing.T) {
+	t.Run("filters nodes dedups pods sets preemptor and protected and baseline", func(t *testing.T) {
 		// Nodes
 		n1 := node("n1", withAllocatable("1000m", "1Gi"))                  // usable
 		n2 := node("n2", withAllocatable("1000m", "1Gi"), unschedulable()) // unusable -> ignored
@@ -259,11 +200,10 @@ func TestBuildBaselineScore(t *testing.T) {
 // -------------------------
 
 func TestSolverConfigArgs(t *testing.T) {
-	// Set everything explicitly so the formatting is deterministic.
 	withVar(t, &SolverSaveAllAttempts, true)
 	withVar(t, &SolverPythonEnabled, false)
 
-	t.Run("python_disabled_still_includes_shared_flags", func(t *testing.T) {
+	t.Run("python disabled still includes shared flags", func(t *testing.T) {
 		args := solverConfigArgs()
 		kv := kvToMap(t, args)
 
@@ -275,7 +215,7 @@ func TestSolverConfigArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("python_enabled_includes_all_python_fields_with_expected_formats", func(t *testing.T) {
+	t.Run("python enabled includes all python fields with expected formats", func(t *testing.T) {
 		withVar(t, &SolverPythonEnabled, true)
 		withVar(t, &SolverPythonTimeout, 250*time.Millisecond)
 		withVar(t, &SolverPythonGapLimit, 0.125)
@@ -319,16 +259,16 @@ func TestIsSolutionBetter(t *testing.T) {
 		want int
 	}{
 		// Placed-by-priority dominates; "better placed" should win even if it shifts lower prio counts.
-		{"better_placed", SolverScore{PlacedByPriority: map[string]int{"1": 2, "0": 0}, Evicted: 999, Moved: 999}, 1},
+		{"better placed", SolverScore{PlacedByPriority: map[string]int{"1": 2, "0": 0}, Evicted: 999, Moved: 999}, 1},
 
 		// Equal placed, fewer evictions is better
-		{"fewer_evictions", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 1, Moved: 999}, 1},
+		{"fewer evictions", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 1, Moved: 999}, 1},
 
 		// Equal placed/evictions, fewer moves is better
-		{"fewer_moves", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 2}, 1},
+		{"fewer moves", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 2}, 1},
 
 		// Worse on moves
-		{"more_moves_worse", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 4}, -1},
+		{"more moves worse", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 4}, -1},
 
 		// Equal everything
 		{"equal", SolverScore{PlacedByPriority: map[string]int{"1": 1, "0": 1}, Evicted: 2, Moved: 3}, 0},
@@ -398,18 +338,18 @@ func TestIsSolutionApplicable(t *testing.T) {
 	pOnN1 := pod("ns", "p1", withUID("u1"), onNode("n1"), withReqs("100m", "128Mi"))
 	pOnN2 := pod("ns", "p2", withUID("u2"), onNode("n2"), withReqs("100m", "128Mi"))
 
-	t.Run("nil_plan", func(t *testing.T) {
+	t.Run("nil plan", func(t *testing.T) {
 		mustApplicable(t, nil, nil, nil, false, "nil plan")
 	})
 
-	t.Run("pod_vanished", func(t *testing.T) {
+	t.Run("pod vanished", func(t *testing.T) {
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "missing", Namespace: "ns", Name: "missing", OldNode: "", Node: "n1"}},
 		}
 		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{pOnN1}, false, "pod vanished")
 	})
 
-	t.Run("dest_node_now_unusable", func(t *testing.T) {
+	t.Run("dest node now unusable", func(t *testing.T) {
 		// place pending to n2, but n2 is unusable
 		pPending := pod("ns", "p3", withUID("u3"), withReqs("100m", "128Mi"))
 		out := &SolverOutput{
@@ -418,7 +358,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 		mustApplicable(t, out, []*v1.Node{n1, n2Bad}, []*v1.Pod{pPending}, false, "dest node now unusable")
 	})
 
-	t.Run("move_precondition_changed", func(t *testing.T) {
+	t.Run("move precondition changed", func(t *testing.T) {
 		// plan expects u2 on n1, but actually on n2
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u2", Namespace: "ns", Name: "p2", OldNode: "n1", Node: "n1"}},
@@ -426,7 +366,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 		mustApplicable(t, out, []*v1.Node{n1, node("n2")}, []*v1.Pod{pOnN2}, false, "move precondition changed")
 	})
 
-	t.Run("success_move_branch", func(t *testing.T) {
+	t.Run("success move branch", func(t *testing.T) {
 		// u1 move from n1 to n1 (no-op move, but precondition matches)
 		out := &SolverOutput{
 			Placements: []SolverPod{{UID: "u1", Namespace: "ns", Name: "p1", OldNode: "n1", Node: "n1"}},
@@ -434,13 +374,13 @@ func TestIsSolutionApplicable(t *testing.T) {
 		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{pOnN1}, true, "")
 	})
 
-	t.Run("evict_node_now_unusable", func(t *testing.T) {
+	t.Run("evict node now unusable", func(t *testing.T) {
 		p := pod("ns", "p", withUID("u-ev"), onNode("n2"), withReqs("100m", "128Mi"), withPhase(v1.PodRunning))
 		out := &SolverOutput{Evictions: []SolverPod{{UID: "u-ev"}}}
 		mustApplicable(t, out, []*v1.Node{n1, n2Bad}, []*v1.Pod{p}, false, "evict node now unusable")
 	})
 
-	t.Run("pending_precondition_changed", func(t *testing.T) {
+	t.Run("pending precondition changed", func(t *testing.T) {
 		// OldNode == "" means plan expects pending, but pod is already bound.
 		p := pod("ns", "p", withUID("u-bind"), onNode("n1"), withReqs("100m", "128Mi"), withPhase(v1.PodRunning))
 		out := &SolverOutput{
@@ -449,7 +389,7 @@ func TestIsSolutionApplicable(t *testing.T) {
 		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{p}, false, "pending precondition changed")
 	})
 
-	t.Run("capacity_exceeded", func(t *testing.T) {
+	t.Run("capacity exceeded", func(t *testing.T) {
 		// Tight node, existing usage + planned placement exceeds capacity.
 		nSmall := node("n1", withAllocatable("100m", "64Mi"))
 		pRun := pod("ns", "run", withUID("u-run"), onNode("n1"), withReqs("90m", "60Mi"), withPhase(v1.PodRunning))
@@ -461,14 +401,14 @@ func TestIsSolutionApplicable(t *testing.T) {
 		mustApplicable(t, out, []*v1.Node{nSmall}, []*v1.Pod{pRun, pPend}, false, "capacity exceeded")
 	})
 
-	t.Run("eviction_pending_is_ignored", func(t *testing.T) {
+	t.Run("eviction pending is ignored", func(t *testing.T) {
 		// Eviction entry for a pod that is already pending should just be skipped.
 		pPending := pod("ns", "p", withUID("u-pend"), withReqs("10m", "8Mi"), withPhase(v1.PodPending))
 		out := &SolverOutput{Evictions: []SolverPod{{UID: "u-pend"}}}
 		mustApplicable(t, out, []*v1.Node{n1}, []*v1.Pod{pPending}, true, "")
 	})
 
-	t.Run("eviction_frees_capacity_for_placement", func(t *testing.T) {
+	t.Run("eviction frees capacity for placement", func(t *testing.T) {
 		// Small capacity node
 		nSmall := node("n1", withAllocatable("100m", "64Mi"))
 
@@ -511,17 +451,17 @@ func TestLogLeaderboard(t *testing.T) {
 		best     *SolverResult
 	}{
 		{
-			name:     "best_nil_only_baseline",
+			name:     "best nil only baseline",
 			attempts: nil,
 			best:     nil,
 		},
 		{
-			name:     "attempts_empty_best_baseline_non_nil",
+			name:     "attempts empty best baseline non nil",
 			attempts: []SolverResult{},
 			best:     &SolverResult{Name: "baseline", Status: "BASELINE", DurationMs: 0, Score: baseline},
 		},
 		{
-			name: "ties_better_worse_and_best_not_baseline",
+			name: "ties better worse and best not baseline",
 			attempts: []SolverResult{
 				{Name: "a", Status: "OPTIMAL", DurationMs: 1, Score: baseline},
 				{Name: "b", Status: "FEASIBLE", DurationMs: 2, Score: baseline},
@@ -693,19 +633,19 @@ func TestAppendSolverStatsCM_UpsertAndAppend(t *testing.T) {
 		wantBest []string
 	}{
 		{
-			name:     "create_on_missing",
+			name:     "create on missing",
 			initial:  nil,
 			entry:    ExportedSolverStats{BestName: "first"},
 			wantBest: []string{"first"},
 		},
 		{
-			name:     "append_when_found",
+			name:     "append when found",
 			initial:  statsCMWithEntries(t, []ExportedSolverStats{{BestName: "first"}}),
 			entry:    ExportedSolverStats{BestName: "second"},
 			wantBest: []string{"first", "second"},
 		},
 		{
-			name:     "append_when_found_empty_payload",
+			name:     "append when found empty payload",
 			initial:  statsCMWithRaw(t, ""), // key exists but empty
 			entry:    ExportedSolverStats{BestName: "only"},
 			wantBest: []string{"only"},
@@ -737,16 +677,6 @@ func TestAppendSolverStatsCM_UpsertAndAppend(t *testing.T) {
 	}
 }
 
-type errConfigMapNamespaceLister struct{ err error }
-
-func (e errConfigMapNamespaceLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) {
-	return nil, e.err
-}
-
-func (e errConfigMapNamespaceLister) Get(_ string) (*v1.ConfigMap, error) {
-	return nil, e.err
-}
-
 func TestAppendSolverStatsCM_ReadJsonError(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
@@ -772,4 +702,73 @@ func TestAppendSolverStatsCM_ReadJsonError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err=%v, want contains 'boom'", err)
 	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+type errConfigMapNamespaceLister struct{ err error }
+
+func (e errConfigMapNamespaceLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) {
+	return nil, e.err
+}
+
+func (e errConfigMapNamespaceLister) Get(_ string) (*v1.ConfigMap, error) {
+	return nil, e.err
+}
+
+func statsCMWithRaw(t *testing.T, raw string) *v1.ConfigMap {
+	t.Helper()
+	key := SolverStatsConfigMapLabelKey + ".json"
+	return &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      SolverStatsConfigMapName,
+			Namespace: SystemNamespace,
+			Labels:    map[string]string{SolverStatsConfigMapLabelKey: "true"},
+		},
+		Data: map[string]string{key: raw},
+	}
+}
+
+func statsCMWithEntries(t *testing.T, entries []ExportedSolverStats) *v1.ConfigMap {
+	t.Helper()
+	b, err := json.MarshalIndent(entries, "", "  ")
+	mustNoErr(t, err, "marshal entries")
+	return statsCMWithRaw(t, string(b))
+}
+
+func readStatsArr(t *testing.T, ctx context.Context, pl *SharedState) []ExportedSolverStats {
+	t.Helper()
+	key := SolverStatsConfigMapLabelKey + ".json"
+	cm, err := pl.Handle.ClientSet().CoreV1().ConfigMaps(SystemNamespace).
+		Get(ctx, SolverStatsConfigMapName, metav1.GetOptions{})
+	mustNoErr(t, err, "get stats CM")
+
+	raw := cm.Data[key]
+	must(t, raw != "", "expected non-empty json payload at %q", key)
+
+	var arr []ExportedSolverStats
+	mustNoErr(t, json.Unmarshal([]byte(raw), &arr), "unmarshal stats json (raw=%q)", raw)
+	return arr
+}
+
+func kvToMap(t *testing.T, args []any) map[string]any {
+	t.Helper()
+	must(t, len(args)%2 == 0, "expected even len kv args, got %d: %v", len(args), args)
+
+	m := make(map[string]any, len(args)/2)
+	for i := 0; i < len(args); i += 2 {
+		k, ok := args[i].(string)
+		must(t, ok, "kv key at %d is not string: %T (%v)", i, args[i], args[i])
+		m[k] = args[i+1]
+	}
+	return m
+}
+
+func withAppendStatsHook(t *testing.T, hook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)) {
+	t.Helper()
+	orig := appendSolverStatsCMHook
+	appendSolverStatsCMHook = hook
+	t.Cleanup(func() { appendSolverStatsCMHook = orig })
 }

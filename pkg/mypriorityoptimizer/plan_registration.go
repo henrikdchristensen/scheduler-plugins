@@ -10,25 +10,10 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	buildPlanFn = func(pl *SharedState, out *SolverOutput, preemptor *v1.Pod, pods []*v1.Pod) (*Plan, error) {
-		return pl.buildPlan(out, preemptor, pods)
-	}
-
-	exportPlanToConfigMapFn = func(pl *SharedState, ctx context.Context, id string, stored *StoredPlan) error {
-		return pl.exportPlanToConfigMap(ctx, id, stored)
-	}
-)
-
-// -------------------------
 // planRegistration
 // -------------------------
 
 // planRegistration builds and registers a new plan as active, exporting it to a ConfigMap.
-// CHECKED
 func (pl *SharedState) planRegistration(
 	ctx context.Context,
 	solverResult SolverResult,
@@ -62,3 +47,17 @@ func (pl *SharedState) planRegistration(
 
 	return plan, pl.getActivePlan(), nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	buildPlanFn = func(pl *SharedState, out *SolverOutput, preemptor *v1.Pod, pods []*v1.Pod) (*Plan, error) {
+		return pl.buildPlan(out, preemptor, pods)
+	}
+
+	exportPlanToConfigMapFn = func(pl *SharedState, ctx context.Context, id string, stored *StoredPlan) error {
+		return pl.exportPlanToConfigMap(ctx, id, stored)
+	}
+)

@@ -6,20 +6,6 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	getNodesForPlanContext = func(pl *SharedState) ([]*v1.Node, error) { return pl.getNodes() }
-
-	getPodsForPlanContext = func(pl *SharedState) ([]*v1.Pod, error) { return pl.getPods() }
-
-	buildInputForPlanCtx = func(pl *SharedState, nodes []*v1.Node, pods []*v1.Pod, preemptor *v1.Pod) (SolverInput, error) {
-		return pl.buildSolverInput(nodes, pods, preemptor)
-	}
-)
-
-// -------------------------
 // planContext
 // -------------------------
 
@@ -47,3 +33,17 @@ func (pl *SharedState) planContext(preemptor *v1.Pod) (
 
 	return nodes, pods, inp, nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	getNodesForPlanContext = func(pl *SharedState) ([]*v1.Node, error) { return pl.getNodes() }
+
+	getPodsForPlanContext = func(pl *SharedState) ([]*v1.Pod, error) { return pl.getPods() }
+
+	buildInputForPlanCtx = func(pl *SharedState, nodes []*v1.Node, pods []*v1.Pod, preemptor *v1.Pod) (SolverInput, error) {
+		return pl.buildSolverInput(nodes, pods, preemptor)
+	}
+)

@@ -10,28 +10,6 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	runPythonSolverHook func(
-		pl *SharedState,
-		ctx context.Context,
-		in SolverInput,
-		opts PythonSolverOptions,
-	) (*SolverOutput, error)
-
-	runPythonSolverFn = func(
-		pl *SharedState,
-		ctx context.Context,
-		in SolverInput,
-		opts PythonSolverOptions,
-	) (*SolverOutput, error) {
-		return pl.runPythonSolver(ctx, in, opts)
-	}
-)
-
-// -------------------------
 // planComputation
 // -------------------------
 
@@ -187,3 +165,25 @@ func (pl *SharedState) planComputation(
 
 	return bestName, hadUsableResult, bestAttempt, bestOutput, attempts
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	runPythonSolverHook func(
+		pl *SharedState,
+		ctx context.Context,
+		in SolverInput,
+		opts PythonSolverOptions,
+	) (*SolverOutput, error)
+
+	runPythonSolverFn = func(
+		pl *SharedState,
+		ctx context.Context,
+		in SolverInput,
+		opts PythonSolverOptions,
+	) (*SolverOutput, error) {
+		return pl.runPythonSolver(ctx, in, opts)
+	}
+)

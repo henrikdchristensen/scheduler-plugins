@@ -24,114 +24,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-type CmNSLister struct {
-	ListFn func() ([]*v1.ConfigMap, error)
-	GetFn  func(name string) (*v1.ConfigMap, error)
-}
-
-func (c CmNSLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) { return c.ListFn() }
-func (c CmNSLister) Get(name string) (*v1.ConfigMap, error)          { return c.GetFn(name) }
-
-func nsLister(ns string, cms ...*v1.ConfigMap) corev1listers.ConfigMapNamespaceLister {
-	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
-		cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
-	})
-	for _, cm := range cms {
-		if cm != nil {
-			_ = indexer.Add(cm)
-		}
-	}
-	return corev1listers.NewConfigMapLister(indexer).ConfigMaps(ns)
-}
-
-func cm(ns, name string, lbls map[string]string, data map[string]string, ts time.Time) *v1.ConfigMap {
-	return &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         ns,
-			Name:              name,
-			Labels:            lbls,
-			CreationTimestamp: metav1.NewTime(ts),
-		},
-		Data: data,
-	}
-}
-
-func cmDoc(ns, name, labelKey, dataKey string) ConfigMapDoc {
-	return ConfigMapDoc{Namespace: ns, Name: name, LabelKey: labelKey, DataKey: dataKey}
-}
-
-func setupCm(
-	ns string,
-	cm *v1.ConfigMap,
-) (*fake.Clientset, corev1client.ConfigMapInterface, corev1listers.ConfigMapNamespaceLister) {
-	var objs []runtime.Object
-	if cm != nil {
-		objs = append(objs, cm)
-	}
-	cli := fake.NewSimpleClientset(objs...)
-	lister := nsLister(ns) // empty
-	if cm != nil {
-		lister = nsLister(ns, cm)
-	}
-
-	return cli, cli.CoreV1().ConfigMaps(ns), lister
-}
-
-func deleteActions(cli *fake.Clientset) []string {
-	var out []string
-	for _, a := range cli.Actions() {
-		if a.GetVerb() != "delete" || a.GetResource().Resource != "configmaps" {
-			continue
-		}
-		da, ok := a.(k8stesting.DeleteAction)
-		if ok {
-			out = append(out, da.GetName())
-		}
-	}
-	return out
-}
-
-func mustReadJSON[T any](t *testing.T, cm *v1.ConfigMap, key string) T {
-	t.Helper()
-	var out T
-	if err := json.Unmarshal([]byte(cm.Data[key]), &out); err != nil {
-		t.Fatalf("json.Unmarshal(Data[%q]) err = %v", key, err)
-	}
-	return out
-}
-
-func assertReadJSON(t *testing.T, raw []byte, found bool, err error, wantFound bool, wantRaw *string, wantErrSubstr string) {
-	t.Helper()
-	if wantErrSubstr != "" {
-		if err == nil || !strings.Contains(err.Error(), wantErrSubstr) {
-			t.Fatalf("err=%v, want substring %q", err, wantErrSubstr)
-		}
-		return
-	}
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if found != wantFound {
-		t.Fatalf("found=%v, want %v", found, wantFound)
-	}
-	if wantRaw == nil {
-		if raw != nil {
-			t.Fatalf("raw=%q, want nil", string(raw))
-		}
-		return
-	}
-	if raw == nil {
-		t.Fatalf("raw=nil, want %q", *wantRaw)
-	}
-	if string(raw) != *wantRaw {
-		t.Fatalf("raw=%q, want %q", string(raw), *wantRaw)
-	}
-}
-
-// -------------------------
 // listConfigMaps
 // -------------------------
 
@@ -141,7 +33,7 @@ func TestListConfigMaps(t *testing.T) {
 
 	base := time.Unix(1_700_000_000, 0)
 
-	// newest to oldest cms
+	// Newest to oldest cms
 	cmOld := cm(ns, "old", map[string]string{labelKey: "true"}, nil, base.Add(-2*time.Hour))
 	cmMid := cm(ns, "mid", map[string]string{labelKey: "true"}, nil, base.Add(-1*time.Hour))
 	cmNew := cm(ns, "new", map[string]string{labelKey: "true"}, nil, base)
@@ -500,7 +392,7 @@ func TestEnsureJson_UpdateOnNilData(t *testing.T) {
 	}
 }
 
-func TestEnsureJson_PropagatesClientErrors(t *testing.T) {
+func TestEnsureJson_PropagatesErrors(t *testing.T) {
 	ctx := context.Background()
 	const ns, name, lk, dk = "ns", "cm", "lk", "dk"
 	doc := cmDoc(ns, name, lk, dk)
@@ -544,7 +436,7 @@ func TestEnsureJson_PropagatesClientErrors(t *testing.T) {
 	}
 }
 
-func TestEnsureJson_MarshalError_NoClientActions(t *testing.T) {
+func TestEnsureJson_MarshalError(t *testing.T) {
 	ctx := context.Background()
 	cli, cms, _ := setupCm("ns", nil)
 	doc := cmDoc("ns", "cm", "lk", "dk")
@@ -988,5 +880,113 @@ func TestMutateRaw(t *testing.T) {
 				t.Fatalf("data[%q]=%q, want %q", tt.dataKey, got.Data[tt.dataKey], *tt.wantVal)
 			}
 		})
+	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+type CmNSLister struct {
+	ListFn func() ([]*v1.ConfigMap, error)
+	GetFn  func(name string) (*v1.ConfigMap, error)
+}
+
+func (c CmNSLister) List(_ labels.Selector) ([]*v1.ConfigMap, error) { return c.ListFn() }
+func (c CmNSLister) Get(name string) (*v1.ConfigMap, error)          { return c.GetFn(name) }
+
+func nsLister(ns string, cms ...*v1.ConfigMap) corev1listers.ConfigMapNamespaceLister {
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
+		cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
+	})
+	for _, cm := range cms {
+		if cm != nil {
+			_ = indexer.Add(cm)
+		}
+	}
+	return corev1listers.NewConfigMapLister(indexer).ConfigMaps(ns)
+}
+
+func cm(ns, name string, lbls map[string]string, data map[string]string, ts time.Time) *v1.ConfigMap {
+	return &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:         ns,
+			Name:              name,
+			Labels:            lbls,
+			CreationTimestamp: metav1.NewTime(ts),
+		},
+		Data: data,
+	}
+}
+
+func cmDoc(ns, name, labelKey, dataKey string) ConfigMapDoc {
+	return ConfigMapDoc{Namespace: ns, Name: name, LabelKey: labelKey, DataKey: dataKey}
+}
+
+func setupCm(
+	ns string,
+	cm *v1.ConfigMap,
+) (*fake.Clientset, corev1client.ConfigMapInterface, corev1listers.ConfigMapNamespaceLister) {
+	var objs []runtime.Object
+	if cm != nil {
+		objs = append(objs, cm)
+	}
+	cli := fake.NewSimpleClientset(objs...)
+	lister := nsLister(ns) // empty
+	if cm != nil {
+		lister = nsLister(ns, cm)
+	}
+
+	return cli, cli.CoreV1().ConfigMaps(ns), lister
+}
+
+func deleteActions(cli *fake.Clientset) []string {
+	var out []string
+	for _, a := range cli.Actions() {
+		if a.GetVerb() != "delete" || a.GetResource().Resource != "configmaps" {
+			continue
+		}
+		da, ok := a.(k8stesting.DeleteAction)
+		if ok {
+			out = append(out, da.GetName())
+		}
+	}
+	return out
+}
+
+func mustReadJSON[T any](t *testing.T, cm *v1.ConfigMap, key string) T {
+	t.Helper()
+	var out T
+	if err := json.Unmarshal([]byte(cm.Data[key]), &out); err != nil {
+		t.Fatalf("json.Unmarshal(Data[%q]) err = %v", key, err)
+	}
+	return out
+}
+
+func assertReadJSON(t *testing.T, raw []byte, found bool, err error, wantFound bool, wantRaw *string, wantErrSubstr string) {
+	t.Helper()
+	if wantErrSubstr != "" {
+		if err == nil || !strings.Contains(err.Error(), wantErrSubstr) {
+			t.Fatalf("err=%v, want substring %q", err, wantErrSubstr)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if found != wantFound {
+		t.Fatalf("found=%v, want %v", found, wantFound)
+	}
+	if wantRaw == nil {
+		if raw != nil {
+			t.Fatalf("raw=%q, want nil", string(raw))
+		}
+		return
+	}
+	if raw == nil {
+		t.Fatalf("raw=nil, want %q", *wantRaw)
+	}
+	if string(raw) != *wantRaw {
+		t.Fatalf("raw=%q, want %q", string(raw), *wantRaw)
 	}
 }

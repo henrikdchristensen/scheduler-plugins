@@ -16,62 +16,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func uidSet(uids ...string) map[types.UID]struct{} {
-	m := make(map[types.UID]struct{}, len(uids))
-	for _, u := range uids {
-		m[types.UID(u)] = struct{}{}
-	}
-	return m
-}
-
-func withBackgroundHooks(
-	t *testing.T,
-	snapFn func(pl *SharedState) (*PendingSnapshot, error),
-	startFn func(pl *SharedState, cfg OptimizeLoopConfig, ctxRun context.Context, runDone chan<- bool),
-	body func(),
-) {
-	t.Helper()
-
-	origSnap := buildPendingSnapshotHook
-	origStart := startBackgroundOptimization
-	buildPendingSnapshotHook = snapFn
-	startBackgroundOptimization = startFn
-	t.Cleanup(func() {
-		buildPendingSnapshotHook = origSnap
-		startBackgroundOptimization = origStart
-	})
-
-	body()
-}
-
-// helper that retries until timeout for a condition to become true
-func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("timeout after %v: %s", timeout, msg)
-}
-
-func withOptimizeLoopFunc(t *testing.T,
-	fn func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig),
-	body func(),
-) {
-	t.Helper()
-	orig := optimizeBackgroundLoopFunc
-	optimizeBackgroundLoopFunc = fn
-	t.Cleanup(func() { optimizeBackgroundLoopFunc = orig })
-	body()
-}
-
-// -------------------------
 // startLoops
 // -------------------------
 
@@ -557,4 +501,60 @@ func TestBuildPendingSnapshot_PodsErrorPropagated(t *testing.T) {
 			}
 		})
 	})
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func uidSet(uids ...string) map[types.UID]struct{} {
+	m := make(map[types.UID]struct{}, len(uids))
+	for _, u := range uids {
+		m[types.UID(u)] = struct{}{}
+	}
+	return m
+}
+
+func withBackgroundHooks(
+	t *testing.T,
+	snapFn func(pl *SharedState) (*PendingSnapshot, error),
+	startFn func(pl *SharedState, cfg OptimizeLoopConfig, ctxRun context.Context, runDone chan<- bool),
+	body func(),
+) {
+	t.Helper()
+
+	origSnap := buildPendingSnapshotHook
+	origStart := startBackgroundOptimization
+	buildPendingSnapshotHook = snapFn
+	startBackgroundOptimization = startFn
+	t.Cleanup(func() {
+		buildPendingSnapshotHook = origSnap
+		startBackgroundOptimization = origStart
+	})
+
+	body()
+}
+
+// helper that retries until timeout for a condition to become true
+func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timeout after %v: %s", timeout, msg)
+}
+
+func withOptimizeLoopFunc(t *testing.T,
+	fn func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig),
+	body func(),
+) {
+	t.Helper()
+	orig := optimizeBackgroundLoopFunc
+	optimizeBackgroundLoopFunc = fn
+	t.Cleanup(func() { optimizeBackgroundLoopFunc = orig })
+	body()
 }

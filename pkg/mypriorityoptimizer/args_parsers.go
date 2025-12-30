@@ -15,7 +15,6 @@ import (
 // -------------------------
 
 // getEnv retrieves value of an environment variable or returns a default value
-// CHECKED
 func getEnv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -28,7 +27,6 @@ func getEnv(key, def string) string {
 // -------------------------
 
 // parseBool parses a boolean string and returns a corresponding bool value.
-// CHECKED
 func parseBool(s string) bool {
 	v, err := strconv.ParseBool(s)
 	if err != nil { // we are okay with returning false on invalid input
@@ -43,7 +41,6 @@ func parseBool(s string) bool {
 // -------------------------
 
 // parseInt parses an integer string and returns a corresponding int value.
-// CHECKED
 func parseInt(s string) int {
 	v, err := strconv.Atoi(s)
 	if err != nil { // we are okay with returning 0 on invalid input
@@ -58,7 +55,6 @@ func parseInt(s string) int {
 // -------------------------
 
 // parseFloat parses a float string and returns a corresponding float64 value
-// CHECKED
 func parseFloat(s string, lLimit float64, uLimit float64) float64 {
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil { // we are okay with returning 0 on invalid input
@@ -79,7 +75,6 @@ func parseFloat(s string, lLimit float64, uLimit float64) float64 {
 // -------------------------
 
 // parseTime parses a duration string and returns a corresponding time.Duration
-// CHECKED
 func parseTime(s string) time.Duration {
 	d, err := time.ParseDuration(s)
 	if err != nil {
@@ -94,7 +89,6 @@ func parseTime(s string) time.Duration {
 // -------------------------
 
 // parseOptimizeMode parses an optimization mode string and returns the ModeType
-// CHECKED
 func parseOptimizeMode(s string) ModeType {
 	v := strings.ToLower(strings.TrimSpace(s))
 	switch v {

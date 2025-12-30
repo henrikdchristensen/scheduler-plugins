@@ -13,21 +13,10 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	execCommandContext   = exec.CommandContext
-	readAllStdout        = io.ReadAll
-	streamSolverStderrFn = streamSolverStderr
-)
-
-// -------------------------
 // runSolverExternal
 // -------------------------
 
 // runSolverExternal is the generic external solver runner.
-// CHECKED
 func (pl *SharedState) runSolverExternal(
 	ctx context.Context,
 	payload []byte,
@@ -94,7 +83,6 @@ func (pl *SharedState) runSolverExternal(
 // -------------------------
 
 // streamSolverStderr scans stderr and logs it. Returns scanner error (if any).
-// CHECKED
 func streamSolverStderr(r io.Reader) error {
 	s := bufio.NewScanner(r)
 	buf := make([]byte, 0, 256*1024) // 256KB initial buffer
@@ -108,3 +96,13 @@ func streamSolverStderr(r io.Reader) error {
 	}
 	return nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	execCommandContext   = exec.CommandContext
+	readAllStdout        = io.ReadAll
+	streamSolverStderrFn = streamSolverStderr
+)

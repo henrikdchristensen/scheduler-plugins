@@ -12,42 +12,6 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	optimizeBackgroundLoopFunc = func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
-		pl.optimizeBackgroundLoop(ctx, cfg)
-	}
-
-	buildPendingSnapshotHook = func(pl *SharedState) (*PendingSnapshot, error) {
-		return pl.buildPendingSnapshot()
-	}
-
-	startBackgroundOptimization = func(
-		pl *SharedState,
-		cfg OptimizeLoopConfig,
-		ctxRun context.Context,
-		runDone chan<- bool,
-	) {
-		go func() {
-			_, _, _, bestAttempt, _, err := pl.runOptimizationFlow(ctxRun, nil)
-			solved := isAlreadyComputedForPendingSet(err, bestAttempt)
-
-			if err != nil &&
-				err != context.Canceled &&
-				err != ErrNoImprovingSolutionFromAnySolver &&
-				err != ErrNoPendingPodsScheduled {
-				klog.V(MyV).InfoS(msg(cfg.Label, "runFlow completed with error"),
-					"err", err.Error())
-			}
-
-			runDone <- solved
-		}()
-	}
-)
-
-// -------------------------
 // startLoops
 // -------------------------
 
@@ -339,3 +303,39 @@ func (pl *SharedState) buildPendingSnapshot() (*PendingSnapshot, error) {
 		Nodes:        nodes,
 	}, nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	optimizeBackgroundLoopFunc = func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
+		pl.optimizeBackgroundLoop(ctx, cfg)
+	}
+
+	buildPendingSnapshotHook = func(pl *SharedState) (*PendingSnapshot, error) {
+		return pl.buildPendingSnapshot()
+	}
+
+	startBackgroundOptimization = func(
+		pl *SharedState,
+		cfg OptimizeLoopConfig,
+		ctxRun context.Context,
+		runDone chan<- bool,
+	) {
+		go func() {
+			_, _, _, bestAttempt, _, err := pl.runOptimizationFlow(ctxRun, nil)
+			solved := isAlreadyComputedForPendingSet(err, bestAttempt)
+
+			if err != nil &&
+				err != context.Canceled &&
+				err != ErrNoImprovingSolutionFromAnySolver &&
+				err != ErrNoPendingPodsScheduled {
+				klog.V(MyV).InfoS(msg(cfg.Label, "runFlow completed with error"),
+					"err", err.Error())
+			}
+
+			runDone <- solved
+		}()
+	}
+)

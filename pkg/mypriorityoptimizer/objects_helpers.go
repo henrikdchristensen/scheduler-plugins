@@ -16,27 +16,10 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	nodesListerFor = func(pl *SharedState) corev1listers.NodeLister {
-		return pl.Handle.SharedInformerFactory().Core().V1().Nodes().Lister()
-	}
-	podsListerFor = func(pl *SharedState) corev1listers.PodLister {
-		return pl.Handle.SharedInformerFactory().Core().V1().Pods().Lister()
-	}
-	evictPodFor = func(pl *SharedState, ctx context.Context, pod *v1.Pod, ev *policyv1.Eviction) error {
-		return pl.Client.CoreV1().Pods(pod.Namespace).EvictV1(ctx, ev)
-	}
-)
-
-// -------------------------
 // nodesLister
 // -------------------------
 
 // nodesLister returns the NodeLister from the shared informer factory.
-// CHECKED
 func (pl *SharedState) nodesLister() corev1listers.NodeLister {
 	return nodesListerFor(pl)
 }
@@ -46,7 +29,6 @@ func (pl *SharedState) nodesLister() corev1listers.NodeLister {
 // -------------------------
 
 // podsLister returns the PodsLister from the shared informer factory.
-// CHECKED
 func (pl *SharedState) podsLister() corev1listers.PodLister {
 	return podsListerFor(pl)
 }
@@ -57,7 +39,6 @@ func (pl *SharedState) podsLister() corev1listers.PodLister {
 
 // getNodes returns a list of all nodes in the cluster. Use the informer lister
 // to avoid stale data from SnapshotLister.
-// CHECKED
 func (pl *SharedState) getNodes() ([]*v1.Node, error) {
 	return pl.nodesLister().List(labels.Everything())
 }
@@ -68,7 +49,6 @@ func (pl *SharedState) getNodes() ([]*v1.Node, error) {
 
 // getPods returns a list of all pods in the cluster. Use the informer lister to
 // avoid stale data from SnapshotLister.
-// CHECKED
 func (pl *SharedState) getPods() ([]*v1.Pod, error) {
 	pods, err := pl.podsLister().List(labels.Everything())
 	if err != nil {
@@ -106,7 +86,6 @@ func (pl *SharedState) getPods() ([]*v1.Pod, error) {
 // -------------------------
 
 // podRef returns a string representation of pod's namespace and name.
-// CHECKED
 func podRef(p *v1.Pod) string {
 	return fmt.Sprintf("%s/%s", p.Namespace, p.Name)
 }
@@ -117,7 +96,6 @@ func podRef(p *v1.Pod) string {
 
 // mergeNsName combines namespace and name into a single string with a '/'
 // separator.
-// CHECKED
 func mergeNsName(ns, name string) string {
 	return fmt.Sprintf("%s/%s", ns, name)
 }
@@ -127,7 +105,6 @@ func mergeNsName(ns, name string) string {
 // -------------------------
 
 // splitNsName splits a combined namespace/name string into its components.
-// CHECKED
 func splitNsName(nsname string) (string, string, error) {
 	parts := strings.SplitN(nsname, "/", 2)
 	if len(parts) != 2 {
@@ -142,7 +119,6 @@ func splitNsName(nsname string) (string, string, error) {
 
 // countPendingPods returns the number of pods that are currently pending (alive
 // and unbound).
-// CHECKED
 func countPendingPods(pods []*v1.Pod) int {
 	if len(pods) == 0 {
 		return 0
@@ -165,7 +141,6 @@ func countPendingPods(pods []*v1.Pod) int {
 
 // evictPod evicts a pod from the cluster using the eviction API. grace is set
 // to 0 for immediate eviction.
-// CHECKED
 func (pl *SharedState) evictPod(ctx context.Context, pod *v1.Pod) error {
 	grace := int64(0) // immediate eviction
 	ev := &policyv1.Eviction{
@@ -187,7 +162,6 @@ func (pl *SharedState) evictPod(ctx context.Context, pod *v1.Pod) error {
 // -------------------------
 
 // getNodeCPUAllocatable returns the allocatable CPU of a node in millicores.
-// CHECKED
 func getNodeCPUAllocatable(n *v1.Node) int64 {
 	return n.Status.Allocatable.Cpu().MilliValue()
 }
@@ -197,7 +171,6 @@ func getNodeCPUAllocatable(n *v1.Node) int64 {
 // -------------------------
 
 // getNodeMemoryAllocatable returns the allocatable memory of a node in bytes.
-// CHECKED
 func getNodeMemoryAllocatable(n *v1.Node) int64 {
 	return n.Status.Allocatable.Memory().Value()
 }
@@ -208,7 +181,6 @@ func getNodeMemoryAllocatable(n *v1.Node) int64 {
 
 // isNodeControlPlane returns true if the node is a control plane node.
 // Additional labels can be added here as needed.
-// CHECKED
 func isNodeControlPlane(n *v1.Node) bool {
 	return n.Labels["node-role.kubernetes.io/control-plane"] != "" ||
 		n.Labels["node-role.kubernetes.io/master"] != "" ||
@@ -220,7 +192,6 @@ func isNodeControlPlane(n *v1.Node) bool {
 // -------------------------
 
 // getNodeConditions returns the conditions of a node.
-// CHECKED
 func getNodeConditions(n *v1.Node) []v1.NodeCondition {
 	return n.Status.Conditions
 }
@@ -230,7 +201,6 @@ func getNodeConditions(n *v1.Node) []v1.NodeCondition {
 // -------------------------
 
 // isNodeReady returns true if the node is ready.
-// CHECKED
 func isNodeReady(n *v1.Node) bool {
 	conditions := getNodeConditions(n)
 	for _, c := range conditions {
@@ -246,7 +216,6 @@ func isNodeReady(n *v1.Node) bool {
 // -------------------------
 
 // getNodeTaints returns the taints of a node.
-// CHECKED
 func getNodeTaints(n *v1.Node) []v1.Taint {
 	return n.Spec.Taints
 }
@@ -257,7 +226,6 @@ func getNodeTaints(n *v1.Node) []v1.Taint {
 
 // isNodeNoScheduleConditionTainted returns true if the node has a NoSchedule
 // taint due to not ready or unreachable conditions.
-// CHECKED
 func isNodeNoScheduleConditionTainted(n *v1.Node) bool {
 	taints := getNodeTaints(n)
 	for _, t := range taints {
@@ -275,7 +243,6 @@ func isNodeNoScheduleConditionTainted(n *v1.Node) bool {
 
 // isNodeAllocatable returns true if node has allocatable CPU and memory
 // resources.
-// CHECKED
 func isNodeAllocatable(n *v1.Node) bool {
 	return getNodeCPUAllocatable(n) > 0 && getNodeMemoryAllocatable(n) > 0
 }
@@ -285,7 +252,6 @@ func isNodeAllocatable(n *v1.Node) bool {
 // -------------------------
 
 // isNodeUnschedulable returns true if the node is marked as unschedulable.
-// CHECKED
 func isNodeUnschedulable(n *v1.Node) bool {
 	return n.Spec.Unschedulable
 }
@@ -295,7 +261,6 @@ func isNodeUnschedulable(n *v1.Node) bool {
 // -------------------------
 
 // isNodeUsable returns true if the node is usable for scheduling.
-// CHECKED
 func isNodeUsable(n *v1.Node) bool {
 	return n != nil &&
 		!isNodeControlPlane(n) &&
@@ -312,7 +277,6 @@ func isNodeUsable(n *v1.Node) bool {
 // getPod attempts to find the pod by matching UID and name, using getPodByName
 // first, then falling back to getPodByUID. Returns nil if the pod cannot be
 // found or errors occur.
-// CHECKED
 func (pl *SharedState) getPod(uid types.UID, ns, name string) *v1.Pod {
 	// Fast path: lookup by namespace/name and verify UID.
 	if p, err := pl.getPodByName(ns, name); err == nil && p != nil && isSamePodUID(p.UID, uid) {
@@ -330,7 +294,6 @@ func (pl *SharedState) getPod(uid types.UID, ns, name string) *v1.Pod {
 // -------------------------
 
 // getPodByName returns the pod by namespace and name.
-// CHECKED
 func (pl *SharedState) getPodByName(ns, name string) (*v1.Pod, error) {
 	return pl.podsLister().Pods(ns).Get(name)
 }
@@ -340,7 +303,6 @@ func (pl *SharedState) getPodByName(ns, name string) (*v1.Pod, error) {
 // -------------------------
 
 // getPodByUID returns the pod by UID by scanning all pods.
-// CHECKED
 func (pl *SharedState) getPodByUID(uid types.UID) (*v1.Pod, error) {
 	pods, err := pl.podsLister().List(labels.Everything())
 	if err != nil {
@@ -359,7 +321,6 @@ func (pl *SharedState) getPodByUID(uid types.UID) (*v1.Pod, error) {
 // -------------------------
 
 // podsByUID returns a map of pod UIDs to their corresponding Pod objects.
-// CHECKED
 func podsByUID(pods []*v1.Pod) map[types.UID]*v1.Pod {
 	m := make(map[types.UID]*v1.Pod, len(pods))
 	for _, p := range pods {
@@ -376,7 +337,6 @@ func podsByUID(pods []*v1.Pod) map[types.UID]*v1.Pod {
 // -------------------------
 
 // getPodContainers returns all containers of a pod.
-// CHECKED
 func getPodContainers(p *v1.Pod) []v1.Container {
 	return p.Spec.Containers
 }
@@ -386,7 +346,6 @@ func getPodContainers(p *v1.Pod) []v1.Container {
 // -------------------------
 
 // getContainerCPURequest returns the CPU request of a container in millicores.
-// CHECKED
 func getContainerCPURequest(c v1.Container) int64 {
 	return c.Resources.Requests.Cpu().MilliValue()
 }
@@ -396,7 +355,6 @@ func getContainerCPURequest(c v1.Container) int64 {
 // -------------------------
 
 // getContainerMemoryRequest returns the memory request of a container in bytes.
-// CHECKED
 func getContainerMemoryRequest(c v1.Container) int64 {
 	return c.Resources.Requests.Memory().Value()
 }
@@ -407,7 +365,6 @@ func getContainerMemoryRequest(c v1.Container) int64 {
 
 // getPodCPURequest returns the total CPU request for a pod by summing the
 // requests of all containers in millicores.
-// CHECKED
 func getPodCPURequest(p *v1.Pod) int64 {
 	containers := getPodContainers(p)
 	var total int64
@@ -423,7 +380,6 @@ func getPodCPURequest(p *v1.Pod) int64 {
 
 // getPodMemoryRequest returns the total memory request for a pod by summing the
 // requests of all containers.
-// CHECKED
 func getPodMemoryRequest(p *v1.Pod) int64 {
 	containers := getPodContainers(p)
 	var total int64
@@ -438,7 +394,6 @@ func getPodMemoryRequest(p *v1.Pod) int64 {
 // -------------------------
 
 // getPodPriority returns the priority of a pod.
-// CHECKED
 func getPodPriority(p *v1.Pod) int32 {
 	if p.Spec.Priority != nil {
 		return *p.Spec.Priority
@@ -451,7 +406,6 @@ func getPodPriority(p *v1.Pod) int32 {
 // -------------------------
 
 // getPodNodeName returns the name of the node to which the pod is assigned.
-// CHECKED
 func getPodAssignedNodeName(p *v1.Pod) string {
 	return p.Spec.NodeName
 }
@@ -461,7 +415,6 @@ func getPodAssignedNodeName(p *v1.Pod) string {
 // -------------------------
 
 // isSamePodUID returns true if the two pod UIDs are the same and non-empty.
-// CHECKED
 func isSamePodUID(pod1, pod2 types.UID) bool {
 	return string(pod1) != "" && string(pod2) != "" && pod1 == pod2
 }
@@ -471,7 +424,6 @@ func isSamePodUID(pod1, pod2 types.UID) bool {
 // -------------------------
 
 // isPodDeleted returns true if the pod has a deletion timestamp set.
-// CHECKED
 func isPodDeleted(p *v1.Pod) bool {
 	return p == nil || p.DeletionTimestamp != nil
 }
@@ -481,7 +433,6 @@ func isPodDeleted(p *v1.Pod) bool {
 // -------------------------
 
 // isPodAssigned returns true if the pod is assigned to a node.
-// CHECKED
 func isPodAssigned(p *v1.Pod) bool {
 	return p != nil && getPodAssignedNodeName(p) != ""
 }
@@ -493,7 +444,6 @@ func isPodAssigned(p *v1.Pod) bool {
 // isPodAssignedAndAlive returns true if the pod is non-nil, not terminating,
 // and currently bound to a node. This is the set of pods we can count as
 // "running now".
-// CHECKED
 func isPodAssignedAndAlive(p *v1.Pod) bool {
 	return !isPodDeleted(p) && isPodAssigned(p)
 }
@@ -503,7 +453,6 @@ func isPodAssignedAndAlive(p *v1.Pod) bool {
 // -------------------------
 
 // isPodProtected returns true if the pod e.g. is a system pod and should not be evicted.
-// CHECKED
 func isPodProtected(p *v1.Pod) bool {
 	if p == nil {
 		return false
@@ -520,7 +469,6 @@ func isPodProtected(p *v1.Pod) bool {
 // -------------------------
 
 // WorkloadKind represents the type of workload.
-// CHECKED
 func (wk WorkloadKey) String() string {
 	switch wk.Kind {
 	case wkReplicaSet:
@@ -542,7 +490,6 @@ func (wk WorkloadKey) String() string {
 
 // getTopWorkload returns the top-level workload controller of a pod, if any.
 // Take the first matching owner reference that is a known controller type.
-// CHECKED
 func getTopWorkload(p *v1.Pod) (WorkloadKey, bool) {
 	for _, o := range p.OwnerReferences {
 		if o.Controller == nil || !*o.Controller { // not a controller
@@ -561,3 +508,19 @@ func getTopWorkload(p *v1.Pod) (WorkloadKey, bool) {
 	}
 	return WorkloadKey{}, false
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	nodesListerFor = func(pl *SharedState) corev1listers.NodeLister {
+		return pl.Handle.SharedInformerFactory().Core().V1().Nodes().Lister()
+	}
+	podsListerFor = func(pl *SharedState) corev1listers.PodLister {
+		return pl.Handle.SharedInformerFactory().Core().V1().Pods().Lister()
+	}
+	evictPodFor = func(pl *SharedState, ctx context.Context, pod *v1.Pod, ev *policyv1.Eviction) error {
+		return pl.Client.CoreV1().Pods(pod.Namespace).EvictV1(ctx, ev)
+	}
+)

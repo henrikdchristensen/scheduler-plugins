@@ -193,7 +193,6 @@ func TestPlanCompletionWatch_IsPlanCompletedError_RetriesThenCompletes(t *testin
 	var n int32
 	withVar(t, &isPlanCompletedFn, func(_ *SharedState, _ *ActivePlan) (bool, error) {
 		if atomic.AddInt32(&n, 1) == 1 {
-			// Any non-nil error triggers the "will retry" branch.
 			return false, context.Canceled
 		}
 		return true, nil

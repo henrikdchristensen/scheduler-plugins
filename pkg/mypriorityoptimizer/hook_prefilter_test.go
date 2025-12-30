@@ -12,32 +12,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func mustNodeNames(t *testing.T, res *framework.PreFilterResult, want []string) {
-	t.Helper()
-	if len(want) == 0 {
-		if res != nil {
-			t.Fatalf("PreFilter() result = %#v, want nil", res)
-		}
-		return
-	}
-	if res == nil || res.NodeNames == nil {
-		t.Fatalf("PreFilter() result = %#v, want NodeNames", res)
-	}
-	for _, n := range want {
-		if !res.NodeNames.Has(n) {
-			t.Fatalf("PreFilter() NodeNames = %#v, want to contain %q", res.NodeNames.UnsortedList(), n)
-		}
-	}
-	// ensure no extras if caller expects an exact set
-	if got, wantLen := res.NodeNames.Len(), len(want); got != wantLen {
-		t.Fatalf("PreFilter() NodeNames = %#v, want exactly %#v", res.NodeNames.UnsortedList(), want)
-	}
-}
-
-// -------------------------
 // PreFilter
 // -------------------------
 
@@ -163,5 +137,31 @@ func TestPreFilterExtensions_IsNil(t *testing.T) {
 	pl := &SharedState{}
 	if ext := pl.PreFilterExtensions(); ext != nil {
 		t.Fatalf("PreFilterExtensions() = %#v, want nil", ext)
+	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func mustNodeNames(t *testing.T, res *framework.PreFilterResult, want []string) {
+	t.Helper()
+	if len(want) == 0 {
+		if res != nil {
+			t.Fatalf("PreFilter() result = %#v, want nil", res)
+		}
+		return
+	}
+	if res == nil || res.NodeNames == nil {
+		t.Fatalf("PreFilter() result = %#v, want NodeNames", res)
+	}
+	for _, n := range want {
+		if !res.NodeNames.Has(n) {
+			t.Fatalf("PreFilter() NodeNames = %#v, want to contain %q", res.NodeNames.UnsortedList(), n)
+		}
+	}
+	// ensure no extras if caller expects an exact set
+	if got, wantLen := res.NodeNames.Len(), len(want); got != wantLen {
+		t.Fatalf("PreFilter() NodeNames = %#v, want exactly %#v", res.NodeNames.UnsortedList(), want)
 	}
 }

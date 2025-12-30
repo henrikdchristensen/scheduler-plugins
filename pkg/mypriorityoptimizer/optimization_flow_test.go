@@ -11,168 +11,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-type flowCaptures struct {
-	exportCalled bool
-	export       struct {
-		strategy string
-		baseline SolverScore
-		bestName string
-		attempts []SolverResult
-		errorMsg string
-	}
-	watchCalled     bool
-	watchAP         *ActivePlan
-	completedCalled bool
-	completedStatus PlanStatus
-	completedAP     *ActivePlan
-}
-
-type flowHarness struct {
-	t           *testing.T
-	pl          *SharedState
-	nonblocking bool
-	// planContextFn
-	nodes         []*v1.Node
-	pods          []*v1.Pod
-	baselineEvict int
-	planCtxError  error
-	// planComputationFn
-	bestName       string
-	hadImprovement bool
-	bestAttempt    *SolverResult
-	bestOut        *SolverOutput
-	attempts       []SolverResult
-	// isSolutionApplicableFn
-	applicable    bool
-	applicableWhy string
-	// computePlanPodCountsFn
-	pendingScheduled int
-	totalPrePlan     int
-	totalPostPlan    int
-	// planRegistrationFn / planActivationFn
-	regError error
-	actError error
-	plan     *Plan
-	ap       *ActivePlan
-}
-
-func (h *flowHarness) install(t *testing.T) *flowCaptures {
-	t.Helper()
-
-	// Save originals and restore on cleanup.
-	origNonBlocking := isNonBlockingSolvingFn
-	origPlanCtx := planContextFn
-	origPlanComp := planComputationFn
-	origApplicable := isSolutionApplicableFn
-	origCounts := computePlanPodCountsFn
-	origReg := planRegistrationFn
-	origAct := planActivationFn
-	origWatch := startPlanCompletionWatchFn
-	origExport := exportSolverStatsFn
-	origOnCompleted := onPlanCompletedHook
-
-	t.Cleanup(func() {
-		isNonBlockingSolvingFn = origNonBlocking
-		planContextFn = origPlanCtx
-		planComputationFn = origPlanComp
-		isSolutionApplicableFn = origApplicable
-		computePlanPodCountsFn = origCounts
-		planRegistrationFn = origReg
-		planActivationFn = origAct
-		startPlanCompletionWatchFn = origWatch
-		exportSolverStatsFn = origExport
-		onPlanCompletedHook = origOnCompleted
-	})
-
-	caps := &flowCaptures{}
-
-	// Hooks
-	isNonBlockingSolvingFn = func() bool { return h.nonblocking }
-
-	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		if h.planCtxError != nil {
-			return nil, nil, SolverInput{}, h.planCtxError
-		}
-		return h.nodes, h.pods, SolverInput{BaselineScore: SolverScore{Evicted: h.baselineEvict}}, nil
-	}
-
-	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return h.bestName, h.hadImprovement, h.bestAttempt, h.bestOut, h.attempts
-	}
-
-	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
-		return h.applicable, h.applicableWhy
-	}
-
-	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
-		return h.pendingScheduled, h.totalPrePlan, h.totalPostPlan
-	}
-
-	planRegistrationFn = func(pl *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
-		if h.regError != nil {
-			if h.ap != nil {
-				pl.ActivePlan.Store(h.ap)
-			}
-			return nil, nil, h.regError
-		}
-
-		if h.plan == nil {
-			h.plan = &Plan{}
-		}
-		if h.ap == nil {
-			h.ap = &ActivePlan{ID: "ap-1"}
-		}
-
-		pl.ActivePlan.Store(h.ap)
-		return h.plan, h.ap, nil
-	}
-
-	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
-		return h.actError
-	}
-
-	startPlanCompletionWatchFn = func(_ *SharedState, ap *ActivePlan) {
-		caps.watchCalled = true
-		caps.watchAP = ap
-	}
-
-	exportSolverStatsFn = func(_ *SharedState, strategy string, baseline SolverScore, bestName string, attempts []SolverResult, errMsg string) {
-		caps.exportCalled = true
-		caps.export.strategy = strategy
-		caps.export.baseline = baseline
-		caps.export.bestName = bestName
-		caps.export.attempts = attempts
-		caps.export.errorMsg = errMsg
-	}
-
-	onPlanCompletedHook = func(_ *SharedState, status PlanStatus, ap *ActivePlan) {
-		caps.completedCalled = true
-		caps.completedStatus = status
-		caps.completedAP = ap
-	}
-
-	return caps
-}
-
-func assertZeroReturns(t *testing.T, plan *Plan, baseline *SolverScore, bestName string, bestAttempt *SolverResult, attempts []SolverResult) {
-	t.Helper()
-	if plan != nil || baseline != nil || bestName != "" || bestAttempt != nil || attempts != nil {
-		t.Fatalf("expected all return values to be zero (plan=%v baseline=%v bestName=%q bestAttempt=%v attempts=%v)",
-			plan, baseline, bestName, bestAttempt, attempts)
-	}
-}
-
-func assertPlanActiveReleased(t *testing.T, pl *SharedState) {
-	t.Helper()
-	if !pl.tryEnterActivePlan() {
-		t.Fatalf("expected ActivePlan gate to be released")
-	}
-}
-
-// -------------------------
 // runOptimizationFlow
 // -------------------------
 
@@ -233,7 +71,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 		want want
 	}{
 		{
-			name: "planContext_error",
+			name: "planContext error",
 			h: flowHarness{
 				nonblocking:  false,
 				planCtxError: errors.New("boom-plancontext"),
@@ -247,7 +85,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "no_pending_pods",
+			name: "no pending pods",
 			h: flowHarness{
 				nonblocking:   false,
 				nodes:         []*v1.Node{},
@@ -268,7 +106,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "no_improving_solution",
+			name: "no improving solution",
 			h: flowHarness{
 				nonblocking:    false,
 				nodes:          nil,
@@ -298,7 +136,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "plan_not_applicable",
+			name: "plan not applicable",
 			h: flowHarness{
 				nonblocking:    false,
 				nodes:          []*v1.Node{},
@@ -326,7 +164,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "no_pending_scheduled",
+			name: "no pending scheduled",
 			h: flowHarness{
 				nonblocking:      false,
 				nodes:            []*v1.Node{},
@@ -356,7 +194,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "plan_registration_error_calls_onPlanCompleted",
+			name: "plan registration error calls onPlanCompleted",
 			h: flowHarness{
 				nonblocking:      false,
 				nodes:            []*v1.Node{},
@@ -391,7 +229,7 @@ func TestRunOptimizationFlow_NonBlocking_Scenarios(t *testing.T) {
 			},
 		},
 		{
-			name: "plan_activation_error_calls_onPlanCompleted",
+			name: "plan activation error calls onPlanCompleted",
 			h: flowHarness{
 				nonblocking:      false,
 				nodes:            []*v1.Node{},
@@ -566,13 +404,12 @@ func TestRunOptimizationFlow_NonBlocking_ActivePlanAlreadyInProgress(t *testing.
 		t:           t,
 		pl:          pl,
 		nonblocking: false,
-
 		// If planContext is called, the test should fail (must return early).
 		planCtxError: errors.New("must-not-be-called"),
 	}
 	caps := h.install(t)
 
-	// Hard fail if any of the big hooks are reached.
+	// Fail if any of the following are called.
 	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
 		t.Fatalf("planContextFn must not be called when ActivePlan is already in progress")
 		return nil, nil, SolverInput{}, nil
@@ -655,5 +492,167 @@ func TestRunOptimizationFlow_NonBlocking_ActivePlanInProgressAtApply(t *testing.
 	}
 	if caps.export.errorMsg != ErrActiveInProgress.Error() {
 		t.Fatalf("exported errMsg=%q, want %q", caps.export.errorMsg, ErrActiveInProgress.Error())
+	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+type flowCaptures struct {
+	exportCalled bool
+	export       struct {
+		strategy string
+		baseline SolverScore
+		bestName string
+		attempts []SolverResult
+		errorMsg string
+	}
+	watchCalled     bool
+	watchAP         *ActivePlan
+	completedCalled bool
+	completedStatus PlanStatus
+	completedAP     *ActivePlan
+}
+
+type flowHarness struct {
+	t           *testing.T
+	pl          *SharedState
+	nonblocking bool
+	// planContextFn
+	nodes         []*v1.Node
+	pods          []*v1.Pod
+	baselineEvict int
+	planCtxError  error
+	// planComputationFn
+	bestName       string
+	hadImprovement bool
+	bestAttempt    *SolverResult
+	bestOut        *SolverOutput
+	attempts       []SolverResult
+	// isSolutionApplicableFn
+	applicable    bool
+	applicableWhy string
+	// computePlanPodCountsFn
+	pendingScheduled int
+	totalPrePlan     int
+	totalPostPlan    int
+	// planRegistrationFn / planActivationFn
+	regError error
+	actError error
+	plan     *Plan
+	ap       *ActivePlan
+}
+
+func (h *flowHarness) install(t *testing.T) *flowCaptures {
+	t.Helper()
+
+	// Save originals and restore on cleanup.
+	origNonBlocking := isNonBlockingSolvingFn
+	origPlanCtx := planContextFn
+	origPlanComp := planComputationFn
+	origApplicable := isSolutionApplicableFn
+	origCounts := computePlanPodCountsFn
+	origReg := planRegistrationFn
+	origAct := planActivationFn
+	origWatch := startPlanCompletionWatchFn
+	origExport := exportSolverStatsFn
+	origOnCompleted := onPlanCompletedHook
+
+	t.Cleanup(func() {
+		isNonBlockingSolvingFn = origNonBlocking
+		planContextFn = origPlanCtx
+		planComputationFn = origPlanComp
+		isSolutionApplicableFn = origApplicable
+		computePlanPodCountsFn = origCounts
+		planRegistrationFn = origReg
+		planActivationFn = origAct
+		startPlanCompletionWatchFn = origWatch
+		exportSolverStatsFn = origExport
+		onPlanCompletedHook = origOnCompleted
+	})
+
+	caps := &flowCaptures{}
+
+	// Hooks
+	isNonBlockingSolvingFn = func() bool { return h.nonblocking }
+
+	planContextFn = func(_ *SharedState, _ *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
+		if h.planCtxError != nil {
+			return nil, nil, SolverInput{}, h.planCtxError
+		}
+		return h.nodes, h.pods, SolverInput{BaselineScore: SolverScore{Evicted: h.baselineEvict}}, nil
+	}
+
+	planComputationFn = func(_ *SharedState, _ context.Context, _ SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
+		return h.bestName, h.hadImprovement, h.bestAttempt, h.bestOut, h.attempts
+	}
+
+	isSolutionApplicableFn = func(_ *SharedState, _ *SolverOutput, _ []*v1.Node, _ []*v1.Pod) (bool, string) {
+		return h.applicable, h.applicableWhy
+	}
+
+	computePlanPodCountsFn = func(_ *SolverOutput, _ []*v1.Pod) (int, int, int) {
+		return h.pendingScheduled, h.totalPrePlan, h.totalPostPlan
+	}
+
+	planRegistrationFn = func(pl *SharedState, _ context.Context, _ SolverResult, _ *SolverOutput, _ *v1.Pod, _ []*v1.Pod) (*Plan, *ActivePlan, error) {
+		if h.regError != nil {
+			if h.ap != nil {
+				pl.ActivePlan.Store(h.ap)
+			}
+			return nil, nil, h.regError
+		}
+
+		if h.plan == nil {
+			h.plan = &Plan{}
+		}
+		if h.ap == nil {
+			h.ap = &ActivePlan{ID: "ap-1"}
+		}
+
+		pl.ActivePlan.Store(h.ap)
+		return h.plan, h.ap, nil
+	}
+
+	planActivationFn = func(_ *SharedState, _ *Plan, _ []*v1.Pod) error {
+		return h.actError
+	}
+
+	startPlanCompletionWatchFn = func(_ *SharedState, ap *ActivePlan) {
+		caps.watchCalled = true
+		caps.watchAP = ap
+	}
+
+	exportSolverStatsFn = func(_ *SharedState, strategy string, baseline SolverScore, bestName string, attempts []SolverResult, errMsg string) {
+		caps.exportCalled = true
+		caps.export.strategy = strategy
+		caps.export.baseline = baseline
+		caps.export.bestName = bestName
+		caps.export.attempts = attempts
+		caps.export.errorMsg = errMsg
+	}
+
+	onPlanCompletedHook = func(_ *SharedState, status PlanStatus, ap *ActivePlan) {
+		caps.completedCalled = true
+		caps.completedStatus = status
+		caps.completedAP = ap
+	}
+
+	return caps
+}
+
+func assertZeroReturns(t *testing.T, plan *Plan, baseline *SolverScore, bestName string, bestAttempt *SolverResult, attempts []SolverResult) {
+	t.Helper()
+	if plan != nil || baseline != nil || bestName != "" || bestAttempt != nil || attempts != nil {
+		t.Fatalf("expected all return values to be zero (plan=%v baseline=%v bestName=%q bestAttempt=%v attempts=%v)",
+			plan, baseline, bestName, bestAttempt, attempts)
+	}
+}
+
+func assertPlanActiveReleased(t *testing.T, pl *SharedState) {
+	t.Helper()
+	if !pl.tryEnterActivePlan() {
+		t.Fatalf("expected ActivePlan gate to be released")
 	}
 }

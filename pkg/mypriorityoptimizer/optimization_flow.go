@@ -10,39 +10,6 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	isNonBlockingSolvingFn = isNonBlockingSolving
-
-	planContextFn = func(pl *SharedState, preemptor *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
-		return pl.planContext(preemptor)
-	}
-	planComputationFn = func(pl *SharedState, ctx context.Context, in SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
-		return pl.planComputation(ctx, in)
-	}
-	isSolutionApplicableFn = func(pl *SharedState, out *SolverOutput, nodes []*v1.Node, pods []*v1.Pod) (bool, string) {
-		return pl.isSolutionApplicable(out, nodes, pods)
-	}
-	computePlanPodCountsFn = func(out *SolverOutput, pods []*v1.Pod) (int, int, int) {
-		return computePlanPodCounts(out, pods)
-	}
-	planRegistrationFn = func(pl *SharedState, ctx context.Context, res SolverResult, out *SolverOutput, preemptor *v1.Pod, pods []*v1.Pod) (*Plan, *ActivePlan, error) {
-		return pl.planRegistration(ctx, res, out, preemptor, pods)
-	}
-	planActivationFn = func(pl *SharedState, plan *Plan, pods []*v1.Pod) error {
-		return pl.planActivation(plan, pods)
-	}
-	startPlanCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
-		pl.startPlanCompletionWatch(ap)
-	}
-	exportSolverStatsFn = func(pl *SharedState, strategy string, baseline SolverScore, bestName string, attempts []SolverResult, errMsg string) {
-		pl.exportSolverStatsToConfigMap(context.Background(), strategy, baseline, bestName, attempts, errMsg)
-	}
-)
-
-// -------------------------
 // runOptimizationFlow
 // -------------------------
 
@@ -165,3 +132,36 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 
 	return plan, &baselineScore, bestName, bestAttempt, attempts, nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	isNonBlockingSolvingFn = isNonBlockingSolving
+
+	planContextFn = func(pl *SharedState, preemptor *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
+		return pl.planContext(preemptor)
+	}
+	planComputationFn = func(pl *SharedState, ctx context.Context, in SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
+		return pl.planComputation(ctx, in)
+	}
+	isSolutionApplicableFn = func(pl *SharedState, out *SolverOutput, nodes []*v1.Node, pods []*v1.Pod) (bool, string) {
+		return pl.isSolutionApplicable(out, nodes, pods)
+	}
+	computePlanPodCountsFn = func(out *SolverOutput, pods []*v1.Pod) (int, int, int) {
+		return computePlanPodCounts(out, pods)
+	}
+	planRegistrationFn = func(pl *SharedState, ctx context.Context, res SolverResult, out *SolverOutput, preemptor *v1.Pod, pods []*v1.Pod) (*Plan, *ActivePlan, error) {
+		return pl.planRegistration(ctx, res, out, preemptor, pods)
+	}
+	planActivationFn = func(pl *SharedState, plan *Plan, pods []*v1.Pod) error {
+		return pl.planActivation(plan, pods)
+	}
+	startPlanCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
+		pl.startPlanCompletionWatch(ap)
+	}
+	exportSolverStatsFn = func(pl *SharedState, strategy string, baseline SolverScore, bestName string, attempts []SolverResult, errMsg string) {
+		pl.exportSolverStatsToConfigMap(context.Background(), strategy, baseline, bestName, attempts, errMsg)
+	}
+)

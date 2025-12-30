@@ -11,20 +11,6 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	activatePlannedPodsFn = func(pl *SharedState, plan *Plan, pods []*v1.Pod) {
-		pl.activatePlannedPods(plan, pods)
-	}
-
-	getPodForPlanActivation = func(pl *SharedState, uid types.UID, ns, name string) *v1.Pod {
-		return pl.getPod(uid, ns, name)
-	}
-)
-
-// -------------------------
 // planActivation
 // -------------------------
 
@@ -102,3 +88,17 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 
 	return nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	activatePlannedPodsFn = func(pl *SharedState, plan *Plan, pods []*v1.Pod) {
+		pl.activatePlannedPods(plan, pods)
+	}
+
+	getPodForPlanActivation = func(pl *SharedState, uid types.UID, ns, name string) *v1.Pod {
+		return pl.getPod(uid, ns, name)
+	}
+)

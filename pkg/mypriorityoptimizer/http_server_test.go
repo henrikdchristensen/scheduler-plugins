@@ -16,79 +16,6 @@ import (
 )
 
 // -------------------------
-// Test Helpers
-// -------------------------
-
-func httpCall(t *testing.T, h http.HandlerFunc, method, path string) *httptest.ResponseRecorder {
-	t.Helper()
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(method, path, nil)
-	h(rr, req)
-	return rr
-}
-
-func mustStatus(t *testing.T, rr *httptest.ResponseRecorder, want int) {
-	t.Helper()
-	if rr.Code != want {
-		t.Fatalf("status=%d want=%d body=%q", rr.Code, want, rr.Body.String())
-	}
-}
-
-func mustJSON[T any](t *testing.T, rr *httptest.ResponseRecorder, wantStatus int) T {
-	t.Helper()
-	mustStatus(t, rr, wantStatus)
-
-	ct := rr.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Fatalf("Content-Type=%q want=%q body=%q", ct, "application/json", rr.Body.String())
-	}
-
-	var out T
-	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
-		t.Fatalf("invalid JSON: %v body=%q", err, rr.Body.String())
-	}
-	return out
-}
-
-func withRunOptFlow(t *testing.T, fn func(*SharedState, context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error), body func()) {
-	t.Helper()
-	old := runOptFlow
-	runOptFlow = fn
-	t.Cleanup(func() { runOptFlow = old })
-	body()
-}
-
-func reserveAddr(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen :0: %v", err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
-}
-
-func waitHTTP(t *testing.T, url string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-
-	client := &http.Client{Timeout: 200 * time.Millisecond}
-	var lastErr error
-
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			_ = resp.Body.Close()
-			return
-		}
-		lastErr = err
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("server never became reachable at %s (last err: %v)", url, lastErr)
-}
-
-// -------------------------
 // /healthz
 // -------------------------
 
@@ -370,4 +297,77 @@ func TestWriteHttpJson(t *testing.T) {
 	if !strings.HasSuffix(rr.Body.String(), "\n") {
 		t.Fatalf("expected trailing newline from Encoder, got %q", rr.Body.String())
 	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func httpCall(t *testing.T, h http.HandlerFunc, method, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, nil)
+	h(rr, req)
+	return rr
+}
+
+func mustStatus(t *testing.T, rr *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if rr.Code != want {
+		t.Fatalf("status=%d want=%d body=%q", rr.Code, want, rr.Body.String())
+	}
+}
+
+func mustJSON[T any](t *testing.T, rr *httptest.ResponseRecorder, wantStatus int) T {
+	t.Helper()
+	mustStatus(t, rr, wantStatus)
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Fatalf("Content-Type=%q want=%q body=%q", ct, "application/json", rr.Body.String())
+	}
+
+	var out T
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("invalid JSON: %v body=%q", err, rr.Body.String())
+	}
+	return out
+}
+
+func withRunOptFlow(t *testing.T, fn func(*SharedState, context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error), body func()) {
+	t.Helper()
+	old := runOptFlow
+	runOptFlow = fn
+	t.Cleanup(func() { runOptFlow = old })
+	body()
+}
+
+func reserveAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen :0: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+func waitHTTP(t *testing.T, url string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			return
+		}
+		lastErr = err
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server never became reachable at %s (last err: %v)", url, lastErr)
 }

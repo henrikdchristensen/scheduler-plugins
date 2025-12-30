@@ -13,24 +13,6 @@ import (
 )
 
 // -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	pluginReadinessStarter = func(pl *SharedState, ctx context.Context, infs ...cache.SharedIndexInformer) {
-		go pl.pluginReadiness(ctx, infs...)
-	}
-
-	httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
-		go pl.startHttpServer(ctx, addr)
-	}
-
-	solverEnabled = func(pl *SharedState) bool {
-		return pl.isAnySolverEnabled()
-	}
-)
-
-// -------------------------
 // Name
 // -------------------------
 
@@ -114,3 +96,19 @@ func New(ctx context.Context, obj runtime.Object, h framework.Handle) (framework
 	}
 	return newFromHandle(ctx, obj, clientFn, h, h)
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	pluginReadinessStarter = func(pl *SharedState, ctx context.Context, infs ...cache.SharedIndexInformer) {
+		go pl.pluginReadiness(ctx, infs...)
+	}
+	httpServerStarter = func(pl *SharedState, ctx context.Context, addr string) {
+		go pl.startHttpServer(ctx, addr)
+	}
+	solverEnabled = func(pl *SharedState) bool {
+		return pl.isAnySolverEnabled()
+	}
+)

@@ -72,7 +72,7 @@ func TestModeType_String(t *testing.T) {
 		{ModeInterlude, "Interlude"},
 		{ModeManual, "Manual"},
 		{ModeManualBlocking, "ManualBlocking"},
-		{ModeType(999), "Periodic"}, // default branch
+		{ModeType(999), "Periodic"}, // default case
 	}
 
 	for _, tt := range tests {

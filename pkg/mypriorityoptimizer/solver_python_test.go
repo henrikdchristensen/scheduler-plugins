@@ -30,7 +30,7 @@ printf '{"status":"OPTIMAL","placements":[],"evictions":[]}'
 			wantStatus: "OPTIMAL",
 		},
 		{
-			name: "success_with_phases", // covers SolvePhases loop
+			name: "success with phases",
 			script: `#!/usr/bin/env bash
 cat >/dev/null
 printf '{"status":"OPTIMAL","durationMs":7,"placements":[],"evictions":[],"phases":[{"tier":1,"stage":"presolve","status":"ok","durationMs":1,"relativeGap":0.10}]}'
@@ -38,7 +38,7 @@ printf '{"status":"OPTIMAL","durationMs":7,"placements":[],"evictions":[],"phase
 			wantStatus: "OPTIMAL",
 		},
 		{
-			name: "invalid_json",
+			name: "invalid json",
 			script: `#!/usr/bin/env bash
 cat >/dev/null
 echo 'not-json'
@@ -46,7 +46,7 @@ echo 'not-json'
 			wantErrSub: []string{"decode", "output"},
 		},
 		{
-			name: "external_error", // covers runSolverExternal error wrap
+			name: "external error",
 			script: `#!/usr/bin/env bash
 cat >/dev/null
 echo 'boom' >&2
@@ -55,7 +55,7 @@ exit 42
 			wantErrSub: []string{"python solver external"},
 		},
 		{
-			name:       "marshal_error", // covers json.Marshal error
+			name:       "marshal error",
 			opts:       PythonSolverOptions{GapLimit: math.NaN()},
 			wantErrSub: []string{"marshal", "payload"},
 		},

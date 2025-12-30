@@ -241,15 +241,7 @@ func TestSortPodSetItemsByPriorityAndCreation(t *testing.T) {
 // buildPlan
 // -------------------------
 
-func TestBuildPlan_NilOutputReturnsEmptyPlan(t *testing.T) {
-	pl := &SharedState{}
-	plan, err := pl.buildPlan(nil, nil, nil)
-	must(t, err == nil, "err=%v", err)
-	must(t, plan != nil, "plan nil")
-	must(t, len(plan.Evicts) == 0 && len(plan.Moves) == 0 && len(plan.NewPlacements) == 0, "expected empty plan, got=%#v", plan)
-}
-
-func TestBuildPlan_CoversBranches(t *testing.T) {
+func TestBuildPlan(t *testing.T) {
 	pl := &SharedState{}
 
 	// pRunEvict: running, evicted
@@ -329,6 +321,14 @@ func TestBuildPlan_CoversBranches(t *testing.T) {
 	}
 }
 
+func TestBuildPlan_NilOutputReturnsEmptyPlan(t *testing.T) {
+	pl := &SharedState{}
+	plan, err := pl.buildPlan(nil, nil, nil)
+	must(t, err == nil, "err=%v", err)
+	must(t, plan != nil, "plan nil")
+	must(t, len(plan.Evicts) == 0 && len(plan.Moves) == 0 && len(plan.NewPlacements) == 0, "expected empty plan, got=%#v", plan)
+}
+
 func TestBuildPlan_WithPreemptorNomination(t *testing.T) {
 	pl := &SharedState{}
 	pre := pod("ns", "pre", withUID("u-pre"))
@@ -357,7 +357,7 @@ func TestBuildPlan_PreemptorNotInPodsStillNominates(t *testing.T) {
 	mustEq(t, plan.NewPlacements[0].Node, "n1", "preemptor new node wrong")
 }
 
-func TestBuildPlan_PreemptorAlreadyAssigned_NoMovesButPlacementRecorded(t *testing.T) {
+func TestBuildPlan_PreemptorAlreadyAssigned(t *testing.T) {
 	pl := &SharedState{}
 	// Preemptor is already assigned; solver moves it. We should NOT count it as a "move".
 	pre := pod("ns", "pre", withUID("u-pre"), onNode("n-old"))
@@ -374,7 +374,7 @@ func TestBuildPlan_PreemptorAlreadyAssigned_NoMovesButPlacementRecorded(t *testi
 	mustEq(t, plan.OldPlacements[0].Node, "n-old", "old placement node wrong")
 }
 
-func TestBuildPlan_PreemptorDeleted_IsIgnored(t *testing.T) {
+func TestBuildPlan_PreemptorDeleted(t *testing.T) {
 	pl := &SharedState{}
 	pre := pod("ns", "pre", withUID("u-pre"), withDeletionTimestamp(metav1.Now()))
 	out := &SolverOutput{Placements: []SolverPod{{UID: pre.UID, Node: "n1"}}}
@@ -455,7 +455,7 @@ func TestEvictTargets_UsesHook(t *testing.T) {
 	must(t, called, "hook not called")
 }
 
-func TestEvictTargets_NotFoundIgnored_NonNotFoundPropagates(t *testing.T) {
+func TestEvictTargets_NotFoundIgnored(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 
@@ -510,7 +510,7 @@ func TestWaitPodsGone_EmptyOrNilPodFastPath(t *testing.T) {
 	mustNoErr(t, pl.waitPodsGone(ctx, []*v1.Pod{nil}), "expected nil")
 }
 
-func TestWaitPodsGone_NotFound_UIDChange_Terminating(t *testing.T) {
+func TestWaitPodsGone_NotFound_UIDChange(t *testing.T) {
 	pl := &SharedState{}
 	ctx := context.Background()
 
@@ -1399,7 +1399,7 @@ func TestSetPlanStatusInConfigMap_Default_SetsAndStickyAndBadJson(t *testing.T) 
 // clusterFingerprint
 // -------------------------
 
-func TestClusterFingerprint_ExcludesPending_AndUnusableNodes(t *testing.T) {
+func TestClusterFingerprint_ExcludesPending(t *testing.T) {
 	// Nodes: one usable, one unschedulable, one not-ready
 	n1 := node("n1", withAllocatable("2000m", "2Gi"))
 	nBad := node("n-bad", unschedulable())
@@ -1429,7 +1429,7 @@ func TestClusterFingerprint_ExcludesPending_AndUnusableNodes(t *testing.T) {
 	must(t, fp4 != clusterFingerprint([]*v1.Node{n1}, []*v1.Pod{pRun}), "expected fingerprint to change when running pod changes")
 }
 
-func TestClusterFingerprint_IgnoresDeletedPods_AndNilNodes(t *testing.T) {
+func TestClusterFingerprint_IgnoresDeletedPods(t *testing.T) {
 	n1 := node("n1", withAllocatable("2000m", "2Gi"))
 
 	pRun := pod("ns", "run", withUID("u-run"), onNode("n1"), withReqs("100m", "64Mi"), withPrio(10))
@@ -1442,7 +1442,7 @@ func TestClusterFingerprint_IgnoresDeletedPods_AndNilNodes(t *testing.T) {
 	mustEq(t, fp1, fp2, "deleted pods and nil nodes must not affect fingerprint")
 }
 
-func TestClusterFingerprint_DedupesUsableNodes_AndHandlesNoUsableNodes(t *testing.T) {
+func TestClusterFingerprint_DedupesUsableNodes(t *testing.T) {
 	n1a := node("n1", withAllocatable("2000m", "2Gi"))
 	n1b := node("n1", withAllocatable("2000m", "2Gi")) // duplicate name
 	pRun := pod("ns", "run", withUID("u-run"), onNode("n1"), withReqs("100m", "64Mi"), withPrio(1))
