@@ -1,4 +1,5 @@
 // constants.go
+// CHECKED
 package mypriorityoptimizer
 
 import "time"

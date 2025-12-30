@@ -1,4 +1,5 @@
 // http_server_test.go
+// CHECKED
 package mypriorityoptimizer
 
 import (
@@ -242,7 +243,7 @@ func TestStartHttpServer_ShutsDownOnContextCancel(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait until the server is reachable (no sleeps/guesses).
+	// Wait until the server is reachable...
 	waitHTTP(t, "http://"+addr+"/healthz", 2*time.Second)
 
 	cancel()

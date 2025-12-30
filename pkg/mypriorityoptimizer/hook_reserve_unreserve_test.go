@@ -1,4 +1,5 @@
 // hook_reserve_unreserve_test.go
+// CHECKED
 package mypriorityoptimizer
 
 import (
@@ -233,7 +234,7 @@ func (b *badState) Clone() fwk.StateData { return &badState{} }
 func TestUnreserve(t *testing.T) {
 	type tc struct {
 		name       string
-		cycleWrite fwk.StateData // written under rsReservationKey; nil => don't write
+		cycleWrite fwk.StateData // what to write into cycle state before Unreserve
 		activePlan *ActivePlan
 		wantQuota  bool
 		wkKey      string
@@ -244,17 +245,17 @@ func TestUnreserve(t *testing.T) {
 
 	tests := []tc{
 		{
-			name:       "no reservation state -> no panic / no-op",
+			name:       "no reservation state -> no-op",
 			cycleWrite: nil,
 			activePlan: nil,
 		},
 		{
-			name:       "reservation state wrong type -> no panic / no-op",
+			name:       "reservation state wrong type -> no-op",
 			cycleWrite: &badState{},
 			activePlan: nil,
 		},
 		{
-			name:       "reservation state present but no active plan -> no panic / no-op",
+			name:       "reservation state present but no active plan -> no-op",
 			cycleWrite: &RsReservationState{Key: ReservationKey{RsKey: "wk/ns/foo", NodeName: "node1"}},
 			activePlan: nil,
 		},
@@ -278,7 +279,7 @@ func TestUnreserve(t *testing.T) {
 			want:      1,
 		},
 		{
-			name:       "active plan present but workload/node missing -> no panic / no-op",
+			name:       "active plan present but workload/node missing -> no-op",
 			cycleWrite: &RsReservationState{Key: ReservationKey{RsKey: "missing", NodeName: "node1"}},
 			activePlan: func() *ActivePlan {
 				return &ActivePlan{

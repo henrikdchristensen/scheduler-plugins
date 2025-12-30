@@ -1,4 +1,5 @@
 // plugin_types.go
+// CHECKED
 package mypriorityoptimizer
 
 import (

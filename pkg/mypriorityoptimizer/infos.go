@@ -1,4 +1,5 @@
 // infos.go
+// CHECKED
 package mypriorityoptimizer
 
 var (

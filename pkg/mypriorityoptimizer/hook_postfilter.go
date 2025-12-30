@@ -1,4 +1,5 @@
 // hook_postfilter.go
+// CHECKED
 package mypriorityoptimizer
 
 import (
@@ -9,19 +10,6 @@ import (
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
-)
-
-// -------------------------
-// Test Hooks
-// -------------------------
-
-var (
-	postFilterSleep           = time.Sleep
-	postFilterPerPodEnabled   = isPerPodMode
-	postFilterRunOptimization = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
-		plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)
-		return plan, err
-	}
 )
 
 // -------------------------
@@ -69,3 +57,16 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 		},
 	}, fwk.NewStatus(fwk.Success, msg(stage, InfoNominatedAfterPlan))
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	postFilterSleep           = time.Sleep
+	postFilterPerPodEnabled   = isPerPodMode
+	postFilterRunOptimization = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
+		plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)
+		return plan, err
+	}
+)

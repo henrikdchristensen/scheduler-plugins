@@ -1,4 +1,5 @@
 // http_types.go
+// CHECKED
 package mypriorityoptimizer
 
 // HttpResponse represents the JSON response structure for optimization requests.

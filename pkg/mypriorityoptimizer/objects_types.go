@@ -1,4 +1,5 @@
 // objects_types.go
+// CHECKED
 package mypriorityoptimizer
 
 // WorkloadKind represents the kind of workload.
