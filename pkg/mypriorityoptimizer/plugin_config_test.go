@@ -1,5 +1,6 @@
 // plugin_config_test.go
 // with the help of AI tools to cover more branches/cases
+// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 package mypriorityoptimizer
 
 import (

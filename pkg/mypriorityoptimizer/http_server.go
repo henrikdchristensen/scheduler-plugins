@@ -1,5 +1,4 @@
 // http_server.go
-// CHECKED
 package mypriorityoptimizer
 
 import (

@@ -1,5 +1,4 @@
 // errors.go
-// CHECKED
 package mypriorityoptimizer
 
 import "errors"

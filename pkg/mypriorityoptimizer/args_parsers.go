@@ -1,5 +1,4 @@
 // args_parsers.go
-// CHECKED
 package mypriorityoptimizer
 
 import (

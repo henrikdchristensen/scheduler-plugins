@@ -1,5 +1,4 @@
 // logging_helpers.go
-// CHECKED
 package mypriorityoptimizer
 
 // -------------------------

@@ -1,5 +1,4 @@
 // hook_prefilter.go
-// CHECKED
 package mypriorityoptimizer
 
 import (

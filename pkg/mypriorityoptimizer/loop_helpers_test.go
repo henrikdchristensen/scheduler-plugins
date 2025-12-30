@@ -1,4 +1,5 @@
 // loop_helpers_test.go
+// TODO: MISSING CHECK FOR THIS FILE; simplifications, readability, etc.
 // with the help of AI tools to cover more branches/cases
 package mypriorityoptimizer
 

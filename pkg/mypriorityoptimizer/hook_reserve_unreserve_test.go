@@ -1,5 +1,4 @@
 // hook_reserve_unreserve_test.go
-// CHECKED
 package mypriorityoptimizer
 
 import (
