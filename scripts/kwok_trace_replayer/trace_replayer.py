@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 # trace_replayer.py
 
+#######################################################################
+"""
+python -m scripts.kwok_trace_replayer.trace_replayer \
+--job-file <job-file.yaml> \
+--result-dir <result-dir> \
+--trace-dir <trace-dir> \
+--kwokctl-config-file <kwokctl-config.yaml> \
+--cluster-name <kwok-cluster-name> \
+--namespace <k8s-namespace> \
+--node-cpu <k8s-cpu-quantity> \
+--node-mem <k8s-mem-quantity> \
+--monitor-interval <seconds> \
+--log-level <log-level> \
+--save-scheduler-logs <True|False>
+"""
+#######################################################################
+
 import argparse, csv, json, logging, threading, time, yaml, subprocess, re
 from argparse import BooleanOptionalAction
 from concurrent.futures import ThreadPoolExecutor, Future

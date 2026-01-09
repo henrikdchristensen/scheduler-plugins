@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # test_modes.py
 
+# ---------------------------------------------------------------------------
+# python -m pytest -s scripts/kwok_integration_tests/test_modes.py 
+# ---------------------------------------------------------------------------
+
 import argparse, csv, json, logging, sys, time
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List

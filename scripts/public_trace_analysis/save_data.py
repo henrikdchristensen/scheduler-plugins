@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # save_data.py
 
+# ----------------------------------------------------------------------
+# python -m scripts.public_trace_analysis.save_data
+# ----------------------------------------------------------------------
+
 import csv, os
 from typing import List, Tuple
 from google.cloud import bigquery

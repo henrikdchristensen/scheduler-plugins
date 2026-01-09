@@ -1,6 +1,35 @@
 #!/usr/bin/env python3
 # trace_generator.py
 
+#######################################################################
+"""
+python -m scripts.kwok_trace_replayer.trace_generator \
+--output-dir ./output-traces \
+--seed 12345 \
+--log-level INFO \
+--num-nodes 8 \
+--trace-time 1h \
+--xmin-arrival 0.01 \
+--xmax-arrival 10.0 \
+--mean-arrival 0.5 \
+--xmin-life 10.0 \
+--xmax-life 3600.0 \
+--mean-life 300 \
+--xmin-cpu 0.01 \
+--xmax-cpu 0.5 \
+--mean-cpu 0.1 \
+--xmin-mem 0.01 \
+--xmax-mem 0.5 \
+--mean-mem 0.1 \
+--priority-min 1 \
+--priority-max 5 \
+--priority-ratio 0.9 \
+--replicas-min 1 \
+--replicas-max 3 \
+--replicas-ratio 0.8 \
+"""
+#######################################################################
+
 import argparse, heapq, json, logging, os
 from dataclasses import dataclass, asdict, field
 from pathlib import Path

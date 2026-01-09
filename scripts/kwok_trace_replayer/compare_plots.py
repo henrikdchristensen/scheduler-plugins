@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 # plots.py
 
+#######################################################################
+"""
+python -m scripts.kwok_trace_replayer.compare_plots \
+--default-csv <path-to-default-scheduler-csv> \
+--python-csv <path-to-python-optimizer-csv> \
+[--smooth-seconds <seconds>] \
+[--out <output-image-path>] \
+[--no-show]
+"""
+#######################################################################
+
 import argparse
 import math
 import json
