@@ -2,12 +2,16 @@
 # plots.py
 
 # ----------------------------------------------------------------------
-# python -m scripts.public_trace_analysis.plots
+# Examples:
+#   python -m scripts.public_trace_analysis.plots --layout datasets-cols
+#   python -m scripts.public_trace_analysis.plots --layout datasets-rows
 # ----------------------------------------------------------------------
 
+import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Dict, Any, List
+
 from scripts.kwok_trace_replayer.plot_helpers import (
     plot_histogram_with_pareto,
     plot_bar_with_geometric,
@@ -16,8 +20,6 @@ from scripts.kwok_trace_replayer.plot_helpers import (
 # ----------------------------------------------------------------------
 # CONFIG
 # ----------------------------------------------------------------------
-# alpha: shape parameter - controls the tail heaviness
-# x_min: scale / lower bound of the distribution
 
 DATASETS: List[Dict[str, Any]] = [
     {
@@ -36,7 +38,6 @@ DATASETS: List[Dict[str, Any]] = [
                 "pareto_alpha": 0.72,
                 "pareto_xmin": 1.0,
             },
-            # Use Pareto I for CPU and MEM
             "cpu_request": {
                 "x_label": "Requested CPU (fraction of node capacity)",
                 "x_max": 0.2,
@@ -54,7 +55,7 @@ DATASETS: List[Dict[str, Any]] = [
             "priority": {
                 "log_y": True,
                 "fit_geometric": True,
-                "geom_ratio": 0.98
+                "geom_ratio": 0.98,
             },
         },
     },
@@ -89,7 +90,7 @@ DATASETS: List[Dict[str, Any]] = [
 BASE_PLOT_SPECS = [
     {
         "column": "inter_arrival_us",
-        "title": "Inter-arrival time distribution",
+        "title": "Inter-arrival time",
         "x_label": "Δt (seconds)",
         "y_label": "Probability density",
         "bins": 100,
@@ -102,7 +103,7 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "life_time_us",
-        "title": "Instance lifetime distribution",
+        "title": "Instance lifetime",
         "x_label": "Lifetime (hours)",
         "y_label": "Probability density",
         "bins": 100,
@@ -115,7 +116,7 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "cpu_request",
-        "title": "CPU request distribution",
+        "title": "CPU request",
         "x_label": "Requested CPU",
         "y_label": "Probability density",
         "bins": 100,
@@ -128,7 +129,7 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "mem_request",
-        "title": "Memory request distribution",
+        "title": "Memory request",
         "x_label": "Requested memory",
         "y_label": "Probability density",
         "bins": 100,
@@ -141,9 +142,9 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "priority",
-        "title": "Priority distribution",
+        "title": "Priority",
         "x_label": "Priority",
-        "y_label": "Probability density",
+        "y_label": "Probability mass",
         "bins": 10,
         "log_y": False,
         "y_min": None,
@@ -156,7 +157,6 @@ BASE_PLOT_SPECS = [
 ]
 
 
-
 def build_plot_specs_for_dataset(per_column_cfg: Dict[str, Dict[str, Any]] | None) -> Dict[str, Dict[str, Any]]:
     """
     Take BASE_PLOT_SPECS and apply per-column configs.
@@ -165,22 +165,56 @@ def build_plot_specs_for_dataset(per_column_cfg: Dict[str, Dict[str, Any]] | Non
     specs_by_col: Dict[str, Dict[str, Any]] = {}
     for base in BASE_PLOT_SPECS:
         col = base["column"]
-        spec = dict(base)  # shallow copy
+        spec = dict(base) # copy
         if col in per_column_cfg:
-            overrides = {k: v for k, v in per_column_cfg[col].items()}
-            spec.update(overrides)
+            spec.update({k: v for k, v in per_column_cfg[col].items()})
         specs_by_col[col] = spec
     return specs_by_col
 
-# ----------------------------------------------------------------------
-# Combined grid plot
-# ----------------------------------------------------------------------
 
-def make_combined_grid() -> None:
+def _draw_cell(ax, col_name: str, data, spec: Dict[str, Any], y_label: str) -> None:
     """
-    Create a grid of histograms:
-    - Columns = metrics (in BASE_PLOT_SPECS order)
-    - Rows = datasets (Google, Alibaba, ...)
+    Draw one subplot cell (either histogram+pareto or bar+geometric).
+    """
+    if col_name == "priority":
+        plot_bar_with_geometric(
+            ax,
+            data,
+            title="",
+            x_label=spec["x_label"],
+            y_label=y_label,
+            geom_fit=spec.get("fit_geometric", False),
+            geom_ratio=spec.get("geom_ratio"),
+            x_min=None,
+            x_max=spec.get("x_max"),
+            y_min=spec.get("y_min"),
+            y_max=spec.get("y_max"),
+            log_y=spec.get("log_y", False),
+        )
+    else:
+        plot_histogram_with_pareto(
+            ax,
+            data,
+            title="",
+            x_label=spec["x_label"],
+            y_label=y_label,
+            bins=spec["bins"],
+            x_max=spec.get("x_max"),
+            y_min=spec.get("y_min"),
+            y_max=spec.get("y_max"),
+            log_y=spec["log_y"],
+            scale=spec.get("scale", 1.0),
+            pareto_fit=spec.get("fit_pareto", False),
+            pareto_alpha=spec.get("pareto_alpha"),
+            pareto_xmin=spec.get("pareto_xmin"),
+        )
+
+
+def make_combined_grid(layout: str, out_dir: str) -> None:
+    """
+    layout:
+      - "datasets-cols": columns=datasets (Google|Alibaba), rows=metrics
+      - "datasets-rows": rows=datasets (Google over Alibaba), cols=metrics
     """
     loaded: List[Dict[str, Any]] = []
     for ds in DATASETS:
@@ -191,98 +225,134 @@ def make_combined_grid() -> None:
         specs_by_col = build_plot_specs_for_dataset(ds.get("plots"))
         loaded.append({"name": name, "df": df, "specs_by_col": specs_by_col})
 
-    # Columns = metrics (in BASE_PLOT_SPECS order)
     metric_columns = [spec["column"] for spec in BASE_PLOT_SPECS]
+    base_by_col = {s["column"]: s for s in BASE_PLOT_SPECS}
 
-    # Rows = datasets (Google, Alibaba, ...)
-    n_rows = len(loaded)
-    n_cols = len(metric_columns)
+    if layout == "datasets-cols":
+        # Rows=metrics, Cols=datasets
+        n_rows = len(metric_columns)
+        n_cols = len(loaded)
+        fig_w = 3.2 * n_cols
+        fig_h = 1.9 * n_rows
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
 
-    # Create grid figure
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(2.1 * n_cols, 1.6 * n_rows),
-        squeeze=False,
-    )
+        for row_idx, col_name in enumerate(metric_columns):
+            base_spec = base_by_col[col_name]
+            for col_idx, ds_info in enumerate(loaded):
+                ax = axes[row_idx, col_idx]
+                df = ds_info["df"]
+                spec = ds_info["specs_by_col"][col_name]
 
-    for row_idx, ds_info in enumerate(loaded):
-        ds_name = ds_info["name"]
-        df = ds_info["df"]
-        specs_by_col = ds_info["specs_by_col"]
+                if col_name not in df.columns:
+                    ax.axis("off")
+                    continue
 
+                data = df[col_name].to_numpy()
+
+                # Left-side label per metric row, only on first dataset column.
+                y_label = spec["y_label"] if col_idx == 0 else ""
+
+                _draw_cell(ax, col_name, data, spec, y_label)
+
+                # Bold metric label (once per row, left side)
+                if col_idx == 0:
+                    ax.text(
+                        -0.20, 0.5, base_spec["title"],
+                        transform=ax.transAxes,
+                        rotation=90,
+                        va="center",
+                        ha="center",
+                        fontsize=7,
+                        fontweight="bold",
+                    )
+
+        # ONE dataset label per dataset
+        for col_idx, ds_info in enumerate(loaded):
+            axes[0, col_idx].set_title(ds_info["name"], fontsize=11, pad=8, fontweight="bold")
+
+    else:
+        # Rows=datasets, Cols=metrics
+        n_rows = len(loaded)
+        n_cols = len(metric_columns)
+        fig_w = 2.1 * n_cols
+        fig_h = 1.6 * n_rows
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
+
+        for row_idx, ds_info in enumerate(loaded):
+            ds_name = ds_info["name"]
+            df = ds_info["df"]
+            specs_by_col = ds_info["specs_by_col"]
+
+            for col_idx, col_name in enumerate(metric_columns):
+                ax = axes[row_idx, col_idx]
+
+                if col_name not in df.columns:
+                    ax.axis("off")
+                    continue
+
+                spec = specs_by_col[col_name]
+                data = df[col_name].to_numpy()
+
+                # y-label only once per dataset row
+                y_label = spec["y_label"] if col_idx == 0 else ""
+
+                _draw_cell(ax, col_name, data, spec, y_label)
+
+                # Dataset label once per row, on the left side (first column only)
+                if col_idx == 0:
+                    ax.text(
+                        -0.32, 0.5, ds_name,
+                        transform=ax.transAxes,
+                        rotation=90,
+                        va="center",
+                        ha="center",
+                        fontweight="bold",
+                    )
+
+        # Metric titles (top row)
         for col_idx, col_name in enumerate(metric_columns):
-            ax = axes[row_idx, col_idx]
+            axes[0, col_idx].set_title(base_by_col[col_name]["title"], fontsize=7, pad=8, fontweight="bold")
 
-            # If this metric isn't present in this dataset, hide the axes
-            if col_name not in df.columns:
-                ax.axis("off")
-                continue
-            spec = specs_by_col[col_name]
-            data = df[col_name].to_numpy()
-
-            # Y-label only in first column for each row
-            y_label = (
-                rf"$\bf{{{ds_name}}}$" + f"\n\n{spec['y_label']}"
-                if col_idx == 0
-                else ""
-            )
-
-            if col_name == "priority":
-                # Discrete priority distribution as bar chart
-                plot_bar_with_geometric(
-                    ax,
-                    data,
-                    title="",
-                    x_label=spec["x_label"],
-                    y_label=y_label,
-                    geom_fit=spec.get("fit_geometric", False),
-                    geom_ratio=spec.get("geom_ratio"),
-                    x_min=None,
-                    x_max=spec.get("x_max"),
-                    y_min=spec.get("y_min"),
-                    y_max=spec.get("y_max"),
-                    log_y=spec.get("log_y", False),
-                )
-            else:
-                # Continuous-ish metrics: histogram + optional Pareto
-                plot_histogram_with_pareto(
-                    ax,
-                    data,
-                    title="",
-                    x_label=spec["x_label"],
-                    y_label=y_label,
-                    bins=spec["bins"],
-                    x_max=spec.get("x_max"),
-                    y_min=spec.get("y_min"),
-                    y_max=spec.get("y_max"),
-                    log_y=spec["log_y"],
-                    scale=spec.get("scale", 1.0),
-                    pareto_fit=spec.get("fit_pareto", False),
-                    pareto_alpha=spec.get("pareto_alpha"),
-                    pareto_xmin=spec.get("pareto_xmin"),
-                )
-
-    # Space adjustments
     fig.tight_layout(
         rect=(0.01, 0.01, 0.99, 0.99),
-        pad=0.2,    # overall padding around the figure (default ~1.08)
-        w_pad=0.2,  # width padding between subplots (inches)
-        h_pad=0.2,  # height padding between subplots (inches)
+        pad=0.3,
+        w_pad=0.4,
+        h_pad=0.4,
     )
 
-    out_path = "analysis/kwok_trace_replayer/figures/"
-    fig.savefig(out_path+"public_trace_histograms.png", dpi=300, bbox_inches="tight")
-    fig.savefig(out_path+"public_trace_histograms.pdf", bbox_inches="tight")
+    out_dir = out_dir.rstrip("/") + "/"
+    fig.savefig(out_dir + "public_trace_histograms.png", dpi=300, bbox_inches="tight")
+    fig.savefig(out_dir + "public_trace_histograms.pdf", bbox_inches="tight")
     plt.close(fig)
-    print(f"[OK] Saved combined grid to {out_path}")
+    print(f"[OK] Saved combined grid to {out_dir} (layout={layout})")
+
 
 # ----------------------------------------------------------------------
 # main
 # ----------------------------------------------------------------------
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Public trace histogram grid plotter.")
+    p.add_argument(
+        "--layout",
+        type=str,
+        default="datasets-cols",
+        choices=["datasets-cols", "datasets-rows"],
+        help="Layout mode: datasets as columns or datasets as rows.",
+    )
+    p.add_argument(
+        "--out-dir",
+        type=str,
+        default="analysis/kwok_trace_replayer/figures/",
+        help="Output directory for the combined plots.",
+    )
+    return p
+
+
 def main() -> None:
-    make_combined_grid()
+    args = _build_arg_parser().parse_args()
+    make_combined_grid(layout=args.layout, out_dir=args.out_dir)
+
 
 if __name__ == "__main__":
     main()
