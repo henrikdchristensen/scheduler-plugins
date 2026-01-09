@@ -105,6 +105,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # Lifetime bounds (mean is inferred from util)
     p.add_argument("--xmin-life", type=float, default=10.0)
     p.add_argument("--xmax-life", type=float, default=None)
+    p.add_argument("--mean-life", type=float, default=None)
 
     # Requests (Pareto)
     p.add_argument("--xmin-req", type=float, default=0.01)
@@ -637,7 +638,8 @@ class TraceGenerator:
         if self._prepared:
             return
 
-        self.args.mean_life = self._infer_mean_life_from_target_util()
+        if self.args.mean_life is None:
+            self.args.mean_life = self._infer_mean_life_from_target_util()
         LOG.info(
             "inferred mean_life=%.3fs from target-util=%.3f",
             float(self.args.mean_life),

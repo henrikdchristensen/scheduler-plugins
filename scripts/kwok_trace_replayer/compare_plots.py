@@ -103,6 +103,34 @@ def parse_args() -> argparse.Namespace:
 # -----------------------------
 # Helpers
 # -----------------------------
+def _choose_time_unit(max_time_s: float) -> tuple[float, str]:
+    """
+    Match trace_generator.py behavior:
+      <= 7h   -> minutes
+      <= 7d   -> hours
+      else    -> days
+    Returns (scale, label) where x_plot = x_seconds * scale.
+    """
+    if max_time_s <= 7 * 3600:
+        return 1.0 / 60.0, "Time (minutes)"
+    if max_time_s <= 7 * 24 * 3600:
+        return 1.0 / 3600.0, "Time (hours)"
+    return 1.0 / (24.0 * 3600.0), "Time (days)"
+
+
+def _time_scaled(
+    t_def_s: np.ndarray,
+    t_our_s: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, str]:
+    max_s = 0.0
+    if t_def_s.size:
+        max_s = max(max_s, float(np.nanmax(t_def_s)))
+    if t_our_s.size:
+        max_s = max(max_s, float(np.nanmax(t_our_s)))
+    scale, label = _choose_time_unit(max_s)
+    return t_def_s * scale, t_our_s * scale, label
+
+
 def _rs_prefix_from_pod_name(pod_name: str) -> str:
     m = _RS_PREFIX_RE.match(pod_name or "")
     if m:
@@ -267,8 +295,9 @@ def plot_effective_utilization(
     *,
     out_path: Path,
 ) -> None:
-    t_def = df_def[TIME_COL].astype(float).to_numpy()
-    t_our = df_our[TIME_COL].astype(float).to_numpy()
+    t_def_s = df_def[TIME_COL].astype(float).to_numpy()
+    t_our_s = df_our[TIME_COL].astype(float).to_numpy()
+    t_def, t_our, x_label = _time_scaled(t_def_s, t_our_s)
 
     eff_def = np.maximum(df_def[CPU_COL].astype(float).to_numpy(), df_def[MEM_COL].astype(float).to_numpy())
     eff_our = np.maximum(df_our[CPU_COL].astype(float).to_numpy(), df_our[MEM_COL].astype(float).to_numpy())
@@ -278,7 +307,7 @@ def plot_effective_utilization(
     plt.plot(t_our, eff_our, linewidth=1.5, label="ours")
 
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-    plt.xlabel("Time (s)")
+    plt.xlabel(x_label)
     plt.ylabel("Effective utilization\nmax(CPU, MEM)")
     plt.title("Effective utilization")
 
@@ -313,15 +342,19 @@ def plot_cumulative_running_pod_seconds_diff(
         y_def = df_def[col].fillna(0).astype(float).to_numpy()
         y_our = df_our[col].fillna(0).astype(float).to_numpy()
 
-        x, diff = build_stepwise_diff(t_def, y_def, t_our, y_our)  # ours - default
-        cum = _integrate_pod_seconds(x, diff)
+        x_s, diff = build_stepwise_diff(t_def, y_def, t_our, y_our)  # seconds
+        cum = _integrate_pod_seconds(x_s, diff)                      # integrates in seconds (keep!)
+        # choose unit based on *this plot's* horizon
+        scale, x_label = _choose_time_unit(float(np.nanmax(x_s)) if x_s.size else 0.0)
+        x = x_s * scale
+        
         all_cums.append(cum)
 
         plt.plot(x, cum, linewidth=1.5, label=f"p{p}")
 
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-    plt.xlabel("Time (s)")
+    plt.xlabel(x_label)
     plt.ylabel("Cumulative running pod-seconds\n(ours - default)")
     plt.title("Cumulative running pod-seconds difference (positive = ours better)")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
@@ -364,14 +397,17 @@ def plot_cumulative_deletions_diff(
         y_def = df_def[col].fillna(0).astype(float).to_numpy()
         y_our = df_our[col].fillna(0).astype(float).to_numpy()
 
-        x, diff = build_stepwise_diff(t_def, y_def, t_our, y_our)  # ours - default
+        x_s, diff = build_stepwise_diff(t_def, y_def, t_our, y_our)
+        scale, x_label = _choose_time_unit(float(np.nanmax(x_s)) if x_s.size else 0.0)
+        x = x_s * scale
+        
         all_series.append(diff)
 
         plt.plot(x, diff, linewidth=1.5, label=f"p{p}")
 
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-    plt.xlabel("Time (s)")
+    plt.xlabel(x_label)
     plt.ylabel("Cumulative deletions diff\n(ours - default)")
     plt.title("Cumulative deletions difference (positive = more deletions in ours)")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
@@ -460,7 +496,7 @@ def plot_first_admit_latency_histogram_total(
     plt.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel("Scheduling latency (s)")
     plt.ylabel("Count")
-    plt.title("Scheduling latency (total)")
+    plt.title("Scheduling latency")
     plt.legend(frameon=False, ncol=2)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

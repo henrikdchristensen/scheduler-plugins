@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # test_kwok_trace_helpers.py
 
-import pytest
 import numpy as np
+import pytest
 
 from scripts.kwok_trace_replayer import trace_helpers as th
 
 
-# ---------------------------------------------------------------------------
-# estimate_pareto_params
-# ---------------------------------------------------------------------------
+# =============================================================================
+# estimate_pareto_params()
+# =============================================================================
 
 @pytest.mark.parametrize(
     "pos_data",
@@ -32,10 +32,10 @@ def test_estimate_pareto_params_returns_positive_estimates(pos_data: np.ndarray)
 @pytest.mark.parametrize(
     "b_hat,scale_hat",
     [
-        (0.0, 1.0),     # invalid alpha
-        (-1.0, 1.0),    # invalid alpha
-        (1.0, 0.0),     # invalid x_min
-        (1.0, -2.0),    # invalid x_min
+        (0.0, 1.0),   # invalid alpha
+        (-1.0, 1.0),  # invalid alpha
+        (1.0, 0.0),   # invalid x_min
+        (1.0, -2.0),  # invalid x_min
     ],
 )
 def test_estimate_pareto_params_returns_none_on_invalid(monkeypatch, b_hat: float, scale_hat: float):
