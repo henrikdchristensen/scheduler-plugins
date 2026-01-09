@@ -15,3 +15,6 @@ profiles:
     reserve:
       enabled:
         - name: MyPriorityOptimizer
+    multiPoint:
+      disabled:
+        - name: DefaultPreemption

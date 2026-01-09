@@ -13,6 +13,7 @@ python -m scripts.kwok_trace_replayer.trace_replayer \
 --node-cpu <k8s-cpu-quantity> \
 --node-mem <k8s-mem-quantity> \
 --monitor-interval <seconds> \
+--start-delay <seconds> \
 --log-level <log-level> \
 --save-scheduler-logs <True|False>
 """
@@ -22,8 +23,9 @@ import argparse, csv, json, logging, threading, time, yaml, subprocess, re
 from argparse import BooleanOptionalAction
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional, Tuple, Set
 
 from scripts.helpers.job_helpers import (
     JobField,
@@ -41,8 +43,10 @@ from scripts.helpers.general_helpers import (
     qty_to_bytes_str,
     build_cli_cmd,
     write_info_file,
-    SystemClock, Runner, Clock,
-    log_args_block
+    SystemClock,
+    Runner,
+    Clock,
+    log_args_block,
 )
 from scripts.helpers.kubectl_helpers import (
     kubectl_apply_yaml,
@@ -59,66 +63,54 @@ from scripts.helpers.kwokctl_helpers import (
     merge_kwokctl_envs,
     save_kwok_scheduler_logs,
 )
-from scripts.kwok_trace_replayer.trace_helpers import (
-    TraceRecord,
-)
+from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 
 #######################################################################
 # Constants
 #######################################################################
-MAX_REPLAY_WORKERS = 5  # number of threads for replaying events. If more than 1, tasks run "async"
-
-# Base ReplicaSet name produced by _rs_name_for_record (e.g. rs-000001)
+MAX_REPLAY_WORKERS = 5
 _RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
 
-#######################################################################
-# Logging setup
-#######################################################################
 LOGGER_NAME = "trace-replayer"
 LOG = logging.getLogger(LOGGER_NAME)
 
-#######################################################################
-# Small helpers (pure)
-#######################################################################
+
 def _parse_optional_bool_strict(v: Any) -> bool | None:
     return v if isinstance(v, bool) else None
 
 
-def _identity_from_pod_name(pod_name: str) -> str:
+def _rs_prefix_from_pod_name(pod_name: str) -> str:
     """
-    Map a pod name to the "identity" used by prio_by_identity.
-
-    - For RS pods, we expect names like: rs-000001-<hash>-<index> or rs-000001-...
-      and we map that to identity "rs-000001".
-    - Otherwise, we try stripping a last "-suffix".
+    Extract "rs-000001" from a pod name like "rs-000001-<hash>-<suffix>".
     """
     m = _RS_PREFIX_RE.match(pod_name)
     if m:
         return m.group(1)
-
-    # Generic fallback: strip the last "-something"
     if "-" in pod_name:
-        identity, _suffix = pod_name.rsplit("-", 1)
-        return identity
+        return pod_name.split("-", 1)[0]
     return pod_name
 
 
-def _prio_for_pod_name(
-    pod_name: str,
-    prio_by_identity: Dict[str, int],
-    max_prio: int,
-) -> int | None:
-    identity = _identity_from_pod_name(pod_name)
-    prio = prio_by_identity.get(identity)
-    if prio is None:
+def _parse_rfc3339_to_epoch(ts: str) -> Optional[float]:
+    """
+    Kubernetes timestamps are RFC3339, often like:
+      2026-01-09T12:34:56Z
+      2026-01-09T12:34:56.123Z
+    """
+    if not ts or not isinstance(ts, str):
         return None
-    if prio < 1 or prio > max_prio:
+    try:
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
         return None
-    return prio
 
 
 class _TimeClock:
-    """Fallback clock if an injected Clock doesn't provide time/sleep."""
     def time(self) -> float:
         return time.time()
 
@@ -126,13 +118,10 @@ class _TimeClock:
         time.sleep(seconds)
 
 
-#######################################################################
-# Event model
-#######################################################################
 @dataclass
 class Event:
-    sim_time_s: float   # seconds in trace's time
-    kind: str           # "create" or "delete"
+    sim_time_s: float
+    kind: str  # "create" or "delete"
     record_id: int
     cpu_str: str | None = None
     mem_str: str | None = None
@@ -140,90 +129,35 @@ class Event:
     replicas: int = 1
 
 
-#####################################################################
-# Argument parser
-#####################################################################
 def build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description=(
-        "Replay a JSON pod trace on a KWOK cluster and monitor utilization. "
-        "Expects <trace-dir>/trace.json as produced by trace_generator.py."
-    ))
-
-    # Result directory
-    p.add_argument(
-        "--result-dir", dest="result_dir", required=False, default=None,
-        help="Directory where replay results (e.g., trace-monitor.csv) are written.",
+    p = argparse.ArgumentParser(
+        description=(
+            "Replay a JSON pod trace on a KWOK cluster and monitor utilization. "
+            "Expects <trace-dir>/trace.json and <trace-dir>/initial.json as produced by trace_generator.py."
+        )
     )
 
-    # Job file (optional)
-    p.add_argument(
-        "--job-file", dest="job_file", default=None,
-        help="Path to a YAML job file describing the trace replay job (trace-dir, kwokctl-config-file, overrides, ...).",
-    )
+    p.add_argument("--result-dir", dest="result_dir", required=False, default=None)
+    p.add_argument("--job-file", dest="job_file", default=None)
+    p.add_argument("--trace-dir", dest="trace_dir", required=False, default=None)
 
-    # Trace directory (can come from CLI or job-file)
-    p.add_argument(
-        "--trace-dir", dest="trace_dir", required=False, default=None,
-        help="Directory containing trace.json from trace_generator.py",
-    )
+    p.add_argument("--cluster-name", dest="cluster_name", default=None)
+    p.add_argument("--kwok-runtime", dest="kwok_runtime", choices=["binary", "docker"], default=None)
+    p.add_argument("--kwokctl-config-file", dest="kwokctl_config_file", required=False, default=None)
+    p.add_argument("--namespace", dest="namespace", default=None)
+    p.add_argument("--node-cpu", dest="node_cpu", default=None)
+    p.add_argument("--node-mem", dest="node_mem", default=None)
 
-    # Cluster / KWOK options
-    p.add_argument(
-        "--cluster-name", dest="cluster_name", default=None,
-        help="KWOK cluster name (kwokctl --name) (default: kwok1).",
-    )
-    p.add_argument(
-        "--kwok-runtime", dest="kwok_runtime", choices=["binary", "docker"], default=None,
-        help="KWOK runtime (default: binary).",
-    )
-    p.add_argument(
-        "--kwokctl-config-file", dest="kwokctl_config_file", required=False, default=None,
-        help="KwokctlConfiguration YAML used to create the KWOK cluster.",
-    )
-    p.add_argument(
-        "--namespace", dest="namespace", default=None,
-        help="Kubernetes namespace in which to create pods (default: trace).",
-    )
-    p.add_argument(
-        "--node-cpu", dest="node_cpu", default=None,
-        help=(
-            "Per-node CPU capacity as a Kubernetes quantity. "
-            "The trace stores CPU as a fraction of one node; this flag defines what "
-            "'1.0' means when converting to pod requests "
-            "(e.g., 0.25 → 250m if --node-cpu=1000m). "
-            "Default: 1000m (≈1 core)."
-        ),
-    )
-    p.add_argument(
-        "--node-mem", dest="node_mem", default=None,
-        help=(
-            "Per-node memory capacity as a Kubernetes quantity. "
-            "The trace stores memory as a fraction of one node; this flag defines what "
-            "'1.0' means when converting to pod requests "
-            "(e.g., 0.5 → 512Mi if --node-mem=1Gi). "
-            "Default: 1Gi."
-        ),
-    )
+    p.add_argument("--monitor-interval", dest="monitor_interval", type=float, default=None)
+    p.add_argument("--start-delay", dest="start_delay", type=float, default=None)
 
-    # Monitoring
-    p.add_argument(
-        "--monitor-interval", dest="monitor_interval", type=float, default=None,
-        help="Monitor sampling interval in seconds (default: 1.0).",
-    )
+    p.add_argument("--log-level", dest="log_level", default=None)
 
-    # Logging
-    p.add_argument(
-        "--log-level", dest="log_level", default=None,
-        help="Logging level (DEBUG, INFO, WARNING, ERROR) (default: INFO).",
-    )
-
-    # Scheduler logs
     p.add_argument(
         "--save-scheduler-logs",
         dest="save_scheduler_logs",
         action=BooleanOptionalAction,
         default=None,
-        help="Save 'kwokctl logs kube-scheduler' under <result-dir>/scheduler-logs before exiting.",
     )
 
     return p
@@ -233,10 +167,6 @@ def merge_job_fields_into_args(
     args: argparse.Namespace,
     job: Dict[str, Any],
 ) -> tuple[argparse.Namespace, List[Dict[str, Any]]]:
-    """
-    Merge job-file fields into args. CLI has priority.
-    Returns (args, override_kwokctl_envs).
-    """
     fields = [
         JobField("trace-dir", "trace_dir", parse=parse_optional_str),
         JobField("cluster-name", "cluster_name", parse=parse_optional_str),
@@ -246,6 +176,7 @@ def merge_job_fields_into_args(
         JobField("node-cpu", "node_cpu", parse=parse_optional_str),
         JobField("node-mem", "node_mem", parse=parse_optional_str),
         JobField("monitor-interval", "monitor_interval", parse=parse_optional_float),
+        JobField("start-delay", "start_delay", parse=parse_optional_float),
         JobField("log-level", "log_level", parse=parse_optional_str),
         JobField("result-dir", "result_dir", parse=parse_optional_str),
         JobField(
@@ -261,9 +192,6 @@ def merge_job_fields_into_args(
 
 
 def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
-    """
-    Final defaults + sanity checks after we've merged job-file and CLI.
-    """
     if getattr(args, "cluster_name", None) is None:
         args.cluster_name = "kwok1"
     if getattr(args, "kwok_runtime", None) is None:
@@ -276,6 +204,8 @@ def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
         args.node_mem = "1Gi"
     if getattr(args, "monitor_interval", None) is None:
         args.monitor_interval = 1.0
+    if getattr(args, "start_delay", None) is None:
+        args.start_delay = 0.0
     if getattr(args, "log_level", None) is None:
         args.log_level = "INFO"
     if getattr(args, "job_file", None) is None:
@@ -283,7 +213,6 @@ def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
     if getattr(args, "save_scheduler_logs", None) is None:
         args.save_scheduler_logs = False
 
-    # Required: trace_dir + kwokctl_config_file + result_dir
     if not getattr(args, "trace_dir", None):
         raise SystemExit("--trace-dir (or trace-dir in job-file) is required")
     if not getattr(args, "kwokctl_config_file", None):
@@ -303,9 +232,6 @@ def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
-#######################################################################
-# TraceReplayer class
-#######################################################################
 class TraceReplayer:
     """
     Replay a trace on a KWOK cluster and monitor utilization.
@@ -323,61 +249,70 @@ class TraceReplayer:
         self.job_doc: Dict[str, Any] = job_doc or {}
         self.override_kwokctl_envs: List[Dict[str, Any]] = list(override_kwokctl_envs or [])
 
-        # Base directory containing trace.json
         self.base_dir: Path = Path(args.trace_dir).resolve()
         self.trace_path: Path = self.base_dir / "trace.json"
+        self.initial_path: Path = self.base_dir / "initial.json"
+        self.info_generate_path: Path = self.base_dir / "info_generate.yaml"
 
-        # Result directory (required; normalized in ensure_default_args)
         self.results_dir: Path = Path(self.args.result_dir).resolve()
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        self.monitor_path = self.results_dir / "results.csv"
 
-        # Filled by load_trace
-        self.pods: List[TraceRecord] = []
-        self.max_prio: int = 0
-        self.t_min: float = 0.0
-        self.trace_time: float = 0.0
-        self.meta: dict = {}
+        self.general_stats_path = self.results_dir / "general_stats.csv"
+        self.pod_stats_path = self.results_dir / "pod_stats.csv"
 
-        # Derived from meta / args
+        self.trace_pods: List[TraceRecord] = []
+        self.initial_pods: List[TraceRecord] = []
+
         self.num_nodes: int = 0
+        self.max_prio: int = 0
+        self.trace_time_s: float = 0.0
+
         self.node_cpu_m: int = 0
         self.node_mem_b: int = 0
 
-        # Monitoring fields
-        self.ctx: str = f"kwok-{args.cluster_name}"
         self.events: List[Event] = []
-        self.prio_by_identity: Dict[str, int] = {}
+
+        # rs -> priority (include BOTH initial + trace)
+        self.prio_by_rs: Dict[str, int] = {}
+
+        # rs names that belong to initial workload (skip these in pod_stats.csv)
+        self.initial_rs_names: Set[str] = set()
 
         # Runner + clock + executor factory
+        self.ctx: str = f"kwok-{args.cluster_name}"
         self.runner = runner
         self.clock = clock or SystemClock()
         if not (hasattr(self.clock, "time") and hasattr(self.clock, "sleep")):
             self.clock = _TimeClock()
         self.executor_factory = executor_factory
 
-        # Write metadata bundle (non-fatal on error)
-        LOG.info("logging arguments and git info to trace_dir...")
-        self._write_info_file()
+        # Run start epoch/time base (set in run())
+        self.run_start_wall: float = 0.0       # epoch seconds
+        self.run_start_monotonic: float = 0.0  # from clock.time()
 
-        # Log args
+        LOG.info("logging arguments and git info to results_dir...")
+        self._write_info_file()
         self.log_args()
 
-    ##############################################
-    # ------------ Info/logging helpers ----------
-    ##############################################
     def log_args(self) -> None:
         include = [
-            "trace_dir", "cluster_name", "kwok_runtime", "kwokctl_config_file",
-            "namespace", "node_cpu", "node_mem", "monitor_interval",
-            "result_dir", "log_level", "save_scheduler_logs", "job_file",
+            "trace_dir",
+            "cluster_name",
+            "kwok_runtime",
+            "kwokctl_config_file",
+            "namespace",
+            "node_cpu",
+            "node_mem",
+            "monitor_interval",
+            "start_delay",
+            "result_dir",
+            "log_level",
+            "save_scheduler_logs",
+            "job_file",
         ]
         log_args_block(LOG, self.args, title="ARGS", include=include)
 
     def _write_info_file(self) -> None:
-        """
-        Write info_replayer.yaml in results_dir with git + CLI + args.
-        """
         try:
             out_path = self.results_dir / "info_replayer.yaml"
             meta_extra = {
@@ -390,48 +325,36 @@ class TraceReplayer:
                 "args": {k: v for k, v in vars(self.args).items()},
                 "job": self.job_doc or {},
             }
-            write_info_file(
-                out_path,
-                meta_extra=meta_extra,
-                inputs=inputs,
-                logger=LOG,
-            )
+            write_info_file(out_path, meta_extra=meta_extra, inputs=inputs, logger=LOG)
         except Exception as e:
             LOG.warning("failed to write info_replayer.yaml: %s", e)
 
     def _save_scheduler_logs(self) -> None:
         sched_dir = self.results_dir / "scheduler-logs"
         out_path = sched_dir / "sched_logs.log"
-        save_kwok_scheduler_logs(
-            self.args.cluster_name,
-            out_path,
-            runner=self.runner,
-            logger=LOG,
-        )
+        save_kwok_scheduler_logs(self.args.cluster_name, out_path, runner=self.runner, logger=LOG)
 
-    ##############################################
-    # ------------ Replay helpers ----------------
-    ##############################################
     @staticmethod
     def _rs_name_for_record(record_id: int) -> str:
-        """
-        Stable ReplicaSet name derived from the trace record id.
-        Example: record_id=1 -> "rs-000001"
-        """
         return f"rs-{record_id:06d}"
 
-    def load_trace(self) -> None:
-        """Load trace JSON and populate pods, max_prio, t_min, trace_time, meta."""
-        if not self.trace_path.exists():
-            raise FileNotFoundError(
-                f"Trace file not found: {self.trace_path} "
-                f"(expected trace.json inside --trace-dir={self.base_dir})"
-            )
+    def _load_generate_info(self) -> Dict[str, Any]:
+        if not self.info_generate_path.exists():
+            LOG.warning("info_generate.yaml not found at %s (will infer from JSON)", self.info_generate_path)
+            return {}
+        try:
+            with open(self.info_generate_path, "r", encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+            return doc if isinstance(doc, dict) else {}
+        except Exception as e:
+            LOG.warning("failed to read info_generate.yaml: %s", e)
+            return {}
 
-        with open(self.trace_path, "r", encoding="utf-8") as f:
+    def _load_json_pods(self, path: Path) -> List[TraceRecord]:
+        if not path.exists():
+            raise FileNotFoundError(f"Trace file not found: {path}")
+        with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
-
-        meta = raw.get("meta", {}) or {}
         records = raw.get("pods", []) or []
 
         def req(rec: dict, key: str) -> Any:
@@ -440,70 +363,105 @@ class TraceReplayer:
             return rec[key]
 
         pods: List[TraceRecord] = []
-        max_prio = 0
-        t_min = float("inf")
-        trace_time = 0.0
-
         for rec in records:
-            id_val   = int(req(rec, "id"))
-            start    = float(req(rec, "start_time"))
-            end      = float(req(rec, "end_time"))
-            cpu      = float(req(rec, "cpu"))
-            mem      = float(req(rec, "mem"))
-            prio     = int(req(rec, "priority"))
-            replicas = int(req(rec, "replicas"))
-
-            max_prio   = max(max_prio, prio)
-            t_min      = min(t_min, start)
-            trace_time = max(trace_time, end)
-
             pods.append(
                 TraceRecord(
-                    id=id_val,
-                    start_time=start,
-                    end_time=end,
-                    cpu=cpu,
-                    mem=mem,
-                    priority=prio,
-                    replicas=replicas,
+                    id=int(req(rec, "id")),
+                    start_time=float(req(rec, "start_time")),
+                    end_time=float(req(rec, "end_time")),
+                    cpu=float(req(rec, "cpu")),
+                    mem=float(req(rec, "mem")),
+                    priority=int(req(rec, "priority")),
+                    replicas=int(req(rec, "replicas")),
                 )
             )
+        pods.sort(key=lambda p: p.start_time)
+        return pods
 
-        # Prefer the trace horizon from meta if provided: "trace_time_s"
-        meta_trace_time = meta.get("trace_time_s")
-        if meta_trace_time is not None:
-            try:
-                trace_time = float(meta_trace_time)
-            except (TypeError, ValueError):
-                pass
+    def load_initial_and_trace(self) -> None:
+        gen_info = self._load_generate_info()
+
+        self.trace_pods = self._load_json_pods(self.trace_path)
+        self.initial_pods = self._load_json_pods(self.initial_path) if self.initial_path.exists() else []
+
+        # Prefer info_generate.yaml for these if present; otherwise infer
+        num_nodes = None
+        trace_time_s = None
+        max_prio = None
+
+        def _deep_get(d: Dict[str, Any], path: List[str]) -> Any:
+            cur: Any = d
+            for k in path:
+                if not isinstance(cur, dict) or k not in cur:
+                    return None
+                cur = cur[k]
+            return cur
+
+        for candidate in [
+            _deep_get(gen_info, ["inputs", "generated", "num_nodes"]),
+            _deep_get(gen_info, ["generated", "num_nodes"]),
+        ]:
+            if isinstance(candidate, int):
+                num_nodes = candidate
+
+        for candidate in [
+            _deep_get(gen_info, ["inputs", "generated", "trace_time_s"]),
+            _deep_get(gen_info, ["generated", "trace_time_s"]),
+        ]:
+            if isinstance(candidate, (int, float)):
+                trace_time_s = float(candidate)
+
+        for candidate in [
+            _deep_get(gen_info, ["inputs", "generated", "max_priority_seen"]),
+            _deep_get(gen_info, ["generated", "max_priority_seen"]),
+        ]:
+            if isinstance(candidate, int):
+                max_prio = candidate
+
+        if num_nodes is None:
+            LOG.warning("num_nodes not found in info_generate.yaml; falling back to --num-nodes assumption (8)")
+            num_nodes = 8
+
+        if trace_time_s is None:
+            tmax = 0.0
+            for p in (self.initial_pods + self.trace_pods):
+                tmax = max(tmax, float(p.end_time))
+            trace_time_s = float(tmax)
+
+        if max_prio is None:
+            m = 0
+            for p in (self.initial_pods + self.trace_pods):
+                m = max(m, int(p.priority))
+            max_prio = int(m)
+
+        self.num_nodes = int(num_nodes)
+        self.trace_time_s = float(trace_time_s)
+        self.max_prio = int(max_prio)
 
         LOG.info(
-            "loaded %d pods from %s (t_min=%.3f, trace_time=%.3f, max_priority=%d)",
-            len(pods),
+            "loaded trace=%d records (%s), initial=%d records (%s), trace_time_s=%.3f, max_prio=%d, num_nodes=%d",
+            len(self.trace_pods),
             self.trace_path,
-            t_min if t_min != float("inf") else 0.0,
-            trace_time,
-            max_prio,
+            len(self.initial_pods),
+            self.initial_path,
+            self.trace_time_s,
+            self.max_prio,
+            self.num_nodes,
         )
 
-        pods.sort(key=lambda p: p.start_time)
+        # Build rs->priority mapping for both initial + trace
+        for p in self.initial_pods:
+            rs = self._rs_name_for_record(p.id)
+            self.prio_by_rs[rs] = int(p.priority)
+            self.initial_rs_names.add(rs)
 
-        self.pods = pods
-        self.max_prio = max_prio
-        self.t_min = 0.0 if t_min == float("inf") else t_min
-        self.trace_time = trace_time
-        self.meta = meta
+        for p in self.trace_pods:
+            rs = self._rs_name_for_record(p.id)
+            self.prio_by_rs[rs] = int(p.priority)
 
-        if "num_nodes" not in meta:
-            raise ValueError("trace meta missing required key 'num_nodes'")
-        self.num_nodes = int(meta["num_nodes"])
-
-    def _build_events(self) -> None:
-        """
-        Turn trace pods into a sorted list of events with concrete K8s quantities.
-        """
+    def _build_trace_events(self) -> None:
         events: List[Event] = []
-        for p in self.pods:
+        for p in self.trace_pods:
             cpu_m = max(1, int(round(p.cpu * self.node_cpu_m)))
             mem_b = max(1, int(round(p.mem * self.node_mem_b)))
             cpu_str = qty_to_mcpu_str(cpu_m)
@@ -522,98 +480,96 @@ class TraceReplayer:
                     replicas=replicas,
                 )
             )
-            events.append(
-                Event(
-                    sim_time_s=float(p.end_time),
-                    kind="delete",
-                    record_id=p.id,
-                )
-            )
+            events.append(Event(sim_time_s=float(p.end_time), kind="delete", record_id=p.id))
 
-        # sort by sim_time, then create before delete
         events.sort(key=lambda e: (e.sim_time_s, 0 if e.kind == "create" else 1))
-        LOG.info("built %d events from %d pods", len(events), len(self.pods))
         self.events = events
+        LOG.info("built %d trace events from %d trace pods", len(events), len(self.trace_pods))
 
-    ##############################################
-    # ------------ Replayer ----------------------
-    ##############################################
-    def _replay_events(self, namespace: str, start_wall_time: float, sim_t0: float) -> None:
-        """
-        Replay events against the cluster.
+    def _apply_initial_workload(self, namespace: str) -> None:
+        header, footer = make_header_footer("APPLY INITIAL WORKLOAD")
+        LOG.info("\n%s\nstart_wall=%s initial_records=%d\n%s", header, get_timestamp(), len(self.initial_pods), footer)
 
-        We respect a global trace horizon self.trace_time (usually meta['trace_time_s']):
-        - All events with sim_time_s <= trace_time are executed.
-        - If the next batch would be after trace_time, we instead sleep until the
-          corresponding wall time for trace_time and then exit.
-        - If there are no more events but trace_time is still in the future,
-          we also sleep until trace_time before finishing.
-        """
+        if not self.initial_pods:
+            LOG.info("no initial pods; skipping initial apply")
+            return
+
+        executor = self.executor_factory(max_workers=MAX_REPLAY_WORKERS)
+        futures: List[Future] = []
+
+        try:
+            for p in self.initial_pods:
+                cpu_m = max(1, int(round(p.cpu * self.node_cpu_m)))
+                mem_b = max(1, int(round(p.mem * self.node_mem_b)))
+                cpu_str = qty_to_mcpu_str(cpu_m)
+                mem_str = qty_to_bytes_str(mem_b)
+                pc_name = f"p{int(p.priority)}"
+                replicas = max(1, int(getattr(p, "replicas", 1)))
+
+                rs_name = self._rs_name_for_record(p.id)
+                yaml_text = yaml_kwok_rs(
+                    ns=namespace,
+                    rs_name=rs_name,
+                    replicas=replicas,
+                    cpu=cpu_str,
+                    mem=mem_str,
+                    pc=pc_name,
+                )
+                LOG.info(
+                    "INITIAL CREATE: rs=%s (id=%d) replicas=%d cpu=%s mem=%s pc=%s",
+                    rs_name,
+                    p.id,
+                    replicas,
+                    cpu_str,
+                    mem_str,
+                    pc_name,
+                )
+                futures.append(executor.submit(kubectl_apply_yaml, LOG, self.ctx, yaml_text))
+
+        finally:
+            for fut in futures:
+                try:
+                    fut.result()
+                except Exception as e:
+                    LOG.error("initial kubectl task failed: %s", e)
+            try:
+                executor.shutdown(wait=True)
+            except Exception:
+                pass
+
+        LOG.info("initial workload applied (kubectl tasks completed)")
+
+    def _replay_trace_events(self, namespace: str, trace_start_wall: float) -> None:
         header, footer = make_header_footer("TRACE REPLAY")
         LOG.info(
-            "\n%s\nstart_wall=%s sim_t0=%.3f trace_end_s=%.3f\n%s",
+            "\n%s\ntrace_start_wall=%s trace_end_s=%.3f\n%s",
             header,
             get_timestamp(),
-            sim_t0,
-            self.trace_time,
+            self.trace_time_s,
             footer,
         )
 
         events = self.events
         num_events = len(events)
-        trace_end_s = float(self.trace_time)
-        trace_total_wall = max(0.0, trace_end_s - sim_t0)
+        trace_end_s = float(self.trace_time_s)
 
-        def sleep_until(reason: str) -> None:
-            if trace_end_s <= sim_t0:
-                LOG.info(
-                    "trace_end_s=%.3f <= sim_t0=%.3f; no extra sleep (%s)",
-                    trace_end_s,
-                    sim_t0,
-                    reason,
-                )
-                return
-
-            target_wall_end = start_wall_time + max(0.0, trace_end_s - sim_t0)
+        if num_events == 0:
+            LOG.info("no events in trace; sleeping to trace_end_s=%.3f", trace_end_s)
+            target_wall_end = trace_start_wall + trace_end_s
             now = float(self.clock.time())
             sleep_s = max(0.0, target_wall_end - now)
             if sleep_s > 0:
-                LOG.info(
-                    "sleeping %.3fs to reach trace_end_s=%.3f (reason=%s)",
-                    sleep_s,
-                    trace_end_s,
-                    reason,
-                )
                 self.clock.sleep(sleep_s)
-            else:
-                LOG.info(
-                    "trace_end_s=%.3f already reached in wall time (reason=%s); no sleep",
-                    trace_end_s,
-                    reason,
-                )
-
-        if num_events == 0:
-            LOG.info("no events in trace; only aligning to trace_end_s=%.3f", trace_end_s)
-            sleep_until("no-events")
             return
 
         idx = 0
         executor = self.executor_factory(max_workers=MAX_REPLAY_WORKERS)
         futures: List[Future] = []
-        reached_end_sleep = False
 
         try:
             while idx < num_events:
                 current_t = events[idx].sim_time_s
-
                 if current_t > trace_end_s:
-                    LOG.info(
-                        "next batch sim_t=%.3f is beyond trace_end_s=%.3f; no more events will be replayed",
-                        current_t,
-                        trace_end_s,
-                    )
-                    sleep_until("next-batch-after-end")
-                    reached_end_sleep = True
                     break
 
                 batch_events: List[Event] = []
@@ -621,8 +577,7 @@ class TraceReplayer:
                     batch_events.append(events[idx])
                     idx += 1
 
-                target_wall = start_wall_time + max(0.0, current_t - sim_t0)
-
+                target_wall = trace_start_wall + max(0.0, current_t)
                 now_before = float(self.clock.time())
                 sleep_s = max(0.0, target_wall - now_before)
                 if sleep_s > 0:
@@ -630,24 +585,6 @@ class TraceReplayer:
 
                 creates = [ev for ev in batch_events if ev.kind == "create"]
                 deletes = [ev for ev in batch_events if ev.kind == "delete"]
-
-                now_after = float(self.clock.time())
-                batch_drift = now_after - target_wall
-
-                sim_remaining_s = max(0.0, trace_end_s - current_t)
-                wall_elapsed_s = now_after - start_wall_time
-                wall_remaining_s = max(0.0, trace_total_wall - wall_elapsed_s)
-
-                LOG.info(
-                    "TIME DRIFT batch @ sim_t=%.3f: target_wall=%.3f actual_wall=%.3f "
-                    "drift=%.6fs (creates=%d deletes=%d)",
-                    current_t,
-                    target_wall - start_wall_time,
-                    now_after - start_wall_time,
-                    batch_drift,
-                    len(creates),
-                    len(deletes),
-                )
 
                 for ev in creates:
                     assert ev.cpu_str is not None and ev.mem_str is not None and ev.pc_name is not None
@@ -670,38 +607,19 @@ class TraceReplayer:
                         ev.mem_str,
                         ev.pc_name,
                     )
-                    fut = executor.submit(kubectl_apply_yaml, LOG, self.ctx, yaml_text)
-                    futures.append(fut)
+                    futures.append(executor.submit(kubectl_apply_yaml, LOG, self.ctx, yaml_text))
 
                 for ev in deletes:
                     rs_name = self._rs_name_for_record(ev.record_id)
-                    LOG.info(
-                        "DELETE @ sim_t=%.3f: rs=%s (id=%d)",
-                        ev.sim_time_s,
-                        rs_name,
-                        ev.record_id,
-                    )
-                    fut = executor.submit(delete_rs, LOG, self.ctx, namespace, rs_name)
-                    futures.append(fut)
+                    LOG.info("DELETE @ sim_t=%.3f: rs=%s (id=%d)", ev.sim_time_s, rs_name, ev.record_id)
+                    futures.append(executor.submit(delete_rs, LOG, self.ctx, namespace, rs_name))
 
-                LOG.info(
-                    "batch done @ sim_t=%.3f submitted: creates=%d deletes=%d "
-                    "(sim_remaining=%.3fs wall_remaining=%.3fs)",
-                    current_t,
-                    len(creates),
-                    len(deletes),
-                    sim_remaining_s,
-                    wall_remaining_s,
-                )
-
-            if not reached_end_sleep:
-                LOG.info(
-                    "all events <= trace_end_s=%.3f processed; aligning to trace end if needed",
-                    trace_end_s,
-                )
-                sleep_until("after-last-batch")
-
-            LOG.info("all events processed; waiting for kubectl tasks to finish...")
+            # Align to end
+            target_wall_end = trace_start_wall + trace_end_s
+            now = float(self.clock.time())
+            sleep_s = max(0.0, target_wall_end - now)
+            if sleep_s > 0:
+                self.clock.sleep(sleep_s)
 
         finally:
             for fut in futures:
@@ -715,36 +633,44 @@ class TraceReplayer:
                 pass
             LOG.info("all kubectl tasks completed")
 
-    ##############################################
-    # ------------ Monitor helpers ---------------
-    ##############################################
-    def _snapshot_from_pods(self, ns: str) -> tuple[float, float, List[tuple[str, str]], List[str]]:
-        """
-        Build a snapshot directly from pods.
+    # ------------------------------
+    # Monitoring
+    # ------------------------------
+    def _time_s(self) -> float:
+        return float(self.clock.time()) - float(self.run_start_monotonic)
 
+    def _snapshot_from_pods(self, ns: str) -> Tuple[float, float, Dict[int, int], Dict[int, int], List[Dict[str, Any]]]:
+        """
         Returns:
-            cpu_run_util:  fraction of total cluster CPU capacity requested by running pods
-            mem_run_util:  fraction of total cluster memory capacity requested by running pods
-            pods_running:  list of (pod_name, node_name) for running pods
-            pending_pods:  list of pod names that are Pending
+            cpu_run_util
+            mem_run_util
+            running_count_by_prio
+            unsched_count_by_prio (Pending)
+            pod_items (raw items)
         """
         pods_json = get_json_ctx(self.ctx, ["-n", ns, "get", "pods", "-o", "json"])
         items = pods_json.get("items", []) or []
+
         total_cpu_m = 0
         total_mem_b = 0
-        pods_running: List[tuple[str, str]] = []
-        pending_pods: List[str] = []
+
+        running_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
+        pending_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
 
         for pod in items:
             meta = pod.get("metadata", {}) or {}
             spec = pod.get("spec", {}) or {}
             status = pod.get("status", {}) or {}
             pod_name = meta.get("name", "")
-            node_name = spec.get("nodeName", "") or ""
             phase = status.get("phase", "")
 
+            rs_name = _rs_prefix_from_pod_name(pod_name)
+            prio = int(self.prio_by_rs.get(rs_name, 0))
+
             if phase == "Running":
-                pods_running.append((pod_name, node_name))
+                if prio in running_by_prio:
+                    running_by_prio[prio] += 1
+
                 containers = spec.get("containers", []) or []
                 for c in containers:
                     res = (c.get("resources") or {}).get("requests", {}) or {}
@@ -752,99 +678,164 @@ class TraceReplayer:
                     mem_q = res.get("memory")
                     total_cpu_m += qty_to_mcpu_int(cpu_q)
                     total_mem_b += qty_to_bytes_int(mem_q)
+
             elif phase == "Pending":
-                pending_pods.append(pod_name)
+                if prio in pending_by_prio:
+                    pending_by_prio[prio] += 1
 
         cpu_capacity_m = self.num_nodes * self.node_cpu_m
         mem_capacity_b = self.num_nodes * self.node_mem_b
         cpu_run_util = (total_cpu_m / cpu_capacity_m) if cpu_capacity_m > 0 else 0.0
         mem_run_util = (total_mem_b / mem_capacity_b) if mem_capacity_b > 0 else 0.0
+        return cpu_run_util, mem_run_util, running_by_prio, pending_by_prio, items
 
-        return cpu_run_util, mem_run_util, pods_running, pending_pods
+    def _pod_start_epoch(self, pod: Dict[str, Any]) -> Optional[float]:
+        status = pod.get("status", {}) or {}
+        st = status.get("startTime")
+        return _parse_rfc3339_to_epoch(st) if isinstance(st, str) else None
+
+    def _pod_creation_epoch(self, pod: Dict[str, Any]) -> Optional[float]:
+        meta = pod.get("metadata", {}) or {}
+        ts = meta.get("creationTimestamp")
+        return _parse_rfc3339_to_epoch(ts) if isinstance(ts, str) else None
 
     def _monitor_loop(
         self,
         namespace: str,
         interval_s: float,
-        max_prio: int,
-        prio_by_identity: Dict[str, int],
-        out_csv: Path,
+        general_csv: Path,
+        pod_stats_csv: Path,
         stop_event: threading.Event,
-        start_wall_time: float,
-        sim_t0: float,
     ) -> None:
-        """
-        Periodically sample cluster state and write CSV.
+        general_csv.parent.mkdir(parents=True, exist_ok=True)
+        pod_stats_csv.parent.mkdir(parents=True, exist_ok=True)
 
-        We record:
-          - total CPU/mem utilization
-          - total running / unsched counts
-          - running_by_prio:  { "p1": <count>, ... }
-          - unsched_by_prio:  { "p1": <count>, ... }
-        """
-        out_csv.parent.mkdir(parents=True, exist_ok=True)
-        LOG.info("monitor: writing time series to %s (interval=%.3fs)", out_csv, interval_s)
+        LOG.info("monitor: writing %s (interval=%.3fs)", general_csv, interval_s)
+        LOG.info("monitor: writing %s (apply-time + running-time; trace pods only)", pod_stats_csv)
 
-        with open(out_csv, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            header = [
-                "timestamp",
-                "wall_time_s",
-                "sim_time_s",
-                "cpu_run_util",
-                "mem_run_util",
-                "running_count",
-                "unsched_count",
-                "running_by_prio",
-                "unsched_by_prio",
-            ]
-            writer.writerow(header)
+        # pod_stats: only for trace pods (skip initial rs)
+        seen_apply: set[str] = set()     # pod_name
+        seen_running: set[str] = set()   # pod_name
+
+        # deletion proxy: UID disappears between snapshots
+        prev_live_uids: set[str] = set()
+        uid_to_prio: Dict[str, int] = {}  # last known prio for that uid (best-effort)
+
+        deletions_cum_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
+
+        with open(general_csv, "w", encoding="utf-8", newline="") as f_ts, open(
+            pod_stats_csv, "w", encoding="utf-8", newline=""
+        ) as f_ps:
+            tsw = csv.writer(f_ts)
+            psw = csv.writer(f_ps)
+
+            # general_stats.csv header
+            header = ["timestamp", "time_s", "cpu_run_util", "mem_run_util"]
+            for p in range(1, self.max_prio + 1):
+                header.append(f"running_p{p}")
+            for p in range(1, self.max_prio + 1):
+                header.append(f"unsched_p{p}")
+
+            # only cumulative deletions per priority (as requested)
+            for p in range(1, self.max_prio + 1):
+                header.append(f"deletions_cum_p{p}")
+
+            tsw.writerow(header)
+
+            # pod_stats.csv header (only apply-time and running-time)
+            psw.writerow(["timestamp", "event", "pod_name", "pod_uid", "priority", "time_s"])
 
             while not stop_event.is_set():
                 loop_start = float(self.clock.time())
+                now_ts = get_timestamp()
+                t_s = self._time_s()
+
                 try:
-                    cpu_run_util, mem_run_util, pods_running, pending_pods = self._snapshot_from_pods(namespace)
+                    cpu_run_util, mem_run_util, running_by_prio, pending_by_prio, pod_items = self._snapshot_from_pods(
+                        namespace
+                    )
                 except Exception as e:
-                    LOG.warning("monitor: snapshot_from_pods failed: %s", e)
+                    LOG.warning("monitor: snapshot failed: %s", e)
                     self.clock.sleep(interval_s)
                     continue
 
-                now_abs = float(self.clock.time())
-                real_ts = get_timestamp()
-                wall_time_s = now_abs - start_wall_time
-                sim_time_s = sim_t0 + wall_time_s
-                running_cnt = len(pods_running)
-                unsched_cnt = len(pending_pods)
+                # ---- deletion proxy (UID disappearance) ----
+                cur_live_uids: set[str] = set()
+                for pod in pod_items:
+                    meta = pod.get("metadata", {}) or {}
+                    pod_uid = meta.get("uid", "")
+                    pod_name = meta.get("name", "")
+                    if not pod_uid or not pod_name:
+                        continue
+                    cur_live_uids.add(pod_uid)
 
-                running_by_prio: Dict[str, int] = {f"p{p}": 0 for p in range(1, max_prio + 1)}
-                unsched_by_prio: Dict[str, int] = {f"p{p}": 0 for p in range(1, max_prio + 1)}
+                    rs_name = _rs_prefix_from_pod_name(pod_name)
+                    prio = int(self.prio_by_rs.get(rs_name, 0))
+                    if prio > 0:
+                        uid_to_prio[pod_uid] = prio
 
-                for pod_name, _node_name in pods_running:
-                    prio = _prio_for_pod_name(pod_name, prio_by_identity, max_prio)
-                    if prio is not None:
-                        running_by_prio[f"p{prio}"] += 1
+                gone = prev_live_uids - cur_live_uids
+                if gone:
+                    delta_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
+                    for uid in gone:
+                        p = int(uid_to_prio.get(uid, 0))
+                        if p in delta_by_prio:
+                            delta_by_prio[p] += 1
+                    for p in range(1, self.max_prio + 1):
+                        deletions_cum_by_prio[p] += delta_by_prio[p]
 
-                for pod_name in pending_pods:
-                    prio = _prio_for_pod_name(pod_name, prio_by_identity, max_prio)
-                    if prio is not None:
-                        unsched_by_prio[f"p{prio}"] += 1
+                prev_live_uids = cur_live_uids
 
-                running_dict_str = json.dumps(running_by_prio, separators=(",", ":"), sort_keys=True)
-                unsched_dict_str = json.dumps(unsched_by_prio, separators=(",", ":"), sort_keys=True)
+                # ---- write general_stats row ----
+                row = [now_ts, f"{t_s:.6f}", f"{cpu_run_util:.6f}", f"{mem_run_util:.6f}"]
+                for p in range(1, self.max_prio + 1):
+                    row.append(str(int(running_by_prio.get(p, 0))))
+                for p in range(1, self.max_prio + 1):
+                    row.append(str(int(pending_by_prio.get(p, 0))))
+                for p in range(1, self.max_prio + 1):
+                    row.append(str(int(deletions_cum_by_prio.get(p, 0))))
 
-                row: list[Any] = [
-                    real_ts,
-                    f"{wall_time_s:.3f}",
-                    f"{sim_time_s:.3f}",
-                    f"{cpu_run_util:.6f}",
-                    f"{mem_run_util:.6f}",
-                    running_cnt,
-                    unsched_cnt,
-                    running_dict_str,
-                    unsched_dict_str,
-                ]
-                writer.writerow(row)
-                f.flush()
+                tsw.writerow(row)
+                f_ts.flush()
+
+                # ---- pod_stats: apply-time + running-time (trace pods only) ----
+                for pod in pod_items:
+                    meta = pod.get("metadata", {}) or {}
+                    status = pod.get("status", {}) or {}
+                    pod_uid = meta.get("uid", "")
+                    pod_name = meta.get("name", "")
+                    if not pod_name:
+                        continue
+
+                    rs_name = _rs_prefix_from_pod_name(pod_name)
+                    if rs_name in self.initial_rs_names:
+                        # skip initial pods entirely in pod_stats.csv
+                        continue
+
+                    prio = int(self.prio_by_rs.get(rs_name, 0))
+
+                    # APPLY: first time we observe the pod at all
+                    if pod_name not in seen_apply:
+                        seen_apply.add(pod_name)
+                        ce = self._pod_creation_epoch(pod)
+                        if ce is not None and self.run_start_wall > 0:
+                            apply_time_s = max(0.0, ce - self.run_start_wall)
+                        else:
+                            apply_time_s = float(t_s)
+                        psw.writerow([now_ts, "apply-time", pod_name, pod_uid, prio, f"{apply_time_s:.6f}"])
+                        f_ps.flush()
+
+                    # RUNNING: first time we see it Running
+                    phase = status.get("phase", "")
+                    if phase == "Running" and pod_name not in seen_running:
+                        seen_running.add(pod_name)
+                        st = self._pod_start_epoch(pod)  # status.startTime only
+                        if st is not None and self.run_start_wall > 0:
+                            run_time_s = max(0.0, st - self.run_start_wall)
+                        else:
+                            run_time_s = float(t_s)
+                        psw.writerow([now_ts, "running-time", pod_name, pod_uid, prio, f"{run_time_s:.6f}"])
+                        f_ps.flush()
 
                 elapsed = float(self.clock.time()) - loop_start
                 sleep_s = max(0.0, interval_s - elapsed)
@@ -853,35 +844,28 @@ class TraceReplayer:
 
         LOG.info("monitor: stop signal received; exiting")
 
-    ##############################################
-    # ------------ Runner ------------------------
-    ##############################################
     def run(self) -> None:
-        # Load trace
-        self.load_trace()
+        # Load trace inputs
+        self.load_initial_and_trace()
 
-        # self.prio_by_identity holds all pods from the trace and their priorities
-        self.prio_by_identity = {self._rs_name_for_record(p.id): p.priority for p in self.pods}
-
-        # Convert node capacities to ints (mCPU / bytes)
+        # Node capacities
         self.node_cpu_m = qty_to_mcpu_int(self.args.node_cpu)
         self.node_mem_b = qty_to_bytes_int(self.args.node_mem)
         LOG.info(
-            "per-node capacity: cpu_m=%d mem_bytes=%d (num_nodes=%d from trace meta)",
+            "per-node capacity: cpu_m=%d mem_bytes=%d (num_nodes=%d)",
             self.node_cpu_m,
             self.node_mem_b,
             self.num_nodes,
         )
 
-        # Build events
-        self._build_events()
+        # Build trace events (needs node_* set)
+        self._build_trace_events()
 
         # Create KWOK cluster
         kwok_cfg_path = Path(self.args.kwokctl_config_file).resolve()
         with open(kwok_cfg_path, "r", encoding="utf-8") as f:
             config_doc = yaml.safe_load(f) or {}
 
-        # Apply override-kwokctl-envs from job-file, if any
         if self.override_kwokctl_envs:
             config_doc = merge_kwokctl_envs(config_doc, self.override_kwokctl_envs)
 
@@ -907,34 +891,48 @@ class TraceReplayer:
         ensure_namespace(LOG, self.ctx, self.args.namespace)
         ensure_priority_classes(LOG, self.ctx, self.max_prio)
 
-        # Start monitor thread
-        start_wall_time = float(self.clock.time())
+        # Start time base (time_s reference) BEFORE initial apply
+        self.run_start_monotonic = float(self.clock.time())
+        self.run_start_wall = time.time()
+        LOG.info("run start: %s", get_timestamp())
+
         stop_event = threading.Event()
-        monitor_thread = threading.Thread(
-            target=self._monitor_loop,
-            args=(
-                self.args.namespace,
-                float(self.args.monitor_interval),
-                self.max_prio,
-                self.prio_by_identity,
-                self.monitor_path,
-                stop_event,
-                start_wall_time,
-                self.t_min,
-            ),
-            daemon=True,
-        )
-        monitor_thread.start()
+        monitor_thread: Optional[threading.Thread] = None
 
         try:
-            self._replay_events(
-                namespace=self.args.namespace,
-                start_wall_time=start_wall_time,
-                sim_t0=self.t_min,
+            # 1) Apply initial workload now
+            self._apply_initial_workload(self.args.namespace)
+
+            # 2) Start monitor ONLY AFTER initial load has been applied
+            monitor_thread = threading.Thread(
+                target=self._monitor_loop,
+                args=(
+                    self.args.namespace,
+                    float(self.args.monitor_interval),
+                    self.general_stats_path,
+                    self.pod_stats_path,
+                    stop_event,
+                ),
+                daemon=True,
             )
+            monitor_thread.start()
+
+            # 3) Start-delay (wall time)
+            start_delay = float(self.args.start_delay or 0.0)
+            if start_delay > 0:
+                LOG.info("start-delay: sleeping %.3fs before trace replay", start_delay)
+                self.clock.sleep(start_delay)
+
+            # Trace starts after delay
+            trace_start_wall = float(self.clock.time())
+
+            # 4) Replay trace aligned so sim_time 0 happens at trace_start_wall
+            self._replay_trace_events(namespace=self.args.namespace, trace_start_wall=trace_start_wall)
+
         finally:
             stop_event.set()
-            monitor_thread.join(timeout=10.0)
+            if monitor_thread is not None:
+                monitor_thread.join(timeout=10.0)
             LOG.info("monitor thread joined; done.")
 
             if self.args.save_scheduler_logs:
@@ -944,9 +942,6 @@ class TraceReplayer:
         LOG.info("Done.")
 
 
-###############################################
-# ------------ Main entry point ---------------
-###############################################
 def main() -> None:
     args = build_argparser().parse_args()
 

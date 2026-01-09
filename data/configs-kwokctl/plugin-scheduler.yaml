@@ -12,10 +12,12 @@ componentsPatches:
     #     value: "10"
     extraEnvs:
       - name: OPTIMIZE_MODE
-        value: "manual" # choices: per_pod, periodic, interlude, manual, manual_blocking
+        value: "periodic" # choices: per_pod, periodic, interlude, manual, manual_blocking
+      - name: OPTIMIZE_PERIODIC_INTERVAL
+        value: "10s" # for periodic mode
       - name: PLAN_EXECUTION_TIMEOUT
         value: "600h" # set high to determine any potential issues
       - name: SOLVER_PYTHON_ENABLED
         value: "true"
-      # - name: SOLVER_PYTHON_TIMEOUT
-      #   value: # 1s, 10s, 20s
+      - name: SOLVER_PYTHON_TIMEOUT
+        value: "10s" # 1s, 10s, 20s

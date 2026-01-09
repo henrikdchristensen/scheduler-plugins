@@ -112,6 +112,18 @@ To build the binary, run the following command in the root of the repo:
 make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64'
 ```
 
+NOTE: The issues of version mismatches between the scheduler-plugin and KWOK versions (see [Version mismatch between Scheduler-plugin and KWOK versions](#version-mismatch-between-scheduler-plugin-and-kwok-versions)) can be solved by specifying the `VERSION` field when building, e.g.:
+
+```bash
+make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64' VERSION=v1.33.0
+```
+
+or just run:
+
+```bash
+./build.sh
+```
+
 The built binary will be located in `bin/kube-scheduler`.
 
 ### Docker image
@@ -232,6 +244,12 @@ That can be fixed by building the scheduler with the `VERSION` field set to the 
 
 ```bash
 make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64' VERSION=v1.33.0
+```
+
+or just run:
+
+```bash
+./build.sh
 ```
 
 ## Testing

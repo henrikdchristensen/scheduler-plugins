@@ -1,20 +1,23 @@
-#!/usr/bin/env python3
-# plots.py
+# scripts/kwok_trace_replayer/compare_plots.py
+# compare_plots.py
 
 #######################################################################
 """
 python -m scripts.kwok_trace_replayer.compare_plots \
---default-csv <path-to-default-scheduler-csv> \
---python-csv <path-to-python-optimizer-csv> \
-[--smooth-seconds <seconds>] \
-[--out <output-image-path>] \
-[--no-show]
+  --default-general <path-to-default/general_stats.csv> \
+  --python-general  <path-to-our/general_stats.csv> \
+  [--default-pod <path-to-default/pod_stats.csv>] \
+  [--python-pod  <path-to-our/pod_stats.csv>] \
+  [--latency-bins 40] \
+  [--latency-xmax <seconds>] \
+  [--out-dir <dir>] \
+  [--no-show]
 """
 #######################################################################
 
 import argparse
 import math
-import json
+import re
 from pathlib import Path
 from typing import List, Tuple
 
@@ -22,471 +25,508 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-TIME_COL = "wall_time_s"
-UNSCHED_COL = "unsched_by_prio"
+
+# -----------------------------
+# CSV schema (new)
+# -----------------------------
+TIME_COL = "time_s"
 CPU_COL = "cpu_run_util"
 MEM_COL = "mem_run_util"
 
+# general_stats: running_pK, deletions_cum_pK
+RUNNING_PREFIX = "running_p"
+DELETIONS_CUM_PREFIX = "deletions_cum_p"
 
+# pod_stats: timestamp,event,pod_name,pod_uid,priority,time_s
+POD_EVENT_COL = "event"
+POD_NAME_COL = "pod_name"
+POD_UID_COL = "pod_uid"
+POD_PRIO_COL = "priority"
+POD_TIME_COL = "time_s"
+
+_RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
+
+
+# -----------------------------
+# Argparse
+# -----------------------------
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
-            "Compare pending pods and utilization between default and python schedulers.\n\n"
-            "Row 1 (top): effective utilization (max(CPU, MEM)) for default vs python.\n"
-            "Row 2: per-time *pending difference* (python - default).\n"
-            "Row 3: *cumulative pending difference* (integral of the per-time diff, in pod-seconds).\n\n"
-            "If more than one priority:\n"
-            "  - Column 0 = TOTAL (all priorities summed)\n"
-            "  - Remaining columns = per priority.\n"
+            "Compare two scheduler runs using the new CSV outputs.\n\n"
+            "Produces:\n"
+            "  1) Effective utilization over time (max(cpu_run_util, mem_run_util)) with one line per scheduler.\n"
+            "  2) Cumulative running pod-seconds difference over time (ours - default), one line per priority (single plot).\n"
+            "  3) Cumulative deletions difference (ours - default), one line per priority (single plot).\n"
+            "  4) ONE total scheduling-latency histogram (first-admit only): side-by-side bars per bin for default vs ours,\n"
+            "     and dashed vertical mean lines for both.\n"
         )
     )
+
+    p.add_argument("--default-general", required=True, help="Path to default scheduler general_stats.csv")
+    p.add_argument("--python-general", required=True, help="Path to our scheduler general_stats.csv")
+
     p.add_argument(
-        "--default-csv",
-        required=True,
-        help="Results CSV for the default scheduler.",
-    )
-    p.add_argument(
-        "--python-csv",
-        required=True,
-        help="Results CSV for the Python optimizer.",
-    )
-    p.add_argument(
-        "--smooth-seconds",
-        type=float,
-        default=0.0,
-        help=(
-            "Centered running-average window size in seconds applied "
-            "to the *per-time* pending difference before plotting (row 2). "
-            "0 means no smoothing. (default: 0.0)"
-        ),
-    )
-    p.add_argument(
-        "--out",
+        "--default-pod",
         default=None,
-        help=(
-            "Output image path (e.g., figures/prio_pending_diff_grid.png). "
-            "Default: <default-csv-stem>_prio_pending_diff_grid.png in the same "
-            "directory as the default CSV."
-        ),
+        help="Path to default scheduler pod_stats.csv (default: alongside --default-general)",
     )
     p.add_argument(
-        "--no-show",
-        action="store_true",
-        help="Do not open an interactive window; just save the figure.",
+        "--python-pod",
+        default=None,
+        help="Path to our scheduler pod_stats.csv (default: alongside --python-general)",
     )
+
+    p.add_argument(
+        "--latency-bins",
+        type=int,
+        default=40,
+        help="Number of latency histogram bins (default: 40).",
+    )
+    p.add_argument(
+        "--latency-xmax",
+        type=float,
+        default=None,
+        help="Optional max latency (seconds) to clip the histogram x-axis to.",
+    )
+
+    p.add_argument(
+        "--out-dir",
+        default=None,
+        help="Directory to write PNGs (default: directory of --python-general).",
+    )
+
+    p.add_argument("--no-show", action="store_true", help="Do not open an interactive window; just save figures.")
     return p.parse_args()
 
 
-def detect_priorities_from_unsched(df: pd.DataFrame) -> List[int]:
-    """
-    Inspect the first non-null unsched_by_prio cell and extract priorities.
-    Expects JSON like: {"p1": 0, "p2": 3, ...}
-    Returns a sorted list of integer priorities, e.g. [1, 2, 3, 4].
-    """
-    if UNSCHED_COL not in df.columns:
-        raise SystemExit(f"Column {UNSCHED_COL!r} not found in DataFrame")
+# -----------------------------
+# Helpers
+# -----------------------------
+def _rs_prefix_from_pod_name(pod_name: str) -> str:
+    m = _RS_PREFIX_RE.match(pod_name or "")
+    if m:
+        return m.group(1)
+    if "-" in (pod_name or ""):
+        return (pod_name or "").split("-", 1)[0]
+    return pod_name or ""
 
-    series = df[UNSCHED_COL].dropna()
-    if series.empty:
-        raise SystemExit(f"No non-null values in column {UNSCHED_COL!r}")
 
-    first = series.iloc[0]
-    if not isinstance(first, str):
-        raise SystemExit(f"Expected {UNSCHED_COL!r} to contain JSON strings, got {type(first)}")
+def _require_cols(df: pd.DataFrame, path: Path, cols: List[str]) -> None:
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise SystemExit(f"{path} is missing columns: {', '.join(missing)}")
 
-    try:
-        d = json.loads(first)
-    except json.JSONDecodeError as e:
-        raise SystemExit(f"Failed to parse {UNSCHED_COL!r} JSON: {e}")
 
+def _detect_priorities_from_general(df: pd.DataFrame) -> List[int]:
     prios: List[int] = []
-    for key in d.keys():
-        if key.startswith("p"):
+    for c in df.columns:
+        if c.startswith(RUNNING_PREFIX):
             try:
-                prios.append(int(key[1:]))
+                prios.append(int(c[len(RUNNING_PREFIX) :]))
             except ValueError:
-                continue
-
+                pass
+    prios = sorted(set(prios))
     if not prios:
-        raise SystemExit(
-            f"No 'p<k>' keys found in {UNSCHED_COL!r} JSON; got keys: {list(d.keys())}"
-        )
-
-    prios.sort()
+        raise SystemExit("No priorities detected in general_stats.csv (no running_pK columns found).")
     return prios
 
 
 def build_stepwise_diff(
     t_def: np.ndarray,
     y_def: np.ndarray,
-    t_py: np.ndarray,
-    y_py: np.ndarray,
+    t_our: np.ndarray,
+    y_our: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Build a time-aligned difference series between two stepwise-constant signals.
-
-    We:
-      - Take the union of timestamps from both series,
-      - Treat y_def and y_py as stepwise-constant between their own samples,
-      - For each time in the union, take the latest known value from each series
-        and compute diff = y_py - y_def.
-
-    Returns:
-      times, diff
+    Align two stepwise-constant series on the union of timestamps and return (t, y_our - y_def).
     """
-    if t_def.size == 0 and t_py.size == 0:
+    if t_def.size == 0 and t_our.size == 0:
         return np.array([]), np.array([])
 
-    # Sort just in case
-    order_def = np.argsort(t_def)
-    t_def = t_def[order_def]
-    y_def = y_def[order_def]
+    od = np.argsort(t_def)
+    t_def = t_def[od]
+    y_def = y_def[od]
 
-    order_py = np.argsort(t_py)
-    t_py = t_py[order_py]
-    y_py = y_py[order_py]
+    oo = np.argsort(t_our)
+    t_our = t_our[oo]
+    y_our = y_our[oo]
 
-    # Union of timestamps
-    all_times = np.unique(np.concatenate([t_def, t_py]))
+    all_t = np.unique(np.concatenate([t_def, t_our]))
 
-    # Indices & last values (start at 0 until we see the first sample)
     i_def = -1
-    i_py = -1
+    i_our = -1
     last_def = 0.0
-    last_py = 0.0
+    last_our = 0.0
 
     out_t: List[float] = []
-    out_diff: List[float] = []
+    out_d: List[float] = []
 
-    for t in all_times:
-        # Advance default series up to time t
+    for t in all_t:
         while i_def + 1 < t_def.size and t_def[i_def + 1] <= t:
             i_def += 1
-            last_def = y_def[i_def]
-
-        # Advance python series up to time t
-        while i_py + 1 < t_py.size and t_py[i_py + 1] <= t:
-            i_py += 1
-            last_py = y_py[i_py]
+            last_def = float(y_def[i_def])
+        while i_our + 1 < t_our.size and t_our[i_our + 1] <= t:
+            i_our += 1
+            last_our = float(y_our[i_our])
 
         out_t.append(float(t))
-        out_diff.append(float(last_py - last_def))  # python - default
+        out_d.append(float(last_our - last_def))
 
-    return np.array(out_t, dtype=float), np.array(out_diff, dtype=float)
+    return np.asarray(out_t, dtype=float), np.asarray(out_d, dtype=float)
 
 
-def time_based_running_average(
-    t: np.ndarray,
-    y: np.ndarray,
-    window_s: float,
-) -> np.ndarray:
+def _integrate_pod_seconds(t: np.ndarray, diff: np.ndarray) -> np.ndarray:
+    if t.size == 0:
+        return np.array([], dtype=float)
+    dt = np.diff(t, prepend=t[0])
+    dt = np.clip(dt, 0.0, None)
+    return np.cumsum(diff * dt)
+
+
+def _read_pod_stats(p: Path) -> pd.DataFrame:
+    df = pd.read_csv(p)
+    _require_cols(
+        df,
+        p,
+        [POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL],
+    )
+    df[POD_TIME_COL] = df[POD_TIME_COL].astype(float)
+    df[POD_PRIO_COL] = df[POD_PRIO_COL].astype(int)
+    df[POD_EVENT_COL] = df[POD_EVENT_COL].astype(str)
+    df[POD_NAME_COL] = df[POD_NAME_COL].astype(str)
+    df[POD_UID_COL] = df[POD_UID_COL].astype(str)
+    return df
+
+
+def _first_admit_events(
+    pod_df: pd.DataFrame,
+    *,
+    eps_s: float = 1.0,
+) -> pd.DataFrame:
     """
-    Centered running average over a *time* window (seconds).
+    Return first-admit events with:
+      priority, admit_time_s, latency_s
 
-    For each index i, we average all y[j] such that
-      t[j] is in [t[i] - window_s/2, t[i] + window_s/2].
-
-    - window_s <= 0 → returns y unchanged
-    - Assumes t is sorted ascending.
+    "First-admit only" heuristic for workload pods:
+      - Group by rs prefix (e.g., rs-000022).
+      - Take initial batch = pods whose apply-time is within eps_s of the first apply-time.
+      - For those instances, latency = first running-time - apply-time.
     """
-    if window_s <= 0.0 or y.size == 0:
-        return y
+    apply_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
+    run_df = pod_df[pod_df[POD_EVENT_COL] == "running-time"].copy()
 
-    n = y.size
-    out = np.empty_like(y, dtype=float)
-    half = window_s / 2.0
+    apply_df = apply_df.sort_values(POD_TIME_COL).drop_duplicates(subset=[POD_UID_COL], keep="first")
+    run_df = run_df.sort_values(POD_TIME_COL).drop_duplicates(subset=[POD_UID_COL], keep="first")
 
-    left = 0
-    right = 0
+    apply_df["rs_prefix"] = apply_df[POD_NAME_COL].map(_rs_prefix_from_pod_name)
 
-    for i in range(n):
-        center = t[i]
-        lo = center - half
-        hi = center + half
+    joined = apply_df.merge(
+        run_df[[POD_UID_COL, POD_TIME_COL]].rename(columns={POD_TIME_COL: "running_time_s"}),
+        on=POD_UID_COL,
+        how="left",
+    ).rename(columns={POD_TIME_COL: "apply_time_s"})
 
-        # Move left pointer to the first index with t >= lo
-        while left < n and t[left] < lo:
-            left += 1
+    out_rows: List[Tuple[int, float, float]] = []
 
-        # Ensure right at least left
-        if right < left:
-            right = left
+    for _, g in joined.groupby("rs_prefix", sort=False):
+        g = g.sort_values("apply_time_s")
+        if g.empty:
+            continue
 
-        # Move right pointer to the last index with t <= hi
-        while right + 1 < n and t[right + 1] <= hi:
-            right += 1
+        t0 = float(g["apply_time_s"].iloc[0])
+        batch_mask = (g["apply_time_s"] - t0) <= float(eps_s)
+        batch_n = int(batch_mask.sum())
+        if batch_n <= 0:
+            continue
 
-        if right < left:
-            # No points in window (can happen if window_s is tiny); fall back to original
-            out[i] = float(y[i])
-        else:
-            out[i] = float(np.mean(y[left : right + 1]))
+        first_batch = g.iloc[:batch_n]
 
+        for _, row in first_batch.iterrows():
+            rt = row.get("running_time_s")
+            at = row.get("apply_time_s")
+            pr = row.get(POD_PRIO_COL)
+            if pd.isna(rt) or pd.isna(at) or pd.isna(pr):
+                continue
+            lat = float(rt) - float(at)
+            if math.isfinite(lat) and lat >= 0.0:
+                out_rows.append((int(pr), float(rt), float(lat)))
+
+    out = pd.DataFrame(out_rows, columns=["priority", "admit_time_s", "latency_s"])
+    if not out.empty:
+        out = out.sort_values("admit_time_s")
     return out
 
 
+# -----------------------------
+# Plotting
+# -----------------------------
+def plot_effective_utilization(
+    df_def: pd.DataFrame,
+    df_our: pd.DataFrame,
+    *,
+    out_path: Path,
+) -> None:
+    t_def = df_def[TIME_COL].astype(float).to_numpy()
+    t_our = df_our[TIME_COL].astype(float).to_numpy()
+
+    eff_def = np.maximum(df_def[CPU_COL].astype(float).to_numpy(), df_def[MEM_COL].astype(float).to_numpy())
+    eff_our = np.maximum(df_our[CPU_COL].astype(float).to_numpy(), df_our[MEM_COL].astype(float).to_numpy())
+
+    plt.figure(figsize=(8.5, 3.0))
+    plt.plot(t_def, eff_def, linewidth=1.5, label="default")
+    plt.plot(t_our, eff_our, linewidth=1.5, label="ours")
+
+    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Effective utilization\nmax(CPU, MEM)")
+    plt.title("Effective utilization over time")
+
+    ymax = float(np.nanmax([np.nanmax(eff_def) if eff_def.size else 0.0, np.nanmax(eff_our) if eff_our.size else 0.0]))
+    plt.ylim(0.0, max(1.0, 1.05 * ymax))
+
+    plt.legend(frameon=False)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+def plot_cumulative_running_pod_seconds_diff(
+    df_def: pd.DataFrame,
+    df_our: pd.DataFrame,
+    prios: List[int],
+    *,
+    out_path: Path,
+) -> None:
+    t_def = df_def[TIME_COL].astype(float).to_numpy()
+    t_our = df_our[TIME_COL].astype(float).to_numpy()
+
+    plt.figure(figsize=(8.5, 3.3))
+
+    all_cums: List[np.ndarray] = []
+
+    for p in prios:
+        col = f"{RUNNING_PREFIX}{p}"
+        if col not in df_def.columns or col not in df_our.columns:
+            continue
+
+        y_def = df_def[col].fillna(0).astype(float).to_numpy()
+        y_our = df_our[col].fillna(0).astype(float).to_numpy()
+
+        x, diff = build_stepwise_diff(t_def, y_def, t_our, y_our)  # ours - default
+        cum = _integrate_pod_seconds(x, diff)
+        all_cums.append(cum)
+
+        plt.plot(x, cum, linewidth=1.5, label=f"p{p}")
+
+    plt.axhline(0.0, linewidth=0.8, linestyle="--")
+    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Cumulative running pod-seconds\n(ours - default)")
+    plt.title("Cumulative running pod-seconds difference (positive = ours better)")
+    plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
+
+    if all_cums:
+        ymin = min(float(np.nanmin(c)) for c in all_cums if c.size)
+        ymax = max(float(np.nanmax(c)) for c in all_cums if c.size)
+        if math.isfinite(ymin) and math.isfinite(ymax) and ymin != ymax:
+            pad = 0.05 * (ymax - ymin)
+            plt.ylim(ymin - pad, ymax + pad)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+def plot_cumulative_deletions_diff(
+    df_def: pd.DataFrame,
+    df_our: pd.DataFrame,
+    prios: List[int],
+    *,
+    out_path: Path,
+) -> None:
+    """
+    One plot total: cumulative deletions diff (ours - default),
+    one line per priority (same style as running pod-seconds plot).
+    """
+    t_def = df_def[TIME_COL].astype(float).to_numpy()
+    t_our = df_our[TIME_COL].astype(float).to_numpy()
+
+    plt.figure(figsize=(8.5, 3.3))
+
+    all_series: List[np.ndarray] = []
+
+    for p in prios:
+        col = f"{DELETIONS_CUM_PREFIX}{p}"
+        if col not in df_def.columns or col not in df_our.columns:
+            continue
+
+        y_def = df_def[col].fillna(0).astype(float).to_numpy()
+        y_our = df_our[col].fillna(0).astype(float).to_numpy()
+
+        x, diff = build_stepwise_diff(t_def, y_def, t_our, y_our)  # ours - default
+        all_series.append(diff)
+
+        plt.plot(x, diff, linewidth=1.5, label=f"p{p}")
+
+    plt.axhline(0.0, linewidth=0.8, linestyle="--")
+    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Cumulative deletions diff\n(ours - default)")
+    plt.title("Cumulative deletions difference (positive = more deletions in ours)")
+    plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
+
+    # Optional global y padding
+    if all_series:
+        ymin = min(float(np.nanmin(s)) for s in all_series if s.size)
+        ymax = max(float(np.nanmax(s)) for s in all_series if s.size)
+        if math.isfinite(ymin) and math.isfinite(ymax) and ymin != ymax:
+            pad = 0.05 * (ymax - ymin)
+            plt.ylim(ymin - pad, ymax + pad)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+
+def plot_first_admit_latency_histogram_total(
+    pod_def: pd.DataFrame,
+    pod_our: pd.DataFrame,
+    *,
+    bins: int,
+    xmax: float | None,
+    out_path: Path,
+) -> None:
+    ev_def = _first_admit_events(pod_def, eps_s=1.0)
+    ev_our = _first_admit_events(pod_our, eps_s=1.0)
+
+    lat_def = ev_def["latency_s"].astype(float).to_numpy() if not ev_def.empty else np.array([], dtype=float)
+    lat_our = ev_our["latency_s"].astype(float).to_numpy() if not ev_our.empty else np.array([], dtype=float)
+
+    # Optional clipping for plotting range (keeps means computed on unclipped data)
+    lat_def_plot = lat_def
+    lat_our_plot = lat_our
+    if xmax is not None and math.isfinite(float(xmax)):
+        xmx = float(xmax)
+        lat_def_plot = lat_def_plot[lat_def_plot <= xmx]
+        lat_our_plot = lat_our_plot[lat_our_plot <= xmx]
+
+    combined = np.concatenate([lat_def_plot, lat_our_plot]) if (lat_def_plot.size or lat_our_plot.size) else np.array([0.0])
+    lo = float(np.nanmin(combined))
+    hi = float(np.nanmax(combined))
+    if not math.isfinite(lo) or not math.isfinite(hi) or hi <= lo:
+        lo, hi = 0.0, max(1.0, hi if math.isfinite(hi) else 1.0)
+
+    edges = np.linspace(lo, hi, num=max(2, int(bins) + 1))
+
+    c_def, _ = np.histogram(lat_def_plot, bins=edges)
+    c_our, _ = np.histogram(lat_our_plot, bins=edges)
+
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    widths = np.diff(edges)
+
+    frac = 0.45
+    w = widths * frac
+    offset = widths * 0.5 * frac
+
+    plt.figure(figsize=(8.5, 3.2))
+
+    # Draw bars and capture their actual colors
+    bars_def = plt.bar(centers - offset, c_def, width=w, align="center", label="default")
+    bars_our = plt.bar(centers + offset, c_our, width=w, align="center", label="ours")
+
+    color_def = bars_def.patches[0].get_facecolor() if len(bars_def.patches) else None
+    color_our = bars_our.patches[0].get_facecolor() if len(bars_our.patches) else None
+
+    # Mean lines in matching colors
+    if lat_def.size:
+        plt.axvline(
+            float(np.mean(lat_def)),
+            linestyle="--",
+            linewidth=1.4,
+            color=color_def,
+            label="default mean",
+        )
+    if lat_our.size:
+        plt.axvline(
+            float(np.mean(lat_our)),
+            linestyle="--",
+            linewidth=1.4,
+            color=color_our,
+            label="ours mean",
+        )
+
+    plt.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel("First-admit scheduling latency (s)")
+    plt.ylabel("Count")
+    plt.title("First-admit scheduling latency histogram (total)")
+    plt.legend(frameon=False, ncol=2)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+
+# -----------------------------
+# Main
+# -----------------------------
 def main() -> None:
     args = parse_args()
 
-    csv_paths = [Path(args.default_csv), Path(args.python_csv)]
+    p_def_gen = Path(args.default_general)
+    p_our_gen = Path(args.python_general)
+    if not p_def_gen.exists():
+        raise SystemExit(f"Not found: {p_def_gen}")
+    if not p_our_gen.exists():
+        raise SystemExit(f"Not found: {p_our_gen}")
 
-    # Load both CSVs
-    dfs: List[pd.DataFrame] = []
-    for p in csv_paths:
-        if not p.exists():
-            raise SystemExit(f"CSV file not found: {p}")
-        dfs.append(pd.read_csv(p))
+    p_def_pod = Path(args.default_pod) if args.default_pod else (p_def_gen.parent / "pod_stats.csv")
+    p_our_pod = Path(args.python_pod) if args.python_pod else (p_our_gen.parent / "pod_stats.csv")
 
-    df_def, df_py = dfs
+    if not p_def_pod.exists():
+        raise SystemExit(f"Not found: {p_def_pod}")
+    if not p_our_pod.exists():
+        raise SystemExit(f"Not found: {p_our_pod}")
 
-    # Column checks
-    for p, df in zip(csv_paths, dfs):
-        missing = []
-        if TIME_COL not in df.columns:
-            missing.append(TIME_COL)
-        if UNSCHED_COL not in df.columns:
-            missing.append(UNSCHED_COL)
-        if CPU_COL not in df.columns:
-            missing.append(CPU_COL)
-        if MEM_COL not in df.columns:
-            missing.append(MEM_COL)
-        if missing:
-            raise SystemExit(
-                f"CSV {p} is missing required columns: {', '.join(missing)}"
-            )
+    out_dir = Path(args.out_dir) if args.out_dir else p_our_gen.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Detect priorities from default CSV
-    prios = detect_priorities_from_unsched(df_def)  # e.g. [1,2,3,4]
-    n_prios = len(prios)
+    # Load general_stats
+    df_def = pd.read_csv(p_def_gen)
+    df_our = pd.read_csv(p_our_gen)
 
-    # Parse unsched_by_prio JSON → DataFrame of columns p1, p2, ...
-    unsched_frames: List[pd.DataFrame] = []
-    for df in dfs:
-        parsed = df[UNSCHED_COL].apply(
-            lambda s: json.loads(s) if isinstance(s, str) and s else {}
-        )
-        unsched_df = pd.DataFrame(list(parsed))
-        unsched_frames.append(unsched_df)
+    _require_cols(df_def, p_def_gen, [TIME_COL, CPU_COL, MEM_COL])
+    _require_cols(df_our, p_our_gen, [TIME_COL, CPU_COL, MEM_COL])
 
-    unsched_def, unsched_py = unsched_frames
+    prios = _detect_priorities_from_general(df_def)
 
-    # Time axes
-    t_def = df_def[TIME_COL].values.astype(float)
-    t_py = df_py[TIME_COL].values.astype(float)
+    # 1) Effective utilization (single plot)
+    plot_effective_utilization(df_def, df_our, out_path=out_dir / "effective_utilization.png")
 
-    # Effective utilization (max(CPU, MEM)) for default and python
-    eff_def = np.maximum(
-        df_def[CPU_COL].astype(float).to_numpy(),
-        df_def[MEM_COL].astype(float).to_numpy(),
-    )
-    eff_py = np.maximum(
-        df_py[CPU_COL].astype(float).to_numpy(),
-        df_py[MEM_COL].astype(float).to_numpy(),
+    # 2) Cumulative running pod-seconds diff (single plot, one line per priority)
+    plot_cumulative_running_pod_seconds_diff(
+        df_def, df_our, prios, out_path=out_dir / "cumulative_running_pod_seconds_diff.png"
     )
 
-    smooth_seconds = max(0.0, float(args.smooth_seconds))
-
-    # Groups = [total] + per-priority (if more than one priority)
-    groups: List[Tuple[str, np.ndarray, np.ndarray]] = []  # (label, y_def, y_py)
-
-    if n_prios > 1:
-        # Total group (all priorities summed)
-        cols_def = [f"p{pr}" for pr in prios if f"p{pr}" in unsched_def.columns]
-        cols_py = [f"p{pr}" for pr in prios if f"p{pr}" in unsched_py.columns]
-
-        if cols_def:
-            pend_def_total = unsched_def[cols_def].fillna(0).to_numpy(dtype=float).sum(axis=1)
-        else:
-            pend_def_total = np.zeros_like(t_def, dtype=float)
-
-        if cols_py:
-            pend_py_total = unsched_py[cols_py].fillna(0).to_numpy(dtype=float).sum(axis=1)
-        else:
-            pend_py_total = np.zeros_like(t_py, dtype=float)
-
-        groups.append(("Total (all priorities)", pend_def_total, pend_py_total))
-
-    # Per-priority groups
-    for pr in prios:
-        pkey = f"p{pr}"
-        if pkey in unsched_def.columns:
-            pend_def = unsched_def[pkey].fillna(0).astype(float).values
-        else:
-            pend_def = np.zeros_like(t_def, dtype=float)
-
-        if pkey in unsched_py.columns:
-            pend_py = unsched_py[pkey].fillna(0).astype(float).values
-        else:
-            pend_py = np.zeros_like(t_py, dtype=float)
-
-        groups.append((f"Priority {pr}", pend_def, pend_py))
-
-    n_groups = len(groups)
-    if n_groups == 0:
-        raise SystemExit("No groups to plot (no priorities detected).")
-
-    # Layout:
-    #   Row 0: single axis spanning all columns → effective utilization (default vs python)
-    #   Row 1: per-time pending diff (one column per group)
-    #   Row 2: cumulative pending diff (one column per group)
-    ncols = n_groups
-
-    per_col_width = 2.6
-    height_util = 2.0
-    height_diff = 2.0
-    height_cum = 2.0
-
-    fig_width = per_col_width * ncols
-    fig_height = height_util + height_diff + height_cum
-
-    fig = plt.figure(figsize=(fig_width, fig_height))
-    gs = fig.add_gridspec(
-        nrows=3,
-        ncols=ncols,
-        height_ratios=[height_util, height_diff, height_cum],
+    # 3) Cumulative deletions diff: one plot per priority
+    plot_cumulative_deletions_diff(
+        df_def, df_our, prios, out_path=out_dir / "cumulative_deletions_diff.png"
     )
 
-    # Row 0: utilization axis spanning all columns
-    ax_util = fig.add_subplot(gs[0, :])
+    # 4) Scheduling latency histogram (TOTAL): default vs ours, two bars per bin + mean lines
+    pod_def = _read_pod_stats(p_def_pod)
+    pod_our = _read_pod_stats(p_our_pod)
+    plot_first_admit_latency_histogram_total(
+        pod_def,
+        pod_our,
+        bins=max(5, int(args.latency_bins)),
+        xmax=args.latency_xmax,
+        out_path=out_dir / "first_admit_latency_hist_total.png",
+    )
 
-    # Rows 1–2: per-group axes
-    axes_diff = []
-    axes_cum = []
-    for j in range(ncols):
-        ax_d = fig.add_subplot(gs[1, j], sharex=ax_util)
-        ax_c = fig.add_subplot(gs[2, j], sharex=ax_util)
-        axes_diff.append(ax_d)
-        axes_cum.append(ax_c)
-
-    # ---- Utilization row (row 0) ----
-    line_def = ax_util.plot(t_def, eff_def, linewidth=1.2, label="default")[0]
-    line_py = ax_util.plot(t_py, eff_py, linewidth=1.2, label="python")[0]
-
-    ax_util.set_ylabel("Effective util.\nmax(CPU, MEM)", fontsize=8)
-    ax_util.set_xlabel("")  # x-label at bottom row only
-    ax_util.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-    ax_util.tick_params(axis="both", labelsize=6)
-    ax_util.set_title("Effective utilization over time", fontsize=9)
-    ax_util.set_ylim(0.0, 1.05 * max(1.0, float(np.nanmax([eff_def.max(), eff_py.max()]))))
-    ax_util.legend(loc="upper left", fontsize=7, frameon=False)
-
-    first_diff_line = None
-
-    # ---- Pending diff + cumulative rows (rows 1–2) ----
-    cum_series = []  # <--- collect cumulative series for global y-scale
-
-    for j, (label, y_def, y_py) in enumerate(groups):
-        ax_diff = axes_diff[j]
-        ax_cum = axes_cum[j]
-
-        # Build per-time diff (stepwise)
-        x, diff = build_stepwise_diff(t_def, y_def, t_py, y_py)
-        diff_sm = time_based_running_average(x, diff, smooth_seconds)
-
-        # ---- Row 1: per-time pending diff ----
-        if x.size > 0:
-            line = ax_diff.plot(x, diff_sm, linewidth=1.2)[0]
-            if first_diff_line is None:
-                first_diff_line = line
-            # Symmetric y around 0 for per-time diff (per-column)
-            absmax = float(np.nanmax(np.abs(diff_sm))) if diff_sm.size > 0 else 1.0
-            if not math.isfinite(absmax) or absmax <= 0:
-                absmax = 1.0
-            ax_diff.set_ylim(-absmax * 1.05, absmax * 1.05)
-
-        ax_diff.axhline(0.0, color="black", linewidth=0.5, linestyle="--")
-        ax_diff.set_title(label, fontsize=9)
-        ax_diff.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-        ax_diff.tick_params(axis="both", labelsize=6)
-
-        if j == 0:
-            ax_diff.set_ylabel("Pending diff\n(python - default)", fontsize=8)
-        else:
-            ax_diff.set_ylabel("")
-            ax_diff.tick_params(axis="y", labelleft=False)
-        ax_diff.set_xlabel("")
-
-        # ---- Row 2: cumulative diff (pod-seconds) ----
-        cum = None
-        if x.size > 0:
-            dt = np.diff(x, prepend=x[0])
-            dt = np.clip(dt, 0.0, None)
-            cum = np.cumsum(diff * dt)
-            cum_series.append(cum)              # <--- store series
-            ax_cum.plot(x, cum, linewidth=1.2)
-
-        ax_cum.axhline(0.0, color="black", linewidth=0.5, linestyle="--")
-        ax_cum.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-        ax_cum.tick_params(axis="both", labelsize=6)
-
-        if j == 0:
-            ax_cum.set_ylabel("Cumulative diff\n(pod-seconds)", fontsize=8)
-        else:
-            ax_cum.set_ylabel("")
-            ax_cum.tick_params(axis="y", labelleft=False)
-
-        ax_cum.set_xlabel("Time (s)", fontsize=8)
-
-    # ---- Shared y-scale for ALL cumulative plots ----
-    global_min = math.inf
-    global_max = -math.inf
-    for c in cum_series:
-        if c.size == 0:
-            continue
-        cmin = float(np.nanmin(c))
-        cmax = float(np.nanmax(c))
-        if math.isfinite(cmin):
-            global_min = min(global_min, cmin)
-        if math.isfinite(cmax):
-            global_max = max(global_max, cmax)
-
-    if global_min == math.inf or global_max == -math.inf:
-        # fallback if no data
-        global_min, global_max = 0.0, 1.0
-    elif global_min == global_max:
-        # flat line – give it a bit of range
-        if global_min == 0.0:
-            global_max = 1.0
-        else:
-            global_min *= 0.95
-            global_max *= 1.05
-    else:
-        span = global_max - global_min
-        pad = 0.05 * span
-        global_min -= pad
-        global_max += pad
-
-    for ax_cum in axes_cum:
-        ax_cum.set_ylim(global_min, global_max)
-
-
-    # Tiny figure-level legend explaining the pending diff sign / smoothing
-    if first_diff_line is not None:
-        legend_label = "Pending diff (python - default)"
-        if smooth_seconds > 0:
-            legend_label += f", smoothed over ±{smooth_seconds/2:.1f}s"
-        fig.legend(
-            [first_diff_line],
-            [legend_label],
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.02),
-            ncol=1,
-            frameon=False,
-            fontsize=8,
-        )
-
-    fig.tight_layout(rect=(0.02, 0.03, 0.98, 0.93))
-
-    # Output path
-    if args.out:
-        out_path = Path(args.out)
-    else:
-        first = csv_paths[0]
-        out_path = first.with_name("prio_pending_diff_grid.png")
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=200)
-    print(f"Saved figure to: {out_path}")
+    print(f"Saved plots to: {out_dir}")
 
     if not args.no_show:
         plt.show()
