@@ -55,8 +55,8 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Compare two scheduler runs using the new CSV outputs.\n\n"
             "Produces:\n"
-            "  1) Effective utilization over time (max(cpu_run_util, mem_run_util)) with one line per scheduler.\n"
-            "  2) Cumulative running pod-seconds difference over time (ours - default), one line per priority (single plot).\n"
+            "  1) Effective utilization (max(cpu_run_util, mem_run_util)) with one line per scheduler.\n"
+            "  2) Cumulative running pod-seconds difference (ours - default), one line per priority (single plot).\n"
             "  3) Cumulative deletions difference (ours - default), one line per priority (single plot).\n"
             "  4) ONE total scheduling-latency histogram (first-admit only): side-by-side bars per bin for default vs ours,\n"
             "     and dashed vertical mean lines for both.\n"
@@ -280,7 +280,7 @@ def plot_effective_utilization(
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel("Time (s)")
     plt.ylabel("Effective utilization\nmax(CPU, MEM)")
-    plt.title("Effective utilization over time")
+    plt.title("Effective utilization")
 
     ymax = float(np.nanmax([np.nanmax(eff_def) if eff_def.size else 0.0, np.nanmax(eff_our) if eff_our.size else 0.0]))
     plt.ylim(0.0, max(1.0, 1.05 * ymax))
@@ -458,9 +458,9 @@ def plot_first_admit_latency_histogram_total(
         )
 
     plt.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
-    plt.xlabel("First-admit scheduling latency (s)")
+    plt.xlabel("Scheduling latency (s)")
     plt.ylabel("Count")
-    plt.title("First-admit scheduling latency histogram (total)")
+    plt.title("Scheduling latency (total)")
     plt.legend(frameon=False, ncol=2)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -523,7 +523,7 @@ def main() -> None:
         pod_our,
         bins=max(5, int(args.latency_bins)),
         xmax=args.latency_xmax,
-        out_path=out_dir / "first_admit_latency_hist_total.png",
+        out_path=out_dir / "scheduling_latency.png",
     )
 
     print(f"Saved plots to: {out_dir}")
