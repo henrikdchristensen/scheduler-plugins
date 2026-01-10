@@ -62,9 +62,9 @@ def sample_for_alpha(_rng, alpha, x_min, x_max, size=1):
         v = min(v, float(x_max))
     return tg.np.full(size, v, dtype=float)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # build_arg_parser()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_build_arg_parser_defaults_and_required(tmp_path: Path):
     p = tg.build_arg_parser()
@@ -241,9 +241,9 @@ def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
     with pytest.raises(SystemExit):
         tg.resolve_effective_args(cli_args)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # round_float_args()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_round_float_args_rounds_only_floats():
     ns = argparse.Namespace(a=1.23456, b=2, c="x", d=3.14159)
@@ -253,9 +253,9 @@ def test_round_float_args_rounds_only_floats():
     assert ns.c == "x"
     assert ns.d == 3.14
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator.__init__()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_trace_generator_init_creates_paths(tmp_path: Path):
     args = _make_required_args(tmp_path)
@@ -267,9 +267,9 @@ def test_trace_generator_init_creates_paths(tmp_path: Path):
     assert gen.trace_path.name == "trace.json"
     assert gen.info_path.name == "info_generate.yaml"
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator.log_args()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_log_args_calls_log_args_block_and_order(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path)
@@ -292,9 +292,9 @@ def test_log_args_calls_log_args_block_and_order(tmp_path: Path, monkeypatch):
     assert "mean_req" in seen["include"]
     assert "mean_arrival" in seen["include"]
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._write_info_file()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_write_info_file_success_calls_write_info_file(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path)
@@ -330,9 +330,9 @@ def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, cap
 
     assert any("failed to write info_generate.yaml" in rec.message for rec in caplog.records)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._sample_pareto()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_sample_pareto_validates_and_respects_xmax():
     rng = tg.np.random.default_rng(123)
@@ -352,9 +352,9 @@ def test_sample_pareto_validates_and_respects_xmax():
     x2 = tg.TraceGenerator._sample_pareto(rng, alpha=2.0, x_min=1.0, x_max=None, size=10)
     assert (x2 >= 1.0).all()
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._solve_alpha_for_mean()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_solve_alpha_validates_target_mean_ranges():
     rng = tg.np.random.default_rng(0)
@@ -415,9 +415,9 @@ def test_solve_alpha_unbounded_adjusts_alpha_low(monkeypatch):
     )
     assert alpha >= 1.0
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._build_geometric_support()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_build_geometric_support_validates_and_returns_probs():
     values, probs = tg.TraceGenerator._build_geometric_support(min_val=3, max_val=3, ratio=0.5)
@@ -437,9 +437,9 @@ def test_build_geometric_support_validates_and_returns_probs():
     with pytest.raises(ValueError):
         tg.TraceGenerator._build_geometric_support(min_val=1, max_val=2, ratio=0.0)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._expected_value()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_expected_value_for_support_handles_uniform_and_weighted():
     vals = tg.np.array([1, 2, 3], dtype=int)
@@ -448,9 +448,9 @@ def test_expected_value_for_support_handles_uniform_and_weighted():
     probs = tg.np.array([0.5, 0.25, 0.25], dtype=float)
     assert tg.TraceGenerator._expected_value_for_support(vals, probs) == pytest.approx(1.75)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._infer_mean_life_from_target_util()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_infer_mean_life_validates_ranges(tmp_path: Path):
     args = _make_required_args(tmp_path, target_util=0.5, mean_arrival=2.0, mean_req=0.25, num_nodes=2)
@@ -464,9 +464,9 @@ def test_infer_mean_life_validates_ranges(tmp_path: Path):
     with pytest.raises(ValueError):
         gen2.infer_mean_life_from_target_util()
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._fit_alphas()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_fit_alphas_sets_fields_and_attaches_to_args(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(sample_for_alpha))
@@ -490,9 +490,9 @@ def test_fit_alphas_sets_fields_and_attaches_to_args(monkeypatch, tmp_path: Path
     assert hasattr(args, "alpha_arrival")
     assert hasattr(args, "alpha_life")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._time_avg_req_util()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_time_avg_req_util_basic(tmp_path: Path):
     args = _make_required_args(tmp_path, num_nodes=2, trace_time="10s")
@@ -504,9 +504,9 @@ def test_time_avg_req_util_basic(tmp_path: Path):
     # area = 0.5*10, divide by N*T = 2*10 => 0.25
     assert gen._time_avg_req_util(pods) == pytest.approx(0.25)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._build_initial_load()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_build_initial_load_can_overshoot_then_pop(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path, num_nodes=1, target_util=0.1)
@@ -559,9 +559,9 @@ def test_build_initial_load_returns_some_pods(tmp_path: Path, monkeypatch):
     assert next_id == len(pods)
     assert all(p.start_time == 0.0 for p in pods)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._generate_trace_events()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_generate_trace_events_seeds_baseline_and_pops_end_heap(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path, num_nodes=1, trace_time="2.5s")
@@ -603,9 +603,9 @@ def test_generate_trace_events_seeds_baseline_and_pops_end_heap(tmp_path: Path, 
     assert len(u_hist) == len(times)
     assert pods_hist == [1, 1, 1]
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._generate_tracedata_once()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_generate_tracedata_once_sets_series_and_metadata(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path, num_nodes=2, trace_time="5s")
@@ -644,9 +644,9 @@ def test_generate_tracedata_once_sets_series_and_metadata(tmp_path: Path, monkey
     assert "rng" in extra and "derived" in extra["rng"]
     assert "files" in extra and "initial_json" in extra["files"]
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._calibrate_mean_life()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_calibrate_mean_life_stops_within_tolerance(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path, target_util=0.5)
@@ -705,9 +705,9 @@ def test_calibrate_mean_life_raises_on_zero_measured_util(tmp_path: Path, monkey
     with pytest.raises(RuntimeError):
         gen.calibrate_mean_life()
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._write_json()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_write_json_writes_expected_shape(tmp_path: Path):
     args = _make_required_args(tmp_path)
@@ -724,9 +724,9 @@ def test_write_json_writes_expected_shape(tmp_path: Path):
     assert isinstance(data["pods"], list)
     assert data["pods"][0]["id"] == 1
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator._write_outputs()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path, target_util=0.5)
@@ -754,9 +754,9 @@ def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
     assert calls["json"][1][1] == 1
     assert calls["info"] == 1
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceGenerator.run()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path)
@@ -799,9 +799,9 @@ def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monk
     assert called["util"] == 1
     assert called["hist"] == 1
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # main()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_main_smoke_invokes_generator(monkeypatch, tmp_path: Path):
     args = _make_required_args(tmp_path)

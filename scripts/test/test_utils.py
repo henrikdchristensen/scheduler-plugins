@@ -111,6 +111,30 @@ def make_subprocess_check_output(
 
 
 # ---------------------------------------------------------------------------
+# Clock helpers (for testing time-dependent code)
+# ---------------------------------------------------------------------------
+
+class TimeController:
+    """
+    A simple fake clock for testing that doesn't actually sleep.
+    Implements the Clock protocol from general_helpers.
+    """
+    def __init__(self):
+        self.current_time = 0.0
+    
+    def time(self) -> float:
+        return self.current_time
+    
+    def sleep(self, seconds: float) -> None:
+        # Don't actually sleep in tests
+        self.current_time += seconds
+    
+    def advance(self, seconds: float) -> None:
+        """Manually advance the clock (for test control)"""
+        self.current_time += seconds
+
+
+# ---------------------------------------------------------------------------
 # Logger helpers
 # ---------------------------------------------------------------------------
 

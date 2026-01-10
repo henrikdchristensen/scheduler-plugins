@@ -78,9 +78,9 @@ class BadFuture:
         raise RuntimeError("boom")
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # _parse_optional_bool_strict()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_parse_optional_bool_strict():
     assert tr._parse_optional_bool_strict(True) is True
@@ -89,9 +89,9 @@ def test_parse_optional_bool_strict():
     assert tr._parse_optional_bool_strict(1) is None
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # _rs_prefix_from_pod_name()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_rs_prefix_from_pod_name():
     assert tr._rs_prefix_from_pod_name("rs-000001-abc-0") == "rs-000001"
@@ -99,9 +99,9 @@ def test_rs_prefix_from_pod_name():
     assert tr._rs_prefix_from_pod_name("plain") == "plain"
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # _parse_rfc3339_to_epoch()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_parse_rfc3339_to_epoch_parses_z_and_fractional():
     t1 = tr._parse_rfc3339_to_epoch("2026-01-09T12:34:56Z")
@@ -117,9 +117,9 @@ def test_parse_rfc3339_to_epoch_invalid_returns_none():
     assert tr._parse_rfc3339_to_epoch(None) is None  # type: ignore[arg-type]
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # build_argparser()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_build_argparser_parses_boolean_optional_action():
     p = tr.build_argparser()
@@ -131,9 +131,9 @@ def test_build_argparser_parses_boolean_optional_action():
     assert args.save_scheduler_logs is False
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # merge_job_fields_into_args()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_merge_job_fields_into_args_cli_wins_and_parses_monitor_interval_and_start_delay():
     args = argparse.Namespace(
@@ -212,9 +212,9 @@ def test_merge_job_fields_into_args_ignores_invalid_types_and_strict_bool():
     assert override_envs == []
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # ensure_default_args()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_ensure_default_args_requires_trace_cfg_results(tmp_path: Path):
     args = argparse.Namespace(
@@ -268,9 +268,9 @@ def test_ensure_default_args_sets_defaults_and_validates_paths(tmp_path: Path):
     assert Path(out.result_dir).is_absolute()
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer.__init__()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_trace_replayer_init_sets_paths_and_state(tmp_path: Path, monkeypatch):
     rp, args, trace_dir, _cfg, result_dir = mk_replayer(tmp_path, monkeypatch)
@@ -286,9 +286,9 @@ def test_trace_replayer_init_sets_paths_and_state(tmp_path: Path, monkeypatch):
     assert rp.ctx == f"kwok-{args.cluster_name}"
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer.log_args()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_log_args_calls_log_args_block(tmp_path: Path, monkeypatch):
     args, *_ = mk_args(tmp_path)
@@ -311,9 +311,9 @@ def test_log_args_calls_log_args_block(tmp_path: Path, monkeypatch):
     assert "save_scheduler_logs" in called["include"]
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._write_info_file()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_write_info_file_success(tmp_path: Path, monkeypatch):
     args, *_ = mk_args(tmp_path)
@@ -345,9 +345,9 @@ def test_write_info_file_failure_is_non_fatal(tmp_path: Path, monkeypatch):
     _ = tr.TraceReplayer(args)
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._save_scheduler_logs()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_save_scheduler_logs(tmp_path: Path, monkeypatch):
     rp, args, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -367,18 +367,18 @@ def test_save_scheduler_logs(tmp_path: Path, monkeypatch):
     assert seen["runner"] == rp.runner
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._rs_name_for_record()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_rs_name_for_record():
     assert tr.TraceReplayer._rs_name_for_record(1) == "rs-000001"
     assert tr.TraceReplayer._rs_name_for_record(123456) == "rs-123456"
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._load_json_pods()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_load_json_pods_missing_file_raises(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -409,9 +409,9 @@ def test_load_json_pods_parses_and_sorts(tmp_path: Path, monkeypatch):
     assert [p.id for p in pods] == [1, 2]
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer.load_initial_and_trace()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_load_initial_and_trace_infers_when_no_info_yaml(tmp_path: Path, monkeypatch, caplog):
     rp, _, trace_dir, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -478,9 +478,9 @@ def test_load_initial_and_trace_prefers_info_yaml(tmp_path: Path, monkeypatch):
     assert rp.max_prio == 5
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._build_trace_events()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_build_trace_events_creates_sorted_create_delete_pairs(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -503,9 +503,9 @@ def test_build_trace_events_creates_sorted_create_delete_pairs(tmp_path: Path, m
     assert rp.events[0].replicas == 1
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._apply_initial_workload()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_apply_initial_workload_no_initial_is_noop(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -544,9 +544,9 @@ def test_apply_initial_workload_submits_kubectl_tasks(tmp_path: Path, monkeypatc
     assert submitted[0][0] == tr.kubectl_apply_yaml
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._replay_trace_events()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_replay_trace_events_no_events_sleeps_until_end(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -612,9 +612,9 @@ def test_replay_trace_events_future_exception_is_caught(tmp_path: Path, monkeypa
     rp.replay_trace_events(namespace="trace", trace_start_wall=0.0)  # should not raise
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._snapshot_from_pods()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_snapshot_from_pods_computes_utilization_and_counts(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -652,9 +652,9 @@ def test_snapshot_from_pods_computes_utilization_and_counts(tmp_path: Path, monk
     assert pending_by_prio == {1: 1, 2: 0}
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._pod_start_epoch() / _pod_creation_epoch()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_pod_epoch_extractors():
     rp = tr.TraceReplayer.__new__(tr.TraceReplayer)  # bypass init
@@ -666,9 +666,9 @@ def test_pod_epoch_extractors():
     assert rp._pod_start_time(pod) is not None
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer._monitor_loop()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
@@ -725,9 +725,9 @@ def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Pat
     assert not any("rs-000001-aaa-0" in ln for ln in plines[1:])
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # TraceReplayer.run()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_run_orchestrates_cluster_setup_and_saves_logs(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch, save_scheduler_logs=True)
@@ -841,9 +841,9 @@ def test_run_finally_saves_logs_even_if_replay_raises(tmp_path: Path, monkeypatc
     assert saved["n"] == 1
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # main()
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 def test_main_job_file_missing_raises(tmp_path: Path, monkeypatch):
     class DummyParser:
