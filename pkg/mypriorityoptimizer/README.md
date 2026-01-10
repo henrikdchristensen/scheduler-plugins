@@ -347,8 +347,9 @@ Here the job file specifies which workload configuration file, kwokctl configura
 
 To run the test jobs faster by parallelizing the evaluation using HPC resources (we used [UCloud](https://docs.cloud.sdu.dk/)), a `bootstrap.sh` script is provided under `scripts/bootstrap/` that can be used to set up a job runner (HPC or VM) and run the tests. The script will ensure all prerequisites are installed and the tests are run.
 
-The bootstrap script accepts parameters that the `test_runner.py` script accepts, but the two main parameters to provide are:
+The bootstrap script accepts parameters that the `test_runner.py` and `trace_replayer.py` scripts accept, but the three main parameters to provide are:
 
+- `--runner`: either `test_runner` or `trace_replayer` to specify which script to run (default: `test_runner`).
 - `--content-dir`: path to the `bootstrap` folder created using the `make_bootstrap_folder.sh` script.
 - `--job-file`: path to the job file to run (e.g. see jobs under `data/jobs/`).
 
