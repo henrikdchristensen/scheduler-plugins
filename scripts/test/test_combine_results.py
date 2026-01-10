@@ -9,7 +9,6 @@ import pandas as pd
 
 from scripts.kwok_workload_once import combine_results as cr
 
-
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------

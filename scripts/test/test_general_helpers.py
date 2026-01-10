@@ -567,7 +567,6 @@ def test_generate_seeds_non_template_parts_add_suffix(tmp_path: Path, monkeypatc
 # HTTP trigger helper
 # ---------------------------------------------------------------------------
 
-
 class _FakeHTTPResp:
     def __init__(self, status: int, body: bytes):
         self.status = status
@@ -581,7 +580,6 @@ class _FakeHTTPResp:
 
     def read(self):
         return self._body
-
 
 def _raise_http_error(code: int, body: bytes):
     def _raise(req, timeout=None):

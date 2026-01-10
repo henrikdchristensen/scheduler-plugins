@@ -6,7 +6,6 @@ import pytest
 from scripts.helpers import cluster_stats as cs
 from scripts.test.test_utils import time_sequence
 
-
 # ---------------------------------------------------------------------------
 # sum_pod_requests
 # ---------------------------------------------------------------------------

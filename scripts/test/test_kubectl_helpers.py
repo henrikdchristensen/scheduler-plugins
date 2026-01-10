@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 # test_kubectl_helpers.py
 
-import json
-import subprocess
+import json, subprocess
 
 import pytest
 
 from scripts.helpers import kubectl_helpers as kh
 from scripts.test.test_utils import (
-    make_logger_stream,
-    time_sequence,
-    make_subprocess_run,
-    make_subprocess_run_seq,
-    make_subprocess_check_output,
+    make_logger_stream, time_sequence, make_subprocess_run,
+    make_subprocess_run_seq, make_subprocess_check_output,
 )
 
 # ---------------------------------------------------------------------------

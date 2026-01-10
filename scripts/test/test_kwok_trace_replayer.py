@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 # test_kwok_trace_replayer.py
 
-import argparse
-import csv
-import json
-import time
+import argparse, json, time
 from pathlib import Path
 
 import pytest
 
 from scripts.kwok_trace_replayer import trace_replayer as tr
-
 
 # ---------------------------------------------------------------------------
 # Test helpers

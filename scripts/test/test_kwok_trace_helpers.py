@@ -6,7 +6,6 @@ import pytest
 
 from scripts.kwok_trace_replayer import trace_helpers as th
 
-
 # =============================================================================
 # estimate_pareto_params()
 # =============================================================================
