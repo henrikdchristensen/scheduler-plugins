@@ -58,9 +58,9 @@ def applied_cfg(
     )
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # build_argparser
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_build_argparser_parses_minimal_seed_run():
     ap = tr.build_argparser()
@@ -79,9 +79,9 @@ def test_build_argparser_parses_minimal_seed_run():
     assert args.seed == 1
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._initialize
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_initialize_loads_job_file_and_configs_and_sets_state(monkeypatch, tmp_path):
     wl = tmp_path / "wl.yaml"
@@ -228,9 +228,9 @@ def test_initialize_job_file_must_be_mapping(tmp_path, monkeypatch):
         tr.TestRunner(args)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner.ensure_default_args
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_ensure_default_args_sets_defaults_and_validates_paths(tmp_path):
     wl, kw = touch_configs(tmp_path)
@@ -405,9 +405,9 @@ def test_ensure_default_args_solver_trigger_requires_binary_runtime(tmp_path):
         tr.TestRunner.ensure_default_args(args)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._read_seeds_file
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_read_seeds_file(tmp_path):
     p = tmp_path / "seeds.txt"
@@ -433,9 +433,9 @@ def test_read_seeds_file_missing_raises_value_error(tmp_path):
         tr.TestRunner._read_seeds_file(tmp_path / "missing.txt")
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._parse_config_doc
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_parse_config_doc():
     runner = tr.TestRunner(ns(), initialize=False)
@@ -457,9 +457,9 @@ def test_parse_config_doc():
     assert cfg.wait_pod_mode == "ready"
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._validate_workload_config
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_validate_workload_config_reports_multiple_errors():
     bad = tr.TestConfigRaw(
@@ -496,9 +496,9 @@ def test_validate_workload_config_ok():
     assert msg == ""
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._resolve_config_for_seed
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_resolve_config_for_seed():
     runner = tr.TestRunner(ns(), initialize=False)
@@ -517,9 +517,9 @@ def test_resolve_config_for_seed():
         runner._resolve_config_for_seed(1)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._write_info_file
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_write_info_file_calls_write_info_file(monkeypatch, tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -570,9 +570,9 @@ def test_write_info_file_logs_warning_on_exception(monkeypatch, tmp_path):
     assert seen["warn"] == 1
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._combined_job_configs_seed_str
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_combined_job_configs_seed_str():
     runner = tr.TestRunner(ns(), initialize=False)
@@ -589,9 +589,9 @@ def test_combined_job_configs_seed_str():
     assert "seed_file=seeds.txt" in s
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._record_failure
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_record_failure(tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -609,9 +609,9 @@ def test_record_failure(tmp_path):
     assert not runner.failed_f.exists()
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._eta_record_seed_duration
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_eta_record_seed_duration(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -621,9 +621,9 @@ def test_eta_record_seed_duration(monkeypatch):
     assert runner.seed_durations == [10.0]
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._eta_estimation
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_eta_estimation_returns_none_when_unknown_or_no_samples():
     runner = tr.TestRunner(ns(), initialize=False)
@@ -643,9 +643,9 @@ def test_eta_estimation_returns_epoch(monkeypatch):
     assert runner._eta_estimation(3, 10) == 124.0
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._eta_write_file
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_eta_write_file(tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -685,9 +685,9 @@ def test_eta_write_file(tmp_path):
     assert payload2["seeds_total"] == -1
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._eta_summary
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_eta_summary(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -708,9 +708,9 @@ def test_eta_summary(monkeypatch):
     runner._eta_summary(next_seed_idx=2, seeds_total=10)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._eta_update_marker
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_eta_update_marker(monkeypatch, tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -731,9 +731,9 @@ def test_eta_update_marker(monkeypatch, tmp_path):
     assert called["got"] == (111.0, 2, 5)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._parse_waits
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_parse_waits():
     runner = tr.TestRunner(ns(), initialize=False)
@@ -750,9 +750,9 @@ def test_parse_waits():
     assert settle_max == 0
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._get_wait_pod_mode_from_dict
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
     "raw,expected",
@@ -778,9 +778,9 @@ def test_get_wait_pod_mode_from_dict_invalid_raises():
         tr.TestRunner._get_wait_pod_mode_from_dict({"wait_pod_mode": "bogus"}, "wait_pod_mode", None)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner.merge_job_fields_into_args
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_merge_job_fields_into_args():
     args = ns(
@@ -834,9 +834,9 @@ def test_merge_job_fields_into_args():
     assert overrides["kwokctl_envs"] == [{"name": "X", "value": "1"}]
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._get_kwokctl_envs
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_get_kwokctl_envs():
     doc = {
@@ -856,9 +856,9 @@ def test_get_kwokctl_envs():
     assert envs == {"A": "1", "B": "2", "EMPTY": None, "NOVAL": None}
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._record_seed_outcome
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_record_seed_outcome(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -884,9 +884,9 @@ def test_record_seed_outcome(tmp_path, monkeypatch):
     assert warned["n"] >= 1
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._prepare_output_dir
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_prepare_output_dir(tmp_path):
     out_dir = tmp_path / "out"
@@ -902,9 +902,9 @@ def test_prepare_output_dir(tmp_path):
     assert not (resolved / "old.txt").exists()
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._append_result_csv
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_append_result_csv_rerun_seeds_removes_old_rows(tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -959,9 +959,9 @@ def test_append_result_csv_prune_failure_logs_warning(tmp_path, monkeypatch):
     assert appended["n"] == 1
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._purge_mismatched_results_csv
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_purge_mismatched_results_csv_deletes_when_clean_start(tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -987,9 +987,9 @@ def test_purge_mismatched_results_csv_does_not_delete_without_clean_start(tmp_pa
     assert p.exists()
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._load_seen_results_csv
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_load_seen_results_csv(tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -999,9 +999,9 @@ def test_load_seen_results_csv(tmp_path):
     assert seen == set()
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._extract_best_attempt_fields
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_extract_best_attempt_fields_extracts_values():
     attempts = [
@@ -1030,9 +1030,9 @@ def test_extract_best_attempt_fields_handles_missing_or_invalid():
     assert status == ""
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._get_solver_attempts
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_get_solver_attempts_prefers_last_solver_result():
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1094,9 +1094,9 @@ def test_get_solver_attempts_fallback_handles_cm_missing_or_bad_json(monkeypatch
     assert (baseline, best_name, attempts, error) == ({}, "", [], "")
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._write_solver_stats_json
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_write_solver_stats_json_writes_runs_raw(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1146,9 +1146,9 @@ def test_write_solver_stats_json_skips_when_no_cm_or_missing_runs(tmp_path, monk
     assert warned["n"] >= 3
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._get_latest_configmap
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_get_latest_configmap_retries_then_returns_latest():
     # First call fails, second returns list with two matching items; should pick newest.
@@ -1256,9 +1256,9 @@ def test_get_latest_configmap_label_selector_accepts_any(monkeypatch):
     assert cm3 is None
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._save_scheduler_logs
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_save_scheduler_logs(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1278,9 +1278,9 @@ def test_save_scheduler_logs(tmp_path, monkeypatch):
     assert Path(seen["out_path"]).name == "sched_logs_seed-3_run-1.log"
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._build_pod_list
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_build_pod_list():
     running_by_name = {"rs-01-p2-abc": "n1"}
@@ -1296,9 +1296,9 @@ def test_build_pod_list():
     assert by_name["other"]["cpu_m"] == 0
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._make_replicaset_specs_only
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_make_replicaset_specs_only_builds_specs_and_rejects_invalid():
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1347,9 +1347,9 @@ def test_make_replicaset_specs_only_clamps_priority_when_num_priorities_zero():
     assert "p1" in specs[0]["name"]
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._apply_replicasets
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_apply_replicasets_calls_kubectl_and_wait(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1385,9 +1385,9 @@ def test_apply_replicasets_skips_wait_when_mode_none(monkeypatch):
     assert calls["wait"] == 0
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._gen_rs_sizes
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_gen_rs_sizes():
     rng = random.Random(0)
@@ -1397,9 +1397,9 @@ def test_gen_rs_sizes():
     assert sizes[0] >= 6
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._solver_directly
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_solver_directly_exports_and_preplace(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1529,9 +1529,9 @@ def test_solver_directly_python_exception_logs_error(tmp_path, monkeypatch):
     assert (tmp_path / "out.json").exists()
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._wait_solver_inactive_http
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_wait_solver_inactive_http_invalid_json(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1576,9 +1576,9 @@ def test_wait_solver_inactive_http_logs_and_non_str_body(monkeypatch):
     assert ok is False
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._pause
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_pause_skips_when_disabled(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1622,9 +1622,9 @@ def test_pause_keyboard_interrupt(monkeypatch):
         runner._pause(next_exists=True)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner.run_mode_single_seed
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_run_mode_single_seed(monkeypatch, tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1640,9 +1640,9 @@ def test_run_mode_single_seed(monkeypatch, tmp_path):
     runner.run_mode_single_seed()
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner.run_mode_count
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_run_mode_count(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1676,9 +1676,9 @@ def test_run_mode_count(monkeypatch):
     assert ran["seeds"] == [2, 3]
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner.run_mode_seed_file
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_run_mode_seed_file(monkeypatch, tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1708,9 +1708,9 @@ def test_run_mode_seed_file(monkeypatch, tmp_path):
     assert ran["seeds"] == [1, 3]
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._run_single_seed
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_run_single_seed(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1734,9 +1734,9 @@ def test_run_single_seed(monkeypatch):
     assert runner.failure is None
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._execute_seed_direct
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_execute_seed_direct(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1781,9 +1781,9 @@ def test_execute_seed_direct(monkeypatch):
     assert "unscheduled=" in (seen["note"] or "")
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # TestRunner._execute_seed_on_cluster
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_execute_seed_on_cluster_ensure_cluster_failure(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1984,9 +1984,9 @@ def test_execute_seed_on_cluster_happy_path(monkeypatch, tmp_path):
     assert seen["outcome"] == (7, False)
 
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
 # Main runner dispatch
-# ===========================================================================
+# ---------------------------------------------------------------------------
 
 def test_run_dispatches_to_correct_mode(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
