@@ -9,7 +9,29 @@ from __future__ import annotations
 import io
 import logging
 import subprocess
+import threading
 from typing import IO, Optional, Tuple, Callable, Any, List
+
+
+# ---------------------------------------------------------------------------
+# Lock helpers (for testing thread-safe code)
+# ---------------------------------------------------------------------------
+
+# A no-op lock for testing that doesn't actually lock
+class _NullLock:
+    """A no-op context manager lock for testing"""
+    def __call__(self):
+        return self
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+    def acquire(self):
+        pass
+    def release(self):
+        pass
+
+null_lock = _NullLock()
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +141,18 @@ class TimeController:
     A simple fake clock for testing that doesn't actually sleep.
     Implements the Clock protocol from general_helpers.
     """
-    def __init__(self):
-        self.current_time = 0.0
+    def __init__(self, now: float = 0.0):
+        self.current_time = now
+    
+    @property
+    def now(self) -> float:
+        """Alias for current_time for backward compatibility"""
+        return self.current_time
+    
+    @now.setter
+    def now(self, value: float) -> None:
+        """Setter for backward compatibility"""
+        self.current_time = value
     
     def time(self) -> float:
         return self.current_time
