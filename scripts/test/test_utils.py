@@ -39,14 +39,6 @@ null_lock = _NullLock()
 # ---------------------------------------------------------------------------
 
 def time_sequence(values: List[float]) -> Callable[[], float]:
-    """
-    Return a callable that returns values from a sequence on each call.
-    Used to mock time.time() in tests.
-    
-    Example:
-        fake_time = time_sequence([0.0, 0.1, 0.2, 999.0])
-        monkeypatch.setattr(module.time, "time", fake_time)
-    """
     iterator = iter(values)
     def _next_time() -> float:
         return next(iterator)
@@ -62,18 +54,6 @@ def make_subprocess_run(
     out_bytes: bytes = b"",
     assert_prefix: Optional[List[str]] = None,
 ) -> Callable[..., subprocess.CompletedProcess]:
-    """
-    Create a fake subprocess.run that returns a fixed result.
-    Optionally asserts that the command starts with assert_prefix.
-    
-    Example:
-        fake_run = make_subprocess_run(
-            returncode=0,
-            out_bytes=b"output",
-            assert_prefix=["kubectl", "--context", "ctx1"],
-        )
-        monkeypatch.setattr(subprocess, "run", fake_run)
-    """
     def _fake_run(cmd: List[str], *args, **kwargs) -> subprocess.CompletedProcess:
         if assert_prefix is not None:
             prefix_len = len(assert_prefix)
@@ -92,14 +72,6 @@ def make_subprocess_run_seq(
     returncodes: List[int],
     out_bytes: bytes = b"",
 ) -> Callable[..., subprocess.CompletedProcess]:
-    """
-    Create a fake subprocess.run that returns different returncodes on successive calls.
-    Used for testing retry logic.
-    
-    Example:
-        fake_run = make_subprocess_run_seq([1, 1, 0], out_bytes=b"")
-        monkeypatch.setattr(subprocess, "run", fake_run)
-    """
     iterator = iter(returncodes)
     def _fake_run(cmd: List[str], *args, **kwargs) -> subprocess.CompletedProcess:
         rc = next(iterator)
@@ -114,21 +86,22 @@ def make_subprocess_run_seq(
 
 def make_subprocess_check_output(
     out_bytes: bytes = b"",
+    *,
+    # Backward-compatible alias used by some tests.
+    output: bytes | None = None,
+    assert_prefix: Optional[List[str]] = None,
     raises: bool = False,
 ) -> Callable[..., bytes]:
-    """
-    Create a fake subprocess.check_output that returns fixed output or raises.
-    
-    Example:
-        fake_check_output = make_subprocess_check_output(
-            out_bytes=b'{"items": []}',
-        )
-        monkeypatch.setattr(subprocess, "check_output", fake_check_output)
-    """
     def _fake_check_output(cmd: List[str], *args, **kwargs) -> bytes:
+        if assert_prefix is not None:
+            prefix_len = len(assert_prefix)
+            assert cmd[:prefix_len] == assert_prefix, \
+                f"Expected command to start with {assert_prefix}, got {cmd[:prefix_len]}"
+
+        effective = out_bytes if output is None else output
         if raises:
-            raise subprocess.CalledProcessError(1, cmd, output=out_bytes)
-        return out_bytes
+            raise subprocess.CalledProcessError(1, cmd, output=effective)
+        return effective
     return _fake_check_output
 
 
@@ -137,10 +110,6 @@ def make_subprocess_check_output(
 # ---------------------------------------------------------------------------
 
 class TimeController:
-    """
-    A simple fake clock for testing that doesn't actually sleep.
-    Implements the Clock protocol from general_helpers.
-    """
     def __init__(self, now: float = 0.0):
         self.current_time = now
     
@@ -174,18 +143,6 @@ def make_logger_stream(
     name: str = "test",
     level: int = logging.DEBUG,
 ) -> Tuple[logging.Logger, IO[str]]:
-    """Create (or reuse) a logger configured with a single StreamHandler.
-
-    Returns a tuple of (logger, string_stream) where string_stream is a
-    text-mode stream (io.StringIO) attached to a StreamHandler.
-
-    Backwards compatibility:
-    - Historically, this helper existed multiple times in this file.
-    - Some tests may call it repeatedly with the same logger name.
-      We therefore clear existing handlers for that logger before adding a new
-      one, and we disable propagation to avoid duplicate output.
-    """
-
     stream = io.StringIO()
 
     logger = logging.getLogger(name)
@@ -200,7 +157,8 @@ def make_logger_stream(
     handler = logging.StreamHandler(stream)
     handler.setLevel(level)
     handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        # Keep formatting minimal so tests can assert on message content.
+        logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     )
     logger.addHandler(handler)
 
@@ -208,11 +166,6 @@ def make_logger_stream(
 
 
 def get_logger_stream(logger: logging.Logger) -> Optional[io.StringIO]:
-    """Return the first attached StringIO stream for a logger, if present.
-
-    This is a small compatibility helper used in some tests.
-    """
-
     for handler in logger.handlers:
         if isinstance(handler, logging.StreamHandler):
             stream = getattr(handler, "stream", None)

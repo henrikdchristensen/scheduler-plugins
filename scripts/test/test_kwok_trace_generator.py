@@ -765,15 +765,15 @@ def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monk
 
     _set_alphas(gen, alpha=2.0)
 
-    monkeypatch.setattr(gen, "_infer_mean_life_from_target_util", lambda: 12.3)
+    monkeypatch.setattr(gen, "infer_mean_life_from_target_util", lambda: 12.3)
     monkeypatch.setattr(gen, "log_args", lambda: None)
 
     initial = [tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=1)]
     trace = []
     extra = {"ok": True}
 
-    monkeypatch.setattr(gen, "_calibrate_mean_life", lambda: (initial, trace, extra))
-    monkeypatch.setattr(gen, "_write_outputs", lambda *_a, **_k: None)
+    monkeypatch.setattr(gen, "calibrate_mean_life", lambda: (initial, trace, extra))
+    monkeypatch.setattr(gen, "write_outputs", lambda *_a, **_k: None)
 
     gen.times = [0.0]
     gen.u_req_hist = [0.1]

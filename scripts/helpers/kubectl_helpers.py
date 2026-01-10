@@ -221,7 +221,8 @@ def get_json_ctx(ctx: str, base_cmd: list[str]) -> dict:
     try:
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        msg = (e.stdout or b"").decode("utf-8", "replace")
+        raw = getattr(e, "output", None) or getattr(e, "stdout", None) or b""
+        msg = raw.decode("utf-8", "replace")
         tail = msg[-1200:]
         raise RuntimeError(
             f"kubectl failed: rc={e.returncode} cmd={' '.join(cmd)} output_tail={tail!r}"

@@ -748,10 +748,10 @@ def test_run_orchestrates_cluster_setup_and_saves_logs(tmp_path: Path, monkeypat
 
     called = {k: 0 for k in ["build_events", "ensure_cluster", "create_nodes", "ensure_ns", "ensure_pcs", "apply_initial", "replay", "save_logs"]}
 
-    monkeypatch.setattr(rp, "_build_trace_events", lambda: called.__setitem__("build_events", called["build_events"] + 1))
-    monkeypatch.setattr(rp, "_apply_initial_workload", lambda *_a, **_k: called.__setitem__("apply_initial", called["apply_initial"] + 1))
-    monkeypatch.setattr(rp, "_replay_trace_events", lambda **_k: called.__setitem__("replay", called["replay"] + 1))
-    monkeypatch.setattr(rp, "_save_scheduler_logs", lambda: called.__setitem__("save_logs", called["save_logs"] + 1))
+    monkeypatch.setattr(rp, "build_trace_events", lambda: called.__setitem__("build_events", called["build_events"] + 1))
+    monkeypatch.setattr(rp, "apply_initial_workload", lambda *_a, **_k: called.__setitem__("apply_initial", called["apply_initial"] + 1))
+    monkeypatch.setattr(rp, "replay_trace_events", lambda **_k: called.__setitem__("replay", called["replay"] + 1))
+    monkeypatch.setattr(rp, "save_scheduler_logs", lambda: called.__setitem__("save_logs", called["save_logs"] + 1))
 
     monkeypatch.setattr(tr.yaml, "safe_load", lambda *_a, **_k: {"x": 1})
     monkeypatch.setattr(tr, "merge_kwokctl_envs", lambda doc, envs: doc)
@@ -808,7 +808,7 @@ def test_run_finally_saves_logs_even_if_replay_raises(tmp_path: Path, monkeypatc
     monkeypatch.setattr(tr, "qty_to_mcpu_int", lambda _q: 1000)
     monkeypatch.setattr(tr, "qty_to_bytes_int", lambda _q: 1024)
 
-    monkeypatch.setattr(rp, "_build_trace_events", lambda: None)
+    monkeypatch.setattr(rp, "build_trace_events", lambda: None)
     monkeypatch.setattr(tr.yaml, "safe_load", lambda *_a, **_k: {})
     monkeypatch.setattr(tr, "ensure_kwok_cluster", lambda **_k: None)
     monkeypatch.setattr(tr, "create_kwok_nodes", lambda **_k: None)
@@ -829,12 +829,12 @@ def test_run_finally_saves_logs_even_if_replay_raises(tmp_path: Path, monkeypatc
             return None
 
     monkeypatch.setattr(tr.threading, "Thread", DummyThread)
-    monkeypatch.setattr(rp, "_apply_initial_workload", lambda *_a, **_k: None)
+    monkeypatch.setattr(rp, "apply_initial_workload", lambda *_a, **_k: None)
 
-    monkeypatch.setattr(rp, "_replay_trace_events", lambda **_k: (_ for _ in ()).throw(RuntimeError("replay failed")))
+    monkeypatch.setattr(rp, "replay_trace_events", lambda **_k: (_ for _ in ()).throw(RuntimeError("replay failed")))
 
     saved = {"n": 0}
-    monkeypatch.setattr(rp, "_save_scheduler_logs", lambda: saved.__setitem__("n", saved["n"] + 1))
+    monkeypatch.setattr(rp, "save_scheduler_logs", lambda: saved.__setitem__("n", saved["n"] + 1))
 
     with pytest.raises(RuntimeError):
         rp.run()
