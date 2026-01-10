@@ -8,8 +8,111 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import IO, Optional, Tuple
+import subprocess
+from typing import IO, Optional, Tuple, Callable, Any, List
 
+
+# ---------------------------------------------------------------------------
+# Time mocking helpers
+# ---------------------------------------------------------------------------
+
+def time_sequence(values: List[float]) -> Callable[[], float]:
+    """
+    Return a callable that returns values from a sequence on each call.
+    Used to mock time.time() in tests.
+    
+    Example:
+        fake_time = time_sequence([0.0, 0.1, 0.2, 999.0])
+        monkeypatch.setattr(module.time, "time", fake_time)
+    """
+    iterator = iter(values)
+    def _next_time() -> float:
+        return next(iterator)
+    return _next_time
+
+
+# ---------------------------------------------------------------------------
+# Subprocess mocking helpers
+# ---------------------------------------------------------------------------
+
+def make_subprocess_run(
+    returncode: int = 0,
+    out_bytes: bytes = b"",
+    assert_prefix: Optional[List[str]] = None,
+) -> Callable[..., subprocess.CompletedProcess]:
+    """
+    Create a fake subprocess.run that returns a fixed result.
+    Optionally asserts that the command starts with assert_prefix.
+    
+    Example:
+        fake_run = make_subprocess_run(
+            returncode=0,
+            out_bytes=b"output",
+            assert_prefix=["kubectl", "--context", "ctx1"],
+        )
+        monkeypatch.setattr(subprocess, "run", fake_run)
+    """
+    def _fake_run(cmd: List[str], *args, **kwargs) -> subprocess.CompletedProcess:
+        if assert_prefix is not None:
+            prefix_len = len(assert_prefix)
+            assert cmd[:prefix_len] == assert_prefix, \
+                f"Expected command to start with {assert_prefix}, got {cmd[:prefix_len]}"
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=returncode,
+            stdout=out_bytes,
+            stderr=b"",
+        )
+    return _fake_run
+
+
+def make_subprocess_run_seq(
+    returncodes: List[int],
+    out_bytes: bytes = b"",
+) -> Callable[..., subprocess.CompletedProcess]:
+    """
+    Create a fake subprocess.run that returns different returncodes on successive calls.
+    Used for testing retry logic.
+    
+    Example:
+        fake_run = make_subprocess_run_seq([1, 1, 0], out_bytes=b"")
+        monkeypatch.setattr(subprocess, "run", fake_run)
+    """
+    iterator = iter(returncodes)
+    def _fake_run(cmd: List[str], *args, **kwargs) -> subprocess.CompletedProcess:
+        rc = next(iterator)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=rc,
+            stdout=out_bytes,
+            stderr=b"",
+        )
+    return _fake_run
+
+
+def make_subprocess_check_output(
+    out_bytes: bytes = b"",
+    raises: bool = False,
+) -> Callable[..., bytes]:
+    """
+    Create a fake subprocess.check_output that returns fixed output or raises.
+    
+    Example:
+        fake_check_output = make_subprocess_check_output(
+            out_bytes=b'{"items": []}',
+        )
+        monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+    """
+    def _fake_check_output(cmd: List[str], *args, **kwargs) -> bytes:
+        if raises:
+            raise subprocess.CalledProcessError(1, cmd, output=out_bytes)
+        return out_bytes
+    return _fake_check_output
+
+
+# ---------------------------------------------------------------------------
+# Logger helpers
+# ---------------------------------------------------------------------------
 
 def make_logger_stream(
     name: str = "test",
