@@ -4,10 +4,9 @@
 #######################################################################
 """
 python -m scripts.kwok_trace_replayer.compare_plots \
-  --default-general <path-to-default/general_stats.csv> \
-  --python-general  <path-to-our/general_stats.csv> \
-  [--default-pod <path-to-default/pod_stats.csv>] \
-  [--python-pod  <path-to-our/pod_stats.csv>] \
+    --default-dir <dir-with-default-csvs> \
+    --plugin-dir  <dir-with-plugin-csvs> \
+    [--plot both|default|plugin] \
   [--latency-bins 40] \
   [--latency-xmax <seconds>] \
   [--out-dir <dir>] \
@@ -24,6 +23,13 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+
+# -----------------------------
+# Input filenames (config)
+# -----------------------------
+GENERAL_STATS_FILENAME = "general_stats.csv"
+POD_STATS_FILENAME = "pod_stats.csv"
 
 
 # -----------------------------
@@ -56,44 +62,68 @@ def parse_args() -> argparse.Namespace:
             "Compare two scheduler runs using the new CSV outputs.\n\n"
             "Produces:\n"
             "  1) Effective utilization (max(cpu_run_util, mem_run_util)) with one line per scheduler.\n"
-            "  2) Cumulative running pod-seconds difference (ours - default), one line per priority (single plot).\n"
-            "  3) Cumulative deletions difference (ours - default), one line per priority (single plot).\n"
-            "  4) ONE total scheduling-latency histogram (first-admit only): side-by-side bars per bin for default vs ours,\n"
+            "  2) Cumulative running pod-seconds difference (plugin - default), one line per priority (single plot).\n"
+            "  3) Cumulative deletions difference (plugin - default), one line per priority (single plot).\n"
+            "  4) ONE total scheduling-latency histogram (first-admit only): side-by-side bars per bin for default vs plugin,\n"
             "     and dashed vertical mean lines for both.\n"
         )
     )
 
-    p.add_argument("--default-general", required=True, help="Path to default scheduler general_stats.csv")
-    p.add_argument("--python-general", required=True, help="Path to our scheduler general_stats.csv")
+    p.add_argument(
+        "--plot",
+        choices=["both", "default", "plugin"],
+        default="both",
+        help=(
+            "Which run(s) to plot. "
+            "'both' compares default vs plugin (diff plots + side-by-side histogram). "
+            "'default' or 'plugin' plots only that run (no diffs)."
+        ),
+    )
+
+    default_src = p.add_mutually_exclusive_group(required=False)
+    default_src.add_argument(
+        "--default-dir",
+        default=None,
+        help=(
+            "Directory containing the default scheduler CSVs "
+            f"({GENERAL_STATS_FILENAME} and {POD_STATS_FILENAME})."
+        ),
+    )
+    default_src.add_argument(
+        "--default-general",
+        default=None,
+        help=(
+            f"[DEPRECATED] Path to default scheduler {GENERAL_STATS_FILENAME}. "
+            "Prefer --default-dir."
+        ),
+    )
 
     p.add_argument(
-        "--default-pod",
+        "--plugin-dir",
         default=None,
-        help="Path to default scheduler pod_stats.csv (default: alongside --default-general)",
-    )
-    p.add_argument(
-        "--python-pod",
-        default=None,
-        help="Path to our scheduler pod_stats.csv (default: alongside --python-general)",
+        help=(
+            "Directory containing the plugin scheduler CSVs "
+            f"({GENERAL_STATS_FILENAME} and {POD_STATS_FILENAME})."
+        ),
     )
 
     p.add_argument(
         "--latency-bins",
         type=int,
-        default=40,
-        help="Number of latency histogram bins (default: 40).",
+        default=60,
+        help="Number of latency histogram bins (default: 60).",
     )
     p.add_argument(
         "--latency-xmax",
         type=float,
-        default=None,
+        default=30.0,
         help="Optional max latency (seconds) to clip the histogram x-axis to.",
     )
 
     p.add_argument(
         "--out-dir",
         default=None,
-        help="Directory to write PNGs (default: directory of --python-general).",
+        help="Directory to write PNGs (default: plugin directory if provided, else default directory).",
     )
 
     p.add_argument("--no-show", action="store_true", help="Do not open an interactive window; just save figures.")
@@ -158,6 +188,23 @@ def _detect_priorities_from_general(df: pd.DataFrame) -> List[int]:
     if not prios:
         raise SystemExit("No priorities detected in general_stats.csv (no running_pK columns found).")
     return prios
+
+
+def _detect_priorities_union(*dfs: pd.DataFrame) -> List[int]:
+    prios: set[int] = set()
+    for df in dfs:
+        if df is None or df.empty:
+            continue
+        for c in df.columns:
+            if c.startswith(RUNNING_PREFIX):
+                try:
+                    prios.add(int(c[len(RUNNING_PREFIX) :]))
+                except ValueError:
+                    pass
+    out = sorted(prios)
+    if not out:
+        raise SystemExit("No priorities detected in general_stats.csv (no running_pK columns found).")
+    return out
 
 
 def build_stepwise_diff(
@@ -304,7 +351,7 @@ def plot_effective_utilization(
 
     plt.figure(figsize=(8.5, 3.0))
     plt.plot(t_def, eff_def, linewidth=1.5, label="default")
-    plt.plot(t_our, eff_our, linewidth=1.5, label="ours")
+    plt.plot(t_our, eff_our, linewidth=1.5, label="plugin")
 
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
@@ -312,6 +359,35 @@ def plot_effective_utilization(
     plt.title("Effective utilization")
 
     ymax = float(np.nanmax([np.nanmax(eff_def) if eff_def.size else 0.0, np.nanmax(eff_our) if eff_our.size else 0.0]))
+    plt.ylim(0.0, max(1.0, 1.05 * ymax))
+
+    plt.legend(frameon=False)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+def plot_effective_utilization_single(
+    df: pd.DataFrame,
+    *,
+    label: str,
+    out_path: Path,
+) -> None:
+    t_s = df[TIME_COL].astype(float).to_numpy()
+    scale, x_label = _choose_time_unit(float(np.nanmax(t_s)) if t_s.size else 0.0)
+    t = t_s * scale
+
+    eff = np.maximum(df[CPU_COL].astype(float).to_numpy(), df[MEM_COL].astype(float).to_numpy())
+
+    plt.figure(figsize=(8.5, 3.0))
+    plt.plot(t, eff, linewidth=1.5, label=label)
+
+    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel(x_label)
+    plt.ylabel("Effective utilization\nmax(CPU, MEM)")
+    plt.title("Effective utilization")
+
+    ymax = float(np.nanmax(eff) if eff.size else 0.0)
     plt.ylim(0.0, max(1.0, 1.05 * ymax))
 
     plt.legend(frameon=False)
@@ -355,8 +431,61 @@ def plot_cumulative_running_pod_seconds_diff(
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Cumulative running pod-seconds\n(ours - default)")
-    plt.title("Cumulative running pod-seconds difference (positive = ours better)")
+    plt.ylabel("Cumulative running pod-seconds\n(plugin - default)")
+    plt.title("Cumulative running pod-seconds difference (positive = plugin better)")
+    plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
+
+    if all_cums:
+        ymin = min(float(np.nanmin(c)) for c in all_cums if c.size)
+        ymax = max(float(np.nanmax(c)) for c in all_cums if c.size)
+        if math.isfinite(ymin) and math.isfinite(ymax) and ymin != ymax:
+            pad = 0.05 * (ymax - ymin)
+            plt.ylim(ymin - pad, ymax + pad)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+def plot_cumulative_running_pod_seconds_single(
+    df: pd.DataFrame,
+    prios: List[int],
+    *,
+    label: str,
+    out_path: Path,
+) -> None:
+    t_s = df[TIME_COL].astype(float).to_numpy()
+
+    plt.figure(figsize=(8.5, 3.3))
+
+    all_cums: List[np.ndarray] = []
+
+    for p in prios:
+        col = f"{RUNNING_PREFIX}{p}"
+        if col not in df.columns:
+            continue
+
+        y = df[col].fillna(0).astype(float).to_numpy()
+        od = np.argsort(t_s)
+        t_sorted = t_s[od]
+        y_sorted = y[od]
+
+        # Integrate running pods over time => pod-seconds
+        dt = np.diff(t_sorted, prepend=t_sorted[0])
+        dt = np.clip(dt, 0.0, None)
+        cum = np.cumsum(y_sorted * dt)
+
+        scale, x_label = _choose_time_unit(float(np.nanmax(t_sorted)) if t_sorted.size else 0.0)
+        x = t_sorted * scale
+
+        all_cums.append(cum)
+        plt.plot(x, cum, linewidth=1.5, label=f"p{p}")
+
+    plt.axhline(0.0, linewidth=0.8, linestyle="--")
+    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel(x_label)
+    plt.ylabel("Cumulative running pod-seconds")
+    plt.title(f"Cumulative running pod-seconds ({label})")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
 
     if all_cums:
@@ -408,11 +537,59 @@ def plot_cumulative_deletions_diff(
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Cumulative deletions diff\n(ours - default)")
-    plt.title("Cumulative deletions difference (positive = more deletions in ours)")
+    plt.ylabel("Cumulative deletions diff\n(plugin - default)")
+    plt.title("Cumulative deletions difference (positive = more deletions in plugin)")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
 
     # Optional global y padding
+    if all_series:
+        ymin = min(float(np.nanmin(s)) for s in all_series if s.size)
+        ymax = max(float(np.nanmax(s)) for s in all_series if s.size)
+        if math.isfinite(ymin) and math.isfinite(ymax) and ymin != ymax:
+            pad = 0.05 * (ymax - ymin)
+            plt.ylim(ymin - pad, ymax + pad)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+def plot_cumulative_deletions_single(
+    df: pd.DataFrame,
+    prios: List[int],
+    *,
+    label: str,
+    out_path: Path,
+) -> None:
+    t_s = df[TIME_COL].astype(float).to_numpy()
+
+    plt.figure(figsize=(8.5, 3.3))
+
+    all_series: List[np.ndarray] = []
+
+    for p in prios:
+        col = f"{DELETIONS_CUM_PREFIX}{p}"
+        if col not in df.columns:
+            continue
+
+        y = df[col].fillna(0).astype(float).to_numpy()
+        od = np.argsort(t_s)
+        t_sorted = t_s[od]
+        y_sorted = y[od]
+
+        scale, x_label = _choose_time_unit(float(np.nanmax(t_sorted)) if t_sorted.size else 0.0)
+        x = t_sorted * scale
+
+        all_series.append(y_sorted)
+        plt.plot(x, y_sorted, linewidth=1.5, label=f"p{p}")
+
+    plt.axhline(0.0, linewidth=0.8, linestyle="--")
+    plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel(x_label)
+    plt.ylabel("Cumulative deletions")
+    plt.title(f"Cumulative deletions ({label})")
+    plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
+
     if all_series:
         ymin = min(float(np.nanmin(s)) for s in all_series if s.size)
         ymax = max(float(np.nanmax(s)) for s in all_series if s.size)
@@ -470,7 +647,7 @@ def plot_first_admit_latency_histogram_total(
 
     # Draw bars and capture their actual colors
     bars_def = plt.bar(centers - offset, c_def, width=w, align="center", label="default")
-    bars_our = plt.bar(centers + offset, c_our, width=w, align="center", label="ours")
+    bars_our = plt.bar(centers + offset, c_our, width=w, align="center", label="plugin")
 
     color_def = bars_def.patches[0].get_facecolor() if len(bars_def.patches) else None
     color_our = bars_our.patches[0].get_facecolor() if len(bars_our.patches) else None
@@ -490,14 +667,67 @@ def plot_first_admit_latency_histogram_total(
             linestyle="--",
             linewidth=1.4,
             color=color_our,
-            label="ours mean",
+            label="plugin mean",
+        )
+
+    plt.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+    plt.xlabel("Scheduling latency (s)")
+    plt.yscale("log")
+    plt.ylabel("Count")
+    plt.title("Scheduling latency")
+    plt.legend(frameon=False, ncol=2)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+
+
+def plot_first_admit_latency_histogram_single(
+    pod_df: pd.DataFrame,
+    *,
+    bins: int,
+    xmax: float | None,
+    label: str,
+    out_path: Path,
+) -> None:
+    ev = _first_admit_events(pod_df, eps_s=1.0)
+    lat = ev["latency_s"].astype(float).to_numpy() if not ev.empty else np.array([], dtype=float)
+
+    lat_plot = lat
+    if xmax is not None and math.isfinite(float(xmax)):
+        xmx = float(xmax)
+        lat_plot = lat_plot[lat_plot <= xmx]
+
+    combined = lat_plot if lat_plot.size else np.array([0.0])
+    lo = float(np.nanmin(combined))
+    hi = float(np.nanmax(combined))
+    if not math.isfinite(lo) or not math.isfinite(hi) or hi <= lo:
+        lo, hi = 0.0, max(1.0, hi if math.isfinite(hi) else 1.0)
+
+    edges = np.linspace(lo, hi, num=max(2, int(bins) + 1))
+    counts, _ = np.histogram(lat_plot, bins=edges)
+
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    widths = np.diff(edges)
+
+    plt.figure(figsize=(8.5, 3.2))
+    bars = plt.bar(centers, counts, width=widths * 0.9, align="center", label=label)
+
+    color = bars.patches[0].get_facecolor() if len(bars.patches) else None
+    if lat.size:
+        plt.axvline(
+            float(np.mean(lat)),
+            linestyle="--",
+            linewidth=1.4,
+            color=color,
+            label=f"{label} mean",
         )
 
     plt.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel("Scheduling latency (s)")
     plt.ylabel("Count")
-    plt.title("Scheduling latency")
-    plt.legend(frameon=False, ncol=2)
+    plt.title(f"Scheduling latency ({label})")
+    plt.legend(frameon=False)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
@@ -511,56 +741,134 @@ def plot_first_admit_latency_histogram_total(
 def main() -> None:
     args = parse_args()
 
-    p_def_gen = Path(args.default_general)
-    p_our_gen = Path(args.python_general)
-    if not p_def_gen.exists():
+    # Resolve input paths
+    def _resolve_general(which: str) -> Path | None:
+        if which == "default":
+            if args.default_dir:
+                return Path(args.default_dir) / GENERAL_STATS_FILENAME
+            if args.default_general:
+                return Path(args.default_general)
+            return None
+        if which == "plugin":
+            if args.plugin_dir:
+                return Path(args.plugin_dir) / GENERAL_STATS_FILENAME
+            return None
+        raise ValueError(which)
+
+    p_def_gen = _resolve_general("default")
+    p_plugin_gen = _resolve_general("plugin")
+
+    if args.plot in ("both", "default") and p_def_gen is None:
+        raise SystemExit("Missing default input. Provide --default-dir (preferred) or --default-general.")
+    if args.plot in ("both", "plugin") and p_plugin_gen is None:
+        raise SystemExit("Missing plugin input. Provide --plugin-dir (preferred) or --plugin-general.")
+
+    # Validate existence
+    if p_def_gen is not None and not p_def_gen.exists():
         raise SystemExit(f"Not found: {p_def_gen}")
-    if not p_our_gen.exists():
-        raise SystemExit(f"Not found: {p_our_gen}")
+    if p_plugin_gen is not None and not p_plugin_gen.exists():
+        raise SystemExit(f"Not found: {p_plugin_gen}")
 
-    p_def_pod = Path(args.default_pod) if args.default_pod else (p_def_gen.parent / "pod_stats.csv")
-    p_our_pod = Path(args.python_pod) if args.python_pod else (p_our_gen.parent / "pod_stats.csv")
+    p_def_pod = (p_def_gen.parent / POD_STATS_FILENAME) if p_def_gen is not None else None
+    p_plugin_pod = (p_plugin_gen.parent / POD_STATS_FILENAME) if p_plugin_gen is not None else None
 
-    if not p_def_pod.exists():
+    if p_def_pod is not None and not p_def_pod.exists():
         raise SystemExit(f"Not found: {p_def_pod}")
-    if not p_our_pod.exists():
-        raise SystemExit(f"Not found: {p_our_pod}")
+    if p_plugin_pod is not None and not p_plugin_pod.exists():
+        raise SystemExit(f"Not found: {p_plugin_pod}")
 
-    out_dir = Path(args.out_dir) if args.out_dir else p_our_gen.parent
+    # Default output directory: plugin dir if present, else default dir.
+    if args.out_dir:
+        out_dir = Path(args.out_dir)
+    else:
+        out_dir = (p_plugin_gen.parent if p_plugin_gen is not None else p_def_gen.parent)  # type: ignore[union-attr]
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load general_stats
-    df_def = pd.read_csv(p_def_gen)
-    df_our = pd.read_csv(p_our_gen)
+    df_def = pd.read_csv(p_def_gen) if p_def_gen is not None else None
+    df_plugin = pd.read_csv(p_plugin_gen) if p_plugin_gen is not None else None
 
-    _require_cols(df_def, p_def_gen, [TIME_COL, CPU_COL, MEM_COL])
-    _require_cols(df_our, p_our_gen, [TIME_COL, CPU_COL, MEM_COL])
+    if df_def is not None:
+        _require_cols(df_def, p_def_gen, [TIME_COL, CPU_COL, MEM_COL])  # type: ignore[arg-type]
+    if df_plugin is not None:
+        _require_cols(df_plugin, p_plugin_gen, [TIME_COL, CPU_COL, MEM_COL])  # type: ignore[arg-type]
 
-    prios = _detect_priorities_from_general(df_def)
+    if args.plot == "both":
+        prios = _detect_priorities_union(df_def, df_plugin)  # type: ignore[arg-type]
+    elif args.plot == "default":
+        prios = _detect_priorities_from_general(df_def)  # type: ignore[arg-type]
+    else:
+        prios = _detect_priorities_from_general(df_plugin)  # type: ignore[arg-type]
 
-    # 1) Effective utilization (single plot)
-    plot_effective_utilization(df_def, df_our, out_path=out_dir / "effective_utilization.png")
+    # 1) Effective utilization
+    if args.plot == "both":
+        plot_effective_utilization(df_def, df_plugin, out_path=out_dir / "effective_utilization.png")  # type: ignore[arg-type]
+    elif args.plot == "default":
+        plot_effective_utilization_single(
+            df_def, label="default", out_path=out_dir / "effective_utilization.png"  # type: ignore[arg-type]
+        )
+    else:
+        plot_effective_utilization_single(
+            df_plugin, label="plugin", out_path=out_dir / "effective_utilization.png"  # type: ignore[arg-type]
+        )
 
-    # 2) Cumulative running pod-seconds diff (single plot, one line per priority)
-    plot_cumulative_running_pod_seconds_diff(
-        df_def, df_our, prios, out_path=out_dir / "cumulative_running_pod_seconds_diff.png"
-    )
+    # 2) Running pod-seconds
+    if args.plot == "both":
+        plot_cumulative_running_pod_seconds_diff(
+            df_def, df_plugin, prios, out_path=out_dir / "cumulative_running_pod_seconds_diff.png"  # type: ignore[arg-type]
+        )
+    elif args.plot == "default":
+        plot_cumulative_running_pod_seconds_single(
+            df_def, prios, label="default", out_path=out_dir / "cumulative_running_pod_seconds.png"  # type: ignore[arg-type]
+        )
+    else:
+        plot_cumulative_running_pod_seconds_single(
+            df_plugin, prios, label="plugin", out_path=out_dir / "cumulative_running_pod_seconds.png"  # type: ignore[arg-type]
+        )
 
-    # 3) Cumulative deletions diff: one plot per priority
-    plot_cumulative_deletions_diff(
-        df_def, df_our, prios, out_path=out_dir / "cumulative_deletions_diff.png"
-    )
+    # 3) Deletions
+    if args.plot == "both":
+        plot_cumulative_deletions_diff(
+            df_def, df_plugin, prios, out_path=out_dir / "cumulative_deletions_diff.png"  # type: ignore[arg-type]
+        )
+    elif args.plot == "default":
+        plot_cumulative_deletions_single(
+            df_def, prios, label="default", out_path=out_dir / "cumulative_deletions.png"  # type: ignore[arg-type]
+        )
+    else:
+        plot_cumulative_deletions_single(
+            df_plugin, prios, label="plugin", out_path=out_dir / "cumulative_deletions.png"  # type: ignore[arg-type]
+        )
 
-    # 4) Scheduling latency histogram (TOTAL): default vs ours, two bars per bin + mean lines
-    pod_def = _read_pod_stats(p_def_pod)
-    pod_our = _read_pod_stats(p_our_pod)
-    plot_first_admit_latency_histogram_total(
-        pod_def,
-        pod_our,
-        bins=max(5, int(args.latency_bins)),
-        xmax=args.latency_xmax,
-        out_path=out_dir / "scheduling_latency.png",
-    )
+    # 4) Scheduling latency histogram
+    if args.plot == "both":
+        pod_def = _read_pod_stats(p_def_pod)  # type: ignore[arg-type]
+        pod_plugin = _read_pod_stats(p_plugin_pod)  # type: ignore[arg-type]
+        plot_first_admit_latency_histogram_total(
+            pod_def,
+            pod_plugin,
+            bins=max(5, int(args.latency_bins)),
+            xmax=args.latency_xmax,
+            out_path=out_dir / "scheduling_latency.png",
+        )
+    elif args.plot == "default":
+        pod_def = _read_pod_stats(p_def_pod)  # type: ignore[arg-type]
+        plot_first_admit_latency_histogram_single(
+            pod_def,
+            bins=max(5, int(args.latency_bins)),
+            xmax=args.latency_xmax,
+            label="default",
+            out_path=out_dir / "scheduling_latency.png",
+        )
+    else:
+        pod_plugin = _read_pod_stats(p_plugin_pod)  # type: ignore[arg-type]
+        plot_first_admit_latency_histogram_single(
+            pod_plugin,
+            bins=max(5, int(args.latency_bins)),
+            xmax=args.latency_xmax,
+            label="plugin",
+            out_path=out_dir / "scheduling_latency.png",
+        )
 
     print(f"Saved plots to: {out_dir}")
 
