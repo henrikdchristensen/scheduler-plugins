@@ -16,12 +16,12 @@ mkdir -p bootstrap/content
 
 # 2) Copy "data" subfolder into "bootstrap/content"
 echo "Copying data subfolder into bootstrap/content..."
-rsync -a --exclude='__pycache__' data/    bootstrap/content/data
+rsync -a --exclude='__pycache__'    data/    bootstrap/content/data
 
 # 3) Copy scripts subfolder into "bootstrap/content/scripts" (excluding __pycache__)
 echo "Copying scripts subfolder into bootstrap/content/scripts..."
 # Use rsync to skip __pycache__ directories
-rsync -a --exclude='__pycache__' scripts/    bootstrap/content/scripts/
+rsync -a --exclude='__pycache__'    scripts/    bootstrap/content/scripts/
 
 # 4) Move bootstrap file scripts to "bootstrap/" folder and make them executable
 echo "Move bootstrap files to 'bootstrap' folder and set permissions..."

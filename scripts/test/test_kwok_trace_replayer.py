@@ -666,8 +666,8 @@ def test_pod_epoch_extractors():
         "metadata": {"creationTimestamp": "2026-01-09T12:00:00Z"},
         "status": {"startTime": "2026-01-09T12:00:01Z"},
     }
-    assert rp._pod_creation_epoch(pod) is not None
-    assert rp._pod_start_epoch(pod) is not None
+    assert rp._pod_creation_time(pod) is not None
+    assert rp._pod_start_time(pod) is not None
 
 
 # =============================================================================

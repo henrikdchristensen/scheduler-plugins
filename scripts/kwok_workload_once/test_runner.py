@@ -290,7 +290,7 @@ class TestRunner:
         self.args = TestRunner.ensure_default_args(self.args)
 
         # Setup logging
-        setup_logging(name=LOGGER_NAME, prefix="[test-runner] ", level=self.args.log_level)
+        setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=self.args.log_level)
 
         # Log args after merging and setting defaults
         self.log_args(self.args)

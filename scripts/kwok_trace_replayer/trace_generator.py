@@ -3,37 +3,14 @@
 
 """
 python -m scripts.kwok_trace_replayer.trace_generator \
---output-dir ./output-traces \
---seed 12345 \
---log-level INFO \
---num-nodes 8 \
---trace-time 1h \
---target-util 0.95 \
---xmin-arrival 0.01 \
---xmax-arrival 30.0 \
---mean-arrival 10.0 \
---xmin-life 10.0 \
---xmax-life 3600.0 \
---xmin-req 0.01 \
---xmax-req 0.5 \
---mean-req 0.1 \
---priority-min 1 \
---priority-max 3 \
---priority-ratio 0.9 \
---replicas-min 1 \
---replicas-max 3 \
---replicas-ratio 0.8 \
- 
+--job-file <job-file.yaml>
 """
 
-import argparse, copy, heapq, json, logging, os
+import argparse, copy, heapq, json, logging, os, yaml
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import yaml
-
-import matplotlib.pyplot as plt
 import numpy as np
 
 from scripts.helpers.general_helpers import (
@@ -55,8 +32,8 @@ from scripts.helpers.job_helpers import (
 )
 from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 from scripts.kwok_trace_replayer.plot_helpers import (
-    plot_histogram_with_pareto,
-    plot_bar_with_geometric,
+    plot_generator_histograms,
+    plot_utilization_time_series,
 )
 
 # ---------------------------------------------------------------------
@@ -82,7 +59,6 @@ LOG = logging.getLogger(LOGGER_NAME)
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_SHOW_PLOTS = False
 
-
 # ---------------------------------------------------------------------
 # Small state models
 # ---------------------------------------------------------------------
@@ -91,22 +67,20 @@ class ClusterState:
     live_req: float = 0.0
     live_pods: int = 0
 
-
 @dataclass(order=True)
 class EndHeapEntry:
     end_time: float
     req: float = field(compare=False)
     replicas: int = field(compare=False)
 
-
 # ---------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------
 def build_arg_parser() -> argparse.ArgumentParser:
+    """
+    Build and return the CLI argument parser.
+    """
     p = argparse.ArgumentParser(description="Generate initial + trace workload JSON files.")
-
-    # This script supports job-file YAML args. To allow job args to supply values,
-    # most CLI defaults are None and are filled in after job merge.
 
     # General
     p.add_argument("--job-file", dest="job_file", default=None,
@@ -157,8 +131,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     return p
 
-
 def _load_job_doc(path: str | Path) -> dict:
+    """
+    Load and validate a YAML job file as a mapping.
+    """
     p = Path(path).resolve()
     if not p.exists():
         raise SystemExit(f"--job-file not found: {p}")
@@ -171,8 +147,10 @@ def _load_job_doc(path: str | Path) -> dict:
         raise SystemExit(f"--job-file must be a YAML mapping/object: {p}")
     return doc
 
-
 def _merge_job_fields(args: argparse.Namespace, job: dict) -> argparse.Namespace:
+    """
+    Merge supported job-file fields into an argparse namespace.
+    """
     fields = [
         JobField("output-dir", "output_dir", parse=parse_optional_str),
         JobField("seed", "seed", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
@@ -206,18 +184,20 @@ def _merge_job_fields(args: argparse.Namespace, job: dict) -> argparse.Namespace
     ]
     return merge_job_fields_into_args(args, job or {}, fields)
 
-
 def _apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    """
+    Apply default values for optional arguments.
+    """
     if getattr(args, "log_level", None) is None:
         args.log_level = DEFAULT_LOG_LEVEL
     if getattr(args, "show_plots", None) is None:
         args.show_plots = bool(DEFAULT_SHOW_PLOTS)
-
     return args
 
-
 def _validate_args(args: argparse.Namespace) -> None:
-    # Only defaults allowed are log_level and show_plots.
+    """
+    Validate that required arguments are present and consistent.
+    """
     missing: list[str] = []
 
     # Output location is always required.
@@ -266,11 +246,9 @@ def _validate_args(args: argparse.Namespace) -> None:
         if not p.exists():
             raise SystemExit(f"--seed-file not found: {p}")
 
-
 def resolve_effective_args(cli_args: argparse.Namespace) -> argparse.Namespace:
     """
-    Resolve arguments in priority order:
-      CLI values > job-file values > defaults.
+    Resolve effective arguments with CLI > job-file > defaults precedence.
     """
     args = cli_args
     job_doc = _load_job_doc(args.job_file) if getattr(args, "job_file", None) else None
@@ -280,17 +258,14 @@ def resolve_effective_args(cli_args: argparse.Namespace) -> argparse.Namespace:
     _validate_args(args)
     return args
 
-
 def expand_seed_runs(args: argparse.Namespace) -> list[argparse.Namespace]:
     """
-    Expand a resolved args namespace into one args-per-seed.
-    If seed-file is provided, outputs are written under <output-dir>/<seed>/.
+    Expand a resolved args namespace into one namespace per seed run.
     """
     if getattr(args, "seed_file", None):
         seeds = read_seeds_file(Path(args.seed_file).resolve(), logger=LOG)
     else:
         seeds = [int(args.seed)]
-
     base_out = Path(args.output_dir).resolve()
     runs: list[argparse.Namespace] = []
     for s in seeds:
@@ -301,18 +276,22 @@ def expand_seed_runs(args: argparse.Namespace) -> list[argparse.Namespace]:
         runs.append(a)
     return runs
 
-
 def round_float_args(args: argparse.Namespace, ndigits: int) -> None:
+    """
+    Round all float fields on an argparse namespace in-place.
+    """
     for k, v in vars(args).items():
         if isinstance(v, float):
             setattr(args, k, round(v, ndigits))
-
 
 # ---------------------------------------------------------------------
 # Generator
 # ---------------------------------------------------------------------
 class TraceGenerator:
     def __init__(self, args: argparse.Namespace) -> None:
+        """
+        Initialize generator state and output paths from resolved args.
+        """
         self.args = args
         self.base_seed = int(args.seed)
 
@@ -345,6 +324,9 @@ class TraceGenerator:
     # Logging / metadata
     # -------------------------
     def log_args(self) -> None:
+        """
+        Log key arguments in a stable order for reproducibility.
+        """
         include = [
             "job_file",
             "output_dir",
@@ -374,7 +356,7 @@ class TraceGenerator:
 
     def _write_info_file(self, extra: Dict[str, object]) -> None:
         """
-        Single place for *all* generation metadata (no meta inside JSON files).
+        Write generation metadata to info_generate.yaml.
         """
         try:
             inputs = {
@@ -398,6 +380,9 @@ class TraceGenerator:
         x_max: Optional[float],
         size: int = 1,
     ) -> np.ndarray:
+        """
+        Sample Pareto-distributed values with an optional upper bound.
+        """
         if alpha <= 0 or x_min <= 0:
             raise ValueError("Pareto alpha and x_min must be > 0.")
         if x_max is not None and x_max < x_min:
@@ -420,6 +405,9 @@ class TraceGenerator:
         x_max: Optional[float],
         target_mean: float,
     ) -> float:
+        """
+        Solve for Pareto alpha (via bisection + MC) that matches a target mean.
+        """
         if x_min <= 0:
             raise ValueError("x_min must be > 0.")
         if x_max is not None and not (x_min < target_mean < x_max):
@@ -455,7 +443,7 @@ class TraceGenerator:
     @staticmethod
     def _build_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Build discrete support and probabilities for geometric distribution.
+        Build discrete support and probabilities for a truncated geometric distribution.
         """
         if ratio <= 0:
             raise ValueError("ratio must be > 0.")
@@ -470,14 +458,16 @@ class TraceGenerator:
         return vals, p
 
     @staticmethod
-    def _expected_value(vals: np.ndarray, probs: Optional[np.ndarray]) -> float:
-        
+    def _expected_value_for_support(vals: np.ndarray, probs: Optional[np.ndarray]) -> float:
+        """
+        Compute an expected value for integer support with optional probabilities.
+        """
         return float(np.mean(vals)) if probs is None else float(np.sum(vals.astype(float) * probs.astype(float)))
 
-    # -------------------------
-    # Mean life inference
-    # -------------------------
     def _infer_mean_life_from_target_util(self) -> float:
+        """
+        Infer mean pod lifetime to hit target utilization given arrival/req distributions.
+        """
         mean_arrival = float(self.args.mean_arrival)
         if mean_arrival <= 0:
             raise ValueError("mean-arrival must be > 0.")
@@ -488,7 +478,7 @@ class TraceGenerator:
             max(1, int(self.args.replicas_max)),
             float(self.args.replicas_ratio),
         )
-        e_rep = self._expected_value(r_vals, r_probs)
+        e_rep = self._expected_value_for_support(r_vals, r_probs)
 
         e_req = float(self.args.mean_req)
         if e_req <= 0:
@@ -513,10 +503,10 @@ class TraceGenerator:
 
         return float(mean_life)
 
-    # -------------------------
-    # Fit alphas
-    # -------------------------
     def _fit_alphas(self, rng: np.random.Generator) -> None:
+        """
+        Fit Pareto alphas for req/arrival/life to match configured means.
+        """
         a_req = self._solve_alpha_for_mean(
             rng,
             float(self.args.xmin_req),
@@ -568,9 +558,12 @@ class TraceGenerator:
         )
 
     # -------------------------
-    # Util metric (single truth)
+    # Util metric
     # -------------------------
     def _time_avg_req_util(self, pods: List[TraceRecord]) -> float:
+        """
+        Compute time-average requested utilization over the trace horizon.
+        """
         T = float(self.trace_time_s)
         if T <= 0:
             return 0.0
@@ -587,9 +580,9 @@ class TraceGenerator:
         return area / (N * T)
 
     # -------------------------
-    # Initial snapshot (steady state)
+    # Initial load generation (load at t=0)
     # -------------------------
-    def _build_initial_snapshot(
+    def _build_initial_load(
         self,
         rng: np.random.Generator,
         prio_vals: np.ndarray,
@@ -598,6 +591,9 @@ class TraceGenerator:
         rep_probs: Optional[np.ndarray],
         next_id: int,
     ) -> Tuple[List[TraceRecord], int]:
+        """
+        Generate a steady-state initial pod set approximating target utilization.
+        """
         assert self.alpha_req is not None and self.alpha_life is not None
 
         target_req_total = float(self.args.target_util) * float(self.args.num_nodes)
@@ -689,9 +685,9 @@ class TraceGenerator:
         initial_pods: List[TraceRecord],
     ) -> Tuple[List[TraceRecord], int, List[float], List[float], List[int]]:
         """
-        Generate trace pods with start_time >= 0, while tracking *live* state
-        that includes the initial snapshot baseline at t=0 (for plotting only).
+        Generate trace pods (t>=0) and utilization series seeded by initial pods.
         """
+        
         assert self.alpha_req is not None and self.alpha_arrival is not None and self.alpha_life is not None
 
         state = ClusterState()
@@ -788,7 +784,10 @@ class TraceGenerator:
     # -------------------------
     # Calibration loop
     # -------------------------
-    def _generate_all_once(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, float], Dict[str, object]]:
+    def _generate_tracedata_once(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, float], Dict[str, object]]:
+        """
+        Generate one candidate initial+trace dataset and associated metadata.
+        """
         iter_seed_int = int(iter_seed)
         rng_fit = np.random.default_rng(derive_seed(iter_seed_int, "fit-alphas"))
         rng_initial = np.random.default_rng(derive_seed(iter_seed_int, "initial-snapshot"))
@@ -809,7 +808,7 @@ class TraceGenerator:
 
         next_id = 0
 
-        initial_pods, next_id = self._build_initial_snapshot(
+        initial_pods, next_id = self._build_initial_load(
             rng_initial,
             prio_vals,
             prio_probs,
@@ -922,6 +921,9 @@ class TraceGenerator:
         return initial_pods, trace_pods, stats, extra_info
 
     def _calibrate_mean_life(self) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
+        """
+        Iteratively calibrate mean-life to match target utilization within tolerance.
+        """
         target = float(self.args.target_util)
         tol = float(UTIL_TOL)
         max_iter = int(CALIB_MEAN_LIFE_MAX_ITER)
@@ -933,7 +935,7 @@ class TraceGenerator:
 
         for it in range(1, max_iter + 1):
             iter_seed = int(derive_seed(self.base_seed, "calibrate-mean-life", it))
-            initial_pods, trace_pods, stats, extra_info = self._generate_all_once(iter_seed)
+            initial_pods, trace_pods, stats, extra_info = self._generate_tracedata_once(iter_seed)
 
             measured = float(stats["util_time_avg"])
             err = abs(measured - target) / max(1e-12, target)
@@ -975,13 +977,18 @@ class TraceGenerator:
     # Output writers
     # -------------------------
     def _write_json(self, path: Path, pods: List[TraceRecord]) -> None:
-        # NO META in JSON anymore (kept in info_generate.yaml).
+        """
+        Write a list of TraceRecords to a JSON file.
+        """
         obj = {"pods": [asdict(p) for p in pods]}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2)
         LOG.info("wrote %s (%d records)", path, len(pods))
 
     def _write_outputs(self, initial_pods: List[TraceRecord], trace_pods: List[TraceRecord], extra_info: Dict[str, object]) -> None:
+        """
+        Write generated JSON outputs and metadata to disk.
+        """
         all_pods = initial_pods + trace_pods
         util_time = self._time_avg_req_util(all_pods)
 
@@ -998,192 +1005,12 @@ class TraceGenerator:
         self._write_info_file(extra=extra_info)
 
     # -------------------------
-    # Plots
-    # -------------------------
-    def _plot_utilization(self, all_pods: List[TraceRecord]) -> None:
-        if not self.times:
-            return
-
-        t = np.asarray(self.times, dtype=float)
-        u = np.asarray(self.u_req_hist, dtype=float)
-        pods = np.asarray(self.pods_hist, dtype=float)
-
-        max_time = float(max(t)) if len(t) else 0.0
-        if max_time <= 7 * 3600:
-            x_scale, x_label = (1.0 / 60.0), "Time (minutes)"
-        elif max_time <= 7 * 24 * 3600:
-            x_scale, x_label = (1.0 / 3600.0), "Time (hours)"
-        else:
-            x_scale, x_label = (1.0 / (24.0 * 3600.0)), "Time (days)"
-
-        fig, ax1 = plt.subplots(figsize=(9, 4))
-
-        ax1.plot(t, u, label="Utilization", color="tab:blue", linewidth=0.8)
-        ax1.set_xlabel(x_label, labelpad=20)
-        ax1.set_ylabel("Utilization (fraction of total capacity)")
-        ax1.grid(True, linestyle="--", alpha=0.4)
-
-        ax2 = ax1.twinx()
-        ax2.plot(t, pods, label="Number of pods", color="tab:orange", linewidth=0.8)
-        ax2.set_ylabel("Number of pods")
-
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc="lower right")
-
-        xticks = [x for x in ax1.get_xticks() if 0.0 <= x <= max_time]
-        ax1.set_xticks(xticks)
-        ax1.set_xticklabels([f"{x * x_scale:.0f}" for x in xticks])
-
-        events: List[Tuple[float, str]] = []
-        for p in all_pods:
-            events.append((float(p.start_time), "C"))
-            events.append((float(p.end_time), "D"))
-        events.sort(key=lambda e: e[0])
-
-        ax1.text(
-            0.0,
-            -0.10,
-            f"+{int(self.initial_pods_count)}",
-            transform=ax1.get_xaxis_transform(),
-            ha="left",
-            va="top",
-            fontsize=8,
-        )
-
-        if events and xticks:
-            idx = 0
-            n_events = len(events)
-            for i, tick in enumerate(xticks):
-                left = 0.0 if i == 0 else xticks[i - 1]
-                right = tick
-                c_count = 0
-                d_count = 0
-
-                while idx < n_events and events[idx][0] <= right:
-                    t_ev, kind = events[idx]
-                    idx += 1
-                    if t_ev > left:
-                        if kind == "C":
-                            c_count += 1
-                        else:
-                            d_count += 1
-
-                if c_count or d_count:
-                    ax1.text(
-                        tick,
-                        -0.10,
-                        f"+{c_count} -{d_count}",
-                        transform=ax1.get_xaxis_transform(),
-                        ha="center",
-                        va="top",
-                        fontsize=8,
-                    )
-
-        plt.tight_layout()
-        plt.subplots_adjust(bottom=0.22)
-        plt.savefig(self.util_plot_path)
-        if bool(getattr(self.args, "show_plots", False)):
-            plt.show()
-        plt.close(fig)
-        LOG.info("saved utilization plot to %s", self.util_plot_path)
-
-    def _plot_histograms(self, all_pods: List[TraceRecord]) -> None:
-        if not all_pods:
-            return
-
-        pods_sorted = sorted(all_pods, key=lambda p: p.start_time)
-        start_times = np.array([p.start_time for p in pods_sorted], dtype=float)
-        req_vals = np.array([p.cpu for p in pods_sorted], dtype=float)
-        lifetimes = np.array([p.end_time - p.start_time for p in pods_sorted], dtype=float)
-        prios = np.array([p.priority for p in pods_sorted], dtype=int)
-        reps = np.array([p.replicas for p in pods_sorted], dtype=int)
-
-        inter_arr = np.empty_like(start_times)
-        if len(start_times) > 0:
-            inter_arr[0] = start_times[0]
-        if len(start_times) > 1:
-            inter_arr[1:] = np.diff(start_times)
-
-        fig, axes = plt.subplots(5, 1, figsize=(6, 10))
-        axes = axes.flatten()
-
-        plot_histogram_with_pareto(
-            axes[0],
-            inter_arr,
-            title="Inter-arrival times (all records)",
-            x_label="Δt (seconds)",
-            y_label="Probability density",
-            bins=80,
-            log_y=True,
-            x_max=self.args.xmax_arrival,
-            scale=1.0,
-            pareto_fit=True,
-            pareto_alpha=float(self.args.alpha_arrival),
-            pareto_xmin=float(self.args.xmin_arrival),
-        )
-        plot_histogram_with_pareto(
-            axes[1],
-            lifetimes,
-            title="Lifetimes (all records)",
-            x_label="Lifetime (seconds)",
-            y_label="Probability density",
-            bins=80,
-            log_y=True,
-            x_max=self.args.xmax_life,
-            scale=1.0,
-            pareto_fit=True,
-            pareto_alpha=float(self.args.alpha_life),
-            pareto_xmin=float(self.args.xmin_life),
-        )
-        plot_histogram_with_pareto(
-            axes[2],
-            req_vals,
-            title="Requests (CPU = MEM)",
-            x_label="Request (fraction of node capacity)",
-            y_label="Probability density",
-            bins=80,
-            log_y=True,
-            x_max=self.args.xmax_req,
-            scale=1.0,
-            pareto_fit=True,
-            pareto_alpha=float(self.args.alpha_req),
-            pareto_xmin=float(self.args.xmin_req),
-        )
-        plot_bar_with_geometric(
-            axes[3],
-            prios,
-            title="Priorities",
-            x_label="Priority",
-            y_label="Probability mass",
-            geom_fit=True,
-            geom_ratio=float(self.args.priority_ratio),
-            x_min=int(self.args.priority_min),
-            x_max=int(self.args.priority_max),
-        )
-        plot_bar_with_geometric(
-            axes[4],
-            reps,
-            title="Replicas",
-            x_label="Replicas",
-            y_label="Probability mass",
-            geom_fit=True,
-            geom_ratio=float(self.args.replicas_ratio),
-            x_min=int(self.args.replicas_min),
-            x_max=int(self.args.replicas_max),
-        )
-
-        fig.tight_layout()
-        fig.savefig(self.hist_plot_path, dpi=150, bbox_inches="tight")
-        if bool(getattr(self.args, "show_plots", False)):
-            plt.show()
-        plt.close(fig)
-        LOG.info("saved generated histograms to %s", self.hist_plot_path)
-
-    # -------------------------
     # Runner
     # -------------------------
     def run(self) -> None:
+        """
+        Run the full generation workflow for a single seed.
+        """
         if self.args.mean_life is None:
             self.args.mean_life = self._infer_mean_life_from_target_util()
             LOG.info(
@@ -1198,9 +1025,37 @@ class TraceGenerator:
         all_pods = initial_pods + trace_pods
         self._write_outputs(initial_pods, trace_pods, extra_info)
 
-        self._plot_utilization(all_pods)
-        self._plot_histograms(all_pods)
-
+        plot_utilization_time_series(
+            times=self.times,
+            u_req_hist=self.u_req_hist,
+            pods_hist=self.pods_hist,
+            all_pods=all_pods,
+            initial_pods_count=int(self.initial_pods_count),
+            out_path=str(self.util_plot_path),
+            show_plots=bool(getattr(self.args, "show_plots", False)),
+            logger=LOG,
+        )
+        plot_generator_histograms(
+            all_pods=all_pods,
+            out_path=str(self.hist_plot_path),
+            alpha_arrival=float(self.args.alpha_arrival),
+            xmin_arrival=float(self.args.xmin_arrival),
+            xmax_arrival=self.args.xmax_arrival,
+            alpha_life=float(self.args.alpha_life),
+            xmin_life=float(self.args.xmin_life),
+            xmax_life=self.args.xmax_life,
+            alpha_req=float(self.args.alpha_req),
+            xmin_req=float(self.args.xmin_req),
+            xmax_req=float(self.args.xmax_req),
+            priority_ratio=float(self.args.priority_ratio),
+            priority_min=int(self.args.priority_min),
+            priority_max=int(self.args.priority_max),
+            replicas_ratio=float(self.args.replicas_ratio),
+            replicas_min=int(self.args.replicas_min),
+            replicas_max=int(self.args.replicas_max),
+            show_plots=bool(getattr(self.args, "show_plots", False)),
+            logger=LOG,
+        )
 
 # ---------------------------------------------------------------------
 # Main
@@ -1211,17 +1066,19 @@ def main() -> None:
     cli_args = build_arg_parser().parse_args()
     args = resolve_effective_args(cli_args)
     round_float_args(args, MAX_DECIMALS)
-    setup_logging(name=LOGGER_NAME, prefix="[trace-generator] ", level=args.log_level)
+    setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
 
     runs = expand_seed_runs(args)
     total = len(runs)
+    # Loop over all runs (different seeds)
     for i, a in enumerate(runs, start=1):
         if total > 1:
             LOG.info("run %d/%d seed=%d output_dir=%s", i, total, int(a.seed), a.output_dir)
         gen = TraceGenerator(a)
         gen.run()
+    
+    # All runs (seeds) done
     LOG.info("done.")
-
 
 if __name__ == "__main__":
     main()
