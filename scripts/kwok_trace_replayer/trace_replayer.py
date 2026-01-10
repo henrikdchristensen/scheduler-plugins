@@ -75,6 +75,38 @@ LOGGER_NAME = "trace-replayer"
 LOG = logging.getLogger(LOGGER_NAME)
 
 
+def _discover_trace_run_dirs(trace_dir: Path) -> List[Path]:
+    """Return a list of directories that each contain a trace.json.
+
+    Supported layouts:
+    - <trace-dir>/trace.json                         -> single run
+    - <trace-dir>/<seed-name>/trace.json             -> one run per seed subdir
+    """
+    trace_dir = trace_dir.resolve()
+    if (trace_dir / "trace.json").exists():
+        return [trace_dir]
+
+    if not trace_dir.is_dir():
+        raise SystemExit(f"--trace-dir must be a directory: {trace_dir}")
+
+    run_dirs: List[Path] = []
+    try:
+        for child in sorted(trace_dir.iterdir(), key=lambda p: p.name):
+            if not child.is_dir():
+                continue
+            if (child / "trace.json").exists():
+                run_dirs.append(child)
+    except Exception as e:
+        raise SystemExit(f"failed to scan --trace-dir for seeds: {trace_dir} ({e})")
+
+    if run_dirs:
+        return run_dirs
+
+    # Fallback to prior behavior: accept a trace-dir that exists even if the
+    # trace.json hasn't been generated yet (or tests are mocking TraceReplayer).
+    return [trace_dir]
+
+
 def _parse_optional_bool_strict(v: Any) -> bool | None:
     return v if isinstance(v, bool) else None
 
@@ -964,8 +996,34 @@ def main() -> None:
     args = ensure_default_args(args)
     setup_logging(name="trace-replayer", prefix="[trace-replayer] ", level=args.log_level)
 
-    replayer = TraceReplayer(args, job_doc=job_doc, override_kwokctl_envs=override_kwokctl_envs)
-    replayer.run()
+    trace_dir = Path(args.trace_dir).resolve()
+    run_dirs = _discover_trace_run_dirs(trace_dir)
+    base_results_dir = Path(args.result_dir).resolve()
+
+    # If trace-dir is a container of multiple seed dirs, write each run under result-dir/<seed-name>.
+    multi_seed = len(run_dirs) > 1 or run_dirs[0] != trace_dir
+    if multi_seed:
+        LOG.info("discovered %d seed trace directories under %s", len(run_dirs), trace_dir)
+
+    for run_dir in run_dirs:
+        if multi_seed:
+            seed_name = run_dir.name
+            run_result_dir = base_results_dir / seed_name
+        else:
+            seed_name = None
+            run_result_dir = base_results_dir
+
+        run_args = argparse.Namespace(**vars(args))
+        run_args.trace_dir = str(run_dir)
+        run_args.result_dir = str(run_result_dir)
+
+        if seed_name:
+            LOG.info("starting trace replay seed=%s trace_dir=%s result_dir=%s", seed_name, run_dir, run_result_dir)
+        else:
+            LOG.info("starting trace replay trace_dir=%s result_dir=%s", run_dir, run_result_dir)
+
+        replayer = TraceReplayer(run_args, job_doc=job_doc, override_kwokctl_envs=override_kwokctl_envs)
+        replayer.run()
 
 
 if __name__ == "__main__":

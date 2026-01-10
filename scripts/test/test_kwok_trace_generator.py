@@ -24,9 +24,12 @@ def _make_required_args(tmp_path: Path, **overrides):
       required-ish for tests: output_dir
     """
     base = dict(
+        job_file=None,
         output_dir=str(tmp_path),
         seed=42,
+        seed_file=None,
         log_level="INFO",
+        show_plots=False,
         num_nodes=2,
         trace_time="5s",
         target_util=0.75,
@@ -50,11 +53,6 @@ def _make_required_args(tmp_path: Path, **overrides):
         replicas_min=1,
         replicas_max=2,
         replicas_ratio=1.0,
-
-        util_tol=0.01,
-        calib_max_iter=10,
-        initial_fill_tol=0.002,
-        initial_max_pods=1000,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -83,43 +81,182 @@ def sample_for_alpha(_rng, alpha, x_min, x_max, size=1):
 
 def test_build_arg_parser_defaults_and_required(tmp_path: Path):
     p = tg.build_arg_parser()
-    args = p.parse_args(
+    cli_args = p.parse_args(
         [
             "--output-dir", str(tmp_path),
+            "--seed", "42",
+            "--num-nodes", "8",
+            "--trace-time", "3600s",
             "--target-util", "0.9",
+            "--xmin-arrival", "0.01",
             "--mean-arrival", "1.0",
+            "--xmin-life", "10.0",
+            "--xmin-req", "0.01",
+            "--xmax-req", "1.0",
             "--mean-req", "0.2",
+            "--priority-min", "1",
+            "--priority-max", "3",
+            "--priority-ratio", "1.0",
+            "--replicas-min", "1",
+            "--replicas-max", "1",
+            "--replicas-ratio", "1.0",
         ]
     )
+
+    args = tg.resolve_effective_args(cli_args)
 
     assert args.output_dir == str(tmp_path)
     assert args.seed == 42
     assert args.num_nodes == 8
     assert args.trace_time == "3600s"
-
-    # defaults
-    assert args.priority_min == 1
-    assert args.priority_max == 3
-    assert args.replicas_min == 1
-    assert args.replicas_max == 1
+    assert args.log_level == "INFO"
+    assert args.show_plots is False
 
 
 @pytest.mark.parametrize(
     "missing_flag",
-    ["--target-util", "--mean-arrival", "--mean-req"],
+    [
+        "--output-dir",
+        "--seed",
+        "--num-nodes",
+        "--trace-time",
+        "--target-util",
+        "--xmin-arrival",
+        "--mean-arrival",
+        "--xmin-life",
+        "--xmin-req",
+        "--xmax-req",
+        "--mean-req",
+        "--priority-min",
+        "--priority-max",
+        "--priority-ratio",
+        "--replicas-min",
+        "--replicas-max",
+        "--replicas-ratio",
+    ],
 )
-def test_build_arg_parser_missing_required_exits(tmp_path: Path, missing_flag: str):
+def test_resolve_effective_args_missing_required_exits(tmp_path: Path, missing_flag: str):
     p = tg.build_arg_parser()
     argv = [
         "--output-dir", str(tmp_path),
+        "--seed", "42",
+        "--num-nodes", "8",
+        "--trace-time", "3600s",
         "--target-util", "0.9",
+        "--xmin-arrival", "0.01",
         "--mean-arrival", "1.0",
+        "--xmin-life", "10.0",
+        "--xmin-req", "0.01",
+        "--xmax-req", "1.0",
         "--mean-req", "0.2",
+        "--priority-min", "1",
+        "--priority-max", "3",
+        "--priority-ratio", "1.0",
+        "--replicas-min", "1",
+        "--replicas-max", "1",
+        "--replicas-ratio", "1.0",
     ]
     i = argv.index(missing_flag)
     del argv[i:i + 2]
+    cli_args = p.parse_args(argv)
     with pytest.raises(SystemExit):
-        p.parse_args(argv)
+        tg.resolve_effective_args(cli_args)
+
+
+def test_job_file_merges_when_cli_missing_and_cli_wins(tmp_path: Path):
+    job_path = tmp_path / "job.yaml"
+    job_path.write_text(
+        """
+output-dir: ./ignored-by-cli
+seed: 111
+num-nodes: 5
+trace-time: 7s
+target-util: 0.9
+xmin-arrival: 0.01
+mean-arrival: 1.0
+xmin-life: 10.0
+xmin-req: 0.01
+xmax-req: 1.0
+mean-req: 0.2
+priority-min: 1
+priority-max: 3
+priority-ratio: 1.0
+replicas-min: 1
+replicas-max: 1
+replicas-ratio: 1.0
+show-plots: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    p = tg.build_arg_parser()
+    cli_args = p.parse_args(
+        [
+            "--job-file", str(job_path),
+            "--output-dir", str(tmp_path),
+            "--seed", "222",  # should override job seed
+        ]
+    )
+
+    args = tg.resolve_effective_args(cli_args)
+    assert args.seed == 222
+    assert args.num_nodes == 5
+    assert args.trace_time == "7s"
+    assert args.show_plots is True
+    assert args.output_dir == str(tmp_path)
+
+
+def test_seed_file_expands_to_subdirs_under_output_dir(tmp_path: Path):
+    seeds_path = tmp_path / "seeds.txt"
+    seeds_path.write_text("1\n2\n#comment\n2\n", encoding="utf-8")
+
+    p = tg.build_arg_parser()
+    cli_args = p.parse_args(
+        [
+            "--output-dir", str(tmp_path),
+            "--seed-file", str(seeds_path),
+            "--num-nodes", "8",
+            "--trace-time", "3600s",
+            "--target-util", "0.9",
+            "--xmin-arrival", "0.01",
+            "--mean-arrival", "1.0",
+            "--xmin-life", "10.0",
+            "--xmin-req", "0.01",
+            "--xmax-req", "1.0",
+            "--mean-req", "0.2",
+            "--priority-min", "1",
+            "--priority-max", "3",
+            "--priority-ratio", "1.0",
+            "--replicas-min", "1",
+            "--replicas-max", "1",
+            "--replicas-ratio", "1.0",
+        ]
+    )
+    args = tg.resolve_effective_args(cli_args)
+    runs = tg.expand_seed_runs(args)
+
+    assert [r.seed for r in runs] == [1, 2]
+    assert Path(runs[0].output_dir).name == "1"
+    assert Path(runs[1].output_dir).name == "2"
+
+
+def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
+    seeds_path = tmp_path / "seeds.txt"
+    seeds_path.write_text("1\n", encoding="utf-8")
+
+    p = tg.build_arg_parser()
+    cli_args = p.parse_args(
+        [
+            "--output-dir", str(tmp_path),
+            "--seed", "123",
+            "--seed-file", str(seeds_path),
+            "--target-util", "0.9",
+            "--mean-arrival", "1.0",
+            "--mean-req", "0.2",
+        ]
+    )
+    with pytest.raises(SystemExit):
+        tg.resolve_effective_args(cli_args)
 
 
 # =============================================================================
@@ -172,7 +309,7 @@ def test_log_args_calls_log_args_block_and_order(tmp_path: Path, monkeypatch):
     assert seen["args"] is args
     assert seen["title"] == "ARGS"
     # first few should match production ordering
-    assert seen["include"][:6] == ["output_dir", "seed", "log_level", "num_nodes", "trace_time", "xmin_arrival"]
+    assert seen["include"][:6] == ["job_file", "output_dir", "seed", "seed_file", "log_level", "show_plots"]
     assert "target_util" in seen["include"]
     assert "mean_req" in seen["include"]
     assert "mean_arrival" in seen["include"]
@@ -378,7 +515,7 @@ def test_fit_alphas_sets_fields_and_attaches_to_args(monkeypatch, tmp_path: Path
     args = _make_required_args(tmp_path)
     gen = tg.TraceGenerator(args)
 
-    # needs mean_life set (normally from _ensure_prepared)
+    # needs mean_life set (normally inferred in TraceGenerator.run())
     gen.args.mean_life = 2.0
 
     rng = tg.np.random.default_rng(0)
@@ -405,30 +542,6 @@ def test_time_avg_req_util_basic(tmp_path: Path):
     ]
     # area = 0.5*10, divide by N*T = 2*10 => 0.25
     assert gen._time_avg_req_util(pods) == pytest.approx(0.25)
-
-
-# =============================================================================
-# TraceGenerator._ensure_prepared()
-# =============================================================================
-
-def test_ensure_prepared_sets_mean_life_once(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path)
-    gen = tg.TraceGenerator(args)
-
-    calls = {"infer": 0}
-
-    def fake_infer():
-        calls["infer"] += 1
-        return 3.0
-
-    monkeypatch.setattr(gen, "_infer_mean_life_from_target_util", fake_infer)
-
-    assert not gen._prepared
-    gen._ensure_prepared()
-    assert gen._prepared
-    assert gen.args.mean_life == 3.0
-    gen._ensure_prepared()
-    assert calls["infer"] == 1
 
 
 # =============================================================================

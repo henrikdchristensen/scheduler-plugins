@@ -23,15 +23,15 @@ python -m scripts.kwok_trace_replayer.trace_generator \
 --replicas-min 1 \
 --replicas-max 3 \
 --replicas-ratio 0.8 \
---util-tol 0.01 \
---calib-max-iter 100 \
---initial-fill-tol 0.002
+ 
 """
 
-import argparse, heapq, json, logging, os
+import argparse, copy, heapq, json, logging, os
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+import yaml
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,6 +42,16 @@ from scripts.helpers.general_helpers import (
     build_cli_cmd,
     write_info_file,
     log_args_block,
+    derive_seed,
+    read_seeds_file,
+)
+from scripts.helpers.job_helpers import (
+    JobField,
+    merge_job_fields_into_args,
+    parse_optional_bool,
+    parse_optional_float,
+    parse_optional_int,
+    parse_optional_str,
 )
 from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 from scripts.kwok_trace_replayer.plot_helpers import (
@@ -58,10 +68,19 @@ SOLVE_ALPHA_SAMPLES = 50_000
 SOLVE_ALPHA_LOWER_BOUND = 0.1
 SOLVE_ALPHA_UPPER_BOUND = 10.0
 
+UTIL_TOL = 0.01
+CALIB_MEAN_LIFE_MAX_ITER = 200
+INITIAL_FILL_TOL = 0.002
+INITIAL_MAX_PODS = 200_000
+
 MAX_DECIMALS = 6
 
 LOGGER_NAME = "trace-generator"
 LOG = logging.getLogger(LOGGER_NAME)
+
+
+DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_SHOW_PLOTS = False
 
 
 # ---------------------------------------------------------------------
@@ -69,7 +88,6 @@ LOG = logging.getLogger(LOGGER_NAME)
 # ---------------------------------------------------------------------
 @dataclass
 class ClusterState:
-    num_nodes: int
     live_req: float = 0.0
     live_pods: int = 0
 
@@ -87,64 +105,201 @@ class EndHeapEntry:
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Generate initial + trace workload JSON files.")
 
+    # This script supports job-file YAML args. To allow job args to supply values,
+    # most CLI defaults are None and are filled in after job merge.
+
     # General
-    p.add_argument("--output-dir", dest="output_dir", default="./output-traces")
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--log-level", dest="log_level", default="INFO")
+    p.add_argument("--job-file", dest="job_file", default=None,
+                   help="Path to a YAML job file describing arguments. CLI overrides job file.")
+    p.add_argument("--output-dir", dest="output_dir", default=None)
+    p.add_argument("--seed", type=int, default=None,
+                   help="Run exactly this seed.")
+    p.add_argument("--seed-file", dest="seed_file", default=None,
+                   help="Path to a seed list file (one integer per line).")
+    p.add_argument("--log-level", dest="log_level", default=None)
+
+    p.add_argument(
+        "--show-plots",
+        dest="show_plots",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Show plots after generation (plots are always saved).",
+    )
 
     # Cluster / horizon
-    p.add_argument("--num-nodes", type=int, default=8)
-    p.add_argument("--trace-time", type=str, default="3600s")
-    p.add_argument("--target-util", type=float, required=True)
+    p.add_argument("--num-nodes", type=int, default=None)
+    p.add_argument("--trace-time", type=str, default=None)
+    p.add_argument("--target-util", type=float, default=None)
 
     # Inter-arrival (Pareto)
-    p.add_argument("--xmin-arrival", type=float, default=0.01)
+    p.add_argument("--xmin-arrival", type=float, default=None)
     p.add_argument("--xmax-arrival", type=float, default=None)
-    p.add_argument("--mean-arrival", type=float, required=True)
+    p.add_argument("--mean-arrival", type=float, default=None)
 
     # Lifetime bounds (mean is inferred from util)
-    p.add_argument("--xmin-life", type=float, default=10.0)
+    p.add_argument("--xmin-life", type=float, default=None)
     p.add_argument("--xmax-life", type=float, default=None)
     p.add_argument("--mean-life", type=float, default=None)
 
     # Requests (Pareto)
-    p.add_argument("--xmin-req", type=float, default=0.01)
-    p.add_argument("--xmax-req", type=float, default=1.0)
-    p.add_argument("--mean-req", type=float, required=True)
+    p.add_argument("--xmin-req", type=float, default=None)
+    p.add_argument("--xmax-req", type=float, default=None)
+    p.add_argument("--mean-req", type=float, default=None)
 
     # Priority + replicas (geometric/uniform)
-    p.add_argument("--priority-min", type=int, default=1)
-    p.add_argument("--priority-max", type=int, default=3)
-    p.add_argument("--priority-ratio", type=float, default=1.0)
+    p.add_argument("--priority-min", type=int, default=None)
+    p.add_argument("--priority-max", type=int, default=None)
+    p.add_argument("--priority-ratio", type=float, default=None)
 
-    p.add_argument("--replicas-min", type=int, default=1)
-    p.add_argument("--replicas-max", type=int, default=1)
-    p.add_argument("--replicas-ratio", type=float, default=1.0)
-
-    # Calibration controls
-    p.add_argument(
-        "--util-tol",
-        type=float,
-        default=0.01,
-        help="Relative tolerance for hitting target utilization (default: 0.01 = 1%).",
-    )
-    p.add_argument("--calib-max-iter", type=int, default=200)
-
-    # Initial snapshot size control (optional)
-    p.add_argument(
-        "--initial-fill-tol",
-        type=float,
-        default=0.002,
-        help="How close initial snapshot util should be to target (fractional, default 0.002).",
-    )
-    p.add_argument(
-        "--initial-max-pods",
-        type=int,
-        default=200_000,
-        help="Safety cap when building initial snapshot (default 200k).",
-    )
+    p.add_argument("--replicas-min", type=int, default=None)
+    p.add_argument("--replicas-max", type=int, default=None)
+    p.add_argument("--replicas-ratio", type=float, default=None)
 
     return p
+
+
+def _load_job_doc(path: str | Path) -> dict:
+    p = Path(path).resolve()
+    if not p.exists():
+        raise SystemExit(f"--job-file not found: {p}")
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise SystemExit(f"failed reading --job-file {p}: {e}")
+    if not isinstance(doc, dict):
+        raise SystemExit(f"--job-file must be a YAML mapping/object: {p}")
+    return doc
+
+
+def _merge_job_fields(args: argparse.Namespace, job: dict) -> argparse.Namespace:
+    fields = [
+        JobField("output-dir", "output_dir", parse=parse_optional_str),
+        JobField("seed", "seed", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+        JobField("seed-file", "seed_file", parse=parse_optional_str),
+        JobField("log-level", "log_level", parse=parse_optional_str),
+        JobField("show-plots", "show_plots", parse=parse_optional_bool, accept=lambda v: v is not None),
+
+        JobField("num-nodes", "num_nodes", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+        JobField("trace-time", "trace_time", parse=parse_optional_str),
+        JobField("target-util", "target_util", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+        JobField("xmin-arrival", "xmin_arrival", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("xmax-arrival", "xmax_arrival", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("mean-arrival", "mean_arrival", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+        JobField("xmin-life", "xmin_life", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("xmax-life", "xmax_life", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("mean-life", "mean_life", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+        JobField("xmin-req", "xmin_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("xmax-req", "xmax_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("mean-req", "mean_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+        JobField("priority-min", "priority_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+        JobField("priority-max", "priority_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+        JobField("priority-ratio", "priority_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+        JobField("replicas-min", "replicas_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+        JobField("replicas-max", "replicas_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+        JobField("replicas-ratio", "replicas_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+    ]
+    return merge_job_fields_into_args(args, job or {}, fields)
+
+
+def _apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    if getattr(args, "log_level", None) is None:
+        args.log_level = DEFAULT_LOG_LEVEL
+    if getattr(args, "show_plots", None) is None:
+        args.show_plots = bool(DEFAULT_SHOW_PLOTS)
+
+    return args
+
+
+def _validate_args(args: argparse.Namespace) -> None:
+    # Only defaults allowed are log_level and show_plots.
+    missing: list[str] = []
+
+    # Output location is always required.
+    if getattr(args, "output_dir", None) is None:
+        missing.append("output_dir")
+
+    # Seed selection: require exactly one mode.
+    seed = getattr(args, "seed", None)
+    seed_file = getattr(args, "seed_file", None)
+    if seed is not None and seed_file:
+        raise SystemExit("--seed and --seed-file cannot be used together")
+    if seed is None and not seed_file:
+        missing.append("seed or seed_file")
+
+    # Everything else must be explicitly provided.
+    for k in (
+        "num_nodes",
+        "trace_time",
+        "target_util",
+        "xmin_arrival",
+        "mean_arrival",
+        "xmin_life",
+        "xmin_req",
+        "xmax_req",
+        "mean_req",
+        "priority_min",
+        "priority_max",
+        "priority_ratio",
+        "replicas_min",
+        "replicas_max",
+        "replicas_ratio",
+    ):
+        if getattr(args, k, None) is None:
+            missing.append(k)
+
+    if missing:
+        raise SystemExit(f"missing required arguments (via CLI or job-file): {', '.join(missing)}")
+
+    if getattr(args, "job_file", None):
+        p = Path(args.job_file).resolve()
+        if not p.exists():
+            raise SystemExit(f"--job-file not found: {p}")
+
+    if getattr(args, "seed_file", None):
+        p = Path(args.seed_file).resolve()
+        if not p.exists():
+            raise SystemExit(f"--seed-file not found: {p}")
+
+
+def resolve_effective_args(cli_args: argparse.Namespace) -> argparse.Namespace:
+    """
+    Resolve arguments in priority order:
+      CLI values > job-file values > defaults.
+    """
+    args = cli_args
+    job_doc = _load_job_doc(args.job_file) if getattr(args, "job_file", None) else None
+    if job_doc is not None:
+        args = _merge_job_fields(args, job_doc)
+    args = _apply_defaults(args)
+    _validate_args(args)
+    return args
+
+
+def expand_seed_runs(args: argparse.Namespace) -> list[argparse.Namespace]:
+    """
+    Expand a resolved args namespace into one args-per-seed.
+    If seed-file is provided, outputs are written under <output-dir>/<seed>/.
+    """
+    if getattr(args, "seed_file", None):
+        seeds = read_seeds_file(Path(args.seed_file).resolve(), logger=LOG)
+    else:
+        seeds = [int(args.seed)]
+
+    base_out = Path(args.output_dir).resolve()
+    runs: list[argparse.Namespace] = []
+    for s in seeds:
+        a = copy.copy(args)
+        a.seed = int(s)
+        if getattr(args, "seed_file", None):
+            a.output_dir = str(base_out / str(int(s)))
+        runs.append(a)
+    return runs
 
 
 def round_float_args(args: argparse.Namespace, ndigits: int) -> None:
@@ -186,18 +341,17 @@ class TraceGenerator:
         self.pods_hist: List[int] = []
         self.initial_pods_count: int = 0
 
-        # For info yaml
-        self._last_stats: Dict[str, float] = {}
-        self._prepared = False
-
     # -------------------------
     # Logging / metadata
     # -------------------------
     def log_args(self) -> None:
         include = [
+            "job_file",
             "output_dir",
             "seed",
+            "seed_file",
             "log_level",
+            "show_plots",
             "num_nodes",
             "trace_time",
             "xmin_arrival",
@@ -215,10 +369,6 @@ class TraceGenerator:
             "replicas_min",
             "replicas_max",
             "replicas_ratio",
-            "util_tol",
-            "calib_max_iter",
-            "initial_fill_tol",
-            "initial_max_pods",
         ]
         log_args_block(LOG, self.args, title="ARGS", include=include)
 
@@ -304,6 +454,9 @@ class TraceGenerator:
 
     @staticmethod
     def _build_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Build discrete support and probabilities for geometric distribution.
+        """
         if ratio <= 0:
             raise ValueError("ratio must be > 0.")
         lo = int(min_val)
@@ -318,6 +471,7 @@ class TraceGenerator:
 
     @staticmethod
     def _expected_value(vals: np.ndarray, probs: Optional[np.ndarray]) -> float:
+        
         return float(np.mean(vals)) if probs is None else float(np.sum(vals.astype(float) * probs.astype(float)))
 
     # -------------------------
@@ -447,8 +601,8 @@ class TraceGenerator:
         assert self.alpha_req is not None and self.alpha_life is not None
 
         target_req_total = float(self.args.target_util) * float(self.args.num_nodes)
-        tol = float(self.args.initial_fill_tol)
-        max_pods = int(self.args.initial_max_pods)
+        tol = float(INITIAL_FILL_TOL)
+        max_pods = int(INITIAL_MAX_PODS)
 
         cur_total = 0.0
         pods: List[TraceRecord] = []
@@ -540,7 +694,7 @@ class TraceGenerator:
         """
         assert self.alpha_req is not None and self.alpha_arrival is not None and self.alpha_life is not None
 
-        state = ClusterState(num_nodes=int(self.args.num_nodes))
+        state = ClusterState()
         end_heap: List[EndHeapEntry] = []
 
         # Seed baseline from initial pods
@@ -632,28 +786,15 @@ class TraceGenerator:
         return pods, next_id, times, u_hist, pods_hist
 
     # -------------------------
-    # Prep
-    # -------------------------
-    def _ensure_prepared(self) -> None:
-        if self._prepared:
-            return
-
-        if self.args.mean_life is None:
-            self.args.mean_life = self._infer_mean_life_from_target_util()
-        LOG.info(
-            "inferred mean_life=%.3fs from target-util=%.3f",
-            float(self.args.mean_life),
-            float(self.args.target_util),
-        )
-        self._prepared = True
-
-    # -------------------------
     # Calibration loop
     # -------------------------
     def _generate_all_once(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, float], Dict[str, object]]:
-        rng = np.random.default_rng(iter_seed)
+        iter_seed_int = int(iter_seed)
+        rng_fit = np.random.default_rng(derive_seed(iter_seed_int, "fit-alphas"))
+        rng_initial = np.random.default_rng(derive_seed(iter_seed_int, "initial-snapshot"))
+        rng_trace = np.random.default_rng(derive_seed(iter_seed_int, "trace-events"))
 
-        self._fit_alphas(rng)
+        self._fit_alphas(rng_fit)
 
         prio_vals, prio_probs = self._build_geometric_support(
             int(self.args.priority_min),
@@ -669,7 +810,7 @@ class TraceGenerator:
         next_id = 0
 
         initial_pods, next_id = self._build_initial_snapshot(
-            rng,
+            rng_initial,
             prio_vals,
             prio_probs,
             rep_vals,
@@ -677,7 +818,7 @@ class TraceGenerator:
             next_id=next_id,
         )
         trace_pods, next_id, times, u_hist, pods_hist = self._generate_trace_events(
-            rng,
+            rng_trace,
             prio_vals,
             prio_probs,
             rep_vals,
@@ -709,10 +850,22 @@ class TraceGenerator:
             "num_nodes": int(self.args.num_nodes),
             "trace_time_s": round(float(self.trace_time_s), 6),
             "seed": int(self.args.seed),
+            "rng": {
+                "iter_seed": int(iter_seed_int),
+                "derived": {
+                    "fit_alphas": int(derive_seed(iter_seed_int, "fit-alphas")),
+                    "initial_snapshot": int(derive_seed(iter_seed_int, "initial-snapshot")),
+                    "trace_events": int(derive_seed(iter_seed_int, "trace-events")),
+                },
+            },
             "measured_util_time_avg": float(util),
             "target_util_time_avg": float(self.args.target_util),
-            "util_tol": float(self.args.util_tol),
-            "calib_max_iter": int(self.args.calib_max_iter),
+            "calibration": {
+                "util_tol": float(UTIL_TOL),
+                "calib_max_iter": int(CALIB_MEAN_LIFE_MAX_ITER),
+                "initial_fill_tol": float(INITIAL_FILL_TOL),
+                "initial_max_pods": int(INITIAL_MAX_PODS),
+            },
             "derived_mean_life_s": round(float(self.args.mean_life), 6),
             "pareto": {
                 "req": {
@@ -770,8 +923,8 @@ class TraceGenerator:
 
     def _calibrate_mean_life(self) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
         target = float(self.args.target_util)
-        tol = float(self.args.util_tol)
-        max_iter = int(self.args.calib_max_iter)
+        tol = float(UTIL_TOL)
+        max_iter = int(CALIB_MEAN_LIFE_MAX_ITER)
 
         best_initial: List[TraceRecord] = []
         best_trace: List[TraceRecord] = []
@@ -779,7 +932,7 @@ class TraceGenerator:
         best_extra: Dict[str, object] = {}
 
         for it in range(1, max_iter + 1):
-            iter_seed = self.base_seed + 10_000 * it
+            iter_seed = int(derive_seed(self.base_seed, "calibrate-mean-life", it))
             initial_pods, trace_pods, stats, extra_info = self._generate_all_once(iter_seed)
 
             measured = float(stats["util_time_avg"])
@@ -787,7 +940,7 @@ class TraceGenerator:
             best_err = min(best_err, err)
 
             LOG.info(
-                "[calibrate] iter=%d measured=%.3f target=%.3f rel_err=%.2f%% (initial=%d trace=%d)",
+                "[calibrate-mean-life] iter=%d measured=%.3f target=%.3f rel_err=%.2f%% (initial=%d trace=%d)",
                 it,
                 measured,
                 target,
@@ -801,7 +954,7 @@ class TraceGenerator:
                 return best_initial, best_trace, best_extra
 
             if measured <= 1e-12:
-                raise RuntimeError("Measured utilization is ~0; cannot calibrate mean_life.")
+                raise RuntimeError("Measured utilization is ~0; cannot calibrate mean-life.")
 
             new_mean_life = float(self.args.mean_life) * (target / measured)
 
@@ -813,9 +966,9 @@ class TraceGenerator:
                 new_mean_life = float(xmax) * 0.999
 
             self.args.mean_life = float(new_mean_life)
-            LOG.info("[calibrate] updated mean_life=%.3fs", float(self.args.mean_life))
+            LOG.info("[calibrate-mean-life] updated mean-life=%.3fs", float(self.args.mean_life))
 
-        LOG.warning("calibration did not reach util-tol; best rel_err=%.2f%%", 100.0 * best_err)
+        LOG.warning("[calibrate-mean-life] calibration did not reach util-tol; best rel_err=%.2f%%", 100.0 * best_err)
         return best_initial, best_trace, best_extra
 
     # -------------------------
@@ -930,6 +1083,8 @@ class TraceGenerator:
         plt.tight_layout()
         plt.subplots_adjust(bottom=0.22)
         plt.savefig(self.util_plot_path)
+        if bool(getattr(self.args, "show_plots", False)):
+            plt.show()
         plt.close(fig)
         LOG.info("saved utilization plot to %s", self.util_plot_path)
 
@@ -1020,6 +1175,8 @@ class TraceGenerator:
 
         fig.tight_layout()
         fig.savefig(self.hist_plot_path, dpi=150, bbox_inches="tight")
+        if bool(getattr(self.args, "show_plots", False)):
+            plt.show()
         plt.close(fig)
         LOG.info("saved generated histograms to %s", self.hist_plot_path)
 
@@ -1027,7 +1184,13 @@ class TraceGenerator:
     # Runner
     # -------------------------
     def run(self) -> None:
-        self._ensure_prepared()
+        if self.args.mean_life is None:
+            self.args.mean_life = self._infer_mean_life_from_target_util()
+            LOG.info(
+                "inferred mean_life=%.3fs from target-util=%.3f",
+                float(self.args.mean_life),
+                float(self.args.target_util),
+            )
         self.log_args()
 
         initial_pods, trace_pods, extra_info = self._calibrate_mean_life()
@@ -1045,12 +1208,18 @@ class TraceGenerator:
 def main() -> None:
     if os.getenv("TRACE_GENERATOR_NOOP") == "1":
         return
-    args = build_arg_parser().parse_args()
+    cli_args = build_arg_parser().parse_args()
+    args = resolve_effective_args(cli_args)
     round_float_args(args, MAX_DECIMALS)
     setup_logging(name=LOGGER_NAME, prefix="[trace-generator] ", level=args.log_level)
 
-    gen = TraceGenerator(args)
-    gen.run()
+    runs = expand_seed_runs(args)
+    total = len(runs)
+    for i, a in enumerate(runs, start=1):
+        if total > 1:
+            LOG.info("run %d/%d seed=%d output_dir=%s", i, total, int(a.seed), a.output_dir)
+        gen = TraceGenerator(a)
+        gen.run()
     LOG.info("done.")
 
 

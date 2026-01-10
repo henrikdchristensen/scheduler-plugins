@@ -480,6 +480,50 @@ def seeded_random(base_seed: int, *labels: object) -> random.Random:
     """
     return random.Random(derive_seed(base_seed, *labels))
 
+
+def read_seeds_file(path: str | Path, *, logger: logging.Logger | None = None) -> list[int]:
+    """
+    Read seeds from a txt file. Format:
+      - One integer per line (whitespace allowed).
+      - Empty lines and lines starting with '#' are ignored.
+      - Non-integer lines are skipped (logged at DEBUG).
+
+    Returns an order-preserving de-duplicated list of positive ints.
+    """
+    log = logger
+    seeds: list[int] = []
+    seen: set[int] = set()
+
+    def _add(n: int) -> None:
+        if n is None or n <= 0:
+            return
+        if n not in seen:
+            seen.add(n)
+            seeds.append(n)
+
+    p = Path(path)
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for i, line in enumerate(f, 1):
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                try:
+                    _add(int(s))
+                except Exception:
+                    if log:
+                        log.debug("seed-file %s:%d ignored non-integer line: %r", p, i, s[:120])
+                    continue
+    except Exception as e:
+        raise ValueError(f"Failed reading seed-file {p}: {e}")
+
+    if log:
+        if not seeds:
+            log.warning("no seeds parsed from %s", p)
+        else:
+            log.info("parsed %d seed(s) from %s", len(seeds), p)
+    return seeds
+
 def generate_seeds(gen_seeds_to_file: Optional[List[str]]) -> None:
     """
     Generate random seeds and if requested, write them to one or multiple files.
