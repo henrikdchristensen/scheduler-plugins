@@ -1,10 +1,10 @@
-trace-dir: data/traces/nodes8_util095_prio1_arrival8
-result-dir: results/plugin/nodes8_util095_prio1_arrival8_timeout10_periodic_int10
+trace-dir: data/traces/nodes8_util090_prio1_arrival32
+result-dir: results/plugin/nodes8_util090_prio1_arrival32_modeperiodic8
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler.yaml
 override-kwokctl-envs:
   - name: SOLVER_PYTHON_TIMEOUT
-    value: 10s
+    value: 16s
   - name: OPTIMIZE_MODE
     value: periodic
   - name: OPTIMIZE_PERIODIC_INTERVAL
-    value: 10s
+    value: 8s
