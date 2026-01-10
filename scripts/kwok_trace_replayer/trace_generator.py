@@ -14,26 +14,17 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from scripts.helpers.general_helpers import (
-    parse_duration_to_seconds,
-    setup_logging,
-    build_cli_cmd,
-    write_info_file,
-    log_args_block,
-    derive_seed,
-    read_seeds_file,
+    parse_duration_to_seconds, setup_logging, build_cli_cmd,
+    write_info_file, log_args_block, derive_seed, read_seeds_file,
 )
 from scripts.helpers.job_helpers import (
     JobField,
     merge_job_fields_into_args,
-    parse_optional_bool,
-    parse_optional_float,
-    parse_optional_int,
-    parse_optional_str,
+    parse_optional_bool, parse_optional_float, parse_optional_int, parse_optional_str,
 )
 from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 from scripts.kwok_trace_replayer.plot_helpers import (
-    plot_generator_histograms,
-    plot_utilization_time_series,
+    plot_generator_histograms, plot_utilization_time_series,
 )
 
 # ---------------------------------------------------------------------
@@ -55,13 +46,13 @@ MAX_DECIMALS = 6
 LOGGER_NAME = "trace-generator"
 LOG = logging.getLogger(LOGGER_NAME)
 
-
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_SHOW_PLOTS = False
 
 # ---------------------------------------------------------------------
 # Small state models
 # ---------------------------------------------------------------------
+
 @dataclass
 class ClusterState:
     live_req: float = 0.0
@@ -76,6 +67,7 @@ class EndHeapEntry:
 # ---------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------
+
 def build_arg_parser() -> argparse.ArgumentParser:
     """
     Build and return the CLI argument parser.
@@ -323,6 +315,7 @@ class TraceGenerator:
     # -------------------------
     # Logging / metadata
     # -------------------------
+    
     def log_args(self) -> None:
         """
         Log key arguments in a stable order for reproducibility.
@@ -372,6 +365,7 @@ class TraceGenerator:
     # -------------------------
     # Distribution helpers
     # -------------------------
+    
     @staticmethod
     def _sample_pareto(
         rng: np.random.Generator,
@@ -464,7 +458,7 @@ class TraceGenerator:
         """
         return float(np.mean(vals)) if probs is None else float(np.sum(vals.astype(float) * probs.astype(float)))
 
-    def _infer_mean_life_from_target_util(self) -> float:
+    def infer_mean_life_from_target_util(self) -> float:
         """
         Infer mean pod lifetime to hit target utilization given arrival/req distributions.
         """
@@ -560,6 +554,7 @@ class TraceGenerator:
     # -------------------------
     # Util metric
     # -------------------------
+    
     def _time_avg_req_util(self, pods: List[TraceRecord]) -> float:
         """
         Compute time-average requested utilization over the trace horizon.
@@ -582,6 +577,7 @@ class TraceGenerator:
     # -------------------------
     # Initial load generation (load at t=0)
     # -------------------------
+    
     def _build_initial_load(
         self,
         rng: np.random.Generator,
@@ -674,6 +670,7 @@ class TraceGenerator:
     # -------------------------
     # Trace generation (events from t>=0)
     # -------------------------
+    
     def _generate_trace_events(
         self,
         rng: np.random.Generator,
@@ -784,6 +781,7 @@ class TraceGenerator:
     # -------------------------
     # Calibration loop
     # -------------------------
+    
     def _generate_tracedata_once(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, float], Dict[str, object]]:
         """
         Generate one candidate initial+trace dataset and associated metadata.
@@ -920,7 +918,7 @@ class TraceGenerator:
 
         return initial_pods, trace_pods, stats, extra_info
 
-    def _calibrate_mean_life(self) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
+    def calibrate_mean_life(self) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
         """
         Iteratively calibrate mean-life to match target utilization within tolerance.
         """
@@ -976,6 +974,7 @@ class TraceGenerator:
     # -------------------------
     # Output writers
     # -------------------------
+    
     def _write_json(self, path: Path, pods: List[TraceRecord]) -> None:
         """
         Write a list of TraceRecords to a JSON file.
@@ -985,7 +984,7 @@ class TraceGenerator:
             json.dump(obj, f, indent=2)
         LOG.info("wrote %s (%d records)", path, len(pods))
 
-    def _write_outputs(self, initial_pods: List[TraceRecord], trace_pods: List[TraceRecord], extra_info: Dict[str, object]) -> None:
+    def write_outputs(self, initial_pods: List[TraceRecord], trace_pods: List[TraceRecord], extra_info: Dict[str, object]) -> None:
         """
         Write generated JSON outputs and metadata to disk.
         """
@@ -1007,12 +1006,13 @@ class TraceGenerator:
     # -------------------------
     # Runner
     # -------------------------
+    
     def run(self) -> None:
         """
         Run the full generation workflow for a single seed.
         """
         if self.args.mean_life is None:
-            self.args.mean_life = self._infer_mean_life_from_target_util()
+            self.args.mean_life = self.infer_mean_life_from_target_util()
             LOG.info(
                 "inferred mean_life=%.3fs from target-util=%.3f",
                 float(self.args.mean_life),
@@ -1020,10 +1020,10 @@ class TraceGenerator:
             )
         self.log_args()
 
-        initial_pods, trace_pods, extra_info = self._calibrate_mean_life()
+        initial_pods, trace_pods, extra_info = self.calibrate_mean_life()
 
         all_pods = initial_pods + trace_pods
-        self._write_outputs(initial_pods, trace_pods, extra_info)
+        self.write_outputs(initial_pods, trace_pods, extra_info)
 
         plot_utilization_time_series(
             times=self.times,
@@ -1060,6 +1060,7 @@ class TraceGenerator:
 # ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
+
 def main() -> None:
     if os.getenv("TRACE_GENERATOR_NOOP") == "1":
         return

@@ -456,13 +456,13 @@ def test_infer_mean_life_validates_ranges(tmp_path: Path):
     args = _make_required_args(tmp_path, target_util=0.5, mean_arrival=2.0, mean_req=0.25, num_nodes=2)
     gen = tg.TraceGenerator(args)
 
-    mean_life = gen._infer_mean_life_from_target_util()
+    mean_life = gen.infer_mean_life_from_target_util()
     assert mean_life > 0
 
     args2 = _make_required_args(tmp_path, target_util=0.0)
     gen2 = tg.TraceGenerator(args2)
     with pytest.raises(ValueError):
-        gen2._infer_mean_life_from_target_util()
+        gen2.infer_mean_life_from_target_util()
 
 # =============================================================================
 # TraceGenerator._fit_alphas()
@@ -663,7 +663,7 @@ def test_calibrate_mean_life_stops_within_tolerance(tmp_path: Path, monkeypatch)
         lambda _seed: (initial, trace, {"util_time_avg": 0.5, "initial_count": 1.0, "trace_count": 0.0}, extra),
     )
 
-    got_initial, got_trace, got_extra = gen._calibrate_mean_life()
+    got_initial, got_trace, got_extra = gen.calibrate_mean_life()
     assert got_initial == initial
     assert got_trace == trace
     assert got_extra == extra
@@ -686,7 +686,7 @@ def test_calibrate_mean_life_updates_mean_life_and_clamps_to_xmax(tmp_path: Path
     monkeypatch.setattr(gen, "_generate_tracedata_once", fake_generate_tracedata_once)
     monkeypatch.setattr(tg, "CALIB_MEAN_LIFE_MAX_ITER", 2)
 
-    gen._calibrate_mean_life()
+    gen.calibrate_mean_life()
 
     # After first iteration: new_mean_life=10*(0.9/0.1)=90 -> clamp to 0.999*xmax
     assert gen.args.mean_life == pytest.approx(15.0 * 0.999)
@@ -703,7 +703,7 @@ def test_calibrate_mean_life_raises_on_zero_measured_util(tmp_path: Path, monkey
     )
 
     with pytest.raises(RuntimeError):
-        gen._calibrate_mean_life()
+        gen.calibrate_mean_life()
 
 # =============================================================================
 # TraceGenerator._write_json()
@@ -746,7 +746,7 @@ def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(gen, "_write_json", fake_write_json)
     monkeypatch.setattr(gen, "_write_info_file", lambda extra: calls.__setitem__("info", calls["info"] + 1))
 
-    gen._write_outputs(initial, trace, extra)
+    gen.write_outputs(initial, trace, extra)
 
     assert calls["json"][0][0].name == "initial.json"
     assert calls["json"][1][0].name == "trace.json"

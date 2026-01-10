@@ -365,7 +365,7 @@ def test_save_scheduler_logs(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(tr, "save_kwok_scheduler_logs", fake_save)
 
-    rp._save_scheduler_logs()
+    rp.save_scheduler_logs()
     assert seen["cluster_name"] == args.cluster_name
     assert seen["out_path"] == rp.results_dir / "scheduler-logs" / "sched_logs.log"
     assert seen["runner"] == rp.runner
@@ -498,7 +498,7 @@ def test_build_trace_events_creates_sorted_create_delete_pairs(tmp_path: Path, m
     monkeypatch.setattr(tr, "qty_to_mcpu_str", lambda m: f"{m}m")
     monkeypatch.setattr(tr, "qty_to_bytes_str", lambda b: f"{b}")
 
-    rp._build_trace_events()
+    rp.build_trace_events()
     assert len(rp.events) == 2
     assert rp.events[0].kind == "create"
     assert rp.events[1].kind == "delete"
@@ -514,7 +514,7 @@ def test_build_trace_events_creates_sorted_create_delete_pairs(tmp_path: Path, m
 def test_apply_initial_workload_no_initial_is_noop(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
     rp.initial_pods = []
-    rp._apply_initial_workload(namespace="trace")  # should not raise
+    rp.apply_initial_workload(namespace="trace")  # should not raise
 
 
 def test_apply_initial_workload_submits_kubectl_tasks(tmp_path: Path, monkeypatch):
@@ -543,7 +543,7 @@ def test_apply_initial_workload_submits_kubectl_tasks(tmp_path: Path, monkeypatc
 
     rp.executor_factory = lambda **_k: CapturingExec()
 
-    rp._apply_initial_workload(namespace="trace")
+    rp.apply_initial_workload(namespace="trace")
     assert len(submitted) == 1
     assert submitted[0][0] == tr.kubectl_apply_yaml
 
@@ -558,7 +558,7 @@ def test_replay_trace_events_no_events_sleeps_until_end(tmp_path: Path, monkeypa
     rp.events = []
     rp.trace_time_s = 10.0
 
-    rp._replay_trace_events(namespace="trace", trace_start_wall=0.0)
+    rp.replay_trace_events(namespace="trace", trace_start_wall=0.0)
     assert rp.clock.sleeps == [pytest.approx(10.0)]
 
 
@@ -589,7 +589,7 @@ def test_replay_trace_events_batch_sleeps_to_batch_and_aligns_end(tmp_path: Path
     ex = CapturingExec()
     rp.executor_factory = lambda **_k: ex
 
-    rp._replay_trace_events(namespace="trace", trace_start_wall=0.0)
+    rp.replay_trace_events(namespace="trace", trace_start_wall=0.0)
 
     # sleep to batch at t=1, then align to end t=2
     assert rp.clock.sleeps == [pytest.approx(1.0), pytest.approx(1.0)]
@@ -613,7 +613,7 @@ def test_replay_trace_events_future_exception_is_caught(tmp_path: Path, monkeypa
 
     rp.executor_factory = lambda **_k: ExecBad()
 
-    rp._replay_trace_events(namespace="trace", trace_start_wall=0.0)  # should not raise
+    rp.replay_trace_events(namespace="trace", trace_start_wall=0.0)  # should not raise
 
 
 # =============================================================================

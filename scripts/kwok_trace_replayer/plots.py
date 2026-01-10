@@ -142,10 +142,10 @@ def _choose_time_unit(max_time_s: float) -> tuple[float, str]:
     Returns (scale, label) where x_plot = x_seconds * scale.
     """
     if max_time_s <= 7 * 3600:
-        return 1.0 / 60.0, "Time (minutes)"
+        return 1.0 / 60.0, "time (minutes)"
     if max_time_s <= 7 * 24 * 3600:
-        return 1.0 / 3600.0, "Time (hours)"
-    return 1.0 / (24.0 * 3600.0), "Time (days)"
+        return 1.0 / 3600.0, "time (hours)"
+    return 1.0 / (24.0 * 3600.0), "time (days)"
 
 
 def _time_scaled(
@@ -355,7 +355,7 @@ def plot_effective_utilization(
 
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Effective utilization\nmax(CPU, MEM)")
+    plt.ylabel("effective utilization\nmax(CPU, MEM)")
     plt.title("Effective utilization")
 
     ymax = float(np.nanmax([np.nanmax(eff_def) if eff_def.size else 0.0, np.nanmax(eff_our) if eff_our.size else 0.0]))
@@ -384,7 +384,7 @@ def plot_effective_utilization_single(
 
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Effective utilization\nmax(CPU, MEM)")
+    plt.ylabel("effective utilization\nmax(CPU, MEM)")
     plt.title("Effective utilization")
 
     ymax = float(np.nanmax(eff) if eff.size else 0.0)
@@ -431,7 +431,7 @@ def plot_cumulative_running_pod_seconds_diff(
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Cumulative running pod-seconds\n(plugin - default)")
+    plt.ylabel("cumulative running pod-seconds\n(plugin - default)")
     plt.title("Cumulative running pod-seconds difference (positive = plugin better)")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
 
@@ -484,7 +484,7 @@ def plot_cumulative_running_pod_seconds_single(
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Cumulative running pod-seconds")
+    plt.ylabel("cumulative running pod-seconds")
     plt.title(f"Cumulative running pod-seconds ({label})")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
 
@@ -537,7 +537,7 @@ def plot_cumulative_deletions_diff(
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Cumulative deletions diff\n(plugin - default)")
+    plt.ylabel("cumulative deletions diff\n(plugin - default)")
     plt.title("Cumulative deletions difference (positive = more deletions in plugin)")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
 
@@ -586,7 +586,7 @@ def plot_cumulative_deletions_single(
     plt.axhline(0.0, linewidth=0.8, linestyle="--")
     plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     plt.xlabel(x_label)
-    plt.ylabel("Cumulative deletions")
+    plt.ylabel("cumulative deletions")
     plt.title(f"Cumulative deletions ({label})")
     plt.legend(frameon=False, ncol=min(6, max(1, len(prios))))
 
@@ -671,9 +671,9 @@ def plot_first_admit_latency_histogram_total(
         )
 
     plt.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
-    plt.xlabel("Scheduling latency (s)")
+    plt.xlabel("scheduling latency (s)")
     plt.yscale("log")
-    plt.ylabel("Count")
+    plt.ylabel("count")
     plt.title("Scheduling latency")
     plt.legend(frameon=False, ncol=2)
 
@@ -724,8 +724,8 @@ def plot_first_admit_latency_histogram_single(
         )
 
     plt.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
-    plt.xlabel("Scheduling latency (s)")
-    plt.ylabel("Count")
+    plt.xlabel("scheduling latency (s)")
+    plt.ylabel("count")
     plt.title(f"Scheduling latency ({label})")
     plt.legend(frameon=False)
 

@@ -17,41 +17,20 @@ from typing import List, Dict, Any, Callable, Optional, Tuple, Set
 from scripts.helpers.job_helpers import (
     JobField,
     merge_job_fields_into_args as _merge_job_fields_into_args,
-    parse_optional_str,
-    parse_optional_float,
+    parse_optional_str, parse_optional_float,
 )
 from scripts.helpers.general_helpers import (
-    setup_logging,
-    make_header_footer,
-    get_timestamp,
-    qty_to_mcpu_int,
-    qty_to_mcpu_str,
-    qty_to_bytes_int,
-    qty_to_bytes_str,
-    build_cli_cmd,
-    write_info_file,
-    SystemClock,
-    Runner,
-    Clock,
-    log_args_block,
+    setup_logging, make_header_footer, get_timestamp,
+    qty_to_mcpu_int, qty_to_mcpu_str, qty_to_bytes_int, qty_to_bytes_str,
+    build_cli_cmd, write_info_file, SystemClock, Runner, Clock, log_args_block,
 )
 from scripts.helpers.kubectl_helpers import (
-    kubectl_apply_yaml,
-    ensure_namespace,
-    ensure_priority_classes,
-    delete_rs,
-    get_json_ctx,
+    kubectl_apply_yaml, ensure_namespace, ensure_priority_classes, delete_rs, get_json_ctx,
 )
 from scripts.helpers.kwokctl_helpers import (
-    yaml_kwok_rs,
-    create_kwok_nodes,
-    ensure_kwok_cluster,
-    kwok_pods_cap,
-    merge_kwokctl_envs,
-    save_kwok_scheduler_logs,
+    yaml_kwok_rs, create_kwok_nodes, ensure_kwok_cluster, kwok_pods_cap, merge_kwokctl_envs, save_kwok_scheduler_logs,
 )
 from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
-
 
 # ---------------------------------------------------------------------
 # Constants
@@ -62,10 +41,10 @@ RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
 LOGGER_NAME = "trace-replayer"
 LOG = logging.getLogger(LOGGER_NAME)
 
-
 # ---------------------------------------------------------------------
 # Trace Discovery Helpers
 # ---------------------------------------------------------------------
+
 def _discover_trace_run_dirs(trace_dir: Path) -> List[Path]:
     """
     Discover run directories containing a trace.json under the given trace-dir.
@@ -91,6 +70,7 @@ def _discover_trace_run_dirs(trace_dir: Path) -> List[Path]:
 # ---------------------------------------------------------------------
 # Parsing Helpers
 # ---------------------------------------------------------------------
+
 def _parse_optional_bool_strict(v: Any) -> bool | None:
     """
     Parse a job-file value that must be a real boolean (or None).
@@ -107,7 +87,6 @@ def _rs_prefix_from_pod_name(pod_name: str) -> str:
     if "-" in pod_name:
         return pod_name.split("-", 1)[0]
     return pod_name
-
 
 def _parse_rfc3339_to_epoch(ts: str) -> Optional[float]:
     """
@@ -128,6 +107,7 @@ def _parse_rfc3339_to_epoch(ts: str) -> Optional[float]:
 # ---------------------------------------------------------------------
 # Small Models
 # ---------------------------------------------------------------------
+
 class _TimeClock:
     def time(self) -> float:
         """
@@ -154,6 +134,7 @@ class Event:
 # ---------------------------------------------------------------------
 # CLI + Job File
 # ---------------------------------------------------------------------
+
 def build_argparser() -> argparse.ArgumentParser:
     """
     Build and return the CLI argument parser.
@@ -195,7 +176,6 @@ def build_argparser() -> argparse.ArgumentParser:
 
     return p
 
-
 def merge_job_fields_into_args(
     args: argparse.Namespace,
     job: Dict[str, Any],
@@ -223,7 +203,6 @@ def merge_job_fields_into_args(
     args = _merge_job_fields_into_args(args, job or {}, fields)
     override_envs = (job or {}).get("override-kwokctl-envs") or []
     return args, override_envs
-
 
 def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
     """Apply defaults and validate required args for the trace replayer."""
@@ -268,11 +247,10 @@ def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
     
     return args
 
-
-
 # ---------------------------------------------------------------------
 # Trace Replayer
 # ---------------------------------------------------------------------
+
 class TraceReplayer:
     """
     Replay a trace on a KWOK cluster and monitor state.
@@ -382,7 +360,7 @@ class TraceReplayer:
         except Exception as e:
             LOG.warning("failed to write info_replayer.yaml: %s", e)
 
-    def _save_scheduler_logs(self) -> None:
+    def save_scheduler_logs(self) -> None:
         """
         Save scheduler logs into results_dir/scheduler-logs/.
         """
@@ -393,6 +371,7 @@ class TraceReplayer:
     # ------------------------------
     # Trace Input Loading
     # ------------------------------
+
     @staticmethod
     def _rs_name_for_record(record_id: int) -> str:
         """
@@ -536,10 +515,11 @@ class TraceReplayer:
             rs = self._rs_name_for_record(p.id)
             self.prio_by_rs[rs] = int(p.priority)
 
-            # ------------------------------
-            # Event Construction
-            # ------------------------------
-    def _build_trace_events(self) -> None:
+    # ------------------------------
+    # Event Construction
+    # ------------------------------
+    
+    def build_trace_events(self) -> None:
         """
         Build sorted create/delete events from trace pod records.
         """
@@ -572,7 +552,8 @@ class TraceReplayer:
     # ------------------------------
     # KWOK Apply / Replay
     # ------------------------------
-    def _apply_initial_workload(self, namespace: str) -> None:
+    
+    def apply_initial_workload(self, namespace: str) -> None:
         """
         Apply the initial workload as KWOK ReplicaSets in the given namespace.
         """
@@ -628,7 +609,7 @@ class TraceReplayer:
 
         LOG.info("initial workload applied (kubectl tasks completed)")
 
-    def _replay_trace_events(self, namespace: str, trace_start_wall: float) -> None:
+    def replay_trace_events(self, namespace: str, trace_start_wall: float) -> None:
         """
         Replay trace events aligned to a wall-clock start time.
         """
@@ -728,6 +709,7 @@ class TraceReplayer:
     # ------------------------------
     # Monitoring
     # ------------------------------
+    
     def _time_s(self) -> float:
         """
         Return elapsed time in seconds since run start (monotonic clock).
@@ -946,6 +928,7 @@ class TraceReplayer:
     # ------------------------------
     # Runner
     # ------------------------------
+    
     def run(self) -> None:
         """
         Run a full trace replay: setup cluster, apply initial load, replay events, monitor, and persist outputs.
@@ -964,7 +947,7 @@ class TraceReplayer:
         )
 
         # Build trace events (needs node_* set)
-        self._build_trace_events()
+        self.build_trace_events()
 
         # Create KWOK cluster
         kwok_cfg_path = Path(self.args.kwokctl_config_file).resolve()
@@ -1006,7 +989,7 @@ class TraceReplayer:
 
         try:
             # 1) Apply initial workload now
-            self._apply_initial_workload(self.args.namespace)
+            self.apply_initial_workload(self.args.namespace)
 
             # 2) Start monitor ONLY AFTER initial load has been applied
             monitor_thread = threading.Thread(
@@ -1032,7 +1015,7 @@ class TraceReplayer:
             trace_start_wall = float(self.clock.time())
 
             # 4) Replay trace aligned so sim_time 0 happens at trace_start_wall
-            self._replay_trace_events(namespace=self.args.namespace, trace_start_wall=trace_start_wall)
+            self.replay_trace_events(namespace=self.args.namespace, trace_start_wall=trace_start_wall)
 
         finally:
             stop_event.set()
@@ -1042,14 +1025,14 @@ class TraceReplayer:
 
             if self.args.save_scheduler_logs:
                 LOG.info("saving scheduler logs via kwokctl...")
-                self._save_scheduler_logs()
+                self.save_scheduler_logs()
 
         LOG.info("Done.")
-
 
 # ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
+
 def main() -> None:
     """
     CLI entry point for trace replayer.
@@ -1103,7 +1086,6 @@ def main() -> None:
 
         replayer = TraceReplayer(run_args, job_doc=job_doc, override_kwokctl_envs=override_kwokctl_envs)
         replayer.run()
-
 
 if __name__ == "__main__":
     main()
