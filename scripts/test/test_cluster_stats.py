@@ -1,106 +1,21 @@
 #!/usr/bin/env python3
-#test_cluster_stats.py
+# test_cluster_stats.py
 
 import pytest
 
 from scripts.helpers import cluster_stats as cs
 from scripts.test.test_utils import time_sequence
 
-# ---------------------------------------------------------------------------
-# sum_pod_requests
-# ---------------------------------------------------------------------------
-
-
-def test_sum_pod_requests_sums_containers_requests():
-	pod = {
-		"spec": {
-			"containers": [
-				{"resources": {"requests": {"cpu": "250m", "memory": "128Mi"}}},
-				{"resources": {"requests": {"cpu": "0.5", "memory": "256Mi"}}},
-			],
-		}
-	}
-	cpu_m, mem_b = cs.sum_pod_requests(pod)
-	assert cpu_m == 250 + 500
-	assert mem_b == 128 * 1024**2 + 256 * 1024**2
-
-
-def test_sum_pod_requests_adds_max_init_container_requests():
-	pod = {
-		"spec": {
-			"containers": [
-				{"resources": {"requests": {"cpu": "250m", "memory": "128Mi"}}},
-			],
-			"initContainers": [
-				{"resources": {"requests": {"cpu": "1", "memory": "512Mi"}}},
-				{"resources": {"requests": {"cpu": "500m", "memory": "1Gi"}}},
-			],
-		}
-	}
-	cpu_m, mem_b = cs.sum_pod_requests(pod)
-	assert cpu_m == 250 + 1000
-	assert mem_b == (128 * 1024**2) + (1 * 1024**3)
-
 
 # ---------------------------------------------------------------------------
-# get_running_and_unscheduled
+# Snapshot
 # ---------------------------------------------------------------------------
-
-
-def test_get_running_and_unscheduled_all_running(monkeypatch):
-	pods_obj = {
-		"items": [
-			{"metadata": {"name": "b"}, "spec": {"nodeName": "n2"}, "status": {"phase": "Running"}},
-			{"metadata": {"name": "a"}, "spec": {"nodeName": "n1"}, "status": {"phase": "Running"}},
-		]
-	}
-
-	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
-	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=1)
-	assert status == "all_running"
-	# Should be sorted by pod name
-	assert running == [("a", "n1"), ("b", "n2")]
-	assert unsched == []
-
-
-def test_get_running_and_unscheduled_some_unschedulable(monkeypatch):
-	pods_obj = {
-		"items": [
-			{"metadata": {"name": "a"}, "spec": {"nodeName": "n1"}, "status": {"phase": "Running"}},
-			{"metadata": {"name": "b"}, "spec": {}, "status": {"phase": "Pending"}},
-		]
-	}
-
-	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
-	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=1)
-	assert status == "some_unschedulable"
-	assert running == [("a", "n1")]
-	assert unsched == ["b"]
-
-
-def test_get_running_and_unscheduled_timeout(monkeypatch):
-	pods_obj = {
-		"items": [
-			{"metadata": {"name": "a"}, "spec": {}, "status": {"phase": "Pending"}},
-		]
-	}
-
-	fake_time = time_sequence([0.0, 0.0, 999.0])
-
-	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
-	monkeypatch.setattr(cs.time, "time", fake_time)
-	monkeypatch.setattr(cs.time, "sleep", lambda _: None)
-
-	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=0)
-	assert status == "timeout"
-	assert running == []
-	assert unsched == ["a"]
+# (dataclass, no dedicated tests)
 
 
 # ---------------------------------------------------------------------------
 # stat_snapshot
 # ---------------------------------------------------------------------------
-
 
 def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
 	monkeypatch.setattr(cs, "get_running_and_unscheduled",
@@ -171,3 +86,92 @@ def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
 
 	assert snap.cpu_run_util == pytest.approx((500 + 1000) / (2000 + 1000))
 	assert snap.mem_run_util == pytest.approx(((512 * 1024**2) + (1024**3)) / (2 * 1024**3))
+
+
+# ---------------------------------------------------------------------------
+# sum_pod_requests
+# ---------------------------------------------------------------------------
+
+def test_sum_pod_requests_sums_containers_requests():
+	pod = {
+		"spec": {
+			"containers": [
+				{"resources": {"requests": {"cpu": "250m", "memory": "128Mi"}}},
+				{"resources": {"requests": {"cpu": "0.5", "memory": "256Mi"}}},
+			],
+		}
+	}
+	cpu_m, mem_b = cs.sum_pod_requests(pod)
+	assert cpu_m == 250 + 500
+	assert mem_b == 128 * 1024**2 + 256 * 1024**2
+
+
+def test_sum_pod_requests_adds_max_init_container_requests():
+	pod = {
+		"spec": {
+			"containers": [
+				{"resources": {"requests": {"cpu": "250m", "memory": "128Mi"}}},
+			],
+			"initContainers": [
+				{"resources": {"requests": {"cpu": "1", "memory": "512Mi"}}},
+				{"resources": {"requests": {"cpu": "500m", "memory": "1Gi"}}},
+			],
+		}
+	}
+	cpu_m, mem_b = cs.sum_pod_requests(pod)
+	assert cpu_m == 250 + 1000
+	assert mem_b == (128 * 1024**2) + (1 * 1024**3)
+
+
+# ---------------------------------------------------------------------------
+# get_running_and_unscheduled
+# ---------------------------------------------------------------------------
+
+def test_get_running_and_unscheduled_all_running(monkeypatch):
+	pods_obj = {
+		"items": [
+			{"metadata": {"name": "b"}, "spec": {"nodeName": "n2"}, "status": {"phase": "Running"}},
+			{"metadata": {"name": "a"}, "spec": {"nodeName": "n1"}, "status": {"phase": "Running"}},
+		]
+	}
+
+	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
+	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=1)
+	assert status == "all_running"
+	# Should be sorted by pod name
+	assert running == [("a", "n1"), ("b", "n2")]
+	assert unsched == []
+
+
+def test_get_running_and_unscheduled_some_unschedulable(monkeypatch):
+	pods_obj = {
+		"items": [
+			{"metadata": {"name": "a"}, "spec": {"nodeName": "n1"}, "status": {"phase": "Running"}},
+			{"metadata": {"name": "b"}, "spec": {}, "status": {"phase": "Pending"}},
+		]
+	}
+
+	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
+	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=1)
+	assert status == "some_unschedulable"
+	assert running == [("a", "n1")]
+	assert unsched == ["b"]
+
+
+def test_get_running_and_unscheduled_timeout(monkeypatch):
+	pods_obj = {
+		"items": [
+			{"metadata": {"name": "a"}, "spec": {}, "status": {"phase": "Pending"}},
+		]
+	}
+
+	fake_time = time_sequence([0.0, 0.0, 999.0])
+
+	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
+	monkeypatch.setattr(cs.time, "time", fake_time)
+	monkeypatch.setattr(cs.time, "sleep", lambda _: None)
+
+	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=0)
+	assert status == "timeout"
+	assert running == []
+	assert unsched == ["a"]
