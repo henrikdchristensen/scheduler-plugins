@@ -96,14 +96,21 @@ def make_header_footer(msg: str, width: int = 100, border: str = "=") -> Tuple[s
     footer = f"{border * w}"
     return header, footer
 
-def get_git_info(cwd: Optional[Path] = None) -> Dict[str, Any]:
+def get_git_info(cwd: Optional[Path] = None, *, timeout_s: float = 0.5) -> Dict[str, Any]:
     """
     Collect basic git info for reproducibility. Best effort; returns empty on failure.
     """
     info: Dict[str, Any] = {}
     def _run(cmd: List[str]) -> Optional[str]:
         try:
-            r = subprocess.run(cmd, cwd=str(cwd) if cwd else None, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+            r = subprocess.run(
+                cmd,
+                cwd=str(cwd) if cwd else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=float(timeout_s) if timeout_s is not None else None,
+            )
             if r.returncode == 0:
                 return (r.stdout or b"").decode("utf-8", errors="replace").strip()
         except Exception:
@@ -111,8 +118,17 @@ def get_git_info(cwd: Optional[Path] = None) -> Dict[str, Any]:
         return None
     commit = _run(["git", "rev-parse", "HEAD"])
     branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-    r = subprocess.run(["git", "status", "--porcelain"], cwd=str(cwd) if cwd else None,
-                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+    try:
+        r = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(cwd) if cwd else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=float(timeout_s) if timeout_s is not None else None,
+        )
+    except Exception:
+        r = None
     if commit is not None: info["commit"] = commit
     if branch is not None: info["branch"] = branch
     return info

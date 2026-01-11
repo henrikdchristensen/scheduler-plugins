@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
 # test_kwok_trace_generator.py
 
-import argparse, json, math, runpy, sys
+import argparse
+import json
+import math
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
 
 from scripts.kwok_trace_replayer import trace_generator as tg
 
+
 # ---------------------------------------------------------------------------
 # Shared test helpers
 # ---------------------------------------------------------------------------
 
 def _make_required_args(tmp_path: Path, **overrides):
+    """
+    Build a Namespace that passes trace_generator._validate_args().
+
+    Notes:
+      - xmin_life must be >= 2.0 (hard floor in production).
+      - mean_life is optional for resolve_effective_args, but many generator methods need it.
+      - Pick xmin/xmax so bounded Pareto max-mean constraint is not violated for mean_life.
+    """
     base = dict(
         job_file=None,
         output_dir=str(tmp_path),
@@ -20,22 +33,27 @@ def _make_required_args(tmp_path: Path, **overrides):
         seed_file=None,
         log_level="INFO",
         show_plots=False,
+
         num_nodes=2,
         trace_time="5s",
         target_util=0.75,
 
+        # Inter-arrival
         xmin_arrival=0.1,
         xmax_arrival=10.0,
         mean_arrival=1.0,
 
-        xmin_life=0.1,
-        xmax_life=10.0,
-        mean_life=None,
+        # Lifetime (bounded Pareto) -- keep mean_life feasible (< bounded_pareto_max_mean)
+        xmin_life=2.0,
+        xmax_life=100.0,
+        mean_life=10.0,
 
+        # Requests
         xmin_req=0.1,
         xmax_req=1.0,
         mean_req=0.2,
 
+        # Priority + replicas
         priority_min=1,
         priority_max=2,
         priority_ratio=1.0,
@@ -47,23 +65,18 @@ def _make_required_args(tmp_path: Path, **overrides):
     base.update(overrides)
     return argparse.Namespace(**base)
 
-def _set_alphas(gen: tg.TraceGenerator, alpha: float = 2.0) -> None:
-    gen.alpha_req = alpha
-    gen.alpha_arrival = alpha
-    gen.alpha_life = alpha
-    gen.args.alpha_req = alpha
-    gen.args.alpha_arrival = alpha
-    gen.args.alpha_life = alpha
 
-def sample_for_alpha(_rng, alpha, x_min, x_max, size=1):
-    # deterministic monotone-ish sample so alpha solver can converge in tests
-    v = float(x_min + (1.0 / float(alpha)))
-    if x_max is not None:
-        v = min(v, float(x_max))
-    return tg.np.full(size, v, dtype=float)
+def _set_alphas(gen: tg.TraceGenerator, alpha: float = 2.0) -> None:
+    gen.alpha_req = float(alpha)
+    gen.alpha_arrival = float(alpha)
+    gen.alpha_life = float(alpha)
+    gen.args.alpha_req = float(alpha)
+    gen.args.alpha_arrival = float(alpha)
+    gen.args.alpha_life = float(alpha)
+
 
 # ---------------------------------------------------------------------------
-# build_arg_parser()
+# CLI
 # ---------------------------------------------------------------------------
 
 def test_build_arg_parser_defaults_and_required(tmp_path: Path):
@@ -75,15 +88,22 @@ def test_build_arg_parser_defaults_and_required(tmp_path: Path):
             "--num-nodes", "8",
             "--trace-time", "3600s",
             "--target-util", "0.9",
+
             "--xmin-arrival", "0.01",
+            "--xmax-arrival", "10.0",
             "--mean-arrival", "1.0",
+
             "--xmin-life", "10.0",
+            "--xmax-life", "100.0",
+
             "--xmin-req", "0.01",
             "--xmax-req", "1.0",
             "--mean-req", "0.2",
+
             "--priority-min", "1",
             "--priority-max", "3",
             "--priority-ratio", "1.0",
+
             "--replicas-min", "1",
             "--replicas-max", "1",
             "--replicas-ratio", "1.0",
@@ -96,8 +116,9 @@ def test_build_arg_parser_defaults_and_required(tmp_path: Path):
     assert args.seed == 42
     assert args.num_nodes == 8
     assert args.trace_time == "3600s"
-    assert args.log_level == "INFO"
-    assert args.show_plots is False
+    assert args.log_level == tg.DEFAULT_LOG_LEVEL
+    assert args.show_plots is tg.DEFAULT_SHOW_PLOTS
+
 
 @pytest.mark.parametrize(
     "missing_flag",
@@ -108,8 +129,10 @@ def test_build_arg_parser_defaults_and_required(tmp_path: Path):
         "--trace-time",
         "--target-util",
         "--xmin-arrival",
+        "--xmax-arrival",
         "--mean-arrival",
         "--xmin-life",
+        "--xmax-life",
         "--xmin-req",
         "--xmax-req",
         "--mean-req",
@@ -129,15 +152,22 @@ def test_resolve_effective_args_missing_required_exits(tmp_path: Path, missing_f
         "--num-nodes", "8",
         "--trace-time", "3600s",
         "--target-util", "0.9",
+
         "--xmin-arrival", "0.01",
+        "--xmax-arrival", "10.0",
         "--mean-arrival", "1.0",
+
         "--xmin-life", "10.0",
+        "--xmax-life", "100.0",
+
         "--xmin-req", "0.01",
         "--xmax-req", "1.0",
         "--mean-req", "0.2",
+
         "--priority-min", "1",
         "--priority-max", "3",
         "--priority-ratio", "1.0",
+
         "--replicas-min", "1",
         "--replicas-max", "1",
         "--replicas-ratio", "1.0",
@@ -148,6 +178,61 @@ def test_resolve_effective_args_missing_required_exits(tmp_path: Path, missing_f
     with pytest.raises(SystemExit):
         tg.resolve_effective_args(cli_args)
 
+
+def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
+    seeds_path = tmp_path / "seeds.txt"
+    seeds_path.write_text("1\n", encoding="utf-8")
+
+    p = tg.build_arg_parser()
+    cli_args = p.parse_args(
+        [
+            "--output-dir", str(tmp_path),
+            "--seed", "123",
+            "--seed-file", str(seeds_path),
+            "--target-util", "0.9",
+            "--mean-arrival", "1.0",
+            "--mean-req", "0.2",
+        ]
+    )
+    with pytest.raises(SystemExit):
+        tg.resolve_effective_args(cli_args)
+
+
+# ---------------------------------------------------------------------------
+# Job-file helpers (private)
+# ---------------------------------------------------------------------------
+
+def test_load_job_doc_missing_file_exits(tmp_path: Path):
+    with pytest.raises(SystemExit):
+        tg._load_job_doc(tmp_path / "nope.yaml")
+
+
+def test_load_job_doc_non_mapping_exits(tmp_path: Path):
+    p = tmp_path / "job.yaml"
+    p.write_text("- 1\n- 2\n", encoding="utf-8")  # YAML list
+    with pytest.raises(SystemExit):
+        tg._load_job_doc(p)
+
+
+def test_apply_defaults_sets_log_level_and_show_plots_when_none(tmp_path: Path):
+    ns = argparse.Namespace(log_level=None, show_plots=None)
+    out = tg._apply_defaults(ns)
+    assert out.log_level == tg.DEFAULT_LOG_LEVEL
+    assert out.show_plots is tg.DEFAULT_SHOW_PLOTS
+
+
+def test_validate_args_enforces_min_lifetime_floor(tmp_path: Path):
+    args = _make_required_args(tmp_path, xmin_life=1.0, xmax_life=10.0)
+    with pytest.raises(SystemExit):
+        tg._validate_args(args)
+
+
+def test_validate_args_requires_xmax_gt_xmin(tmp_path: Path):
+    args = _make_required_args(tmp_path, xmin_arrival=1.0, xmax_arrival=1.0)
+    with pytest.raises(SystemExit):
+        tg._validate_args(args)
+
+
 def test_job_file_merges_when_cli_missing_and_cli_wins(tmp_path: Path):
     job_path = tmp_path / "job.yaml"
     job_path.write_text(
@@ -157,18 +242,26 @@ seed: 111
 num-nodes: 5
 trace-time: 7s
 target-util: 0.9
+
 xmin-arrival: 0.01
+xmax-arrival: 10.0
 mean-arrival: 1.0
+
 xmin-life: 10.0
+xmax-life: 100.0
+
 xmin-req: 0.01
 xmax-req: 1.0
 mean-req: 0.2
+
 priority-min: 1
 priority-max: 3
 priority-ratio: 1.0
+
 replicas-min: 1
 replicas-max: 1
 replicas-ratio: 1.0
+
 show-plots: true
 """.lstrip(),
         encoding="utf-8",
@@ -190,56 +283,62 @@ show-plots: true
     assert args.show_plots is True
     assert args.output_dir == str(tmp_path)
 
-def test_seed_file_expands_to_subdirs_under_output_dir(tmp_path: Path):
+
+# ---------------------------------------------------------------------------
+# expand_seed_runs()
+# ---------------------------------------------------------------------------
+
+def test_expand_seed_runs_single_seed(tmp_path: Path):
+    args = _make_required_args(tmp_path, seed=7, seed_file=None)
+    runs = tg.expand_seed_runs(args)
+    assert [r.seed for r in runs] == [7]
+    assert str(Path(runs[0].output_dir).resolve()) == str(Path(tmp_path).resolve())
+
+
+def test_expand_seed_runs_seed_file_expands_to_subdirs_under_output_dir(tmp_path: Path, monkeypatch):
+    # Do not test read_seeds_file() (imported) — stub it.
     seeds_path = tmp_path / "seeds.txt"
-    seeds_path.write_text("1\n2\n#comment\n2\n", encoding="utf-8")
+    seeds_path.write_text("1\n2\n", encoding="utf-8")
 
     p = tg.build_arg_parser()
     cli_args = p.parse_args(
         [
             "--output-dir", str(tmp_path),
             "--seed-file", str(seeds_path),
+
             "--num-nodes", "8",
             "--trace-time", "3600s",
             "--target-util", "0.9",
+
             "--xmin-arrival", "0.01",
+            "--xmax-arrival", "10.0",
             "--mean-arrival", "1.0",
+
             "--xmin-life", "10.0",
+            "--xmax-life", "100.0",
+
             "--xmin-req", "0.01",
             "--xmax-req", "1.0",
             "--mean-req", "0.2",
+
             "--priority-min", "1",
             "--priority-max", "3",
             "--priority-ratio", "1.0",
+
             "--replicas-min", "1",
             "--replicas-max", "1",
             "--replicas-ratio", "1.0",
         ]
     )
     args = tg.resolve_effective_args(cli_args)
-    runs = tg.expand_seed_runs(args)
 
+    monkeypatch.setattr(tg, "read_seeds_file", lambda _p, logger: [1, 2])
+
+    runs = tg.expand_seed_runs(args)
     assert [r.seed for r in runs] == [1, 2]
     assert Path(runs[0].output_dir).name == "1"
     assert Path(runs[1].output_dir).name == "2"
 
-def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
-    seeds_path = tmp_path / "seeds.txt"
-    seeds_path.write_text("1\n", encoding="utf-8")
-
-    p = tg.build_arg_parser()
-    cli_args = p.parse_args(
-        [
-            "--output-dir", str(tmp_path),
-            "--seed", "123",
-            "--seed-file", str(seeds_path),
-            "--target-util", "0.9",
-            "--mean-arrival", "1.0",
-            "--mean-req", "0.2",
-        ]
-    )
-    with pytest.raises(SystemExit):
-        tg.resolve_effective_args(cli_args)
 
 # ---------------------------------------------------------------------------
 # round_float_args()
@@ -253,8 +352,9 @@ def test_round_float_args_rounds_only_floats():
     assert ns.c == "x"
     assert ns.d == 3.14
 
+
 # ---------------------------------------------------------------------------
-# TraceGenerator.__init__()
+# Generator
 # ---------------------------------------------------------------------------
 
 def test_trace_generator_init_creates_paths(tmp_path: Path):
@@ -267,13 +367,25 @@ def test_trace_generator_init_creates_paths(tmp_path: Path):
     assert gen.trace_path.name == "trace.json"
     assert gen.info_path.name == "info_generate.yaml"
 
-# ---------------------------------------------------------------------------
-# TraceGenerator.log_args()
-# ---------------------------------------------------------------------------
+
+def test_from_run_args_creates_figures_dir_even_for_seed_runs(tmp_path: Path):
+    run_args = _make_required_args(tmp_path, seed=1)
+    gen = tg.TraceGenerator._from_run_args(run_args)
+
+    assert gen.output_dir.exists()
+    assert gen.figures_dir.exists()
+    assert gen.util_plot_path.name == "utilization.png"
+    assert gen.hist_plot_path.name == "histograms.png"
+    assert gen.times == []
+    assert gen.u_req_hist == []
+    assert gen.pods_hist == []
+    assert gen.initial_pods_count == 0
+
 
 def test_log_args_calls_log_args_block_and_order(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path)
     gen = tg.TraceGenerator(args)
+
     seen = {}
 
     def fake_log_args_block(logger, passed_args, title, include):
@@ -288,19 +400,16 @@ def test_log_args_calls_log_args_block_and_order(tmp_path: Path, monkeypatch):
     assert seen["args"] is args
     assert seen["title"] == "ARGS"
     assert seen["include"][:6] == ["job_file", "output_dir", "seed", "seed_file", "log_level", "show_plots"]
+    assert "xmax_arrival" in seen["include"]
+    assert "xmax_life" in seen["include"]
     assert "target_util" in seen["include"]
-    assert "mean_req" in seen["include"]
-    assert "mean_arrival" in seen["include"]
 
-# ---------------------------------------------------------------------------
-# TraceGenerator._write_info_file()
-# ---------------------------------------------------------------------------
 
 def test_write_info_file_success_calls_write_info_file(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path)
     gen = tg.TraceGenerator(args)
-    called = {}
 
+    called = {}
     monkeypatch.setattr(tg, "build_cli_cmd", lambda: ["python", "trace_generator.py", "--x"])
 
     def fake_write_info_file(out_path, inputs, logger):
@@ -318,6 +427,7 @@ def test_write_info_file_success_calls_write_info_file(tmp_path: Path, monkeypat
     assert called["inputs"]["generated"] == {"k": 1}
     assert called["logger"] is tg.LOG
 
+
 def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, caplog):
     args = _make_required_args(tmp_path)
     gen = tg.TraceGenerator(args)
@@ -325,173 +435,209 @@ def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, cap
     monkeypatch.setattr(tg, "build_cli_cmd", lambda: ["x"])
     monkeypatch.setattr(tg, "write_info_file", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
 
-    caplog.set_level("WARNING", logger=tg.LOGGER_NAME)
-    gen._write_info_file(extra={})
+    # trace_generator configures its logger with propagate=False; temporarily allow propagation
+    # so pytest caplog (which attaches to the root logger) can see the warning.
+    old_propagate = tg.LOG.propagate
+    tg.LOG.propagate = True
+    try:
+        caplog.set_level("WARNING", logger=tg.LOGGER_NAME)
+        gen._write_info_file(extra={})
+    finally:
+        tg.LOG.propagate = old_propagate
 
     assert any("failed to write info_generate.yaml" in rec.message for rec in caplog.records)
 
+
 # ---------------------------------------------------------------------------
-# TraceGenerator._sample_pareto()
+# Bounded Pareto: sampling + mean + alpha solve
 # ---------------------------------------------------------------------------
 
-def test_sample_pareto_validates_and_respects_xmax():
+def test_sample_bounded_pareto_validates_and_respects_bounds():
     rng = tg.np.random.default_rng(123)
 
     with pytest.raises(ValueError):
-        tg.TraceGenerator._sample_pareto(rng, alpha=0.0, x_min=1.0, x_max=None, size=10)
+        tg.TraceGenerator.sample_bounded_pareto(rng, alpha=0.0, x_min=1.0, x_max=2.0, size=10)
     with pytest.raises(ValueError):
-        tg.TraceGenerator._sample_pareto(rng, alpha=1.0, x_min=0.0, x_max=None, size=10)
+        tg.TraceGenerator.sample_bounded_pareto(rng, alpha=1.0, x_min=0.0, x_max=2.0, size=10)
     with pytest.raises(ValueError):
-        tg.TraceGenerator._sample_pareto(rng, alpha=1.0, x_min=2.0, x_max=1.0, size=10)
+        tg.TraceGenerator.sample_bounded_pareto(rng, alpha=1.0, x_min=2.0, x_max=1.0, size=10)
 
-    x = tg.TraceGenerator._sample_pareto(rng, alpha=2.0, x_min=1.0, x_max=2.0, size=1000)
+    x = tg.TraceGenerator.sample_bounded_pareto(rng, alpha=2.0, x_min=1.0, x_max=2.0, size=5000)
+    assert x.shape == (5000,)
     assert (x >= 1.0).all()
     assert (x <= 2.0 + 1e-9).all()
 
-    # hit "no x_max" branch
-    x2 = tg.TraceGenerator._sample_pareto(rng, alpha=2.0, x_min=1.0, x_max=None, size=10)
-    assert (x2 >= 1.0).all()
+
+def test_bounded_pareto_mean_validates_and_matches_alpha_one_formula():
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.bounded_pareto_mean(alpha=1.0, x_min=0.0, x_max=2.0)
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.bounded_pareto_mean(alpha=1.0, x_min=2.0, x_max=1.0)
+
+    x_min, x_max = 2.0, 10.0
+    m1 = tg.TraceGenerator.bounded_pareto_mean(alpha=1.0, x_min=x_min, x_max=x_max)
+    expected = (x_max * x_min / (x_max - x_min)) * math.log(x_max / x_min)
+    assert math.isclose(m1, expected, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def test_bounded_pareto_max_mean_validates_and_is_between_bounds():
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.bounded_pareto_max_mean(x_min=0.0, x_max=2.0)
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.bounded_pareto_max_mean(x_min=2.0, x_max=2.0)
+
+    mmax = tg.TraceGenerator.bounded_pareto_max_mean(x_min=2.0, x_max=10.0)
+    assert 2.0 < mmax < 10.0
+
+
+def test_solve_alpha_for_bounded_mean_validates_ranges_and_converges():
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.solve_alpha_for_bounded_mean(x_min=0.0, x_max=2.0, target_mean=1.0)
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.solve_alpha_for_bounded_mean(x_min=2.0, x_max=2.0, target_mean=1.0)
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.solve_alpha_for_bounded_mean(x_min=1.0, x_max=2.0, target_mean=1.0)  # must be in (x_min, x_max)
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.solve_alpha_for_bounded_mean(x_min=1.0, x_max=2.0, target_mean=3.0)
+
+    x_min, x_max = 0.1, 1.0
+    target = 0.2
+    alpha = tg.TraceGenerator.solve_alpha_for_bounded_mean(x_min=x_min, x_max=x_max, target_mean=target)
+    got = tg.TraceGenerator.bounded_pareto_mean(alpha, x_min, x_max)
+    assert got == pytest.approx(target, rel=1e-8, abs=1e-10)
+
+
+def test_solve_alpha_for_bounded_mean_rejects_target_above_max_mean():
+    x_min, x_max = 2.0, 10.0
+    mean_max = tg.TraceGenerator.bounded_pareto_max_mean(x_min, x_max)
+    with pytest.raises(ValueError):
+        tg.TraceGenerator.solve_alpha_for_bounded_mean(x_min=x_min, x_max=x_max, target_mean=mean_max)
+
 
 # ---------------------------------------------------------------------------
-# TraceGenerator._solve_alpha_for_mean()
+# Discrete helpers (priority/replicas)
 # ---------------------------------------------------------------------------
 
-def test_solve_alpha_validates_target_mean_ranges():
-    rng = tg.np.random.default_rng(0)
-
+def test_build_trunc_geometric_support_validates_and_returns_probs():
     with pytest.raises(ValueError):
-        tg.TraceGenerator._solve_alpha_for_mean(rng, x_min=0.0, x_max=1.0, target_mean=0.5)
-    with pytest.raises(ValueError):
-        tg.TraceGenerator._solve_alpha_for_mean(rng, x_min=1.0, x_max=None, target_mean=1.0)
-    with pytest.raises(ValueError):
-        tg.TraceGenerator._solve_alpha_for_mean(rng, x_min=1.0, x_max=2.0, target_mean=3.0)
+        tg.TraceGenerator.build_trunc_geometric_support(1, 2, ratio=0.0)
 
-def test_solve_alpha_bracket_failure_raises(monkeypatch):
-    rng = tg.np.random.default_rng(0)
-
-    def constant_sample(_rng, _alpha, _x_min, _x_max, size=1):
-        return tg.np.full(size, 1.0, dtype=float)
-
-    monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(constant_sample))
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_SAMPLES", 10)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_MAX_ITERATIONS", 10)
-
-    with pytest.raises(ValueError):
-        tg.TraceGenerator._solve_alpha_for_mean(rng, x_min=0.5, x_max=2.0, target_mean=1.5)
-
-def test_solve_alpha_converges_with_stubbed_sampling(monkeypatch):
-    rng = tg.np.random.default_rng(0)
-
-    monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(sample_for_alpha))
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_SAMPLES", 1)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_MAX_ITERATIONS", 200)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_TOLERANCE", 1e-6)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_LOWER_BOUND", 0.1)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_UPPER_BOUND", 10.0)
-
-    alpha = tg.TraceGenerator._solve_alpha_for_mean(
-        rng,
-        x_min=0.5,
-        x_max=10.0,
-        target_mean=0.7,
-    )
-    assert 0.1 <= alpha <= 10.0
-
-def test_solve_alpha_unbounded_adjusts_alpha_low(monkeypatch):
-    rng = tg.np.random.default_rng(0)
-
-    monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(sample_for_alpha))
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_SAMPLES", 1)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_MAX_ITERATIONS", 50)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_TOLERANCE", 1e-6)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_LOWER_BOUND", 0.1)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_UPPER_BOUND", 10.0)
-
-    alpha = tg.TraceGenerator._solve_alpha_for_mean(
-        rng,
-        x_min=0.5,
-        x_max=None,
-        target_mean=0.7,
-    )
-    assert alpha >= 1.0
-
-# ---------------------------------------------------------------------------
-# TraceGenerator._build_geometric_support()
-# ---------------------------------------------------------------------------
-
-def test_build_geometric_support_validates_and_returns_probs():
-    values, probs = tg.TraceGenerator._build_geometric_support(min_val=3, max_val=3, ratio=0.5)
-    assert values.tolist() == [3]
+    vals, probs = tg.TraceGenerator.build_trunc_geometric_support(3, 3, ratio=0.5)
+    assert vals.tolist() == [3]
     assert probs is None
 
-    values, probs = tg.TraceGenerator._build_geometric_support(min_val=1, max_val=3, ratio=1.0)
-    assert values.tolist() == [1, 2, 3]
+    vals, probs = tg.TraceGenerator.build_trunc_geometric_support(1, 3, ratio=1.0)
+    assert vals.tolist() == [1, 2, 3]
     assert probs is None
 
-    values, probs = tg.TraceGenerator._build_geometric_support(min_val=1, max_val=4, ratio=0.5)
-    assert values.tolist() == [1, 2, 3, 4]
+    vals, probs = tg.TraceGenerator.build_trunc_geometric_support(1, 4, ratio=0.5)
+    assert vals.tolist() == [1, 2, 3, 4]
     assert probs is not None
-    assert math.isclose(float(probs.sum()), 1.0, rel_tol=1e-9, abs_tol=1e-9)
+    assert math.isclose(float(probs.sum()), 1.0, rel_tol=1e-12, abs_tol=1e-12)
     assert probs[0] >= probs[-1]
 
-    with pytest.raises(ValueError):
-        tg.TraceGenerator._build_geometric_support(min_val=1, max_val=2, ratio=0.0)
+    # max < min => clamp to min only
+    vals, probs = tg.TraceGenerator.build_trunc_geometric_support(5, 1, ratio=0.5)
+    assert vals.tolist() == [5]
+    assert probs is None
 
-# ---------------------------------------------------------------------------
-# TraceGenerator._expected_value()
-# ---------------------------------------------------------------------------
 
-def test_expected_value_for_support_handles_uniform_and_weighted():
+def test_expected_value_handles_uniform_and_weighted():
     vals = tg.np.array([1, 2, 3], dtype=int)
-    assert tg.TraceGenerator._expected_value_for_support(vals, None) == pytest.approx(2.0)
+    assert tg.TraceGenerator.expected_value(vals, None) == pytest.approx(2.0)
 
     probs = tg.np.array([0.5, 0.25, 0.25], dtype=float)
-    assert tg.TraceGenerator._expected_value_for_support(vals, probs) == pytest.approx(1.75)
+    assert tg.TraceGenerator.expected_value(vals, probs) == pytest.approx(1.75)
+
 
 # ---------------------------------------------------------------------------
-# TraceGenerator._infer_mean_life_from_target_util()
+# Mean-life inference and alpha fitting
 # ---------------------------------------------------------------------------
 
-def test_infer_mean_life_validates_ranges(tmp_path: Path):
-    args = _make_required_args(tmp_path, target_util=0.5, mean_arrival=2.0, mean_req=0.25, num_nodes=2)
+def test_infer_mean_life_from_target_util_happy_path(tmp_path: Path):
+    args = _make_required_args(
+        tmp_path,
+        num_nodes=2,
+        target_util=0.5,
+        mean_arrival=2.0,
+        mean_req=0.25,
+        replicas_min=1,
+        replicas_max=1,
+        replicas_ratio=1.0,
+        xmin_life=2.0,
+        xmax_life=100.0,
+    )
     gen = tg.TraceGenerator(args)
-
     mean_life = gen.infer_mean_life_from_target_util()
-    assert mean_life > 0
+    assert mean_life > 0.0
+    assert float(args.xmin_life) < mean_life < float(args.xmax_life)
 
-    args2 = _make_required_args(tmp_path, target_util=0.0)
-    gen2 = tg.TraceGenerator(args2)
+
+def test_infer_mean_life_from_target_util_raises_if_outside_bounds(tmp_path: Path):
+    # Too small => <= xmin-life
+    args_small = _make_required_args(
+        tmp_path,
+        num_nodes=1,
+        target_util=0.01,
+        mean_arrival=0.1,
+        mean_req=1.0,
+        replicas_min=2,
+        replicas_max=2,
+        replicas_ratio=1.0,
+        xmin_life=2.0,
+        xmax_life=100.0,
+    )
+    gen_small = tg.TraceGenerator(args_small)
     with pytest.raises(ValueError):
-        gen2.infer_mean_life_from_target_util()
+        gen_small.infer_mean_life_from_target_util()
 
-# ---------------------------------------------------------------------------
-# TraceGenerator._fit_alphas()
-# ---------------------------------------------------------------------------
+    # Too large => >= xmax-life
+    args_big = _make_required_args(
+        tmp_path,
+        num_nodes=50,
+        target_util=1.0,
+        mean_arrival=10.0,
+        mean_req=0.1,
+        replicas_min=1,
+        replicas_max=1,
+        replicas_ratio=1.0,
+        xmin_life=2.0,
+        xmax_life=100.0,
+    )
+    gen_big = tg.TraceGenerator(args_big)
+    with pytest.raises(ValueError):
+        gen_big.infer_mean_life_from_target_util()
 
-def test_fit_alphas_sets_fields_and_attaches_to_args(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(sample_for_alpha))
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_SAMPLES", 1)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_MAX_ITERATIONS", 100)
-    monkeypatch.setattr(tg, "SOLVE_ALPHA_TOLERANCE", 1e-6)
 
-    args = _make_required_args(tmp_path)
+def test_fit_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
+    args = _make_required_args(tmp_path, mean_life=10.0)
     gen = tg.TraceGenerator(args)
 
-    # needs mean_life set
-    gen.args.mean_life = 2.0
-
-    rng = tg.np.random.default_rng(0)
-    gen._fit_alphas(rng)
+    gen.fit_alphas()
 
     assert gen.alpha_req is not None
     assert gen.alpha_arrival is not None
     assert gen.alpha_life is not None
+
     assert hasattr(args, "alpha_req")
     assert hasattr(args, "alpha_arrival")
     assert hasattr(args, "alpha_life")
 
+    # If mean_life changes, only alpha_life should recompute (req/arrival cached)
+    old_req = gen.alpha_req
+    old_arr = gen.alpha_arrival
+    old_life = gen.alpha_life
+
+    gen.args.mean_life = 12.0
+    gen.fit_alphas()
+
+    assert gen.alpha_req == old_req
+    assert gen.alpha_arrival == old_arr
+    assert gen.alpha_life != old_life
+
+
 # ---------------------------------------------------------------------------
-# TraceGenerator._time_avg_req_util()
+# Util metric
 # ---------------------------------------------------------------------------
 
 def test_time_avg_req_util_basic(tmp_path: Path):
@@ -502,69 +648,77 @@ def test_time_avg_req_util_basic(tmp_path: Path):
         tg.TraceRecord(id=1, start_time=0.0, end_time=10.0, cpu=0.5, mem=0.5, priority=1, replicas=1),
     ]
     # area = 0.5*10, divide by N*T = 2*10 => 0.25
-    assert gen._time_avg_req_util(pods) == pytest.approx(0.25)
+    assert gen.time_avg_req_util(pods) == pytest.approx(0.25)
+
 
 # ---------------------------------------------------------------------------
-# TraceGenerator._build_initial_load()
+# Initial snapshot
 # ---------------------------------------------------------------------------
 
-def test_build_initial_load_can_overshoot_then_pop(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, num_nodes=1, target_util=0.1)
+def test_build_initial_snapshot_can_overshoot_then_pop(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path, num_nodes=1, target_util=0.1, mean_life=10.0)
     gen = tg.TraceGenerator(args)
     _set_alphas(gen, alpha=2.0)
 
-    def const_sample(_rng, _alpha, _x_min, _x_max, size=1):
+    def const_sample(_rng, *, alpha, x_min, x_max, size=1):
+        # Always return a value that causes overshoot in req and a valid lifetime.
+        # We'll use x_min/x_max to decide which one is being requested by bounds.
+        # Simpler: just return 0.2 for everything.
         return tg.np.full(size, 0.2, dtype=float)
 
-    monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(const_sample))
+    monkeypatch.setattr(tg.TraceGenerator, "sample_bounded_pareto", staticmethod(const_sample))
 
     prio_vals = tg.np.array([1], dtype=int)
     rep_vals = tg.np.array([1], dtype=int)
 
-    pods, next_id = gen._build_initial_load(
+    pods, next_id = gen.build_initial_snapshot(
         tg.np.random.default_rng(0),
-        prio_vals,
-        None,
-        rep_vals,
-        None,
+        prio_vals=prio_vals,
+        prio_probs=None,
+        rep_vals=rep_vals,
+        rep_probs=None,
         next_id=0,
     )
 
     assert pods == []
     assert next_id == 0
 
-def test_build_initial_load_returns_some_pods(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, num_nodes=1, target_util=0.4)
+
+def test_build_initial_snapshot_returns_some_pods(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path, num_nodes=1, target_util=0.4, mean_life=10.0)
     gen = tg.TraceGenerator(args)
     _set_alphas(gen, alpha=2.0)
 
-    def const_sample(_rng, _alpha, _x_min, _x_max, size=1):
+    def const_sample(_rng, *, alpha, x_min, x_max, size=1):
+        # Use a stable request and lifetime.
         return tg.np.full(size, 0.2, dtype=float)
 
-    monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(const_sample))
+    monkeypatch.setattr(tg.TraceGenerator, "sample_bounded_pareto", staticmethod(const_sample))
 
     prio_vals = tg.np.array([1], dtype=int)
     rep_vals = tg.np.array([1], dtype=int)
 
-    pods, next_id = gen._build_initial_load(
+    pods, next_id = gen.build_initial_snapshot(
         tg.np.random.default_rng(1),
-        prio_vals,
-        None,
-        rep_vals,
-        None,
+        prio_vals=prio_vals,
+        prio_probs=None,
+        rep_vals=rep_vals,
+        rep_probs=None,
         next_id=0,
     )
 
     assert len(pods) >= 1
     assert next_id == len(pods)
     assert all(p.start_time == 0.0 for p in pods)
+    assert all(p.end_time > 0.0 for p in pods)
+
 
 # ---------------------------------------------------------------------------
-# TraceGenerator._generate_trace_events()
+# Trace events
 # ---------------------------------------------------------------------------
 
 def test_generate_trace_events_seeds_baseline_and_pops_end_heap(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, num_nodes=1, trace_time="2.5s")
+    args = _make_required_args(tmp_path, num_nodes=1, trace_time="2.5s", mean_life=10.0)
     gen = tg.TraceGenerator(args)
     _set_alphas(gen, alpha=2.0)
 
@@ -575,11 +729,11 @@ def test_generate_trace_events_seeds_baseline_and_pops_end_heap(tmp_path: Path, 
         10.0,
     ]
 
-    def seq_sample(_rng, _alpha, _x_min, _x_max, size=1):
+    def seq_sample(_rng, *, alpha, x_min, x_max, size=1):
         v = float(samples.pop(0))
         return tg.np.full(size, v, dtype=float)
 
-    monkeypatch.setattr(tg.TraceGenerator, "_sample_pareto", staticmethod(seq_sample))
+    monkeypatch.setattr(tg.TraceGenerator, "sample_bounded_pareto", staticmethod(seq_sample))
 
     initial_pods = [
         tg.TraceRecord(id=1, start_time=0.0, end_time=0.5, cpu=0.1, mem=0.1, priority=1, replicas=1)
@@ -588,12 +742,12 @@ def test_generate_trace_events_seeds_baseline_and_pops_end_heap(tmp_path: Path, 
     prio_vals = tg.np.array([1], dtype=int)
     rep_vals = tg.np.array([1], dtype=int)
 
-    pods, _, times, u_hist, pods_hist = gen._generate_trace_events(
+    pods, _, times, u_hist, pods_hist = gen.generate_trace_events(
         tg.np.random.default_rng(0),
-        prio_vals,
-        None,
-        rep_vals,
-        None,
+        prio_vals=prio_vals,
+        prio_probs=None,
+        rep_vals=rep_vals,
+        rep_probs=None,
         next_id=1,
         initial_pods=initial_pods,
     )
@@ -603,20 +757,21 @@ def test_generate_trace_events_seeds_baseline_and_pops_end_heap(tmp_path: Path, 
     assert len(u_hist) == len(times)
     assert pods_hist == [1, 1, 1]
 
+
 # ---------------------------------------------------------------------------
-# TraceGenerator._generate_tracedata_once()
+# One generation pass
 # ---------------------------------------------------------------------------
 
-def test_generate_tracedata_once_sets_series_and_metadata(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, num_nodes=2, trace_time="5s")
-    args.mean_life = 2.0
+def test_generate_once_sets_series_and_extra_info(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path, num_nodes=2, trace_time="5s", mean_life=10.0)
     gen = tg.TraceGenerator(args)
 
-    def fake_fit(_rng):
+    # Avoid the real alpha solve here; just set values and attach to args.
+    def fake_fit_alphas():
         _set_alphas(gen, alpha=2.0)
 
-    monkeypatch.setattr(gen, "_fit_alphas", fake_fit)
-    monkeypatch.setattr(gen, "_time_avg_req_util", lambda _pods: 0.55)
+    monkeypatch.setattr(gen, "fit_alphas", fake_fit_alphas)
+    monkeypatch.setattr(gen, "time_avg_req_util", lambda _pods: 0.55)
 
     initial_pods = [
         tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=2),
@@ -624,112 +779,100 @@ def test_generate_tracedata_once_sets_series_and_metadata(tmp_path: Path, monkey
     trace_pods = [
         tg.TraceRecord(id=2, start_time=1.0, end_time=2.0, cpu=0.2, mem=0.2, priority=1, replicas=1),
     ]
+
     times = [0.0, 1.0]
     u_hist = [0.1, 0.2]
     pods_hist = [2, 1]
 
-    monkeypatch.setattr(gen, "_build_initial_load", lambda *_a, **_k: (initial_pods, 1))
-    monkeypatch.setattr(gen, "_generate_trace_events", lambda *_a, **_k: (trace_pods, 2, times, u_hist, pods_hist))
+    monkeypatch.setattr(gen, "build_initial_snapshot", lambda *_a, **_k: (initial_pods, 1))
+    monkeypatch.setattr(gen, "generate_trace_events", lambda *_a, **_k: (trace_pods, 2, times, u_hist, pods_hist))
 
-    got_initial, got_trace, stats, extra = gen._generate_tracedata_once(iter_seed=1234)
+    got_initial, got_trace, util, extra = gen.generate_once(iter_seed=1234)
 
     assert got_initial == initial_pods
     assert got_trace == trace_pods
-    assert stats["util_time_avg"] == pytest.approx(0.55)
+    assert util == pytest.approx(0.55)
+
     assert gen.times == times
     assert gen.u_req_hist == u_hist
     assert gen.pods_hist == pods_hist
     assert gen.initial_pods_count == 2
+
     assert extra["seed"] == int(args.seed)
+    assert extra["measured_util_time_avg"] == pytest.approx(0.55)
     assert "rng" in extra and "derived" in extra["rng"]
     assert "files" in extra and "initial_json" in extra["files"]
 
+
 # ---------------------------------------------------------------------------
-# TraceGenerator._calibrate_mean_life()
+# Calibration
 # ---------------------------------------------------------------------------
 
 def test_calibrate_mean_life_stops_within_tolerance(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, target_util=0.5)
-    args.mean_life = 10.0
+    args = _make_required_args(tmp_path, target_util=0.5, mean_life=10.0)
     gen = tg.TraceGenerator(args)
 
     initial = [tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=1)]
     trace = []
     extra = {"ok": True}
 
-    monkeypatch.setattr(
-        gen,
-        "_generate_tracedata_once",
-        lambda _seed: (initial, trace, {"util_time_avg": 0.5, "initial_count": 1.0, "trace_count": 0.0}, extra),
-    )
+    monkeypatch.setattr(gen, "generate_once", lambda _seed: (initial, trace, 0.5, extra))
 
     got_initial, got_trace, got_extra = gen.calibrate_mean_life()
     assert got_initial == initial
     assert got_trace == trace
     assert got_extra == extra
 
+
 def test_calibrate_mean_life_updates_mean_life_and_clamps_to_xmax(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, target_util=0.9, xmin_life=1.0, xmax_life=15.0)
-    args.mean_life = 10.0
+    args = _make_required_args(tmp_path, target_util=0.9, xmin_life=2.0, xmax_life=15.0, mean_life=10.0)
     gen = tg.TraceGenerator(args)
 
     calls = {"n": 0}
 
-    def fake_generate_tracedata_once(_seed):
+    def fake_generate_once(_seed):
         calls["n"] += 1
-        if calls["n"] == 1:
-            measured = 0.1
-        else:
-            measured = float(args.target_util)
-        return [], [], {"util_time_avg": measured, "initial_count": 0.0, "trace_count": 0.0}, {"iter": calls["n"]}
+        measured = 0.1 if calls["n"] == 1 else float(args.target_util)
+        return [], [], measured, {"iter": calls["n"]}
 
-    monkeypatch.setattr(gen, "_generate_tracedata_once", fake_generate_tracedata_once)
+    monkeypatch.setattr(gen, "generate_once", fake_generate_once)
     monkeypatch.setattr(tg, "CALIB_MEAN_LIFE_MAX_ITER", 2)
 
     gen.calibrate_mean_life()
 
-    # After first iteration: new_mean_life=10*(0.9/0.1)=90 -> clamp to 0.999*xmax
+    # After first iteration: new_mean=10*(0.9/0.1)=90 -> clamp to 0.999*xmax
     assert gen.args.mean_life == pytest.approx(15.0 * 0.999)
 
+
 def test_calibrate_mean_life_raises_on_zero_measured_util(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, target_util=0.5)
-    args.mean_life = 10.0
+    args = _make_required_args(tmp_path, target_util=0.5, mean_life=10.0)
     gen = tg.TraceGenerator(args)
 
-    monkeypatch.setattr(
-        gen,
-        "_generate_tracedata_once",
-        lambda _seed: ([], [], {"util_time_avg": 0.0, "initial_count": 0.0, "trace_count": 0.0}, {}),
-    )
+    monkeypatch.setattr(gen, "generate_once", lambda _seed: ([], [], 0.0, {}))
 
     with pytest.raises(RuntimeError):
         gen.calibrate_mean_life()
 
+
 # ---------------------------------------------------------------------------
-# TraceGenerator._write_json()
+# Output
 # ---------------------------------------------------------------------------
 
 def test_write_json_writes_expected_shape(tmp_path: Path):
-    args = _make_required_args(tmp_path)
-    gen = tg.TraceGenerator(args)
-
     pods = [
         tg.TraceRecord(id=1, start_time=0.1, end_time=0.2, cpu=0.3, mem=0.3, priority=1, replicas=2)
     ]
     out = tmp_path / "x.json"
-    gen._write_json(out, pods)
+    tg.TraceGenerator._write_json(out, pods)
 
     data = json.loads(out.read_text(encoding="utf-8"))
     assert list(data.keys()) == ["pods"]
     assert isinstance(data["pods"], list)
     assert data["pods"][0]["id"] == 1
 
-# ---------------------------------------------------------------------------
-# TraceGenerator._write_outputs()
-# ---------------------------------------------------------------------------
 
 def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path, target_util=0.5)
+    args = _make_required_args(tmp_path, target_util=0.5, mean_life=10.0)
     gen = tg.TraceGenerator(args)
 
     initial = [tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=1)]
@@ -738,10 +881,10 @@ def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
 
     calls = {"json": [], "info": 0}
 
-    monkeypatch.setattr(gen, "_time_avg_req_util", lambda _pods: 0.6)
+    monkeypatch.setattr(gen, "time_avg_req_util", lambda _pods: 0.6)
 
-    def fake_write_json(path: Path, pods):
-        calls["json"].append((path, len(pods)))
+    def fake_write_json(path: Path, pods_):
+        calls["json"].append((path, len(pods_)))
 
     monkeypatch.setattr(gen, "_write_json", fake_write_json)
     monkeypatch.setattr(gen, "_write_info_file", lambda extra: calls.__setitem__("info", calls["info"] + 1))
@@ -754,19 +897,21 @@ def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
     assert calls["json"][1][1] == 1
     assert calls["info"] == 1
 
+
 # ---------------------------------------------------------------------------
-# TraceGenerator.run_seed()
+# Runner
 # ---------------------------------------------------------------------------
 
-def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path)
-    args.mean_life = None
+def test_run_seed_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path, mean_life=None)
     gen = tg.TraceGenerator(args)
 
-    _set_alphas(gen, alpha=2.0)
+    # Ensure args.alpha_* exist for plotting call sites.
+    gen.args.alpha_arrival = 2.0
+    gen.args.alpha_life = 2.0
+    gen.args.alpha_req = 2.0
 
     monkeypatch.setattr(gen, "infer_mean_life_from_target_util", lambda: 12.3)
-    monkeypatch.setattr(gen, "log_args", lambda: None)
 
     initial = [tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=1)]
     trace = []
@@ -790,7 +935,7 @@ def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monk
         called["hist"] += 1
         assert kwargs["out_path"].endswith("histograms.png")
 
-    monkeypatch.setattr(tg, "plot_utilization_time_series", fake_util)
+    monkeypatch.setattr(tg, "plot_utilization_and_num_pods", fake_util)
     monkeypatch.setattr(tg, "plot_generator_histograms", fake_hist)
 
     gen.run_seed()
@@ -799,8 +944,34 @@ def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monk
     assert called["util"] == 1
     assert called["hist"] == 1
 
+
+def test_run_invokes_run_seed_per_expanded_seed(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path, seed=1, mean_life=10.0)
+    gen = tg.TraceGenerator(args)
+
+    r1 = _make_required_args(tmp_path / "out1", seed=1, mean_life=10.0)
+    r2 = _make_required_args(tmp_path / "out2", seed=2, mean_life=10.0)
+
+    monkeypatch.setattr(tg, "expand_seed_runs", lambda _a: [r1, r2])
+    monkeypatch.setattr(tg, "make_header_footer", lambda _t: ("H", "F"))
+
+    called = {"runs": []}
+
+    class FakePerSeed:
+        def __init__(self, a):
+            self.args = a
+
+        def run_seed(self):
+            called["runs"].append((int(self.args.seed), str(self.args.output_dir)))
+
+    monkeypatch.setattr(tg.TraceGenerator, "_from_run_args", classmethod(lambda _cls, a: FakePerSeed(a)))
+
+    gen.run()
+    assert called["runs"] == [(1, str(r1.output_dir)), (2, str(r2.output_dir))]
+
+
 # ---------------------------------------------------------------------------
-# main()
+# Main
 # ---------------------------------------------------------------------------
 
 def test_main_smoke_invokes_generator(monkeypatch, tmp_path: Path):

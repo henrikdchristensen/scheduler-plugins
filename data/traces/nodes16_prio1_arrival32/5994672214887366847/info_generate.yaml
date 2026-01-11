@@ -1,7 +1,7 @@
 meta:
-  timestamp: 2026/01/11/13:55:45
+  timestamp: 2026/01/11/14:55:45
   git:
-    commit: dc722a4db978a679c13b13e5c0e2631c64287105
+    commit: 287e57dde5d91ff4ebb92113f844a8cc6b76e34d
     branch: opt-prio-refactor
 inputs:
   cli-cmd: python /mnt/d/projects/master/scheduler-plugins/scripts/kwok_trace_replayer/trace_generator.py
@@ -20,8 +20,8 @@ inputs:
     xmax_arrival: 512.0
     mean_arrival: 32.0
     xmin_life: 16.0
-    xmax_life: 32768.0
-    mean_life: 2207.034809252718
+    xmax_life: 28800.0
+    mean_life: 1898.1435876229305
     xmin_req: 0.05
     xmax_req: 0.5
     mean_req: 0.125
@@ -33,7 +33,7 @@ inputs:
     replicas_ratio: 0.8
     alpha_req: 1.057142
     alpha_arrival: 0.033877
-    alpha_life: 0.208447
+    alpha_life: 0.224428
   generated:
     num_nodes: 16
     trace_time_s: 28800.0
@@ -43,14 +43,14 @@ inputs:
       derived:
         initial_snapshot: 168532684997490566652562689098354106512
         trace_events: 262010801696035629476714664293714968509
-    measured_util_time_avg: 0.9010449786420567
+    measured_util_time_avg: 0.9061183904351764
     target_util_time_avg: 0.9
     calibration:
       util_tol: 0.01
       calib_max_iter: 20
       initial_fill_tol: 0.002
       initial_max_pods: 200000
-    derived_mean_life_s: 2207.034809
+    derived_mean_life_s: 1898.143588
     pareto:
       req:
         alpha: 1.057142
@@ -63,10 +63,10 @@ inputs:
         xmax: 512.0
         mean: 32.0
       life:
-        alpha: 0.208447
+        alpha: 0.224428
         xmin: 16.0
-        xmax: 32768.0
-        mean: 2207.034809252718
+        xmax: 28800.0
+        mean: 1898.1435876229305
     priority:
       min: 1
       max: 1
@@ -76,9 +76,9 @@ inputs:
       max: 3
       ratio: 0.8
     counts:
-      initial_records: 71
+      initial_records: 65
       trace_records: 913
-      initial_replicas_total: 128
+      initial_replicas_total: 122
       trace_replicas_total: 1690
     max_priority_seen: 1
     files:

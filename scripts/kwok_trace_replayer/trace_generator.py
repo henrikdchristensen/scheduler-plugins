@@ -11,8 +11,10 @@ High-level flow per seed:
   4) write initial.json + trace.json + info_generate.yaml + plots
 
 NOTE (lifetime alignment):
-  - Initial pods now sample their lifetime from the *same bounded Pareto* as trace pods.
-  - We enforce xmin-life >= 2s (hard requirement).
+    - Initial pods use residual-life sampling (stationary snapshot): we sample a length-biased
+        total lifetime and then take a uniform residual remaining lifetime.
+    - Trace pods still use fresh lifetime draws from the bounded Pareto.
+    - We enforce xmin-life >= 2s (hard requirement for the lifetime distribution bounds).
 """
 
 import argparse
@@ -468,6 +470,49 @@ class TraceGenerator:
         return x_min * np.exp((-np.log(u)) / alpha)
 
     @staticmethod
+    def sample_steady_state_residual_life(
+        rng: np.random.Generator,
+        *,
+        alpha: float,
+        x_min: float,
+        x_max: float,
+        size: int = 1,
+    ) -> np.ndarray:
+        """
+        Sample *steady-state residual life* (equilibrium remaining lifetime) for a renewal process
+        with i.i.d. lifetimes X on [x_min, x_max].
+
+        Construction:
+          1) Sample length-biased lifetime X* with density ∝ x f_X(x).
+             For bounded Pareto f_X(x) ∝ x^{-(alpha+1)} => x f_X(x) ∝ x^{-alpha}.
+          2) Given X* = x, sample residual R ~ Uniform(0, x).
+
+        This avoids the initial transient drop caused by sampling fresh lifetimes at t=0.
+        """
+        if not (alpha > 0 and x_min > 0 and x_max > x_min):
+            raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
+
+        u = rng.random(size)
+        u = np.clip(u, 1e-12, 1.0 - 1e-12)
+
+        # Sample X* with pdf ∝ x^{-alpha} on [x_min, x_max]
+        # CDF:
+        #   if alpha != 1: F(x) = (x^(1-alpha) - x_min^(1-alpha)) / (x_max^(1-alpha) - x_min^(1-alpha))
+        #   if alpha == 1: F(x) = ln(x/x_min) / ln(x_max/x_min)
+        if abs(alpha - 1.0) < 1e-12:
+            x_star = x_min * np.exp(u * np.log(x_max / x_min))
+        else:
+            p = 1.0 - alpha
+            x_min_p = x_min ** p
+            x_max_p = x_max ** p
+            x_star = (x_min_p + u * (x_max_p - x_min_p)) ** (1.0 / p)
+
+        v = rng.random(size)
+        v = np.clip(v, 1e-12, 1.0 - 1e-12)
+        # Residual is Uniform(0, X*). Using (1-v)*X* is equivalent.
+        return x_star * (1.0 - v)
+
+    @staticmethod
     def bounded_pareto_mean(alpha: float, x_min: float, x_max: float) -> float:
         """
         E[X] for bounded Pareto on [x_min, x_max] (stable expm1 form).
@@ -663,7 +708,7 @@ class TraceGenerator:
         return area / (N * T)
 
     # -------------------------------------------------------------------------
-    # Initial snapshot: simple fill to target util (lifetimes sampled like trace)
+    # Initial snapshot: fill to target util (stationary residual-life sampling)
     # -------------------------------------------------------------------------
     def build_initial_snapshot(
         self,
@@ -677,10 +722,6 @@ class TraceGenerator:
     ) -> Tuple[List[TraceRecord], int]:
         """
         Sample pods until total requested ~= target_util * num_nodes (within tol).
-
-        IMPORTANT:
-          Initial pod end_time is sampled from the SAME bounded Pareto lifetime distribution
-          as trace pods (no stationary residual-life sampling).
         """
         assert self.alpha_req is not None and self.alpha_life is not None
 
@@ -692,7 +733,7 @@ class TraceGenerator:
 
         while cur_total < target_total * (1.0 - tol):
             if len(pods) >= int(INITIAL_MAX_PODS):
-                LOG.warning("initial snapshot hit initial-max-pods=%d; stopping at util=%.3f",
+                LOG.warning("[snapshot] hit initial-max-pods=%d; stopping at util=%.3f",
                             int(INITIAL_MAX_PODS), cur_total / float(self.args.num_nodes))
                 break
 
@@ -704,8 +745,8 @@ class TraceGenerator:
                 size=1,
             )[0])
 
-            # sample lifetime from same distribution as trace pods
-            life = float(self.sample_bounded_pareto(
+            # sample *steady-state residual life* (equilibrium remaining lifetime)
+            life = float(self.sample_steady_state_residual_life(
                 rng,
                 alpha=float(self.alpha_life),
                 x_min=float(self.args.xmin_life),
@@ -713,7 +754,6 @@ class TraceGenerator:
                 size=1,
             )[0])
 
-            # xmin-life is already enforced >= 2s in validation
             if life <= 1e-9:
                 continue
 
@@ -738,8 +778,8 @@ class TraceGenerator:
             cur_total -= float(last.replicas) * float(last.cpu)
             next_id -= 1
 
-        LOG.info("initial snapshot: pods=%d req_total=%.3f util=%.3f (target=%.3f tol=±%.3f)",
-                 len(pods), cur_total, cur_total / float(self.args.num_nodes),
+        LOG.info("[snapshot] pods=%d util=%.3f (target=%.3f tol=±%.3f)",
+                 len(pods), cur_total / float(self.args.num_nodes),
                  float(self.args.target_util), tol)
 
         return pods, next_id
@@ -992,7 +1032,7 @@ class TraceGenerator:
         self._write_json(self.initial_path, initial_pods)
         self._write_json(self.trace_path, trace_pods)
 
-        LOG.info("[utilization] time-avg over whole horizon: %.4f (target=%.4f)",
+        LOG.info("[utilization] util-time-avg over whole trace: %.4f (target=%.4f)",
                  float(util_time), float(self.args.target_util))
 
         self._write_info_file(extra=extra_info)
@@ -1003,7 +1043,7 @@ class TraceGenerator:
     def run_seed(self) -> None:
         if self.args.mean_life is None:
             self.args.mean_life = self.infer_mean_life_from_target_util()
-            LOG.info("inferred mean_life=%.3fs from target-util=%.3f",
+            LOG.info("[inferred-mean-life] mean_life=%.3fs from target-util=%.3f",
                      float(self.args.mean_life), float(self.args.target_util))
 
         initial_pods, trace_pods, extra_info = self.calibrate_mean_life()
