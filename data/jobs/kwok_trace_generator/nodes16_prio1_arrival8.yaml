@@ -8,13 +8,14 @@ output-dir: data/traces/nodes16_prio1_arrival8
 num-nodes: 16
 target-util: 0.90
 
-# Inter-arrival (Pareto)
-xmin-arrival: 0.001
-xmax-arrival: 32.0
-mean-arrival: 8.0
+# Inter-arrival
+xmin-arrival: 0.001s
+xmax-arrival: 128s
+mean-arrival: 8s
 
 # Lifetime bounds
-xmin-life: 8.0
+xmin-life: 4s
+xmax-life: 2h
 
 # Priority
 priority-min: 1
@@ -24,10 +25,10 @@ priority-ratio: 0.8
 ####################
 # Fixed ############
 ####################
-trace-time: 1h
+trace-time: 2h
 seed-file: data/seeds/kwok_trace_generator/seeds.txt
 
-# Requests (Pareto)
+# Requests
 xmin-req: 0.05
 xmax-req: 0.5
 mean-req: 0.125

@@ -2,7 +2,7 @@ import argparse
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional
 
-from scripts.helpers.general_helpers import get_str, coerce_bool
+from scripts.helpers.general_helpers import get_str, coerce_bool, parse_duration_to_seconds
 
 _UNSET = object()
 
@@ -56,6 +56,27 @@ def parse_optional_float(v: Any) -> float | None:
         return None
     try:
         return float(s)
+    except Exception:
+        return None
+
+
+def parse_optional_duration_seconds(v: Any) -> float | None:
+    """Parse a duration-like value into seconds.
+
+    Accepts numeric values (treated as seconds) and strings like "2h", "30m", "10s", "1d".
+    Returns None on empty/unparseable inputs.
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return float(parse_duration_to_seconds(s))
     except Exception:
         return None
 

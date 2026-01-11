@@ -43,6 +43,7 @@ from scripts.helpers.job_helpers import (
     JobField,
     merge_job_fields_into_args,
     parse_optional_bool,
+    parse_optional_duration_seconds,
     parse_optional_float,
     parse_optional_int,
     parse_optional_str,
@@ -95,6 +96,18 @@ class EndHeapEntry:
 # -----------------------------------------------------------------------------
 # CLI
 # -----------------------------------------------------------------------------
+def _duration_seconds_arg(name: str):
+    def _parse(s: str) -> float:
+        try:
+            return float(parse_duration_to_seconds(str(s)))
+        except Exception as e:
+            raise argparse.ArgumentTypeError(
+                f"{name} must be seconds or a duration like '2h', '30m', '10s' (got {s!r}): {e}"
+            )
+
+    return _parse
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Generate initial + trace workload JSON files.")
 
@@ -120,14 +133,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-util", type=float, default=None)
 
     # Inter-arrival (bounded Pareto)
-    p.add_argument("--xmin-arrival", type=float, default=None)
-    p.add_argument("--xmax-arrival", type=float, default=None)
-    p.add_argument("--mean-arrival", type=float, default=None)
+    p.add_argument("--xmin-arrival", type=_duration_seconds_arg("xmin-arrival"), default=None)
+    p.add_argument("--xmax-arrival", type=_duration_seconds_arg("xmax-arrival"), default=None)
+    p.add_argument("--mean-arrival", type=_duration_seconds_arg("mean-arrival"), default=None)
 
     # Lifetime (bounded Pareto; mean inferred/calibrated)
-    p.add_argument("--xmin-life", type=float, default=None)
-    p.add_argument("--xmax-life", type=float, default=None)
-    p.add_argument("--mean-life", type=float, default=None)
+    p.add_argument("--xmin-life", type=_duration_seconds_arg("xmin-life"), default=None)
+    p.add_argument("--xmax-life", type=_duration_seconds_arg("xmax-life"), default=None)
+    p.add_argument("--mean-life", type=_duration_seconds_arg("mean-life"), default=None)
 
     # Requests (bounded Pareto)
     p.add_argument("--xmin-req", type=float, default=None)
@@ -172,13 +185,13 @@ def _merge_job_fields(args: argparse.Namespace, job: dict) -> argparse.Namespace
         JobField("trace-time", "trace_time", parse=parse_optional_str),
         JobField("target-util", "target_util", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
 
-        JobField("xmin-arrival", "xmin_arrival", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-        JobField("xmax-arrival", "xmax_arrival", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-        JobField("mean-arrival", "mean_arrival", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("xmin-arrival", "xmin_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+        JobField("xmax-arrival", "xmax_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+        JobField("mean-arrival", "mean_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
 
-        JobField("xmin-life", "xmin_life", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-        JobField("xmax-life", "xmax_life", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-        JobField("mean-life", "mean_life", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        JobField("xmin-life", "xmin_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+        JobField("xmax-life", "xmax_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+        JobField("mean-life", "mean_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
 
         JobField("xmin-req", "xmin_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
         JobField("xmax-req", "xmax_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
@@ -333,7 +346,8 @@ class TraceGenerator:
         self.output_dir = Path(self.args.output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.figures_dir = self.output_dir / "figures"
-        self.figures_dir.mkdir(parents=True, exist_ok=True)
+        if not getattr(self.args, "seed_file", None):
+            self.figures_dir.mkdir(parents=True, exist_ok=True)
 
         self.initial_path = self.output_dir / "initial.json"
         self.trace_path = self.output_dir / "trace.json"
