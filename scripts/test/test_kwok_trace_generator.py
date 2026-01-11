@@ -115,6 +115,111 @@ def test_build_arg_parser_defaults_and_required(tmp_path: Path):
     assert args.show_plots is tg.DEFAULT_SHOW_PLOTS
 
 
+# ---------------------------------------------------------------------------
+# Generator (init + args/logging helpers)
+# ---------------------------------------------------------------------------
+
+def test_trace_generator_init_creates_paths(tmp_path: Path):
+    args = _make_required_args(tmp_path)
+    gen = tg.TraceGenerator(args)
+
+    assert gen.output_dir.exists()
+    assert gen.figures_dir.exists()
+    assert gen.initial_path.name == "initial.json"
+    assert gen.trace_path.name == "trace.json"
+    assert gen.info_path.name == "info_generate.yaml"
+
+
+def test_init_from_args_creates_figures_dir_even_for_seed_runs(tmp_path: Path):
+    run_args = _make_required_args(tmp_path, seed=1)
+
+    gen = tg.TraceGenerator.__new__(tg.TraceGenerator)
+    tg.setup_logging(name=tg.LOGGER_NAME, prefix=f"[{tg.LOGGER_NAME}] ", level=run_args.log_level)
+    gen.init_from_args(run_args, create_figures_dir=True, log_args=False)
+
+    assert gen.output_dir.exists()
+    assert gen.figures_dir.exists()
+    assert gen.util_plot_path.name == "utilization.png"
+    assert gen.hist_plot_path.name == "histograms.png"
+    assert gen.times == []
+    assert gen.u_req_hist == []
+    assert gen.pods_hist == []
+    assert gen.initial_pods_count == 0
+
+
+def test_round_float_args_rounds_only_floats():
+    ns = argparse.Namespace(a=1.23456, b=2, c="x", d=3.14159)
+    tg.TraceGenerator.round_float_args(ns, ndigits=2)
+    assert ns.a == 1.23
+    assert ns.b == 2
+    assert ns.c == "x"
+    assert ns.d == 3.14
+
+
+def test_log_args_calls_log_args_block_and_order(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path)
+    gen = tg.TraceGenerator(args)
+
+    seen = {}
+
+    def fake_log_args_block(logger, passed_args, title, include):
+        seen["logger"] = logger
+        seen["args"] = passed_args
+        seen["title"] = title
+        seen["include"] = include
+
+    monkeypatch.setattr(tg, "log_args_block", fake_log_args_block)
+    gen.log_args()
+
+    assert seen["args"] is args
+    assert seen["title"] == "ARGS"
+    assert seen["include"][:6] == ["job_file", "output_dir", "seed", "seed_file", "log_level", "show_plots"]
+    assert "xmax_arrival" in seen["include"]
+    assert "xmax_life" in seen["include"]
+    assert "target_util" in seen["include"]
+
+
+def test_write_info_file_success_calls_write_info_file(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path)
+    gen = tg.TraceGenerator(args)
+
+    called = {}
+    monkeypatch.setattr(tg, "build_cli_cmd", lambda: ["python", "trace_generator.py", "--x"])
+
+    def fake_write_info_file(out_path, inputs, logger):
+        called["out_path"] = out_path
+        called["inputs"] = inputs
+        called["logger"] = logger
+
+    monkeypatch.setattr(tg, "write_info_file", fake_write_info_file)
+
+    gen.write_info_file(extra={"k": 1})
+
+    assert str(called["out_path"]).endswith("info_generate.yaml")
+    assert called["inputs"]["cli-cmd"] == ["python", "trace_generator.py", "--x"]
+    assert "args" in called["inputs"]
+    assert called["inputs"]["generated"] == {"k": 1}
+    assert called["logger"] is tg.LOG
+
+
+def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, caplog):
+    args = _make_required_args(tmp_path)
+    gen = tg.TraceGenerator(args)
+
+    monkeypatch.setattr(tg, "build_cli_cmd", lambda: ["x"])
+    monkeypatch.setattr(tg, "write_info_file", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    old_propagate = tg.LOG.propagate
+    tg.LOG.propagate = True
+    try:
+        caplog.set_level("WARNING", logger=tg.LOGGER_NAME)
+        gen.write_info_file(extra={})
+    finally:
+        tg.LOG.propagate = old_propagate
+
+    assert any("failed to write info_generate.yaml" in rec.message for rec in caplog.records)
+
+
 @pytest.mark.parametrize(
     "missing_flag",
     [
@@ -333,115 +438,6 @@ def test_expand_seed_runs_seed_file_expands_to_subdirs_under_output_dir(tmp_path
     assert [r.seed for r in runs] == [1, 2]
     assert Path(runs[0].output_dir).name == "1"
     assert Path(runs[1].output_dir).name == "2"
-
-
-# ---------------------------------------------------------------------------
-# round_float_args()
-# ---------------------------------------------------------------------------
-
-def test_round_float_args_rounds_only_floats():
-    ns = argparse.Namespace(a=1.23456, b=2, c="x", d=3.14159)
-    tg.TraceGenerator.round_float_args(ns, ndigits=2)
-    assert ns.a == 1.23
-    assert ns.b == 2
-    assert ns.c == "x"
-    assert ns.d == 3.14
-
-
-# ---------------------------------------------------------------------------
-# Generator
-# ---------------------------------------------------------------------------
-
-def test_trace_generator_init_creates_paths(tmp_path: Path):
-    args = _make_required_args(tmp_path)
-    gen = tg.TraceGenerator(args)
-
-    assert gen.output_dir.exists()
-    assert gen.figures_dir.exists()
-    assert gen.initial_path.name == "initial.json"
-    assert gen.trace_path.name == "trace.json"
-    assert gen.info_path.name == "info_generate.yaml"
-
-
-def test_from_run_args_creates_figures_dir_even_for_seed_runs(tmp_path: Path):
-    run_args = _make_required_args(tmp_path, seed=1)
-
-    gen = tg.TraceGenerator.__new__(tg.TraceGenerator)
-    tg.setup_logging(name=tg.LOGGER_NAME, prefix=f"[{tg.LOGGER_NAME}] ", level=run_args.log_level)
-    gen.init_from_args(run_args, create_figures_dir=True, log_args=False)
-
-    assert gen.output_dir.exists()
-    assert gen.figures_dir.exists()
-    assert gen.util_plot_path.name == "utilization.png"
-    assert gen.hist_plot_path.name == "histograms.png"
-    assert gen.times == []
-    assert gen.u_req_hist == []
-    assert gen.pods_hist == []
-    assert gen.initial_pods_count == 0
-
-
-def test_log_args_calls_log_args_block_and_order(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path)
-    gen = tg.TraceGenerator(args)
-
-    seen = {}
-
-    def fake_log_args_block(logger, passed_args, title, include):
-        seen["logger"] = logger
-        seen["args"] = passed_args
-        seen["title"] = title
-        seen["include"] = include
-
-    monkeypatch.setattr(tg, "log_args_block", fake_log_args_block)
-    gen.log_args()
-
-    assert seen["args"] is args
-    assert seen["title"] == "ARGS"
-    assert seen["include"][:6] == ["job_file", "output_dir", "seed", "seed_file", "log_level", "show_plots"]
-    assert "xmax_arrival" in seen["include"]
-    assert "xmax_life" in seen["include"]
-    assert "target_util" in seen["include"]
-
-
-def test_write_info_file_success_calls_write_info_file(tmp_path: Path, monkeypatch):
-    args = _make_required_args(tmp_path)
-    gen = tg.TraceGenerator(args)
-
-    called = {}
-    monkeypatch.setattr(tg, "build_cli_cmd", lambda: ["python", "trace_generator.py", "--x"])
-
-    def fake_write_info_file(out_path, inputs, logger):
-        called["out_path"] = out_path
-        called["inputs"] = inputs
-        called["logger"] = logger
-
-    monkeypatch.setattr(tg, "write_info_file", fake_write_info_file)
-
-    gen.write_info_file(extra={"k": 1})
-
-    assert str(called["out_path"]).endswith("info_generate.yaml")
-    assert called["inputs"]["cli-cmd"] == ["python", "trace_generator.py", "--x"]
-    assert "args" in called["inputs"]
-    assert called["inputs"]["generated"] == {"k": 1}
-    assert called["logger"] is tg.LOG
-
-
-def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, caplog):
-    args = _make_required_args(tmp_path)
-    gen = tg.TraceGenerator(args)
-
-    monkeypatch.setattr(tg, "build_cli_cmd", lambda: ["x"])
-    monkeypatch.setattr(tg, "write_info_file", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
-
-    old_propagate = tg.LOG.propagate
-    tg.LOG.propagate = True
-    try:
-        caplog.set_level("WARNING", logger=tg.LOGGER_NAME)
-        gen.write_info_file(extra={})
-    finally:
-        tg.LOG.propagate = old_propagate
-
-    assert any("failed to write info_generate.yaml" in rec.message for rec in caplog.records)
 
 
 # ---------------------------------------------------------------------------

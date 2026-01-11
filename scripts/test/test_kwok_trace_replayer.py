@@ -79,45 +79,6 @@ class BadFuture:
 
 
 # ---------------------------------------------------------------------------
-# _parse_optional_bool_strict()
-# ---------------------------------------------------------------------------
-
-def test_parse_optional_bool_strict():
-    assert tr.parse_optional_bool_strict(True) is True
-    assert tr.parse_optional_bool_strict(False) is False
-    assert tr.parse_optional_bool_strict("yes") is None
-    assert tr.parse_optional_bool_strict(1) is None
-
-
-# ---------------------------------------------------------------------------
-# _rs_prefix_from_pod_name()
-# ---------------------------------------------------------------------------
-
-def test_rs_prefix_from_pod_name():
-    assert tr.rs_prefix_from_pod_name("rs-000001-abc-0") == "rs-000001"
-    assert tr.rs_prefix_from_pod_name("custom-foo-0") == "custom"
-    assert tr.rs_prefix_from_pod_name("plain") == "plain"
-
-
-# ---------------------------------------------------------------------------
-# _parse_rfc3339_to_epoch()
-# ---------------------------------------------------------------------------
-
-def test_parse_rfc3339_to_epoch_parses_z_and_fractional():
-    t1 = tr.parse_rfc3339_to_epoch("2026-01-09T12:34:56Z")
-    t2 = tr.parse_rfc3339_to_epoch("2026-01-09T12:34:56.123Z")
-    assert isinstance(t1, float) and t1 > 0
-    assert isinstance(t2, float) and t2 > 0
-    assert t2 >= t1
-
-
-def test_parse_rfc3339_to_epoch_invalid_returns_none():
-    assert tr.parse_rfc3339_to_epoch("") is None
-    assert tr.parse_rfc3339_to_epoch("nope") is None
-    assert tr.parse_rfc3339_to_epoch(None) is None  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
 # build_argparser()
 # ---------------------------------------------------------------------------
 
@@ -266,6 +227,80 @@ def test_ensure_default_args_sets_defaults_and_validates_paths(tmp_path: Path):
     assert out.log_level == "INFO"
     assert out.save_scheduler_logs is False
     assert Path(out.result_dir).is_absolute()
+
+
+# ---------------------------------------------------------------------------
+# discover_trace_run_dirs()
+# ---------------------------------------------------------------------------
+
+def test_discover_trace_run_dirs_trace_dir_with_trace_json_returns_self(tmp_path: Path):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+    (trace_dir / "trace.json").write_text("[]\n", encoding="utf-8")
+
+    runs = tr.discover_trace_run_dirs(trace_dir)
+    assert runs == [trace_dir.resolve()]
+
+
+def test_discover_trace_run_dirs_scans_and_sorts_seed_dirs(tmp_path: Path):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+
+    (trace_dir / "2").mkdir()
+    (trace_dir / "2" / "trace.json").write_text("[]\n", encoding="utf-8")
+
+    (trace_dir / "1").mkdir()
+    (trace_dir / "1" / "trace.json").write_text("[]\n", encoding="utf-8")
+
+    runs = tr.discover_trace_run_dirs(trace_dir)
+    assert [p.name for p in runs] == ["1", "2"]
+
+
+def test_discover_trace_run_dirs_no_seed_traces_falls_back_to_trace_dir(tmp_path: Path):
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+
+    runs = tr.discover_trace_run_dirs(trace_dir)
+    assert runs == [trace_dir.resolve()]
+
+
+# ---------------------------------------------------------------------------
+# parse_optional_bool_strict()
+# ---------------------------------------------------------------------------
+
+def test_parse_optional_bool_strict():
+    assert tr.parse_optional_bool_strict(True) is True
+    assert tr.parse_optional_bool_strict(False) is False
+    assert tr.parse_optional_bool_strict("yes") is None
+    assert tr.parse_optional_bool_strict(1) is None
+
+
+# ---------------------------------------------------------------------------
+# rs_prefix_from_pod_name()
+# ---------------------------------------------------------------------------
+
+def test_rs_prefix_from_pod_name():
+    assert tr.rs_prefix_from_pod_name("rs-000001-abc-0") == "rs-000001"
+    assert tr.rs_prefix_from_pod_name("custom-foo-0") == "custom"
+    assert tr.rs_prefix_from_pod_name("plain") == "plain"
+
+
+# ---------------------------------------------------------------------------
+# parse_rfc3339_to_epoch()
+# ---------------------------------------------------------------------------
+
+def test_parse_rfc3339_to_epoch_parses_z_and_fractional():
+    t1 = tr.parse_rfc3339_to_epoch("2026-01-09T12:34:56Z")
+    t2 = tr.parse_rfc3339_to_epoch("2026-01-09T12:34:56.123Z")
+    assert isinstance(t1, float) and t1 > 0
+    assert isinstance(t2, float) and t2 > 0
+    assert t2 >= t1
+
+
+def test_parse_rfc3339_to_epoch_invalid_returns_none():
+    assert tr.parse_rfc3339_to_epoch("") is None
+    assert tr.parse_rfc3339_to_epoch("nope") is None
+    assert tr.parse_rfc3339_to_epoch(None) is None  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
