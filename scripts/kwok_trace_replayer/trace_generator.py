@@ -61,10 +61,10 @@ from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 # -----------------------------------------------------------------------------
 MAX_DECIMALS = 6
 
-MIN_LIFETIME_S = 2.0  # hard floor: user cannot set xmin-life below this
+MIN_LIFETIME_S = 2.0
 
 UTIL_TOL = 0.01
-CALIB_MEAN_LIFE_MAX_ITER = 20  # keep small; CRN makes it stable
+CALIB_MEAN_LIFE_MAX_ITER = 20
 
 INITIAL_FILL_TOL = 0.002
 INITIAL_MAX_PODS = 200_000
@@ -149,7 +149,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--xmax-req", type=float, default=None)
     p.add_argument("--mean-req", type=float, default=None)
 
-    # Priority + replicas (truncated geometric / uniform)
+    # Priority + replicas (geometric / uniform)
     p.add_argument("--priority-min", type=int, default=None)
     p.add_argument("--priority-max", type=int, default=None)
     p.add_argument("--priority-ratio", type=float, default=None)
@@ -221,7 +221,6 @@ def _apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
 def _validate_args(args: argparse.Namespace) -> None:
     missing: list[str] = []
 
-    # Output location is always required.
     if getattr(args, "output_dir", None) is None:
         missing.append("output_dir")
 
@@ -233,7 +232,6 @@ def _validate_args(args: argparse.Namespace) -> None:
     if seed is None and not seed_file:
         missing.append("seed or seed_file")
 
-    # Required args (bounded everywhere)
     for k in (
         "num_nodes",
         "trace_time",
@@ -259,7 +257,6 @@ def _validate_args(args: argparse.Namespace) -> None:
     if missing:
         raise SystemExit(f"missing required arguments (via CLI or job-file): {', '.join(missing)}")
 
-    # Basic numeric validation
     def _pos(name: str) -> float:
         v = float(getattr(args, name))
         if v <= 0:
@@ -271,7 +268,6 @@ def _validate_args(args: argparse.Namespace) -> None:
     _pos("xmin_life"); _pos("xmax_life")
     _pos("xmin_req"); _pos("xmax_req"); _pos("mean_req")
 
-    # hard floor for lifetime lower bound
     if float(args.xmin_life) < MIN_LIFETIME_S:
         raise SystemExit(f"xmin-life must be >= {MIN_LIFETIME_S:.1f}s (got {float(args.xmin_life):.6f})")
 
@@ -479,7 +475,7 @@ class TraceGenerator:
         size: int = 1,
     ) -> np.ndarray:
         """
-        Sample *steady-state residual life* (equilibrium remaining lifetime) for a renewal process
+        Sample steady-state residual life (equilibrium remaining lifetime) for a renewal process
         with i.i.d. lifetimes X on [x_min, x_max].
 
         Construction:
@@ -524,9 +520,9 @@ class TraceGenerator:
         if abs(alpha - 1.0) < 1e-10:
             return (x_max * x_min / (x_max - x_min)) * math.log(x_max / x_min)
 
-        log_r = math.log(x_min / x_max)  # negative
-        den = -math.expm1(alpha * log_r)          # 1 - (x_min/x_max)^alpha
-        num = -math.expm1((alpha - 1.0) * log_r)  # 1 - (x_min/x_max)^(alpha-1)
+        log_r = math.log(x_min / x_max)             # negative
+        den = -math.expm1(alpha * log_r)            # 1 - (x_min/x_max)^alpha
+        num = -math.expm1((alpha - 1.0) * log_r)    # 1 - (x_min/x_max)^(alpha-1)
 
         return (alpha * x_min / (alpha - 1.0)) * (num / den)
 
@@ -745,7 +741,7 @@ class TraceGenerator:
                 size=1,
             )[0])
 
-            # sample *steady-state residual life* (equilibrium remaining lifetime)
+            # sample steady-state residual life (equilibrium remaining lifetime)
             life = float(self.sample_steady_state_residual_life(
                 rng,
                 alpha=float(self.alpha_life),

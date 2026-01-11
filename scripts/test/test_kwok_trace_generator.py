@@ -20,11 +20,6 @@ from scripts.kwok_trace_replayer import trace_generator as tg
 def _make_required_args(tmp_path: Path, **overrides):
     """
     Build a Namespace that passes trace_generator._validate_args().
-
-    Notes:
-      - xmin_life must be >= 2.0 (hard floor in production).
-      - mean_life is optional for resolve_effective_args, but many generator methods need it.
-      - Pick xmin/xmax so bounded Pareto max-mean constraint is not violated for mean_life.
     """
     base = dict(
         job_file=None,
@@ -435,8 +430,6 @@ def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, cap
     monkeypatch.setattr(tg, "build_cli_cmd", lambda: ["x"])
     monkeypatch.setattr(tg, "write_info_file", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
 
-    # trace_generator configures its logger with propagate=False; temporarily allow propagation
-    # so pytest caplog (which attaches to the root logger) can see the warning.
     old_propagate = tg.LOG.propagate
     tg.LOG.propagate = True
     try:
