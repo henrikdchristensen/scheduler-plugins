@@ -35,101 +35,12 @@ from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 # ---------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------
+
 MAX_REPLAY_WORKERS = 5
 RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
 
 LOGGER_NAME = "trace-replayer"
 LOG = logging.getLogger(LOGGER_NAME)
-
-# ---------------------------------------------------------------------
-# Trace Discovery Helpers
-# ---------------------------------------------------------------------
-
-def _discover_trace_run_dirs(trace_dir: Path) -> List[Path]:
-    """
-    Discover run directories containing a trace.json under the given trace-dir.
-    """
-    trace_dir = trace_dir.resolve()
-    if (trace_dir / "trace.json").exists():
-        return [trace_dir]
-    if not trace_dir.is_dir():
-        raise SystemExit(f"--trace-dir must be a directory: {trace_dir}")
-    run_dirs: List[Path] = []
-    try:
-        for child in sorted(trace_dir.iterdir(), key=lambda p: p.name):
-            if not child.is_dir():
-                continue
-            if (child / "trace.json").exists():
-                run_dirs.append(child)
-    except Exception as e:
-        raise SystemExit(f"failed to scan --trace-dir for seeds: {trace_dir} ({e})")
-    if run_dirs:
-        return run_dirs
-    return [trace_dir]
-
-# ---------------------------------------------------------------------
-# Parsing Helpers
-# ---------------------------------------------------------------------
-
-def _parse_optional_bool_strict(v: Any) -> bool | None:
-    """
-    Parse a job-file value that must be a real boolean (or None).
-    """
-    return v if isinstance(v, bool) else None
-
-def _rs_prefix_from_pod_name(pod_name: str) -> str:
-    """
-    Extract the rs prefix (e.g. "rs-000001") from a pod name.
-    """
-    m = RS_PREFIX_RE.match(pod_name)
-    if m:
-        return m.group(1)
-    if "-" in pod_name:
-        return pod_name.split("-", 1)[0]
-    return pod_name
-
-def _parse_rfc3339_to_epoch(ts: str) -> Optional[float]:
-    """
-    Parse a Kubernetes RFC3339 timestamp string into epoch seconds.
-    """
-    if not ts or not isinstance(ts, str):
-        return None
-    try:
-        if ts.endswith("Z"):
-            ts = ts[:-1] + "+00:00"
-        dt = datetime.fromisoformat(ts)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
-    except Exception:
-        return None
-
-# ---------------------------------------------------------------------
-# Small Models
-# ---------------------------------------------------------------------
-
-class TimeClock:
-    def time(self) -> float:
-        """
-        Return wall-clock time in seconds (time.time()).
-        """
-        return time.time()
-
-    def sleep(self, seconds: float) -> None:
-        """
-        Sleep for the given number of seconds.
-        """
-        time.sleep(seconds)
-
-@dataclass
-class Event:
-    sim_time_s: float
-    kind: str  # "create" or "delete"
-    record_id: int
-    cpu_str: str | None = None
-    mem_str: str | None = None
-    pc_name: str | None = None
-    replicas: int = 1
 
 # ---------------------------------------------------------------------
 # CLI + Job File
@@ -197,7 +108,7 @@ def merge_job_fields_into_args(
         JobField(
             "save-scheduler-logs",
             "save_scheduler_logs",
-            parse=_parse_optional_bool_strict,
+            parse=parse_optional_bool_strict,
             accept=lambda v: isinstance(v, bool),
         ),
     ]
@@ -251,6 +162,96 @@ def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 # ---------------------------------------------------------------------
+# Trace Discovery Helpers
+# ---------------------------------------------------------------------
+
+def discover_trace_run_dirs(trace_dir: Path) -> List[Path]:
+    """
+    Discover run directories containing a trace.json under the given trace-dir.
+    """
+    trace_dir = trace_dir.resolve()
+    if (trace_dir / "trace.json").exists():
+        return [trace_dir]
+    if not trace_dir.is_dir():
+        raise SystemExit(f"--trace-dir must be a directory: {trace_dir}")
+    run_dirs: List[Path] = []
+    try:
+        for child in sorted(trace_dir.iterdir(), key=lambda p: p.name):
+            if not child.is_dir():
+                continue
+            if (child / "trace.json").exists():
+                run_dirs.append(child)
+    except Exception as e:
+        raise SystemExit(f"failed to scan --trace-dir for seeds: {trace_dir} ({e})")
+    if run_dirs:
+        return run_dirs
+    return [trace_dir]
+
+# ---------------------------------------------------------------------
+# Parsing Helpers
+# ---------------------------------------------------------------------
+
+def parse_optional_bool_strict(v: Any) -> bool | None:
+    """
+    Parse a job-file value that must be a real boolean (or None).
+    """
+    return v if isinstance(v, bool) else None
+
+def rs_prefix_from_pod_name(pod_name: str) -> str:
+    """
+    Extract the rs prefix (e.g. "rs-000001") from a pod name.
+    """
+    m = RS_PREFIX_RE.match(pod_name)
+    if m:
+        return m.group(1)
+    if "-" in pod_name:
+        return pod_name.split("-", 1)[0]
+    return pod_name
+
+def parse_rfc3339_to_epoch(ts: str) -> Optional[float]:
+    """
+    Parse a Kubernetes RFC3339 timestamp string into epoch seconds.
+    """
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+# ---------------------------------------------------------------------
+# Small Models
+# ---------------------------------------------------------------------
+
+class TimeClock:
+    def time(self) -> float:
+        """
+        Return wall-clock time in seconds (time.time()).
+        """
+        return time.time()
+
+    def sleep(self, seconds: float) -> None:
+        """
+        Sleep for the given number of seconds.
+        """
+        time.sleep(seconds)
+
+@dataclass
+class Event:
+    sim_time_s: float
+    kind: str  # "create" or "delete"
+    record_id: int
+    cpu_str: str | None = None
+    mem_str: str | None = None
+    pc_name: str | None = None
+    replicas: int = 1
+
+# ---------------------------------------------------------------------
 # Trace Replayer
 # ---------------------------------------------------------------------
 
@@ -270,56 +271,47 @@ class TraceReplayer:
         """
         Initialize replayer state, resolve paths, and record metadata.
         """
-        # Runner + clock + executor factory
-        self.runner = runner
-        self.clock = clock or SystemClock()
-        if not (hasattr(self.clock, "time") and hasattr(self.clock, "sleep")):
-            self.clock = TimeClock()
-        self.executor_factory = executor_factory
+        self.init_runtime(runner=runner, clock=clock, executor_factory=executor_factory)
+        self.init_context(args=args, job_doc=job_doc, override_kwokctl_envs=override_kwokctl_envs)
 
-        # Raw/initial args + job context
-        self.args = args
-        self.job_doc: Dict[str, Any] = job_doc or {}
-        self.override_kwokctl_envs: List[Dict[str, Any]] = list(override_kwokctl_envs or [])
+        self.initialize()
 
-        self._initialize()
-
-        self._configure_from_args()
+        self.configure_from_args()
 
         # Metadata in the run's results_dir.
-        self._write_info_file()
+        self.write_info_file()
 
-    @classmethod
-    def _from_run_args(
-        cls,
-        run_args: argparse.Namespace,
-        *,
-        job_doc: Dict[str, Any],
-        override_kwokctl_envs: List[Dict[str, Any]],
-        runner: Runner,
-        clock: Clock | None,
-        executor_factory: Callable[..., Any],
-    ) -> "TraceReplayer":
+    def init_runtime(self, *, runner: Runner, clock: Clock | None, executor_factory: Callable[..., Any]) -> None:
         """
-        Create a per-seed instance from already-resolved args.
+        Initialize runtime components like runner, clock, and executor factory.
         """
-        self = cls.__new__(cls)
-
         self.runner = runner
-        self.clock = clock or SystemClock()
-        if not (hasattr(self.clock, "time") and hasattr(self.clock, "sleep")):
-            self.clock = TimeClock()
+        self.clock = self.resolve_clock(clock)
         self.executor_factory = executor_factory
 
-        self.args = run_args
-        self.job_doc = job_doc
+    def init_context(
+        self,
+        *,
+        args: argparse.Namespace,
+        job_doc: Dict[str, Any] | None,
+        override_kwokctl_envs: List[Dict[str, Any]] | None,
+    ) -> None:
+        """
+        Initialize context from args, job doc, and override envs.
+        """
+        self.args = args
+        self.job_doc = job_doc or {}
         self.override_kwokctl_envs = list(override_kwokctl_envs or [])
 
-        self._configure_from_args()
-        self._write_info_file()
-        return self
+    @staticmethod
+    def resolve_clock(clock: Clock | None) -> Clock:
+        """
+        Choose a clock implementation.
+        """
+        c = clock or SystemClock()
+        return c if (hasattr(c, "time") and hasattr(c, "sleep")) else TimeClock()
 
-    def _initialize(self) -> None:
+    def initialize(self) -> None:
         """
         Resolve args (job-file + defaults), setup logging, and log args once.
         """
@@ -346,7 +338,7 @@ class TraceReplayer:
         self.args = args
         self.log_args()
 
-    def _configure_from_args(self) -> None:
+    def configure_from_args(self) -> None:
         """
         Configure derived paths/state from (resolved) args.
         """
@@ -385,11 +377,10 @@ class TraceReplayer:
         self.run_start_wall: float = 0.0       # epoch seconds
         self.run_start_monotonic: float = 0.0  # from clock.time()
 
-        
-
     # ------------------------------
     # Logging / Metadata
     # ------------------------------
+    
     def log_args(self) -> None:
         """
         Log key arguments in a stable order.
@@ -411,7 +402,7 @@ class TraceReplayer:
         ]
         log_args_block(LOG, self.args, title="ARGS", include=include)
 
-    def _write_info_file(self) -> None:
+    def write_info_file(self) -> None:
         """
         Write info_replayer.yaml metadata into the results directory.
         """
@@ -444,13 +435,13 @@ class TraceReplayer:
     # ------------------------------
 
     @staticmethod
-    def _rs_name_for_record(record_id: int) -> str:
+    def rs_name_for_record(record_id: int) -> str:
         """
         Format a record id into an rs name like rs-000001.
         """
         return f"rs-{record_id:06d}"
 
-    def _load_generate_info(self) -> Dict[str, Any]:
+    def load_generate_info(self) -> Dict[str, Any]:
         """
         Load info_generate.yaml from the trace directory if present.
         """
@@ -465,7 +456,7 @@ class TraceReplayer:
             LOG.warning("failed to read info_generate.yaml: %s", e)
             return {}
 
-    def _load_json_pods(self, path: Path) -> List[TraceRecord]:
+    def load_json_pods(self, path: Path) -> List[TraceRecord]:
         """
         Load pods from a trace JSON file into sorted TraceRecord objects.
         """
@@ -503,10 +494,10 @@ class TraceReplayer:
         """
         Load initial/trace pods and derive num_nodes, trace_time_s, and max_prio.
         """
-        gen_info = self._load_generate_info()
+        gen_info = self.load_generate_info()
 
-        self.trace_pods = self._load_json_pods(self.trace_path)
-        self.initial_pods = self._load_json_pods(self.initial_path) if self.initial_path.exists() else []
+        self.trace_pods = self.load_json_pods(self.trace_path)
+        self.initial_pods = self.load_json_pods(self.initial_path) if self.initial_path.exists() else []
 
         # Prefer info_generate.yaml for these if present; otherwise infer
         num_nodes = None
@@ -578,12 +569,12 @@ class TraceReplayer:
 
         # Build rs->priority mapping for both initial + trace
         for p in self.initial_pods:
-            rs = self._rs_name_for_record(p.id)
+            rs = self.rs_name_for_record(p.id)
             self.prio_by_rs[rs] = int(p.priority)
             self.initial_rs_names.add(rs)
 
         for p in self.trace_pods:
-            rs = self._rs_name_for_record(p.id)
+            rs = self.rs_name_for_record(p.id)
             self.prio_by_rs[rs] = int(p.priority)
 
     # ------------------------------
@@ -595,6 +586,12 @@ class TraceReplayer:
         Build sorted create/delete events from trace pod records.
         """
         events: List[Event] = []
+
+        # Initial pods are created up-front by apply_initial_workload().
+        # Schedule their deletions here so they don't persist forever.
+        for p in self.initial_pods:
+            events.append(Event(sim_time_s=float(p.end_time), kind="delete", record_id=p.id))
+
         for p in self.trace_pods:
             cpu_m = max(1, int(round(p.cpu * self.node_cpu_m)))
             mem_b = max(1, int(round(p.mem * self.node_mem_b)))
@@ -618,7 +615,12 @@ class TraceReplayer:
 
         events.sort(key=lambda e: (e.sim_time_s, 0 if e.kind == "create" else 1))
         self.events = events
-        LOG.info("built %d trace events from %d trace pods", len(events), len(self.trace_pods))
+        LOG.info(
+            "built %d events (initial_deletes=%d, trace_pods=%d)",
+            len(events),
+            len(self.initial_pods),
+            len(self.trace_pods),
+        )
 
     # ------------------------------
     # KWOK Apply / Replay
@@ -647,7 +649,7 @@ class TraceReplayer:
                 pc_name = f"p{int(p.priority)}"
                 replicas = max(1, int(getattr(p, "replicas", 1)))
 
-                rs_name = self._rs_name_for_record(p.id)
+                rs_name = self.rs_name_for_record(p.id)
                 yaml_text = yaml_kwok_rs(
                     ns=namespace,
                     rs_name=rs_name,
@@ -732,7 +734,7 @@ class TraceReplayer:
 
                 for ev in creates:
                     assert ev.cpu_str is not None and ev.mem_str is not None and ev.pc_name is not None
-                    rs_name = self._rs_name_for_record(ev.record_id)
+                    rs_name = self.rs_name_for_record(ev.record_id)
                     yaml_text = yaml_kwok_rs(
                         ns=namespace,
                         rs_name=rs_name,
@@ -754,7 +756,7 @@ class TraceReplayer:
                     futures.append(executor.submit(kubectl_apply_yaml, LOG, self.ctx, yaml_text))
 
                 for ev in deletes:
-                    rs_name = self._rs_name_for_record(ev.record_id)
+                    rs_name = self.rs_name_for_record(ev.record_id)
                     LOG.info("DELETE @ sim_t=%.3f: rs=%s (id=%d)", ev.sim_time_s, rs_name, ev.record_id)
                     futures.append(executor.submit(delete_rs, LOG, self.ctx, namespace, rs_name))
 
@@ -781,13 +783,13 @@ class TraceReplayer:
     # Monitoring
     # ------------------------------
     
-    def _time_s(self) -> float:
+    def time_s(self) -> float:
         """
         Return elapsed time in seconds since run start (monotonic clock).
         """
         return float(self.clock.time()) - float(self.run_start_monotonic)
 
-    def _snapshot_from_pods(self, ns: str) -> Tuple[float, float, Dict[int, int], Dict[int, int], List[Dict[str, Any]]]:
+    def snapshot_from_pods(self, ns: str) -> Tuple[float, float, Dict[int, int], Dict[int, int], List[Dict[str, Any]]]:
         """
         Snapshot running utilization, priority counts, and raw pod items from the cluster.
         """
@@ -807,7 +809,7 @@ class TraceReplayer:
             pod_name = meta.get("name", "")
             phase = status.get("phase", "")
 
-            rs_name = _rs_prefix_from_pod_name(pod_name)
+            rs_name = rs_prefix_from_pod_name(pod_name)
             prio = int(self.prio_by_rs.get(rs_name, 0))
 
             if phase == "Running":
@@ -832,23 +834,23 @@ class TraceReplayer:
         mem_run_util = (total_mem_b / mem_capacity_b) if mem_capacity_b > 0 else 0.0
         return cpu_run_util, mem_run_util, running_by_prio, pending_by_prio, items
 
-    def _pod_start_time(self, pod: Dict[str, Any]) -> Optional[float]:
+    def pod_start_time(self, pod: Dict[str, Any]) -> Optional[float]:
         """
         Return pod status.startTime as epoch seconds (or None).
         """
         status = pod.get("status", {}) or {}
         st = status.get("startTime")
-        return _parse_rfc3339_to_epoch(st) if isinstance(st, str) else None
+        return parse_rfc3339_to_epoch(st) if isinstance(st, str) else None
 
-    def _pod_creation_time(self, pod: Dict[str, Any]) -> Optional[float]:
+    def pod_creation_time(self, pod: Dict[str, Any]) -> Optional[float]:
         """
         Return pod metadata.creationTimestamp as epoch seconds (or None).
         """
         meta = pod.get("metadata", {}) or {}
         ts = meta.get("creationTimestamp")
-        return _parse_rfc3339_to_epoch(ts) if isinstance(ts, str) else None
+        return parse_rfc3339_to_epoch(ts) if isinstance(ts, str) else None
 
-    def _monitor_loop(
+    def monitor_loop(
         self,
         namespace: str,
         interval_s: float,
@@ -900,10 +902,10 @@ class TraceReplayer:
             while not stop_event.is_set():
                 loop_start = float(self.clock.time())
                 now_ts = get_timestamp()
-                t_s = self._time_s()
+                t_s = self.time_s()
 
                 try:
-                    cpu_run_util, mem_run_util, running_by_prio, pending_by_prio, pod_items = self._snapshot_from_pods(
+                    cpu_run_util, mem_run_util, running_by_prio, pending_by_prio, pod_items = self.snapshot_from_pods(
                         namespace
                     )
                 except Exception as e:
@@ -921,7 +923,7 @@ class TraceReplayer:
                         continue
                     cur_live_uids.add(pod_uid)
 
-                    rs_name = _rs_prefix_from_pod_name(pod_name)
+                    rs_name = rs_prefix_from_pod_name(pod_name)
                     prio = int(self.prio_by_rs.get(rs_name, 0))
                     if prio > 0:
                         uid_to_prio[pod_uid] = prio
@@ -959,7 +961,7 @@ class TraceReplayer:
                     if not pod_name:
                         continue
 
-                    rs_name = _rs_prefix_from_pod_name(pod_name)
+                    rs_name = rs_prefix_from_pod_name(pod_name)
                     if rs_name in self.initial_rs_names:
                         # skip initial pods entirely in pod_stats.csv
                         continue
@@ -969,7 +971,7 @@ class TraceReplayer:
                     # APPLY: first time we observe the pod at all
                     if pod_name not in seen_apply:
                         seen_apply.add(pod_name)
-                        ce = self._pod_creation_time(pod)
+                        ce = self.pod_creation_time(pod)
                         if ce is not None and self.run_start_wall > 0:
                             apply_time_s = max(0.0, ce - self.run_start_wall)
                         else:
@@ -981,7 +983,7 @@ class TraceReplayer:
                     phase = status.get("phase", "")
                     if phase == "Running" and pod_name not in seen_running:
                         seen_running.add(pod_name)
-                        st = self._pod_start_time(pod)  # status.startTime only
+                        st = self.pod_start_time(pod)  # status.startTime only
                         if st is not None and self.run_start_wall > 0:
                             run_time_s = max(0.0, st - self.run_start_wall)
                         else:
@@ -1064,7 +1066,7 @@ class TraceReplayer:
 
             # 2) Start monitor ONLY AFTER initial load has been applied
             monitor_thread = threading.Thread(
-                target=self._monitor_loop,
+                target=self.monitor_loop,
                 args=(
                     self.args.namespace,
                     float(self.args.monitor_interval),
@@ -1105,7 +1107,7 @@ class TraceReplayer:
         Run the trace replayer for one or more seed directories.
         """
         trace_dir = Path(self.args.trace_dir).resolve()
-        run_dirs = _discover_trace_run_dirs(trace_dir)
+        run_dirs = discover_trace_run_dirs(trace_dir)
         base_results_dir = Path(self.args.result_dir).resolve()
 
         multi_seed = len(run_dirs) > 1 or run_dirs[0] != trace_dir
@@ -1134,14 +1136,16 @@ class TraceReplayer:
             run_args.trace_dir = str(run_dir)
             run_args.result_dir = str(run_result_dir)
 
-            replayer = TraceReplayer._from_run_args(
-                run_args,
+            # Per-seed instance from already-resolved args; skips _initialize().
+            replayer = TraceReplayer.__new__(TraceReplayer)
+            replayer.init_runtime(runner=self.runner, clock=self.clock, executor_factory=self.executor_factory)
+            replayer.init_context(
+                args=run_args,
                 job_doc=self.job_doc,
                 override_kwokctl_envs=self.override_kwokctl_envs,
-                runner=self.runner,
-                clock=self.clock,
-                executor_factory=self.executor_factory,
             )
+            replayer.configure_from_args()
+            replayer.write_info_file()
             replayer.run_seed()
 
 # ---------------------------------------------------------------------

@@ -46,7 +46,7 @@ def mk_replayer(tmp_path: Path, monkeypatch, **overrides):
     args, trace_dir, cfg, result_dir = mk_args(tmp_path, **overrides)
 
     # Avoid noisy info writes/logging unless explicitly tested
-    monkeypatch.setattr(tr.TraceReplayer, "_write_info_file", lambda self: None)
+    monkeypatch.setattr(tr.TraceReplayer, "write_info_file", lambda self: None)
     monkeypatch.setattr(tr.TraceReplayer, "log_args", lambda self: None)
 
     rp = tr.TraceReplayer(args)
@@ -83,10 +83,10 @@ class BadFuture:
 # ---------------------------------------------------------------------------
 
 def test_parse_optional_bool_strict():
-    assert tr._parse_optional_bool_strict(True) is True
-    assert tr._parse_optional_bool_strict(False) is False
-    assert tr._parse_optional_bool_strict("yes") is None
-    assert tr._parse_optional_bool_strict(1) is None
+    assert tr.parse_optional_bool_strict(True) is True
+    assert tr.parse_optional_bool_strict(False) is False
+    assert tr.parse_optional_bool_strict("yes") is None
+    assert tr.parse_optional_bool_strict(1) is None
 
 
 # ---------------------------------------------------------------------------
@@ -94,9 +94,9 @@ def test_parse_optional_bool_strict():
 # ---------------------------------------------------------------------------
 
 def test_rs_prefix_from_pod_name():
-    assert tr._rs_prefix_from_pod_name("rs-000001-abc-0") == "rs-000001"
-    assert tr._rs_prefix_from_pod_name("custom-foo-0") == "custom"
-    assert tr._rs_prefix_from_pod_name("plain") == "plain"
+    assert tr.rs_prefix_from_pod_name("rs-000001-abc-0") == "rs-000001"
+    assert tr.rs_prefix_from_pod_name("custom-foo-0") == "custom"
+    assert tr.rs_prefix_from_pod_name("plain") == "plain"
 
 
 # ---------------------------------------------------------------------------
@@ -104,17 +104,17 @@ def test_rs_prefix_from_pod_name():
 # ---------------------------------------------------------------------------
 
 def test_parse_rfc3339_to_epoch_parses_z_and_fractional():
-    t1 = tr._parse_rfc3339_to_epoch("2026-01-09T12:34:56Z")
-    t2 = tr._parse_rfc3339_to_epoch("2026-01-09T12:34:56.123Z")
+    t1 = tr.parse_rfc3339_to_epoch("2026-01-09T12:34:56Z")
+    t2 = tr.parse_rfc3339_to_epoch("2026-01-09T12:34:56.123Z")
     assert isinstance(t1, float) and t1 > 0
     assert isinstance(t2, float) and t2 > 0
     assert t2 >= t1
 
 
 def test_parse_rfc3339_to_epoch_invalid_returns_none():
-    assert tr._parse_rfc3339_to_epoch("") is None
-    assert tr._parse_rfc3339_to_epoch("nope") is None
-    assert tr._parse_rfc3339_to_epoch(None) is None  # type: ignore[arg-type]
+    assert tr.parse_rfc3339_to_epoch("") is None
+    assert tr.parse_rfc3339_to_epoch("nope") is None
+    assert tr.parse_rfc3339_to_epoch(None) is None  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +292,7 @@ def test_trace_replayer_init_sets_paths_and_state(tmp_path: Path, monkeypatch):
 
 def test_log_args_calls_log_args_block(tmp_path: Path, monkeypatch):
     args, *_ = mk_args(tmp_path)
-    monkeypatch.setattr(tr.TraceReplayer, "_write_info_file", lambda self: None)
+    monkeypatch.setattr(tr.TraceReplayer, "write_info_file", lambda self: None)
 
     called = {"n": 0, "include": None, "title": None}
 
@@ -312,7 +312,7 @@ def test_log_args_calls_log_args_block(tmp_path: Path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# TraceReplayer._write_info_file()
+# TraceReplayer.write_info_file()
 # ---------------------------------------------------------------------------
 
 def test_write_info_file_success(tmp_path: Path, monkeypatch):
@@ -372,8 +372,8 @@ def test_save_scheduler_logs(tmp_path: Path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_rs_name_for_record():
-    assert tr.TraceReplayer._rs_name_for_record(1) == "rs-000001"
-    assert tr.TraceReplayer._rs_name_for_record(123456) == "rs-123456"
+    assert tr.TraceReplayer.rs_name_for_record(1) == "rs-000001"
+    assert tr.TraceReplayer.rs_name_for_record(123456) == "rs-123456"
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +383,7 @@ def test_rs_name_for_record():
 def test_load_json_pods_missing_file_raises(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
     with pytest.raises(FileNotFoundError):
-        rp._load_json_pods(tmp_path / "nope.json")
+        rp.load_json_pods(tmp_path / "nope.json")
 
 
 def test_load_json_pods_requires_record_keys(tmp_path: Path, monkeypatch):
@@ -391,7 +391,7 @@ def test_load_json_pods_requires_record_keys(tmp_path: Path, monkeypatch):
 
     (trace_dir / "trace.json").write_text(json.dumps({"pods": [{"id": 1}]}), encoding="utf-8")
     with pytest.raises(ValueError):
-        rp._load_json_pods(trace_dir / "trace.json")
+        rp.load_json_pods(trace_dir / "trace.json")
 
 
 def test_load_json_pods_parses_and_sorts(tmp_path: Path, monkeypatch):
@@ -405,7 +405,7 @@ def test_load_json_pods_parses_and_sorts(tmp_path: Path, monkeypatch):
     }
     (trace_dir / "trace.json").write_text(json.dumps(raw), encoding="utf-8")
 
-    pods = rp._load_json_pods(trace_dir / "trace.json")
+    pods = rp.load_json_pods(trace_dir / "trace.json")
     assert [p.id for p in pods] == [1, 2]
 
 
@@ -644,7 +644,7 @@ def test_snapshot_from_pods_computes_utilization_and_counts(tmp_path: Path, monk
     monkeypatch.setattr(tr, "qty_to_mcpu_int", lambda q: 0 if q is None else int(str(q).rstrip("m")))
     monkeypatch.setattr(tr, "qty_to_bytes_int", lambda q: 0 if q is None else int(str(q)))
 
-    cpu_u, mem_u, running_by_prio, pending_by_prio, items = rp._snapshot_from_pods("trace")
+    cpu_u, mem_u, running_by_prio, pending_by_prio, items = rp.snapshot_from_pods("trace")
     assert items == pods_json["items"]
     assert cpu_u == pytest.approx(100 / (2 * 1000))
     assert mem_u == pytest.approx(10 / (2 * 1000))
@@ -662,8 +662,8 @@ def test_pod_epoch_extractors():
         "metadata": {"creationTimestamp": "2026-01-09T12:00:00Z"},
         "status": {"startTime": "2026-01-09T12:00:01Z"},
     }
-    assert rp._pod_creation_time(pod) is not None
-    assert rp._pod_start_time(pod) is not None
+    assert rp.pod_creation_time(pod) is not None
+    assert rp.pod_start_time(pod) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +692,7 @@ def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Pat
     def snap(_ns):
         return (0.25, 0.50, {1: 0, 2: 2}, {1: 0, 2: 0}, items)
 
-    monkeypatch.setattr(rp, "_snapshot_from_pods", snap)
+    monkeypatch.setattr(rp, "snapshot_from_pods", snap)
     monkeypatch.setattr(tr, "get_timestamp", lambda: "T")
 
     stop_event = tr.threading.Event()
@@ -705,7 +705,7 @@ def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Pat
     general_csv = tmp_path / "general.csv"
     pod_csv = tmp_path / "pod.csv"
 
-    rp._monitor_loop(
+    rp.monitor_loop(
         namespace="trace",
         interval_s=10.0,
         general_csv=general_csv,

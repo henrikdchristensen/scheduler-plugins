@@ -17,42 +17,23 @@ NOTE (lifetime alignment):
     - We enforce xmin-life >= 2s (hard requirement for the lifetime distribution bounds).
 """
 
-import argparse
-import copy
-import heapq
-import json
-import logging
-import math
-import os
+import os, argparse, math, copy, heapq, json, logging, yaml
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
 import numpy as np
-import yaml
 
 from scripts.helpers.general_helpers import (
-    build_cli_cmd,
-    derive_seed,
-    log_args_block,
-    make_header_footer,
-    parse_duration_to_seconds,
-    read_seeds_file,
-    setup_logging,
-    write_info_file,
+    build_cli_cmd, derive_seed, log_args_block, make_header_footer,
+    parse_duration_to_seconds, read_seeds_file, setup_logging, write_info_file,
 )
 from scripts.helpers.job_helpers import (
-    JobField,
-    merge_job_fields_into_args,
-    parse_optional_bool,
-    parse_optional_duration_seconds,
-    parse_optional_float,
-    parse_optional_int,
-    parse_optional_str,
+    JobField, merge_job_fields_into_args,
+    parse_optional_bool, parse_optional_duration_seconds, parse_optional_float,
+    parse_optional_int, parse_optional_str,
 )
 from scripts.kwok_trace_replayer.plot_helpers import (
-    plot_generator_histograms,
-    plot_utilization_and_num_pods,
+    plot_generator_histograms, plot_utilization_and_num_pods,
 )
 from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 
@@ -63,14 +44,14 @@ MAX_DECIMALS = 6
 
 MIN_LIFETIME_S = 2.0
 
-UTIL_TOL = 0.01
-CALIB_MEAN_LIFE_MAX_ITER = 20
+MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE = 0.01
+MEAN_LIFE_CALIBRATION_MAX_ITER = 20
 
-INITIAL_FILL_TOL = 0.002
+INITIAL_PODS_UTIL_TOLERANCE = 0.002
 INITIAL_MAX_PODS = 200_000
 
 ALPHA_SOLVE_MAX_ITER = 200
-ALPHA_SOLVE_REL_TOL = 1e-10
+ALPHA_SOLVE_TOLERANCE = 1e-10
 
 LOGGER_NAME = "trace-generator"
 LOG = logging.getLogger(LOGGER_NAME)
@@ -98,17 +79,6 @@ class EndHeapEntry:
 # -----------------------------------------------------------------------------
 # CLI
 # -----------------------------------------------------------------------------
-def _duration_seconds_arg(name: str):
-    def _parse(s: str) -> float:
-        try:
-            return float(parse_duration_to_seconds(str(s)))
-        except Exception as e:
-            raise argparse.ArgumentTypeError(
-                f"{name} must be seconds or a duration like '2h', '30m', '10s' (got {s!r}): {e}"
-            )
-
-    return _parse
-
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Generate initial + trace workload JSON files.")
@@ -121,11 +91,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed-file", dest="seed_file", default=None,
                    help="Path to a seed list file (one integer per line).")
     p.add_argument("--log-level", dest="log_level", default=None)
-    p.add_argument(
-        "--show-plots",
-        dest="show_plots",
-        action=argparse.BooleanOptionalAction,
-        default=None,
+    p.add_argument("--show-plots", dest="show_plots", action=argparse.BooleanOptionalAction, default=None,
         help="Show plots after generation (plots are always saved).",
     )
 
@@ -135,14 +101,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-util", type=float, default=None)
 
     # Inter-arrival (bounded Pareto)
-    p.add_argument("--xmin-arrival", type=_duration_seconds_arg("xmin-arrival"), default=None)
-    p.add_argument("--xmax-arrival", type=_duration_seconds_arg("xmax-arrival"), default=None)
-    p.add_argument("--mean-arrival", type=_duration_seconds_arg("mean-arrival"), default=None)
+    p.add_argument("--xmin-arrival", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--xmax-arrival", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--mean-arrival", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
 
     # Lifetime (bounded Pareto; mean inferred/calibrated)
-    p.add_argument("--xmin-life", type=_duration_seconds_arg("xmin-life"), default=None)
-    p.add_argument("--xmax-life", type=_duration_seconds_arg("xmax-life"), default=None)
-    p.add_argument("--mean-life", type=_duration_seconds_arg("mean-life"), default=None)
+    p.add_argument("--xmin-life", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--xmax-life", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--mean-life", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
 
     # Requests (bounded Pareto)
     p.add_argument("--xmin-req", type=float, default=None)
@@ -160,183 +126,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     return p
 
-
-def _load_job_doc(path: str | Path) -> dict:
-    p = Path(path).resolve()
-    if not p.exists():
-        raise SystemExit(f"--job-file not found: {p}")
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            doc = yaml.safe_load(f) or {}
-    except Exception as e:
-        raise SystemExit(f"failed reading --job-file {p}: {e}")
-    if not isinstance(doc, dict):
-        raise SystemExit(f"--job-file must be a YAML mapping/object: {p}")
-    return doc
-
-
-def _merge_job_fields(args: argparse.Namespace, job: dict) -> argparse.Namespace:
-    fields = [
-        JobField("output-dir", "output_dir", parse=parse_optional_str),
-        JobField("seed", "seed", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
-        JobField("seed-file", "seed_file", parse=parse_optional_str),
-        JobField("log-level", "log_level", parse=parse_optional_str),
-        JobField("show-plots", "show_plots", parse=parse_optional_bool, accept=lambda v: v is not None),
-
-        JobField("num-nodes", "num_nodes", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
-        JobField("trace-time", "trace_time", parse=parse_optional_str),
-        JobField("target-util", "target_util", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-
-        JobField("xmin-arrival", "xmin_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
-        JobField("xmax-arrival", "xmax_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
-        JobField("mean-arrival", "mean_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
-
-        JobField("xmin-life", "xmin_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
-        JobField("xmax-life", "xmax_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
-        JobField("mean-life", "mean_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
-
-        JobField("xmin-req", "xmin_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-        JobField("xmax-req", "xmax_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-        JobField("mean-req", "mean_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-
-        JobField("priority-min", "priority_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
-        JobField("priority-max", "priority_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
-        JobField("priority-ratio", "priority_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-
-        JobField("replicas-min", "replicas_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
-        JobField("replicas-max", "replicas_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
-        JobField("replicas-ratio", "replicas_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
-    ]
-    return merge_job_fields_into_args(args, job or {}, fields)
-
-
-def _apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
-    if getattr(args, "log_level", None) is None:
-        args.log_level = DEFAULT_LOG_LEVEL
-    if getattr(args, "show_plots", None) is None:
-        args.show_plots = bool(DEFAULT_SHOW_PLOTS)
-    return args
-
-
-def _validate_args(args: argparse.Namespace) -> None:
-    missing: list[str] = []
-
-    if getattr(args, "output_dir", None) is None:
-        missing.append("output_dir")
-
-    # Seed selection: require exactly one mode.
-    seed = getattr(args, "seed", None)
-    seed_file = getattr(args, "seed_file", None)
-    if seed is not None and seed_file:
-        raise SystemExit("--seed and --seed-file cannot be used together")
-    if seed is None and not seed_file:
-        missing.append("seed or seed_file")
-
-    for k in (
-        "num_nodes",
-        "trace_time",
-        "target_util",
-        "xmin_arrival",
-        "xmax_arrival",
-        "mean_arrival",
-        "xmin_life",
-        "xmax_life",
-        "xmin_req",
-        "xmax_req",
-        "mean_req",
-        "priority_min",
-        "priority_max",
-        "priority_ratio",
-        "replicas_min",
-        "replicas_max",
-        "replicas_ratio",
-    ):
-        if getattr(args, k, None) is None:
-            missing.append(k)
-
-    if missing:
-        raise SystemExit(f"missing required arguments (via CLI or job-file): {', '.join(missing)}")
-
-    def _pos(name: str) -> float:
-        v = float(getattr(args, name))
-        if v <= 0:
-            raise SystemExit(f"{name} must be > 0 (got {v})")
-        return v
-
-    _pos("num_nodes")
-    _pos("xmin_arrival"); _pos("xmax_arrival"); _pos("mean_arrival")
-    _pos("xmin_life"); _pos("xmax_life")
-    _pos("xmin_req"); _pos("xmax_req"); _pos("mean_req")
-
-    if float(args.xmin_life) < MIN_LIFETIME_S:
-        raise SystemExit(f"xmin-life must be >= {MIN_LIFETIME_S:.1f}s (got {float(args.xmin_life):.6f})")
-
-    if float(args.xmax_arrival) <= float(args.xmin_arrival):
-        raise SystemExit("require xmax-arrival > xmin-arrival")
-    if float(args.xmax_life) <= float(args.xmin_life):
-        raise SystemExit("require xmax-life > xmin-life")
-    if float(args.xmax_req) <= float(args.xmin_req):
-        raise SystemExit("require xmax-req > xmin-req")
-
-    tu = float(args.target_util)
-    if not (0.0 < tu <= 1.0):
-        raise SystemExit("target-util must be in (0,1]")
-
-    if getattr(args, "job_file", None):
-        p = Path(args.job_file).resolve()
-        if not p.exists():
-            raise SystemExit(f"--job-file not found: {p}")
-
-    if getattr(args, "seed_file", None):
-        p = Path(args.seed_file).resolve()
-        if not p.exists():
-            raise SystemExit(f"--seed-file not found: {p}")
-
-
-def resolve_effective_args(cli_args: argparse.Namespace) -> argparse.Namespace:
-    args = cli_args
-    job_doc = _load_job_doc(args.job_file) if getattr(args, "job_file", None) else None
-    if job_doc is not None:
-        args = _merge_job_fields(args, job_doc)
-    args = _apply_defaults(args)
-    _validate_args(args)
-    return args
-
-
-def expand_seed_runs(args: argparse.Namespace) -> list[argparse.Namespace]:
-    if getattr(args, "seed_file", None):
-        seeds = read_seeds_file(Path(args.seed_file).resolve(), logger=LOG)
-    else:
-        seeds = [int(args.seed)]
-    base_out = Path(args.output_dir).resolve()
-
-    runs: list[argparse.Namespace] = []
-    for s in seeds:
-        a = copy.copy(args)
-        a.seed = int(s)
-        if getattr(args, "seed_file", None):
-            a.output_dir = str(base_out / str(int(s)))
-        runs.append(a)
-    return runs
-
-
-def round_float_args(args: argparse.Namespace, ndigits: int) -> None:
-    for k, v in vars(args).items():
-        if isinstance(v, float):
-            setattr(args, k, round(v, ndigits))
-
-
 # -----------------------------------------------------------------------------
 # Generator
 # -----------------------------------------------------------------------------
+
 class TraceGenerator:
     def __init__(self, cli_args: argparse.Namespace) -> None:
-        args = resolve_effective_args(cli_args)
-        round_float_args(args, MAX_DECIMALS)
+        args = TraceGenerator.resolve_effective_args(cli_args)
+        TraceGenerator.round_float_args(args, MAX_DECIMALS)
         setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
 
+        # Keep behavior: only create figures/ for single-seed runs.
+        self.init_from_args(args, create_figures_dir=not bool(getattr(args, "seed_file", None)), log_args=True)
+
+    def init_from_args(self, args: argparse.Namespace, *, create_figures_dir: bool, log_args: bool) -> None:
+        """
+        Shared initializer for both __init__ (CLI/job-file resolved) and per-seed resolved runs.
+        """
         self.args = args
-        self.base_seed = int(args.seed) if args.seed is not None else 0
+        self.base_seed = int(getattr(args, "seed", 0) or 0)
 
         self.trace_time_s = float(parse_duration_to_seconds(self.args.trace_time))
 
@@ -344,7 +152,7 @@ class TraceGenerator:
         self.output_dir = Path(self.args.output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.figures_dir = self.output_dir / "figures"
-        if not getattr(self.args, "seed_file", None):
+        if create_figures_dir:
             self.figures_dir.mkdir(parents=True, exist_ok=True)
 
         self.initial_path = self.output_dir / "initial.json"
@@ -354,53 +162,230 @@ class TraceGenerator:
         self.hist_plot_path = self.figures_dir / "histograms.png"
 
         # fitted Pareto alphas
-        self.alpha_req: Optional[float] = None
-        self.alpha_arrival: Optional[float] = None
-        self.alpha_life: Optional[float] = None
-
-        # plot series
-        self.times: List[float] = []
-        self.u_req_hist: List[float] = []
-        self.pods_hist: List[int] = []
-        self.initial_pods_count: int = 0
-
-        self.log_args()
-
-    @classmethod
-    def _from_run_args(cls, run_args: argparse.Namespace) -> "TraceGenerator":
-        self = cls.__new__(cls)
-        self.args = run_args
-        setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=run_args.log_level)
-
-        self.base_seed = int(run_args.seed)
-        self.trace_time_s = float(parse_duration_to_seconds(run_args.trace_time))
-
-        self.output_dir = Path(run_args.output_dir).resolve()
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.figures_dir = self.output_dir / "figures"
-        self.figures_dir.mkdir(parents=True, exist_ok=True)
-
-        self.initial_path = self.output_dir / "initial.json"
-        self.trace_path = self.output_dir / "trace.json"
-        self.info_path = self.output_dir / "info_generate.yaml"
-        self.util_plot_path = self.figures_dir / "utilization.png"
-        self.hist_plot_path = self.figures_dir / "histograms.png"
-
         self.alpha_req = None
         self.alpha_arrival = None
         self.alpha_life = None
 
+        # plot series
         self.times = []
         self.u_req_hist = []
         self.pods_hist = []
         self.initial_pods_count = 0
 
-        # Intentionally do not log args here: per-seed instances are created during
-        # multi-seed runs and would spam the ARGS block. The top-level __init__ logs
-        # args once at startup.
-        return self
+        if log_args:
+            self.log_args()
 
+    # -------------------------------------------------------------------------
+    # Argument resolution + validation
+    # -------------------------------------------------------------------------
+    
+    @staticmethod
+    def round_float_args(args: argparse.Namespace, ndigits: int) -> None:
+        """
+        Round all float args to ndigits decimal places.
+        """
+        for k, v in vars(args).items():
+            if isinstance(v, float):
+                setattr(args, k, round(v, ndigits))
+
+    @staticmethod
+    def resolve_effective_args(cli_args: argparse.Namespace) -> argparse.Namespace:
+        """
+        Resolve effective args from CLI + job file.
+        """
+        args = cli_args
+        job_doc = TraceGenerator.load_job_doc(args.job_file) if getattr(args, "job_file", None) else None
+        if job_doc is not None:
+            args = TraceGenerator.merge_job_fields(args, job_doc)
+        args = TraceGenerator.apply_defaults(args)
+        TraceGenerator.validate_args(args)
+        return args
+
+    @staticmethod
+    def load_job_doc(path: str | Path) -> dict:
+        """
+        Load and parse a job YAML file.
+        """
+        p = Path(path).resolve()
+        if not p.exists():
+            raise SystemExit(f"--job-file not found: {p}")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+        except Exception as e:
+            raise SystemExit(f"failed reading --job-file {p}: {e}")
+        if not isinstance(doc, dict):
+            raise SystemExit(f"--job-file must be a YAML mapping/object: {p}")
+        return doc
+
+    @staticmethod
+    def merge_job_fields(args: argparse.Namespace, job: dict) -> argparse.Namespace:
+        """
+        Merge job-file fields into args.
+        """
+        fields = [
+            # General
+            JobField("output-dir", "output_dir", parse=parse_optional_str),
+            JobField("seed", "seed", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("seed-file", "seed_file", parse=parse_optional_str),
+            JobField("log-level", "log_level", parse=parse_optional_str),
+            JobField("show-plots", "show_plots", parse=parse_optional_bool, accept=lambda v: v is not None),
+
+            # Cluster / horizon
+            JobField("num-nodes", "num_nodes", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("trace-time", "trace_time", parse=parse_optional_str),
+            JobField("target-util", "target_util", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+            # Inter-arrival
+            JobField("xmin-arrival", "xmin_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("xmax-arrival", "xmax_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("mean-arrival", "mean_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+
+            # Lifetime
+            JobField("xmin-life", "xmin_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("xmax-life", "xmax_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("mean-life", "mean_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+
+            # Requests
+            JobField("xmin-req", "xmin_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+            JobField("xmax-req", "xmax_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+            JobField("mean-req", "mean_req", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+            # Priority
+            JobField("priority-min", "priority_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("priority-max", "priority_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("priority-ratio", "priority_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+            # Replicas
+            JobField("replicas-min", "replicas_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("replicas-max", "replicas_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("replicas-ratio", "replicas_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        ]
+        
+        return merge_job_fields_into_args(args, job or {}, fields)
+
+    @staticmethod
+    def apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
+        """
+        Apply default values to args when unset.
+        """
+        if getattr(args, "log_level", None) is None:
+            args.log_level = DEFAULT_LOG_LEVEL
+        if getattr(args, "show_plots", None) is None:
+            args.show_plots = bool(DEFAULT_SHOW_PLOTS)
+        return args
+
+    @staticmethod
+    def validate_args(args: argparse.Namespace) -> None:
+        """
+        Validate required args and value ranges.
+        """
+        missing: list[str] = []
+
+        if getattr(args, "output_dir", None) is None:
+            missing.append("output_dir")
+
+        # Seed selection: require exactly one mode.
+        seed = getattr(args, "seed", None)
+        seed_file = getattr(args, "seed_file", None)
+        if seed is not None and seed_file:
+            raise SystemExit("--seed and --seed-file cannot be used together")
+        if seed is None and not seed_file:
+            missing.append("seed or seed_file")
+
+        for k in (
+            "num_nodes",
+            "trace_time",
+            "target_util",
+            "xmin_arrival",
+            "xmax_arrival",
+            "mean_arrival",
+            "xmin_life",
+            "xmax_life",
+            "xmin_req",
+            "xmax_req",
+            "mean_req",
+            "priority_min",
+            "priority_max",
+            "priority_ratio",
+            "replicas_min",
+            "replicas_max",
+            "replicas_ratio",
+        ):
+            if getattr(args, k, None) is None:
+                missing.append(k)
+
+        if missing:
+            raise SystemExit(f"missing required arguments (via CLI or job-file): {', '.join(missing)}")
+
+        def _pos(name: str) -> float:
+            """
+            Ensure arg is > 0 and return its float value.
+            """
+            v = float(getattr(args, name))
+            if v <= 0:
+                raise SystemExit(f"{name} must be > 0 (got {v})")
+            return v
+
+        _pos("num_nodes")
+        _pos("xmin_arrival"); _pos("xmax_arrival"); _pos("mean_arrival")
+        _pos("xmin_life"); _pos("xmax_life")
+        _pos("xmin_req"); _pos("xmax_req"); _pos("mean_req")
+
+        if float(args.xmin_life) < MIN_LIFETIME_S:
+            raise SystemExit(f"xmin-life must be >= {MIN_LIFETIME_S:.1f}s (got {float(args.xmin_life):.6f})")
+        if float(args.xmax_arrival) <= float(args.xmin_arrival):
+            raise SystemExit("require xmax-arrival > xmin-arrival")
+        if float(args.xmax_life) <= float(args.xmin_life):
+            raise SystemExit("require xmax-life > xmin-life")
+        if float(args.xmax_req) <= float(args.xmin_req):
+            raise SystemExit("require xmax-req > xmin-req")
+
+        target_util = float(args.target_util)
+        if not (0.0 < target_util <= 1.0):
+            raise SystemExit("target-util must be in (0,1]")
+
+        if getattr(args, "job_file", None):
+            p = Path(args.job_file).resolve()
+            if not p.exists():
+                raise SystemExit(f"--job-file not found: {p}")
+
+        if getattr(args, "seed_file", None):
+            p = Path(args.seed_file).resolve()
+            if not p.exists():
+                raise SystemExit(f"--seed-file not found: {p}")
+
+    # -------------------------------------------------------------------------
+    # Seed expansion for multi-run
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def expand_seed_runs(args: argparse.Namespace) -> list[argparse.Namespace]:
+        """
+        Expand args into multiple runs based on seed or seed-file.
+        """
+        if getattr(args, "seed_file", None):
+            seeds = read_seeds_file(Path(args.seed_file).resolve(), logger=LOG)
+        else:
+            seeds = [int(args.seed)]
+        base_out = Path(args.output_dir).resolve()
+
+        runs: list[argparse.Namespace] = []
+        for s in seeds:
+            a = copy.copy(args)
+            a.seed = int(s)
+            if getattr(args, "seed_file", None):
+                a.output_dir = str(base_out / str(int(s)))
+            runs.append(a)
+        return runs
+
+    # -------------------------------------------------------------------------
+    # Logging + info file
+    # -------------------------------------------------------------------------
+    
     def log_args(self) -> None:
+        """
+        Log effective args.
+        """
         include = [
             "job_file",
             "output_dir",
@@ -429,7 +414,10 @@ class TraceGenerator:
         ]
         log_args_block(LOG, self.args, title="ARGS", include=include)
 
-    def _write_info_file(self, extra: Dict[str, object]) -> None:
+    def write_info_file(self, extra: Dict[str, object]) -> None:
+        """
+        Write info_generate.yaml with inputs + generated params.
+        """
         try:
             inputs = {
                 "cli-cmd": build_cli_cmd(),
@@ -442,7 +430,7 @@ class TraceGenerator:
             LOG.warning("failed to write info_generate.yaml: %s", e)
 
     # -------------------------------------------------------------------------
-    # Bounded Pareto: sampling + mean + alpha solve (deterministic)
+    # Bounded Pareto: sampling + mean + alpha solve
     # -------------------------------------------------------------------------
     @staticmethod
     def sample_bounded_pareto(
@@ -477,15 +465,19 @@ class TraceGenerator:
         size: int = 1,
     ) -> np.ndarray:
         """
-        Sample steady-state residual life (equilibrium remaining lifetime) for a renewal process
-        with i.i.d. lifetimes X on [x_min, x_max].
+        Sample steady-state residual life (equilibrium remaining lifetime) for a
+        renewal process with i.i.d. lifetimes X on [x_min, x_max].
 
         Construction:
-          1) Sample length-biased lifetime X* with density ∝ x f_X(x).
-             For bounded Pareto f_X(x) ∝ x^{-(alpha+1)} => x f_X(x) ∝ x^{-alpha}.
+          1) Sample length-biased lifetime X* with density ∝ x f_X(x). For
+             bounded Pareto f_X(x) ∝ x^{-(alpha+1)} => x f_X(x) ∝ x^{-alpha}.
           2) Given X* = x, sample residual R ~ Uniform(0, x).
 
-        This avoids the initial transient drop caused by sampling fresh lifetimes at t=0.
+        This avoids the initial transient drop caused by sampling fresh
+        lifetimes at t=0. Note: With heavy tails (Pareto-like), steady-state
+        strongly over-represents long lifetimes (length bias), which matches
+        reality: long-running pods are exactly what you tend to see in a live
+        cluster snapshot.
         """
         if not (alpha > 0 and x_min > 0 and x_max > x_min):
             raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
@@ -544,7 +536,7 @@ class TraceGenerator:
         x_max: float,
         target_mean: float,
         max_iter: int = ALPHA_SOLVE_MAX_ITER,
-        rel_tol: float = ALPHA_SOLVE_REL_TOL,
+        rel_tol: float = ALPHA_SOLVE_TOLERANCE,
     ) -> float:
         """
         Solve alpha from bounded Pareto mean via bisection (alpha>0, mean decreases in alpha).
@@ -582,29 +574,6 @@ class TraceGenerator:
                 hi = mid
 
         return float(0.5 * (lo + hi))
-
-    # -------------------------------------------------------------------------
-    # Discrete helpers (priority/replicas)
-    # -------------------------------------------------------------------------
-    @staticmethod
-    def build_trunc_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        if ratio <= 0:
-            raise ValueError("ratio must be > 0.")
-        lo = int(min_val)
-        hi = max(int(max_val), lo)
-        vals = np.arange(lo, hi + 1, dtype=int)
-
-        if vals.size == 1 or np.isclose(ratio, 1.0):
-            return vals, None
-
-        exps = np.arange(vals.size, dtype=float)
-        w = ratio ** exps
-        p = w / w.sum()
-        return vals, p
-
-    @staticmethod
-    def expected_value(vals: np.ndarray, probs: Optional[np.ndarray]) -> float:
-        return float(np.mean(vals)) if probs is None else float(np.sum(vals.astype(float) * probs.astype(float)))
 
     # -------------------------------------------------------------------------
     # Mean-life inference and alpha fitting
@@ -685,9 +654,46 @@ class TraceGenerator:
                  float(self.args.mean_life), float(self.args.xmin_life), float(self.args.xmax_life), float(self.alpha_life))
 
     # -------------------------------------------------------------------------
+    # Discrete helpers (priority/replicas)
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def build_trunc_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Build discrete support + probs for truncated geometric on [min_val, max_val] with given ratio.
+        1) If ratio == 1.0, uniform discrete on [min_val, max_val].
+        2) If ratio != 1.0, pmf p(k) ∝ ratio^{k - min_val} for k in [min_val, max_val].
+        3) If only one value in support, return uniform with single value.
+        """
+        if ratio <= 0:
+            raise ValueError("ratio must be > 0.")
+        lo = int(min_val)
+        hi = max(int(max_val), lo)
+        vals = np.arange(lo, hi + 1, dtype=int)
+
+        if vals.size == 1 or np.isclose(ratio, 1.0):
+            return vals, None
+
+        exps = np.arange(vals.size, dtype=float)
+        w = ratio ** exps
+        p = w / w.sum()
+        return vals, p
+
+    @staticmethod
+    def expected_value(vals: np.ndarray, probs: Optional[np.ndarray]) -> float:
+        """
+        E[X] for discrete RV with support vals and optional probs.
+        """
+        return float(np.mean(vals)) if probs is None else float(np.sum(vals.astype(float) * probs.astype(float)))
+
+    # -------------------------------------------------------------------------
     # Util metric
     # -------------------------------------------------------------------------
     def time_avg_req_util(self, pods: List[TraceRecord]) -> float:
+        """
+        Time-averaged requested CPU utilization over [0, T]:
+          U = (1 / (N*T)) * ∫[0 to T] Σ_{p in pods active at t} replicas_p * cpu_p dt
+        0 <= U <= 1
+        """
         T = float(self.trace_time_s)
         if T <= 0.0:
             return 0.0
@@ -724,7 +730,7 @@ class TraceGenerator:
         assert self.alpha_req is not None and self.alpha_life is not None
 
         target_total = float(self.args.target_util) * float(self.args.num_nodes)
-        tol = float(INITIAL_FILL_TOL)
+        tol = float(INITIAL_PODS_UTIL_TOLERANCE)
 
         cur_total = 0.0
         pods: List[TraceRecord] = []
@@ -796,6 +802,9 @@ class TraceGenerator:
         next_id: int,
         initial_pods: List[TraceRecord],
     ) -> Tuple[List[TraceRecord], int, List[float], List[float], List[int]]:
+        """
+        Generate trace pod events after initial snapshot.
+        """
         assert self.alpha_req is not None and self.alpha_arrival is not None and self.alpha_life is not None
 
         state = ClusterState()
@@ -880,6 +889,9 @@ class TraceGenerator:
     # One generation pass
     # -------------------------------------------------------------------------
     def generate_once(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], float, Dict[str, object]]:
+        """
+        Generate one initial + trace pod set with given iteration seed.
+        """
         rng_initial = np.random.default_rng(derive_seed(iter_seed, "initial-snapshot"))
         rng_trace = np.random.default_rng(derive_seed(iter_seed, "trace-events"))
 
@@ -936,9 +948,9 @@ class TraceGenerator:
             "measured_util_time_avg": float(util),
             "target_util_time_avg": float(self.args.target_util),
             "calibration": {
-                "util_tol": float(UTIL_TOL),
-                "calib_max_iter": int(CALIB_MEAN_LIFE_MAX_ITER),
-                "initial_fill_tol": float(INITIAL_FILL_TOL),
+                "util_tol": float(MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE),
+                "calib_max_iter": int(MEAN_LIFE_CALIBRATION_MAX_ITER),
+                "initial_fill_tol": float(INITIAL_PODS_UTIL_TOLERANCE),
                 "initial_max_pods": int(INITIAL_MAX_PODS),
             },
             "derived_mean_life_s": round(float(self.args.mean_life), 6),
@@ -970,8 +982,11 @@ class TraceGenerator:
     # Calibration
     # -------------------------------------------------------------------------
     def calibrate_mean_life(self) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
+        """
+        Calibrate mean-life to hit target utilization within tolerance.
+        """
         target = float(self.args.target_util)
-        tol = float(UTIL_TOL)
+        tol = float(MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE)
 
         # fixed seed across iterations (CRN => stable updates)
         iter_seed = int(derive_seed(self.base_seed, "calibrate-mean-life-crn"))
@@ -981,7 +996,7 @@ class TraceGenerator:
         best_trace: List[TraceRecord] = []
         best_extra: Dict[str, object] = {}
 
-        for it in range(1, int(CALIB_MEAN_LIFE_MAX_ITER) + 1):
+        for it in range(1, int(MEAN_LIFE_CALIBRATION_MAX_ITER) + 1):
             initial_pods, trace_pods, measured, extra = self.generate_once(iter_seed)
 
             err = abs(measured - target) / max(1e-12, target)
@@ -1017,34 +1032,59 @@ class TraceGenerator:
     # Output
     # -------------------------------------------------------------------------
     @staticmethod
-    def _write_json(path: Path, pods: List[TraceRecord]) -> None:
+    def write_json(path: Path, pods: List[TraceRecord]) -> None:
+        """
+        Write pods to a JSON file at the given path.
+        """
         obj = {"pods": [asdict(p) for p in pods]}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2)
         LOG.info("wrote %s (%d records)", path, len(pods))
 
     def write_outputs(self, initial_pods: List[TraceRecord], trace_pods: List[TraceRecord], extra_info: Dict[str, object]) -> None:
+        """
+        Write output files: initial JSON, trace JSON, info YAML.
+        """
         all_pods = initial_pods + trace_pods
         util_time = self.time_avg_req_util(all_pods)
 
-        self._write_json(self.initial_path, initial_pods)
-        self._write_json(self.trace_path, trace_pods)
+        self.write_json(self.initial_path, initial_pods)
+        self.write_json(self.trace_path, trace_pods)
 
         LOG.info("[utilization] util-time-avg over whole trace: %.4f (target=%.4f)",
                  float(util_time), float(self.args.target_util))
 
-        self._write_info_file(extra=extra_info)
+        self.write_info_file(extra=extra_info)
 
     # -------------------------------------------------------------------------
     # Runner
     # -------------------------------------------------------------------------
+    
     def run_seed(self) -> None:
+        """
+        Run a single seed instance.
+        """
         if self.args.mean_life is None:
             self.args.mean_life = self.infer_mean_life_from_target_util()
-            LOG.info("[inferred-mean-life] mean_life=%.3fs from target-util=%.3f",
-                     float(self.args.mean_life), float(self.args.target_util))
+            LOG.info(
+                "[inferred-mean-life] mean_life=%.3fs from target-util=%.3f",
+                float(self.args.mean_life),
+                float(self.args.target_util),
+            )
 
-        initial_pods, trace_pods, extra_info = self.calibrate_mean_life()
+            initial_pods, trace_pods, extra_info = self.calibrate_mean_life()
+        else:
+            iter_seed = int(derive_seed(self.base_seed, "provided-mean-life"))
+            initial_pods, trace_pods, measured, extra_info = self.generate_once(iter_seed)
+            extra_info.setdefault("calibration", {})
+            extra_info["calibration"].update({"mode": "skipped", "reason": "mean_life_provided", "iterations": 1})
+            LOG.info(
+                "[provided-mean-life] skipping calibration; measured=%.4f target=%.4f mean_life=%.3fs",
+                float(measured),
+                float(self.args.target_util),
+                float(self.args.mean_life),
+            )
+
         all_pods = initial_pods + trace_pods
 
         self.write_outputs(initial_pods, trace_pods, extra_info)
@@ -1083,7 +1123,10 @@ class TraceGenerator:
         )
 
     def run(self) -> None:
-        runs = expand_seed_runs(self.args)
+        """
+        Run the trace generator, possibly expanding multiple seed runs.
+        """
+        runs = TraceGenerator.expand_seed_runs(self.args)
         total = len(runs)
 
         for i, a in enumerate(runs, start=1):
@@ -1092,11 +1135,13 @@ class TraceGenerator:
             )
             LOG.info("\n%s\nseed=%d output_dir=%s\n%s", header, int(a.seed), str(a.output_dir), footer)
 
-            gen = TraceGenerator._from_run_args(a)
+            # Per-seed run instance: resolved args, no re-logging of full ARGS block.
+            gen = TraceGenerator.__new__(TraceGenerator)
+            setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=a.log_level)
+            gen.init_from_args(a, create_figures_dir=True, log_args=False)
             gen.run_seed()
 
         LOG.info("done.")
-
 
 # -----------------------------------------------------------------------------
 # Main

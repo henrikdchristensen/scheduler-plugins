@@ -19,7 +19,7 @@ from scripts.kwok_trace_replayer import trace_generator as tg
 
 def _make_required_args(tmp_path: Path, **overrides):
     """
-    Build a Namespace that passes trace_generator._validate_args().
+    Build a Namespace that passes TraceGenerator._validate_args().
     """
     base = dict(
         job_file=None,
@@ -105,7 +105,7 @@ def test_build_arg_parser_defaults_and_required(tmp_path: Path):
         ]
     )
 
-    args = tg.resolve_effective_args(cli_args)
+    args = tg.TraceGenerator.resolve_effective_args(cli_args)
 
     assert args.output_dir == str(tmp_path)
     assert args.seed == 42
@@ -171,7 +171,7 @@ def test_resolve_effective_args_missing_required_exits(tmp_path: Path, missing_f
     del argv[i:i + 2]
     cli_args = p.parse_args(argv)
     with pytest.raises(SystemExit):
-        tg.resolve_effective_args(cli_args)
+        tg.TraceGenerator.resolve_effective_args(cli_args)
 
 
 def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
@@ -190,7 +190,7 @@ def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
         ]
     )
     with pytest.raises(SystemExit):
-        tg.resolve_effective_args(cli_args)
+        tg.TraceGenerator.resolve_effective_args(cli_args)
 
 
 # ---------------------------------------------------------------------------
@@ -199,19 +199,19 @@ def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
 
 def test_load_job_doc_missing_file_exits(tmp_path: Path):
     with pytest.raises(SystemExit):
-        tg._load_job_doc(tmp_path / "nope.yaml")
+        tg.TraceGenerator.load_job_doc(tmp_path / "nope.yaml")
 
 
 def test_load_job_doc_non_mapping_exits(tmp_path: Path):
     p = tmp_path / "job.yaml"
     p.write_text("- 1\n- 2\n", encoding="utf-8")  # YAML list
     with pytest.raises(SystemExit):
-        tg._load_job_doc(p)
+        tg.TraceGenerator.load_job_doc(p)
 
 
 def test_apply_defaults_sets_log_level_and_show_plots_when_none(tmp_path: Path):
     ns = argparse.Namespace(log_level=None, show_plots=None)
-    out = tg._apply_defaults(ns)
+    out = tg.TraceGenerator.apply_defaults(ns)
     assert out.log_level == tg.DEFAULT_LOG_LEVEL
     assert out.show_plots is tg.DEFAULT_SHOW_PLOTS
 
@@ -219,13 +219,13 @@ def test_apply_defaults_sets_log_level_and_show_plots_when_none(tmp_path: Path):
 def test_validate_args_enforces_min_lifetime_floor(tmp_path: Path):
     args = _make_required_args(tmp_path, xmin_life=1.0, xmax_life=10.0)
     with pytest.raises(SystemExit):
-        tg._validate_args(args)
+        tg.TraceGenerator.validate_args(args)
 
 
 def test_validate_args_requires_xmax_gt_xmin(tmp_path: Path):
     args = _make_required_args(tmp_path, xmin_arrival=1.0, xmax_arrival=1.0)
     with pytest.raises(SystemExit):
-        tg._validate_args(args)
+        tg.TraceGenerator.validate_args(args)
 
 
 def test_job_file_merges_when_cli_missing_and_cli_wins(tmp_path: Path):
@@ -271,7 +271,7 @@ show-plots: true
         ]
     )
 
-    args = tg.resolve_effective_args(cli_args)
+    args = tg.TraceGenerator.resolve_effective_args(cli_args)
     assert args.seed == 222
     assert args.num_nodes == 5
     assert args.trace_time == "7s"
@@ -285,7 +285,7 @@ show-plots: true
 
 def test_expand_seed_runs_single_seed(tmp_path: Path):
     args = _make_required_args(tmp_path, seed=7, seed_file=None)
-    runs = tg.expand_seed_runs(args)
+    runs = tg.TraceGenerator.expand_seed_runs(args)
     assert [r.seed for r in runs] == [7]
     assert str(Path(runs[0].output_dir).resolve()) == str(Path(tmp_path).resolve())
 
@@ -325,11 +325,11 @@ def test_expand_seed_runs_seed_file_expands_to_subdirs_under_output_dir(tmp_path
             "--replicas-ratio", "1.0",
         ]
     )
-    args = tg.resolve_effective_args(cli_args)
+    args = tg.TraceGenerator.resolve_effective_args(cli_args)
 
     monkeypatch.setattr(tg, "read_seeds_file", lambda _p, logger: [1, 2])
 
-    runs = tg.expand_seed_runs(args)
+    runs = tg.TraceGenerator.expand_seed_runs(args)
     assert [r.seed for r in runs] == [1, 2]
     assert Path(runs[0].output_dir).name == "1"
     assert Path(runs[1].output_dir).name == "2"
@@ -341,7 +341,7 @@ def test_expand_seed_runs_seed_file_expands_to_subdirs_under_output_dir(tmp_path
 
 def test_round_float_args_rounds_only_floats():
     ns = argparse.Namespace(a=1.23456, b=2, c="x", d=3.14159)
-    tg.round_float_args(ns, ndigits=2)
+    tg.TraceGenerator.round_float_args(ns, ndigits=2)
     assert ns.a == 1.23
     assert ns.b == 2
     assert ns.c == "x"
@@ -365,7 +365,10 @@ def test_trace_generator_init_creates_paths(tmp_path: Path):
 
 def test_from_run_args_creates_figures_dir_even_for_seed_runs(tmp_path: Path):
     run_args = _make_required_args(tmp_path, seed=1)
-    gen = tg.TraceGenerator._from_run_args(run_args)
+
+    gen = tg.TraceGenerator.__new__(tg.TraceGenerator)
+    tg.setup_logging(name=tg.LOGGER_NAME, prefix=f"[{tg.LOGGER_NAME}] ", level=run_args.log_level)
+    gen.init_from_args(run_args, create_figures_dir=True, log_args=False)
 
     assert gen.output_dir.exists()
     assert gen.figures_dir.exists()
@@ -414,7 +417,7 @@ def test_write_info_file_success_calls_write_info_file(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(tg, "write_info_file", fake_write_info_file)
 
-    gen._write_info_file(extra={"k": 1})
+    gen.write_info_file(extra={"k": 1})
 
     assert str(called["out_path"]).endswith("info_generate.yaml")
     assert called["inputs"]["cli-cmd"] == ["python", "trace_generator.py", "--x"]
@@ -434,7 +437,7 @@ def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, cap
     tg.LOG.propagate = True
     try:
         caplog.set_level("WARNING", logger=tg.LOGGER_NAME)
-        gen._write_info_file(extra={})
+        gen.write_info_file(extra={})
     finally:
         tg.LOG.propagate = old_propagate
 
@@ -829,7 +832,7 @@ def test_calibrate_mean_life_updates_mean_life_and_clamps_to_xmax(tmp_path: Path
         return [], [], measured, {"iter": calls["n"]}
 
     monkeypatch.setattr(gen, "generate_once", fake_generate_once)
-    monkeypatch.setattr(tg, "CALIB_MEAN_LIFE_MAX_ITER", 2)
+    monkeypatch.setattr(tg, "MEAN_LIFE_CALIBRATION_MAX_ITER", 2)
 
     gen.calibrate_mean_life()
 
@@ -856,7 +859,7 @@ def test_write_json_writes_expected_shape(tmp_path: Path):
         tg.TraceRecord(id=1, start_time=0.1, end_time=0.2, cpu=0.3, mem=0.3, priority=1, replicas=2)
     ]
     out = tmp_path / "x.json"
-    tg.TraceGenerator._write_json(out, pods)
+    tg.TraceGenerator.write_json(out, pods)
 
     data = json.loads(out.read_text(encoding="utf-8"))
     assert list(data.keys()) == ["pods"]
@@ -879,8 +882,8 @@ def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
     def fake_write_json(path: Path, pods_):
         calls["json"].append((path, len(pods_)))
 
-    monkeypatch.setattr(gen, "_write_json", fake_write_json)
-    monkeypatch.setattr(gen, "_write_info_file", lambda extra: calls.__setitem__("info", calls["info"] + 1))
+    monkeypatch.setattr(gen, "write_json", fake_write_json)
+    monkeypatch.setattr(gen, "write_info_file", lambda extra: calls.__setitem__("info", calls["info"] + 1))
 
     gen.write_outputs(initial, trace, extra)
 
@@ -938,6 +941,38 @@ def test_run_seed_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path,
     assert called["hist"] == 1
 
 
+def test_run_seed_skips_calibration_when_mean_life_provided(tmp_path: Path, monkeypatch):
+    args = _make_required_args(tmp_path, mean_life=10.0)
+    gen = tg.TraceGenerator(args)
+
+    monkeypatch.setattr(gen, "calibrate_mean_life", lambda: (_ for _ in ()).throw(AssertionError("should not calibrate")))
+
+    seen = {"iter_seed": None, "called": 0}
+
+    initial = [tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=0, replicas=1)]
+    trace = [tg.TraceRecord(id=2, start_time=0.5, end_time=1.5, cpu=0.2, mem=0.2, priority=0, replicas=1)]
+
+    def fake_generate_once(iter_seed: int):
+        seen["iter_seed"] = iter_seed
+        seen["called"] += 1
+        # generate_once() normally fits alphas and stores them on args for plotting call sites.
+        gen.args.alpha_arrival = 2.0
+        gen.args.alpha_life = 2.0
+        gen.args.alpha_req = 2.0
+        return initial, trace, 0.1234, {"k": "v"}
+
+    monkeypatch.setattr(gen, "generate_once", fake_generate_once)
+    monkeypatch.setattr(gen, "write_outputs", lambda *_a, **_k: None)
+    monkeypatch.setattr(tg, "plot_utilization_and_num_pods", lambda **_k: None)
+    monkeypatch.setattr(tg, "plot_generator_histograms", lambda **_k: None)
+
+    gen.run_seed()
+
+    assert seen["called"] == 1
+    assert seen["iter_seed"] is not None
+    assert gen.args.mean_life == pytest.approx(10.0)
+
+
 def test_run_invokes_run_seed_per_expanded_seed(tmp_path: Path, monkeypatch):
     args = _make_required_args(tmp_path, seed=1, mean_life=10.0)
     gen = tg.TraceGenerator(args)
@@ -945,19 +980,15 @@ def test_run_invokes_run_seed_per_expanded_seed(tmp_path: Path, monkeypatch):
     r1 = _make_required_args(tmp_path / "out1", seed=1, mean_life=10.0)
     r2 = _make_required_args(tmp_path / "out2", seed=2, mean_life=10.0)
 
-    monkeypatch.setattr(tg, "expand_seed_runs", lambda _a: [r1, r2])
+    monkeypatch.setattr(tg.TraceGenerator, "expand_seed_runs", staticmethod(lambda _a: [r1, r2]))
     monkeypatch.setattr(tg, "make_header_footer", lambda _t: ("H", "F"))
 
     called = {"runs": []}
 
-    class FakePerSeed:
-        def __init__(self, a):
-            self.args = a
+    def fake_run_seed(self):
+        called["runs"].append((int(self.args.seed), str(self.args.output_dir)))
 
-        def run_seed(self):
-            called["runs"].append((int(self.args.seed), str(self.args.output_dir)))
-
-    monkeypatch.setattr(tg.TraceGenerator, "_from_run_args", classmethod(lambda _cls, a: FakePerSeed(a)))
+    monkeypatch.setattr(tg.TraceGenerator, "run_seed", fake_run_seed)
 
     gen.run()
     assert called["runs"] == [(1, str(r1.output_dir)), (2, str(r2.output_dir))]
