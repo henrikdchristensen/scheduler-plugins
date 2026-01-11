@@ -395,7 +395,9 @@ class TraceGenerator:
         self.pods_hist = []
         self.initial_pods_count = 0
 
-        self.log_args()
+        # Intentionally do not log args here: per-seed instances are created during
+        # multi-seed runs and would spam the ARGS block. The top-level __init__ logs
+        # args once at startup.
         return self
 
     def log_args(self) -> None:
