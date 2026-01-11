@@ -108,7 +108,7 @@ def _parse_rfc3339_to_epoch(ts: str) -> Optional[float]:
 # Small Models
 # ---------------------------------------------------------------------
 
-class _TimeClock:
+class TimeClock:
     def time(self) -> float:
         """
         Return wall-clock time in seconds (time.time()).
@@ -139,8 +139,7 @@ def build_argparser() -> argparse.ArgumentParser:
     """
     Build and return the CLI argument parser.
     """
-    p = argparse.ArgumentParser(
-        description=(
+    p = argparse.ArgumentParser(description=(
             "Replay a JSON pod trace on a KWOK cluster and monitor utilization. "
             "Expects <trace-dir>/trace.json and <trace-dir>/initial.json as produced by trace_generator.py."
         )
@@ -180,7 +179,9 @@ def merge_job_fields_into_args(
     args: argparse.Namespace,
     job: Dict[str, Any],
 ) -> tuple[argparse.Namespace, List[Dict[str, Any]]]:
-    """Merge supported job-file fields into args and return override kwokctl envs."""
+    """
+    Merge supported job-file fields into args and return override kwokctl envs.
+    """
     fields = [
         JobField("trace-dir", "trace_dir", parse=parse_optional_str),
         JobField("cluster-name", "cluster_name", parse=parse_optional_str),
@@ -205,7 +206,9 @@ def merge_job_fields_into_args(
     return args, override_envs
 
 def ensure_default_args(args: argparse.Namespace) -> argparse.Namespace:
-    """Apply defaults and validate required args for the trace replayer."""
+    """
+    Apply defaults and validate required args for the trace replayer.
+    """
     if getattr(args, "cluster_name", None) is None:
         args.cluster_name = "kwok1"
     if getattr(args, "kwok_runtime", None) is None:
@@ -267,11 +270,87 @@ class TraceReplayer:
         """
         Initialize replayer state, resolve paths, and record metadata.
         """
+        # Runner + clock + executor factory
+        self.runner = runner
+        self.clock = clock or SystemClock()
+        if not (hasattr(self.clock, "time") and hasattr(self.clock, "sleep")):
+            self.clock = TimeClock()
+        self.executor_factory = executor_factory
+
+        # Raw/initial args + job context
         self.args = args
         self.job_doc: Dict[str, Any] = job_doc or {}
         self.override_kwokctl_envs: List[Dict[str, Any]] = list(override_kwokctl_envs or [])
 
-        self.base_dir: Path = Path(args.trace_dir).resolve()
+        self._initialize()
+
+        self._configure_from_args()
+
+        # Metadata in the run's results_dir.
+        self._write_info_file()
+
+    @classmethod
+    def _from_run_args(
+        cls,
+        run_args: argparse.Namespace,
+        *,
+        job_doc: Dict[str, Any],
+        override_kwokctl_envs: List[Dict[str, Any]],
+        runner: Runner,
+        clock: Clock | None,
+        executor_factory: Callable[..., Any],
+    ) -> "TraceReplayer":
+        """
+        Create a per-seed instance from already-resolved args.
+        """
+        self = cls.__new__(cls)
+
+        self.runner = runner
+        self.clock = clock or SystemClock()
+        if not (hasattr(self.clock, "time") and hasattr(self.clock, "sleep")):
+            self.clock = TimeClock()
+        self.executor_factory = executor_factory
+
+        self.args = run_args
+        self.job_doc = job_doc
+        self.override_kwokctl_envs = list(override_kwokctl_envs or [])
+
+        self._configure_from_args()
+        self._write_info_file()
+        return self
+
+    def _initialize(self) -> None:
+        """
+        Resolve args (job-file + defaults), setup logging, and log args once.
+        """
+        args = self.args
+
+        if getattr(args, "job_file", None):
+            job_path = Path(args.job_file)
+            if not job_path.exists():
+                raise SystemExit(f"--job-file not found: {job_path}")
+            try:
+                with open(job_path, "r", encoding="utf-8") as f:
+                    job_doc = yaml.safe_load(f) or {}
+                if not isinstance(job_doc, dict):
+                    raise SystemExit(f"--job-file must be a YAML mapping/object, got {type(job_doc).__name__}")
+            except Exception as e:
+                raise SystemExit(f"--job-file parse error for {job_path}: {e}")
+            args, override_kwokctl_envs = merge_job_fields_into_args(args, job_doc)
+            self.job_doc = job_doc
+            self.override_kwokctl_envs = override_kwokctl_envs
+
+        args = ensure_default_args(args)
+        setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
+
+        self.args = args
+        self.log_args()
+
+    def _configure_from_args(self) -> None:
+        """
+        Configure derived paths/state from (resolved) args.
+        """
+        self.base_dir: Path = Path(self.args.trace_dir).resolve()
         self.trace_path: Path = self.base_dir / "trace.json"
         self.initial_path: Path = self.base_dir / "initial.json"
         self.info_generate_path: Path = self.base_dir / "info_generate.yaml"
@@ -300,21 +379,13 @@ class TraceReplayer:
         # rs names that belong to initial workload (skip these in pod_stats.csv)
         self.initial_rs_names: Set[str] = set()
 
-        # Runner + clock + executor factory
-        self.ctx: str = f"kwok-{args.cluster_name}"
-        self.runner = runner
-        self.clock = clock or SystemClock()
-        if not (hasattr(self.clock, "time") and hasattr(self.clock, "sleep")):
-            self.clock = _TimeClock()
-        self.executor_factory = executor_factory
+        self.ctx: str = f"kwok-{self.args.cluster_name}"
 
         # Run start epoch/time base (set in run())
         self.run_start_wall: float = 0.0       # epoch seconds
         self.run_start_monotonic: float = 0.0  # from clock.time()
 
-        LOG.info("logging arguments and git info to results_dir...")
-        self._write_info_file()
-        self.log_args()
+        
 
     # ------------------------------
     # Logging / Metadata
@@ -928,10 +999,10 @@ class TraceReplayer:
     # ------------------------------
     # Runner
     # ------------------------------
-    
-    def run(self) -> None:
+
+    def run_seed(self) -> None:
         """
-        Run a full trace replay: setup cluster, apply initial load, replay events, monitor, and persist outputs.
+        Run a single trace replay for the current trace_dir/result_dir.
         """
         # Load trace inputs
         self.load_initial_and_trace()
@@ -1029,6 +1100,50 @@ class TraceReplayer:
 
         LOG.info("Done.")
 
+    def run(self) -> None:
+        """
+        Run the trace replayer for one or more seed directories.
+        """
+        trace_dir = Path(self.args.trace_dir).resolve()
+        run_dirs = _discover_trace_run_dirs(trace_dir)
+        base_results_dir = Path(self.args.result_dir).resolve()
+
+        multi_seed = len(run_dirs) > 1 or run_dirs[0] != trace_dir
+        if multi_seed:
+            LOG.info("discovered %d seed trace directories under %s", len(run_dirs), trace_dir)
+
+        for run_dir in run_dirs:
+            if multi_seed:
+                seed_name = run_dir.name
+                run_result_dir = base_results_dir / seed_name
+                header, footer = make_header_footer(f"SEED RUN {seed_name}")
+                LOG.info(
+                    "\n%s\nseed=%s trace_dir=%s result_dir=%s\n%s",
+                    header,
+                    seed_name,
+                    run_dir,
+                    run_result_dir,
+                    footer,
+                )
+            else:
+                run_result_dir = base_results_dir
+                header, footer = make_header_footer("TRACE REPLAY")
+                LOG.info("\n%s\ntrace_dir=%s result_dir=%s\n%s", header, run_dir, run_result_dir, footer)
+
+            run_args = argparse.Namespace(**vars(self.args))
+            run_args.trace_dir = str(run_dir)
+            run_args.result_dir = str(run_result_dir)
+
+            replayer = TraceReplayer._from_run_args(
+                run_args,
+                job_doc=self.job_doc,
+                override_kwokctl_envs=self.override_kwokctl_envs,
+                runner=self.runner,
+                clock=self.clock,
+                executor_factory=self.executor_factory,
+            )
+            replayer.run_seed()
+
 # ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
@@ -1038,54 +1153,8 @@ def main() -> None:
     CLI entry point for trace replayer.
     """
     args = build_argparser().parse_args()
-
-    job_doc: Dict[str, Any] | None = None
-    override_kwokctl_envs: List[Dict[str, Any]] = []
-
-    if getattr(args, "job_file", None):
-        job_path = Path(args.job_file)
-        if not job_path.exists():
-            raise SystemExit(f"--job-file not found: {job_path}")
-        try:
-            with open(job_path, "r", encoding="utf-8") as f:
-                job_doc = yaml.safe_load(f) or {}
-            if not isinstance(job_doc, dict):
-                raise SystemExit(f"--job-file must be a YAML mapping/object, got {type(job_doc).__name__}")
-        except Exception as e:
-            raise SystemExit(f"--job-file parse error for {job_path}: {e}")
-        args, override_kwokctl_envs = merge_job_fields_into_args(args, job_doc)
-
-    args = ensure_default_args(args)
-    setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
-
-    trace_dir = Path(args.trace_dir).resolve()
-    run_dirs = _discover_trace_run_dirs(trace_dir)
-    base_results_dir = Path(args.result_dir).resolve()
-
-    # If trace-dir is a container of multiple seed dirs, write each run under result-dir/<seed-name>.
-    multi_seed = len(run_dirs) > 1 or run_dirs[0] != trace_dir
-    if multi_seed:
-        LOG.info("discovered %d seed trace directories under %s", len(run_dirs), trace_dir)
-
-    for run_dir in run_dirs:
-        if multi_seed:
-            seed_name = run_dir.name
-            run_result_dir = base_results_dir / seed_name
-        else:
-            seed_name = None
-            run_result_dir = base_results_dir
-
-        run_args = argparse.Namespace(**vars(args))
-        run_args.trace_dir = str(run_dir)
-        run_args.result_dir = str(run_result_dir)
-
-        if seed_name:
-            LOG.info("starting trace replay seed=%s trace_dir=%s result_dir=%s", seed_name, run_dir, run_result_dir)
-        else:
-            LOG.info("starting trace replay trace_dir=%s result_dir=%s", run_dir, run_result_dir)
-
-        replayer = TraceReplayer(run_args, job_doc=job_doc, override_kwokctl_envs=override_kwokctl_envs)
-        replayer.run()
+    trace_replayer = TraceReplayer(args)
+    trace_replayer.run()
 
 if __name__ == "__main__":
     main()

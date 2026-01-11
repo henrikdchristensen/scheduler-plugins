@@ -726,7 +726,7 @@ def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Pat
 
 
 # ---------------------------------------------------------------------------
-# TraceReplayer.run()
+# TraceReplayer.run_seed()
 # ---------------------------------------------------------------------------
 
 def test_run_orchestrates_cluster_setup_and_saves_logs(tmp_path: Path, monkeypatch):
@@ -781,7 +781,7 @@ def test_run_orchestrates_cluster_setup_and_saves_logs(tmp_path: Path, monkeypat
     # Stabilize run_start_wall source
     monkeypatch.setattr(time, "time", lambda: 0.0)
 
-    rp.run()
+    rp.run_seed()
 
     assert called["build_events"] == 1
     assert called["ensure_cluster"] == 1
@@ -837,7 +837,7 @@ def test_run_finally_saves_logs_even_if_replay_raises(tmp_path: Path, monkeypatc
     monkeypatch.setattr(rp, "save_scheduler_logs", lambda: saved.__setitem__("n", saved["n"] + 1))
 
     with pytest.raises(RuntimeError):
-        rp.run()
+        rp.run_seed()
     assert saved["n"] == 1
 
 
@@ -910,20 +910,18 @@ def test_main_happy_path_constructs_replayer_and_runs(tmp_path: Path, monkeypatc
 
     ran = {"n": 0}
 
-    class DummyReplayer:
-        def __init__(self, args, job_doc=None, override_kwokctl_envs=None):
-            # ensure defaults applied
-            assert args.cluster_name == "kwok1"
-            assert args.kwok_runtime == "binary"
-            assert args.namespace == "trace"
-            assert args.start_delay == 0.0
-            assert args.save_scheduler_logs is False
-            assert override_kwokctl_envs == [{"name": "X", "value": "Y"}]
-            assert isinstance(job_doc, dict)
+    def fake_run(self):
+        # ensure defaults applied
+        assert self.args is not None
+        assert self.args.cluster_name == "kwok1"
+        assert self.args.kwok_runtime == "binary"
+        assert self.args.namespace == "trace"
+        assert self.args.start_delay == 0.0
+        assert self.args.save_scheduler_logs is False
+        assert self.override_kwokctl_envs == [{"name": "X", "value": "Y"}]
+        assert isinstance(self.job_doc, dict)
+        ran["n"] += 1
 
-        def run(self):
-            ran["n"] += 1
-
-    monkeypatch.setattr(tr, "TraceReplayer", DummyReplayer)
+    monkeypatch.setattr(tr.TraceReplayer, "run", fake_run)
     tr.main()
     assert ran["n"] == 1

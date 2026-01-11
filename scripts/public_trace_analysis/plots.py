@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# plots.py
+# scripts/public_trace_analysis/plots.py
 
 # ----------------------------------------------------------------------
 # Examples:
@@ -8,9 +8,10 @@
 # ----------------------------------------------------------------------
 
 import argparse
+from typing import Dict, Any, List
+
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Dict, Any, List
 
 from scripts.kwok_trace_replayer.plot_helpers import (
     plot_histogram_with_pareto,
@@ -165,7 +166,7 @@ def build_plot_specs_for_dataset(per_column_cfg: Dict[str, Dict[str, Any]] | Non
     specs_by_col: Dict[str, Dict[str, Any]] = {}
     for base in BASE_PLOT_SPECS:
         col = base["column"]
-        spec = dict(base) # copy
+        spec = dict(base)
         if col in per_column_cfg:
             spec.update({k: v for k, v in per_column_cfg[col].items()})
         specs_by_col[col] = spec
@@ -229,7 +230,6 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
     base_by_col = {s["column"]: s for s in BASE_PLOT_SPECS}
 
     if layout == "datasets-cols":
-        # Rows=metrics, Cols=datasets
         n_rows = len(metric_columns)
         n_cols = len(loaded)
         fig_w = 3.2 * n_cols
@@ -248,13 +248,10 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
                     continue
 
                 data = df[col_name].to_numpy()
-
-                # Left-side label per metric row, only on first dataset column.
                 y_label = spec["y_label"] if col_idx == 0 else ""
 
                 _draw_cell(ax, col_name, data, spec, y_label)
 
-                # Bold metric label (once per row, left side)
                 if col_idx == 0:
                     ax.text(
                         -0.20, 0.5, base_spec["title"],
@@ -266,12 +263,10 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
                         fontweight="bold",
                     )
 
-        # ONE dataset label per dataset
         for col_idx, ds_info in enumerate(loaded):
             axes[0, col_idx].set_title(ds_info["name"], fontsize=11, pad=8, fontweight="bold")
 
     else:
-        # Rows=datasets, Cols=metrics
         n_rows = len(loaded)
         n_cols = len(metric_columns)
         fig_w = 2.1 * n_cols
@@ -292,13 +287,10 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
 
                 spec = specs_by_col[col_name]
                 data = df[col_name].to_numpy()
-
-                # y-label only once per dataset row
                 y_label = spec["y_label"] if col_idx == 0 else ""
 
                 _draw_cell(ax, col_name, data, spec, y_label)
 
-                # Dataset label once per row, on the left side (first column only)
                 if col_idx == 0:
                     ax.text(
                         -0.32, 0.5, ds_name,
@@ -309,7 +301,6 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
                         fontweight="bold",
                     )
 
-        # Metric titles (top row)
         for col_idx, col_name in enumerate(metric_columns):
             axes[0, col_idx].set_title(base_by_col[col_name]["title"], fontsize=7, pad=8, fontweight="bold")
 

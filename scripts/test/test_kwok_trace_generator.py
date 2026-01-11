@@ -755,7 +755,7 @@ def test_write_outputs_writes_json_and_info(tmp_path: Path, monkeypatch):
     assert calls["info"] == 1
 
 # ---------------------------------------------------------------------------
-# TraceGenerator.run()
+# TraceGenerator.run_seed()
 # ---------------------------------------------------------------------------
 
 def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monkeypatch):
@@ -793,7 +793,7 @@ def test_run_infers_mean_life_writes_and_calls_plot_helpers(tmp_path: Path, monk
     monkeypatch.setattr(tg, "plot_utilization_time_series", fake_util)
     monkeypatch.setattr(tg, "plot_generator_histograms", fake_hist)
 
-    gen.run()
+    gen.run_seed()
 
     assert gen.args.mean_life == pytest.approx(12.3)
     assert called["util"] == 1
@@ -811,14 +811,12 @@ def test_main_smoke_invokes_generator(monkeypatch, tmp_path: Path):
             return args
 
     monkeypatch.setattr(tg, "build_arg_parser", lambda: DummyParser())
-    monkeypatch.setattr(tg, "round_float_args", lambda *_a, **_k: None)
-    monkeypatch.setattr(tg, "setup_logging", lambda **_k: None)
 
     seen = {"ran": False}
 
     class FakeGen:
-        def __init__(self, _args):
-            self.args = _args
+        def __init__(self, _cli_args):
+            pass
 
         def run(self):
             seen["ran"] = True

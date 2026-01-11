@@ -1,14 +1,14 @@
 meta:
-  timestamp: 2026/01/10/22:57:23
+  timestamp: 2026/01/11/10:33:56
   git:
-    commit: ece1c06f92eedf9a7b8dda4a372d862e8d175c0a
+    commit: 0b600db4e672ac23964fd61583b93542654f4a50
     branch: opt-prio-refactor
 inputs:
-  cli-cmd: python /mnt/c/projects/master/scheduler-plugins/scripts/kwok_trace_replayer/trace_generator.py
+  cli-cmd: python /mnt/d/projects/master/scheduler-plugins/scripts/kwok_trace_replayer/trace_generator.py
     --job-file data/jobs/kwok_trace_generator/nodes8_prio1_arrival8.yaml
   args:
     job_file: data/jobs/kwok_trace_generator/nodes8_prio1_arrival8.yaml
-    output_dir: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847
+    output_dir: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847
     seed: 5994672214887366847
     seed_file: data/seeds/kwok_trace_generator/seeds.txt
     log_level: INFO
@@ -16,12 +16,12 @@ inputs:
     num_nodes: 8
     trace_time: 1h
     target_util: 0.9
-    xmin_arrival: 0.01
-    xmax_arrival: 32.0
+    xmin_arrival: 0.001
+    xmax_arrival: 128.0
     mean_arrival: 8.0
     xmin_life: 8.0
-    xmax_life: 1200.0
-    mean_life: 312.3628725602901
+    xmax_life: 2048.0
+    mean_life: 231.11814148380515
     xmin_req: 0.05
     xmax_req: 0.5
     mean_req: 0.125
@@ -31,43 +31,42 @@ inputs:
     replicas_min: 1
     replicas_max: 3
     replicas_ratio: 0.8
-    alpha_req: 1.4057861328125
-    alpha_arrival: 0.19919063568115233
-    alpha_life: 0.35309866666793815
+    alpha_req: 1.057142
+    alpha_arrival: 0.059329
+    alpha_life: 0.235385
   generated:
     num_nodes: 8
     trace_time_s: 3600.0
     seed: 5994672214887366847
     rng:
-      iter_seed: 63090286097118333425308689390350221656
+      iter_seed: 250854380455113526935441086234174517110
       derived:
-        fit_alphas: 121753139220920783717000686315378769579
-        initial_snapshot: 280443749297957072165323902741243994893
-        trace_events: 133612336261948267878743682288994154792
-    measured_util_time_avg: 0.9009863891432315
+        initial_snapshot: 168532684997490566652562689098354106512
+        trace_events: 262010801696035629476714664293714968509
+    measured_util_time_avg: 0.9022199125415546
     target_util_time_avg: 0.9
     calibration:
       util_tol: 0.01
-      calib_max_iter: 200
+      calib_max_iter: 20
       initial_fill_tol: 0.002
       initial_max_pods: 200000
-    derived_mean_life_s: 312.362873
+    derived_mean_life_s: 231.118141
     pareto:
       req:
-        alpha: 1.405786
+        alpha: 1.057142
         xmin: 0.05
         xmax: 0.5
         mean: 0.125
       arrival:
-        alpha: 0.199191
-        xmin: 0.01
-        xmax: 32.0
+        alpha: 0.059329
+        xmin: 0.001
+        xmax: 128.0
         mean: 8.0
       life:
-        alpha: 0.353099
+        alpha: 0.235385
         xmin: 8.0
-        xmax: 1200.0
-        mean: 312.3628725602901
+        xmax: 2048.0
+        mean: 231.11814148380515
     priority:
       min: 1
       max: 1
@@ -77,19 +76,13 @@ inputs:
       max: 3
       ratio: 0.8
     counts:
-      initial_records: 23
-      trace_records: 414
-      initial_replicas_total: 46
-      trace_replicas_total: 787
+      initial_records: 33
+      trace_records: 441
+      initial_replicas_total: 63
+      trace_replicas_total: 818
     max_priority_seen: 1
-    id_ranges:
-      initial_min_id: 1
-      initial_max_id: 23
-      trace_min_id: 24
-      trace_max_id: 437
-      global_max_id: 437
     files:
-      initial_json: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/initial.json
-      trace_json: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/trace.json
-      utilization_plot: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/figures/utilization.png
-      histograms_plot: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/figures/histograms.png
+      initial_json: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/initial.json
+      trace_json: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/trace.json
+      utilization_plot: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/figures/utilization.png
+      histograms_plot: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes8_prio1_arrival8/5994672214887366847/figures/histograms.png

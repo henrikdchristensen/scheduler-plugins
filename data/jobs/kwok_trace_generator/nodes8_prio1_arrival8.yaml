@@ -9,23 +9,18 @@ num-nodes: 8
 target-util: 0.90
 
 # Inter-arrival (Pareto)
-xmin-arrival: 0.01
-xmax-arrival: 32.0
+xmin-arrival: 0.001
+xmax-arrival: 128.0
 mean-arrival: 8.0
 
 # Lifetime bounds
 xmin-life: 8.0
-xmax-life: 1200.0
+xmax-life: 2048.0
 
 # Priority
 priority-min: 1
 priority-max: 1
 priority-ratio: 0.8
-
-# Replicas
-replicas-min: 1
-replicas-max: 3
-replicas-ratio: 0.8
 
 ####################
 # Fixed ############
@@ -37,3 +32,8 @@ seed-file: data/seeds/kwok_trace_generator/seeds.txt
 xmin-req: 0.05
 xmax-req: 0.5
 mean-req: 0.125
+
+# Replicas
+replicas-min: 1
+replicas-max: 3
+replicas-ratio: 0.8
