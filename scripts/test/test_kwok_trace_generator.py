@@ -105,7 +105,7 @@ def test_build_arg_parser_defaults_and_required(tmp_path: Path):
         ]
     )
 
-    args = tg.TraceGenerator.resolve_effective_args(cli_args)
+    args = tg.TraceGenerator.resolve_args(cli_args)
 
     assert args.output_dir == str(tmp_path)
     assert args.seed == 42
@@ -244,7 +244,7 @@ def test_write_info_file_exception_logs_warning(tmp_path: Path, monkeypatch, cap
         "--replicas-ratio",
     ],
 )
-def test_resolve_effective_args_missing_required_exits(tmp_path: Path, missing_flag: str):
+def test_resolve_args_missing_required_exits(tmp_path: Path, missing_flag: str):
     p = tg.build_arg_parser()
     argv = [
         "--output-dir", str(tmp_path),
@@ -276,7 +276,7 @@ def test_resolve_effective_args_missing_required_exits(tmp_path: Path, missing_f
     del argv[i:i + 2]
     cli_args = p.parse_args(argv)
     with pytest.raises(SystemExit):
-        tg.TraceGenerator.resolve_effective_args(cli_args)
+        tg.TraceGenerator.resolve_args(cli_args)
 
 
 def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
@@ -295,7 +295,7 @@ def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
         ]
     )
     with pytest.raises(SystemExit):
-        tg.TraceGenerator.resolve_effective_args(cli_args)
+        tg.TraceGenerator.resolve_args(cli_args)
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +376,7 @@ show-plots: true
         ]
     )
 
-    args = tg.TraceGenerator.resolve_effective_args(cli_args)
+    args = tg.TraceGenerator.resolve_args(cli_args)
     assert args.seed == 222
     assert args.num_nodes == 5
     assert args.trace_time == "7s"
@@ -430,7 +430,7 @@ def test_expand_seed_runs_seed_file_expands_to_subdirs_under_output_dir(tmp_path
             "--replicas-ratio", "1.0",
         ]
     )
-    args = tg.TraceGenerator.resolve_effective_args(cli_args)
+    args = tg.TraceGenerator.resolve_args(cli_args)
 
     monkeypatch.setattr(tg, "read_seeds_file", lambda _p, logger: [1, 2])
 
@@ -601,11 +601,11 @@ def test_infer_mean_life_from_target_util_raises_if_outside_bounds(tmp_path: Pat
         gen_big.infer_mean_life_from_target_util()
 
 
-def test_fit_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
+def test_fit_pareto_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
     args = _make_required_args(tmp_path, mean_life=10.0)
     gen = tg.TraceGenerator(args)
 
-    gen.fit_alphas()
+    gen.fit_pareto_alphas()
 
     assert gen.alpha_req is not None
     assert gen.alpha_arrival is not None
@@ -621,7 +621,7 @@ def test_fit_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
     old_life = gen.alpha_life
 
     gen.args.mean_life = 12.0
-    gen.fit_alphas()
+    gen.fit_pareto_alphas()
 
     assert gen.alpha_req == old_req
     assert gen.alpha_arrival == old_arr
@@ -759,10 +759,10 @@ def test_generate_once_sets_series_and_extra_info(tmp_path: Path, monkeypatch):
     gen = tg.TraceGenerator(args)
 
     # Avoid the real alpha solve here; just set values and attach to args.
-    def fake_fit_alphas():
+    def fake_fit_pareto_alphas():
         _set_alphas(gen, alpha=2.0)
 
-    monkeypatch.setattr(gen, "fit_alphas", fake_fit_alphas)
+    monkeypatch.setattr(gen, "fit_pareto_alphas", fake_fit_pareto_alphas)
     monkeypatch.setattr(gen, "time_avg_req_util", lambda _pods: 0.55)
 
     initial_pods = [

@@ -132,11 +132,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 class TraceGenerator:
     def __init__(self, cli_args: argparse.Namespace) -> None:
-        args = TraceGenerator.resolve_effective_args(cli_args)
-        TraceGenerator.round_float_args(args, MAX_DECIMALS)
+        args = TraceGenerator.resolve_args(cli_args)
         setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
-
-        # Keep behavior: only create figures/ for single-seed runs.
         self.init_from_args(args, create_figures_dir=not bool(getattr(args, "seed_file", None)), log_args=True)
 
     def init_from_args(self, args: argparse.Namespace, *, create_figures_dir: bool, log_args: bool) -> None:
@@ -148,7 +145,7 @@ class TraceGenerator:
 
         self.trace_time_s = float(parse_duration_to_seconds(self.args.trace_time))
 
-        # output dirs / files
+        # Output dirs / files
         self.output_dir = Path(self.args.output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.figures_dir = self.output_dir / "figures"
@@ -161,12 +158,12 @@ class TraceGenerator:
         self.util_plot_path = self.figures_dir / "utilization.png"
         self.hist_plot_path = self.figures_dir / "histograms.png"
 
-        # fitted Pareto alphas
+        # Fitted Pareto alphas
         self.alpha_req = None
         self.alpha_arrival = None
         self.alpha_life = None
 
-        # plot series
+        # Plot series
         self.times = []
         self.u_req_hist = []
         self.pods_hist = []
@@ -178,18 +175,9 @@ class TraceGenerator:
     # -------------------------------------------------------------------------
     # Argument resolution + validation
     # -------------------------------------------------------------------------
-    
-    @staticmethod
-    def round_float_args(args: argparse.Namespace, ndigits: int) -> None:
-        """
-        Round all float args to ndigits decimal places.
-        """
-        for k, v in vars(args).items():
-            if isinstance(v, float):
-                setattr(args, k, round(v, ndigits))
 
     @staticmethod
-    def resolve_effective_args(cli_args: argparse.Namespace) -> argparse.Namespace:
+    def resolve_args(cli_args: argparse.Namespace) -> argparse.Namespace:
         """
         Resolve effective args from CLI + job file.
         """
@@ -199,6 +187,7 @@ class TraceGenerator:
             args = TraceGenerator.merge_job_fields(args, job_doc)
         args = TraceGenerator.apply_defaults(args)
         TraceGenerator.validate_args(args)
+        TraceGenerator.round_float_args(args, MAX_DECIMALS)
         return args
 
     @staticmethod
@@ -355,6 +344,15 @@ class TraceGenerator:
             if not p.exists():
                 raise SystemExit(f"--seed-file not found: {p}")
 
+    @staticmethod
+    def round_float_args(args: argparse.Namespace, ndigits: int) -> None:
+        """
+        Round all float args to ndigits decimal places.
+        """
+        for k, v in vars(args).items():
+            if isinstance(v, float):
+                setattr(args, k, round(v, ndigits))
+
     # -------------------------------------------------------------------------
     # Seed expansion for multi-run
     # -------------------------------------------------------------------------
@@ -430,7 +428,7 @@ class TraceGenerator:
             LOG.warning("failed to write info_generate.yaml: %s", e)
 
     # -------------------------------------------------------------------------
-    # Bounded Pareto: sampling + mean + alpha solve
+    # Bounded Pareto: sampling + alpha solve + mean 
     # -------------------------------------------------------------------------
     @staticmethod
     def sample_bounded_pareto(
@@ -443,91 +441,21 @@ class TraceGenerator:
     ) -> np.ndarray:
         """
         Bounded Pareto via inverse CDF.
+        Formula: X = x_min * (1 - U * (1 - (x_min/x_max)^alpha))^(-1/alpha)
+        where U ~ Uniform(0, 1)
+        See: https://en.wikipedia.org/wiki/Pareto_distribution#Bounded_Pareto_distribution
         """
         if not (alpha > 0 and x_min > 0 and x_max > x_min):
             raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
 
-        u = rng.random(size)
-        u = np.clip(u, 1e-12, 1.0 - 1e-12)
+        u = rng.random(size) # U ~ Uniform(0, 1)
+        u = np.clip(u, 1e-12, 1.0 - 1e-12) # clamp U to avoid edge cases
 
-        u_min_tail = (x_min / x_max) ** alpha
+        # Adjust U to account for bounded tail
+        u_min_tail = (x_min / x_max) ** alpha # F(x_min) lower CDF tail
         u = u_min_tail + (1.0 - u_min_tail) * u  # uniform on [u_min_tail, 1)
 
         return x_min * np.exp((-np.log(u)) / alpha)
-
-    @staticmethod
-    def sample_steady_state_residual_life(
-        rng: np.random.Generator,
-        *,
-        alpha: float,
-        x_min: float,
-        x_max: float,
-        size: int = 1,
-    ) -> np.ndarray:
-        """
-        Sample steady-state residual life (equilibrium remaining lifetime) for a
-        renewal process with i.i.d. lifetimes X on [x_min, x_max].
-
-        Construction:
-          1) Sample length-biased lifetime X* with density ∝ x f_X(x). For
-             bounded Pareto f_X(x) ∝ x^{-(alpha+1)} => x f_X(x) ∝ x^{-alpha}.
-          2) Given X* = x, sample residual R ~ Uniform(0, x).
-
-        This avoids the initial transient drop caused by sampling fresh
-        lifetimes at t=0. Note: With heavy tails (Pareto-like), steady-state
-        strongly over-represents long lifetimes (length bias), which matches
-        reality: long-running pods are exactly what you tend to see in a live
-        cluster snapshot.
-        """
-        if not (alpha > 0 and x_min > 0 and x_max > x_min):
-            raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
-
-        u = rng.random(size)
-        u = np.clip(u, 1e-12, 1.0 - 1e-12)
-
-        # Sample X* with pdf ∝ x^{-alpha} on [x_min, x_max]
-        # CDF:
-        #   if alpha != 1: F(x) = (x^(1-alpha) - x_min^(1-alpha)) / (x_max^(1-alpha) - x_min^(1-alpha))
-        #   if alpha == 1: F(x) = ln(x/x_min) / ln(x_max/x_min)
-        if abs(alpha - 1.0) < 1e-12:
-            x_star = x_min * np.exp(u * np.log(x_max / x_min))
-        else:
-            p = 1.0 - alpha
-            x_min_p = x_min ** p
-            x_max_p = x_max ** p
-            x_star = (x_min_p + u * (x_max_p - x_min_p)) ** (1.0 / p)
-
-        v = rng.random(size)
-        v = np.clip(v, 1e-12, 1.0 - 1e-12)
-        # Residual is Uniform(0, X*). Using (1-v)*X* is equivalent.
-        return x_star * (1.0 - v)
-
-    @staticmethod
-    def bounded_pareto_mean(alpha: float, x_min: float, x_max: float) -> float:
-        """
-        E[X] for bounded Pareto on [x_min, x_max] (stable expm1 form).
-        Source: Wikipedia (Bounded Pareto distribution mean).
-        """
-        if not (x_min > 0 and x_max > x_min and alpha > 0):
-            raise ValueError("Require x_min>0, x_max>x_min, alpha>0")
-
-        if abs(alpha - 1.0) < 1e-10:
-            return (x_max * x_min / (x_max - x_min)) * math.log(x_max / x_min)
-
-        log_r = math.log(x_min / x_max)             # negative
-        den = -math.expm1(alpha * log_r)            # 1 - (x_min/x_max)^alpha
-        num = -math.expm1((alpha - 1.0) * log_r)    # 1 - (x_min/x_max)^(alpha-1)
-
-        return (alpha * x_min / (alpha - 1.0)) * (num / den)
-
-    @staticmethod
-    def bounded_pareto_max_mean(x_min: float, x_max: float) -> float:
-        """
-        As alpha -> 0+, mean tends to (x_max - x_min) / ln(x_max / x_min).
-        """
-        if not (x_min > 0 and x_max > x_min):
-            raise ValueError("Require x_min>0, x_max>x_min")
-        return (x_max - x_min) / math.log(x_max / x_min)
 
     @staticmethod
     def solve_alpha_for_bounded_mean(
@@ -539,7 +467,22 @@ class TraceGenerator:
         rel_tol: float = ALPHA_SOLVE_TOLERANCE,
     ) -> float:
         """
-        Solve alpha from bounded Pareto mean via bisection (alpha>0, mean decreases in alpha).
+        Solve the bounded-Pareto shape parameter (alpha) from a target mean.
+
+        We want alpha > 0 such that:
+            bounded_pareto_mean(alpha, x_min, x_max) == target_mean
+
+        Key properties (fixed x_min, x_max):
+        - The mean is a decreasing function of alpha.
+        - As alpha -> 0+, the mean approaches the maximum achievable value:
+              mean_max = (x_max - x_min) / ln(x_max / x_min)
+        - As alpha -> +infinity, the distribution concentrates near x_min and the mean
+          approaches x_min.
+
+        Because of monotonicity, we can solve for alpha with bisection:
+        1) Validate that target_mean is achievable (x_min < target_mean < mean_max).
+        2) Bracket the root by growing an upper bound hi until mean(hi) <= target_mean.
+        3) Bisect until the mean matches target_mean within a relative tolerance.
         """
         if not (x_min > 0 and x_max > x_min):
             raise ValueError("Require x_min>0 and x_max>x_min")
@@ -553,19 +496,16 @@ class TraceGenerator:
                 f"Maximum achievable mean is about {mean_max:.6f}. Increase x_max or reduce target_mean."
             )
 
-        def m(a: float) -> float:
-            return TraceGenerator.bounded_pareto_mean(a, x_min, x_max)
-
         lo = 1e-12
         hi = 1.0
-        while m(hi) > target_mean:
+        while TraceGenerator.bounded_pareto_mean(hi, x_min, x_max) > target_mean:
             hi *= 2.0
             if hi > 1e12:
                 raise RuntimeError("Failed to bracket alpha; hi grew too large.")
 
         for _ in range(max_iter):
             mid = 0.5 * (lo + hi)
-            mm = m(mid)
+            mm = TraceGenerator.bounded_pareto_mean(mid, x_min, x_max)
             if abs(mm - target_mean) <= rel_tol * target_mean:
                 return float(mid)
             if mm >= target_mean:
@@ -575,14 +515,118 @@ class TraceGenerator:
 
         return float(0.5 * (lo + hi))
 
+    @staticmethod
+    def bounded_pareto_max_mean(x_min: float, x_max: float) -> float:
+        """
+        Maximum achievable mean for a bounded Pareto on [x_min, x_max].
+
+        This value comes from taking the bounded-Pareto mean formula and letting
+        alpha -> 0+ (the heaviest possible tail while still being a proper
+        bounded distribution). In that limit, the mean approaches:
+
+            mean_max = (x_max - x_min) / ln(x_max / x_min)
+
+        Intuition: for fixed bounds [x_min, x_max], the bounded-Pareto mean
+        decreases as alpha increases (lighter tail puts less mass near x_max).
+        So the largest mean happens at the smallest alpha.
+
+        You can derive the limit from the Wikipedia mean expression by setting r
+        = x_min/x_max and using the standard limit:
+
+            (1 - r^k) / k -> -ln(r) as k -> 0
+
+        See:
+        https://en.wikipedia.org/wiki/Pareto_distribution#Bounded_Pareto_distribution
+        """
+        if not (x_min > 0 and x_max > x_min):
+            raise ValueError("Require x_min>0, x_max>x_min")
+        return (x_max - x_min) / math.log(x_max / x_min)
+
+    @staticmethod
+    def bounded_pareto_mean(alpha: float, x_min: float, x_max: float) -> float:
+        """
+        Mean E[X] for the bounded Pareto on [x_min, x_max].
+
+        See: https://en.wikipedia.org/wiki/Pareto_distribution#Bounded_Pareto_distribution
+                Wikipedia notation (mapped to this function):
+                - alpha  -> shape parameter ("a" on Wikipedia)
+                - x_min  -> minimum ("L" on Wikipedia)
+                - x_max  -> maximum ("H" on Wikipedia)
+
+        For alpha != 1, the Wikipedia page writes the mean as:
+            E[X] = (x_min^alpha / (1 - (x_min/x_max)^alpha))
+                            * (alpha / (alpha - 1))
+                            * (1/(x_min^(alpha-1)) - 1/(x_max^(alpha-1)))
+
+            If you expand the last factor:
+                L^alpha * (1/L^(alpha-1) - 1/H^(alpha-1))
+                = x_min - x_min^alpha / x_max^(alpha-1)
+                = x_min * (1 - (x_min/x_max)^(alpha-1))
+        
+            So the whole expression becomes:
+                E[X] = (alpha * x_min / (alpha - 1)) * (1 - (x_min/x_max)^(alpha - 1)) / (1 - (x_min/x_max)^alpha)
+
+        For alpha == 1, Wikipedia gives:
+            E[X] = (x_min * x_max / (x_max - x_min)) * ln(x_max / x_min)
+
+        Correspondence to the code below:
+            - Define r = x_min / x_max. Because x_min < x_max, we have 0 < r < 1.
+            - The code sets log_r = log(r), so log_r is negative.
+            - Python's math.expm1(x) returns exp(x) - 1. Therefore:
+                -math.expm1(x) == 1 - exp(x)
+            - Using that identity:
+                den = -expm1(alpha * log_r)         = 1 - exp(alpha * log_r)        = 1 - r^alpha
+                num = -expm1((alpha - 1) * log_r)   = 1 - exp((alpha - 1) * log_r)  = 1 - r^(alpha - 1)
+            - We use expm1(...) because when r^k is close to 1 (i.e., k*log(r) is close to 0),
+                computing 1 - r^k directly can lose precision due to cancellation.
+        """
+        if not (x_min > 0 and x_max > x_min and alpha > 0):
+            raise ValueError("Require x_min>0, x_max>x_min, alpha>0")
+
+        #################
+        # alpha == 1 case
+        #################
+        if abs(alpha - 1.0) < 1e-10:
+            return (x_max * x_min / (x_max - x_min)) * math.log(x_max / x_min)
+        
+        #################
+        # alpha != 1 case
+        #################
+        # Let r = x_min/x_max in (0, 1). Wikipedia uses powers of r:
+        #   1 - r^alpha     and     1 - r^(alpha-1)
+        # Compute these as -expm1(k*log(r)) for better precision when r^k ~ 1.
+        log_r = math.log(x_min / x_max)             # log(r) < 0
+        den = -math.expm1(alpha * log_r)            # 1 - r^alpha
+        num = -math.expm1((alpha - 1.0) * log_r)    # 1 - r^(alpha-1)
+        return (alpha * x_min / (alpha - 1.0)) * (num / den)
+
     # -------------------------------------------------------------------------
     # Mean-life inference and alpha fitting
     # -------------------------------------------------------------------------
     def infer_mean_life_from_target_util(self) -> float:
         """
-        First-guess mean life from steady-state expectation:
-          U*N = λ * E[replicas] * E[req] * E[lifetime]
-        => E[lifetime] = U*N / (λ * E[replicas] * E[req])
+        Infer an initial guess for mean pod lifetime from a target steady-state
+        utilization.
+
+        This uses a simple steady-state flow-balance / Little's-law style
+        relation. See: https://en.wikipedia.org/wiki/Little%27s_law In
+        expectation, the long-run average requested CPU across the cluster is:
+
+            expected_total_req = arrival_rate * E[replicas] * E[req_per_replica] * E[lifetime]
+
+        We set expected_total_req equal to the target total requested CPU, which is:
+            target_total_req = target_util * num_nodes
+
+        Solving for E[lifetime] gives:
+            mean_life = (target_util * num_nodes) / (arrival_rate * E[replicas] * E[req_per_replica])
+
+        Where this method gets each term:
+            - arrival_rate is 1/mean_arrival.
+            - E[replicas] comes from the (possibly truncated) geometric / uniform replica model.
+            - E[req_per_replica] is mean_req.
+
+        This is only a first guess: calibration may adjust mean_life to better
+        match the measured time-averaged utilization of a generated trace.
         """
         mean_arrival = float(self.args.mean_arrival)
         lam = 1.0 / mean_arrival
@@ -609,9 +653,10 @@ class TraceGenerator:
 
         return float(mean_life)
 
-    def fit_alphas(self) -> None:
+#TODO: HERTIL
+    def fit_pareto_alphas(self) -> None:
         """
-        Deterministically solve alphas from (xmin, xmax, mean).
+        Deterministically solve Pareto alphas from (xmin, xmax, mean).
         Cache req/arrival; recompute life because mean_life changes during calibration.
         """
         if self.alpha_req is None:
@@ -788,6 +833,59 @@ class TraceGenerator:
 
         return pods, next_id
 
+    @staticmethod
+    def sample_steady_state_residual_life(
+        rng: np.random.Generator,
+        *,
+        alpha: float,
+        x_min: float,
+        x_max: float,
+        size: int = 1,
+    ) -> np.ndarray:
+        """
+        Sample an equilibrium (steady-state) remaining lifetime.
+
+        If pod lifetimes are i.i.d. draws X supported on [x_min, x_max], then a
+        snapshot of a running system does not see fresh lifetimes X. It sees the
+        residual life R of a renewal process. A standard way to generate R is:
+
+        1) Draw a length-biased lifetime X* with density
+            f_{X*}(x) ∝ x f_X(x).
+        2) Given X* = x, draw R ~ Uniform(0, x).
+
+        For the bounded Pareto used here, f_X(x) ∝ x^(-(\alpha+1)) on [x_min,
+        x_max], so the length-biased density simplifies to f_{X*}(x) ∝
+        x^(-\alpha). This function samples X* via an inverse-CDF construction
+        (with the \alpha=1 logarithmic special case) and then samples R
+        uniformly in [0, X*]. Using R instead of fresh X avoids a startup
+        transient where many pods would otherwise end quickly right after t=0.
+        With heavy tails (Pareto-like), the length bias intentionally
+        over-represents long lives, which matches what a real "live cluster"
+        snapshot tends to contain.
+        """
+        if not (alpha > 0 and x_min > 0 and x_max > x_min):
+            raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
+
+        u = rng.random(size)
+        u = np.clip(u, 1e-12, 1.0 - 1e-12)
+
+        # Sample X* with pdf ∝ x^{-alpha} on [x_min, x_max]
+        # CDF:
+        #  if alpha != 1: F(x) = (x^(1-alpha) - x_min^(1-alpha)) / (x_max^(1-alpha) - x_min^(1-alpha))
+        #  if alpha == 1: F(x) = ln(x/x_min) / ln(x_max/x_min)
+        if abs(alpha - 1.0) < 1e-12:
+            x_star = x_min * np.exp(u * np.log(x_max / x_min))
+        else:
+            p = 1.0 - alpha
+            x_min_p = x_min ** p
+            x_max_p = x_max ** p
+            x_star = (x_min_p + u * (x_max_p - x_min_p)) ** (1.0 / p)
+
+        v = rng.random(size)
+        v = np.clip(v, 1e-12, 1.0 - 1e-12)
+        # Residual is Uniform(0, X*). Using (1-v)*X* is equivalent.
+        return x_star * (1.0 - v)
+
     # -------------------------------------------------------------------------
     # Trace events
     # -------------------------------------------------------------------------
@@ -895,7 +993,7 @@ class TraceGenerator:
         rng_initial = np.random.default_rng(derive_seed(iter_seed, "initial-snapshot"))
         rng_trace = np.random.default_rng(derive_seed(iter_seed, "trace-events"))
 
-        self.fit_alphas()
+        self.fit_pareto_alphas()
 
         prio_vals, prio_probs = self.build_trunc_geometric_support(
             int(self.args.priority_min),
