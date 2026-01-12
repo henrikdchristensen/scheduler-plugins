@@ -2,31 +2,38 @@
 # Variable #########
 ####################
 
+# Output directory
 output-dir: data/traces/nodes8_prio1_arrival32
+
+# Time horizon
+trace-time: 8h
 
 # Cluster
 num-nodes: 8
-target-util: 0.90
 
 # Inter-arrival
-xmin-arrival: 0.001s
 xmax-arrival: 512s
 mean-arrival: 32s
 
-# Lifetime bounds
+# Lifetime
 xmin-life: 16s
 xmax-life: 8h
 
 # Priority
-priority-min: 1
 priority-max: 1
-priority-ratio: 0.8
 
 ####################
 # Fixed ############
 ####################
-trace-time: 8h
+
+# Seeds
 seed-file: data/seeds/kwok_trace_generator/seeds.txt
+
+# Cluster
+target-util: 0.90
+
+# Inter-arrival
+xmin-arrival: 0.001s
 
 # Requests
 xmin-req: 0.05
@@ -37,3 +44,7 @@ mean-req: 0.125
 replicas-min: 1
 replicas-max: 3
 replicas-ratio: 0.8
+
+# Priority
+priority-min: 1
+priority-ratio: 0.8
