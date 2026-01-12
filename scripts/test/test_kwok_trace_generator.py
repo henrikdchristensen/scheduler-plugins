@@ -598,7 +598,7 @@ def test_fit_pareto_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
 # Util metric
 # ---------------------------------------------------------------------------
 
-def test_time_mean_req_util_basic(tmp_path: Path):
+def test_time_mean_request_util_basic(tmp_path: Path):
     args = make_required_args(tmp_path, num_nodes=2, trace_time="10s")
     gen = tg.TraceGenerator(args)
 
@@ -606,7 +606,7 @@ def test_time_mean_req_util_basic(tmp_path: Path):
         tg.TraceRecord(id=1, start_time=0.0, end_time=10.0, cpu=0.5, mem=0.5, priority=1, replicas=1),
     ]
     # area = 0.5*10, divide by N*T = 2*10 => 0.25
-    assert gen.time_mean_req_util(pods) == pytest.approx(0.25)
+    assert gen.time_mean_request_util(pods) == pytest.approx(0.25)
 
 
 # ---------------------------------------------------------------------------
@@ -736,13 +736,13 @@ def test_generate_trace_pod_events_and_pops_end_heap(tmp_path: Path, monkeypatch
         initial_pods=initial_pods,
     )
 
-    # Expect recorded points at initial t=0, termination at 0.5,
-    # arrival at 1.0, termination at 1.5, arrival at 2.0.
-    assert times == pytest.approx([0.0, 0.5, 1.0, 1.5, 2.0])
+    # Expect recorded points at event boundaries (initial, terminations, arrivals).
+    # The second generated pod ends at 2.5 (trace horizon).
+    assert times == pytest.approx([0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
     assert len(u_hist) == len(times)
     # Initial pod ends at 0.5 => pods drop to 0.
-    # The first generated pod ends at 1.5 (life=0.5), then the second arrives at 2.0.
-    assert pods_hist == [1, 0, 1, 0, 1]
+    # The first generated pod ends at 1.5 (life=0.5), then the second arrives at 2.0 and ends at 2.5.
+    assert pods_hist == [1, 0, 1, 0, 1, 0]
 
 
 # ---------------------------------------------------------------------------
@@ -758,7 +758,7 @@ def test_make_trace(tmp_path: Path, monkeypatch):
         set_alphas(gen, alpha=2.0)
 
     monkeypatch.setattr(gen, "fit_pareto_alphas", fake_fit_pareto_alphas)
-    monkeypatch.setattr(gen, "time_mean_req_util", lambda _pods: 0.55)
+    monkeypatch.setattr(gen, "time_mean_request_util", lambda _pods: 0.55)
 
     initial_pods = [
         tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=2),
@@ -854,7 +854,7 @@ def test_write_outputs(tmp_path: Path, monkeypatch):
 
     calls = {"json": [], "info": 0}
 
-    monkeypatch.setattr(gen, "time_mean_req_util", lambda _pods: 0.6)
+    monkeypatch.setattr(gen, "time_mean_request_util", lambda _pods: 0.6)
 
     def fake_pods_to_json(path: Path, pods_):
         calls["json"].append((path, len(pods_)))

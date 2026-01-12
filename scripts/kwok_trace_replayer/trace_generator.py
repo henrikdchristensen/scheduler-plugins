@@ -65,14 +65,14 @@ DEFAULT_SHOW_PLOTS = False
 # -----------------------------------------------------------------------------
 @dataclass
 class ClusterState:
-    live_req: float = 0.0
+    live_request: float = 0.0
     live_pods: int = 0
 
 
 @dataclass(order=True)
 class EndHeapEntry:
     end_time: float
-    req: float = field(compare=False)
+    request: float = field(compare=False)
     replicas: int = field(compare=False)
 
 
@@ -715,11 +715,11 @@ class TraceGenerator:
             )
             self.args.alpha_req = float(self.alpha_req)
 
-        LOG.info("[pareto-fit] arrival: mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+        LOG.info("[pareto-fit] arrival:  mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
                  float(self.args.mean_arrival), float(self.args.xmin_arrival), float(self.args.xmax_arrival), float(self.alpha_arrival))
-        LOG.info("[pareto-fit] life:    mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+        LOG.info("[pareto-fit] lifetime: mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
                  float(self.args.mean_life), float(self.args.xmin_life), float(self.args.xmax_life), float(self.alpha_life))
-        LOG.info("[pareto-fit] req:     mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+        LOG.info("[pareto-fit] request:  mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
                  float(self.args.mean_req), float(self.args.xmin_req), float(self.args.xmax_req), float(self.alpha_req))
 
     # -------------------------------------------------------------------------
@@ -792,7 +792,7 @@ class TraceGenerator:
     # Util metric
     # -------------------------------------------------------------------------
     
-    def time_mean_req_util(self, pods: List[TraceRecord]) -> float:
+    def time_mean_request_util(self, pods: List[TraceRecord]) -> float:
         """
         Compute the time-mean requested CPU utilization over the trace horizon.
 
@@ -997,14 +997,14 @@ class TraceGenerator:
         for p in initial_pods:
             request = float(p.cpu)
             replicas = int(p.replicas)
-            state.live_req += replicas * request
+            state.live_request += replicas * request
             state.live_pods += replicas
-            heapq.heappush(end_heap, EndHeapEntry(end_time=float(p.end_time), req=request, replicas=replicas))
+            heapq.heappush(end_heap, EndHeapEntry(end_time=float(p.end_time), request=request, replicas=replicas))
 
         pods: List[TraceRecord] = []
 
         times: List[float] = [0.0]
-        u_hist: List[float] = [state.live_req / float(self.args.num_nodes)]
+        u_hist: List[float] = [state.live_request / float(self.args.num_nodes)]
         pods_hist: List[int] = [state.live_pods]
 
         t = 0.0
@@ -1027,13 +1027,13 @@ class TraceGenerator:
                 # Pop all terminations at this same end time.
                 while end_heap and float(end_heap[0].end_time) == end_t:
                     entry = heapq.heappop(end_heap)
-                    state.live_req = max(0.0, state.live_req - entry.req * entry.replicas)
+                    state.live_request = max(0.0, state.live_request - entry.request * entry.replicas)
                     state.live_pods = max(0, state.live_pods - entry.replicas)
 
                 # Record utilization at the termination boundary.
                 if end_t <= self.trace_time_s and end_t >= times[-1]:
                     times.append(end_t)
-                    u_hist.append(state.live_req / float(self.args.num_nodes))
+                    u_hist.append(state.live_request / float(self.args.num_nodes))
                     pods_hist.append(state.live_pods)
 
             lifetime = float(self.sample_bounded_pareto(
@@ -1057,9 +1057,9 @@ class TraceGenerator:
             priority = int(rng.choice(prio_vals, p=prio_probs))
 
             # Add new pod to state and end-heap
-            state.live_req += replicas * request
+            state.live_request += replicas * request
             state.live_pods += replicas
-            heapq.heappush(end_heap, EndHeapEntry(end_time=end, req=request, replicas=replicas))
+            heapq.heappush(end_heap, EndHeapEntry(end_time=end, request=request, replicas=replicas))
 
             # Record new pod
             next_id += 1
@@ -1073,11 +1073,26 @@ class TraceGenerator:
                 replicas=replicas,
             ))
             times.append(start)
-            u_hist.append(state.live_req / float(self.args.num_nodes))
+            u_hist.append(state.live_request / float(self.args.num_nodes))
             pods_hist.append(state.live_pods)
 
             # Advance time
             t = start
+
+        # Record any remaining terminations up to the trace horizon (including
+        # terminations after the last arrival). This ensures we capture the
+        # final utilization drop-offs at the end of the trace.
+        while end_heap and float(end_heap[0].end_time) <= float(self.trace_time_s):
+            end_t = float(end_heap[0].end_time)
+            while end_heap and float(end_heap[0].end_time) == end_t:
+                entry = heapq.heappop(end_heap)
+                state.live_request = max(0.0, state.live_request - entry.request * entry.replicas)
+                state.live_pods = max(0, state.live_pods - entry.replicas)
+
+            if end_t >= times[-1]:
+                times.append(end_t)
+                u_hist.append(state.live_request / float(self.args.num_nodes))
+                pods_hist.append(state.live_pods)
 
         return pods, next_id, times, u_hist, pods_hist
 
@@ -1129,7 +1144,7 @@ class TraceGenerator:
         self.initial_pods_count = int(sum(int(p.replicas) for p in initial_pods))
 
         all_pods = initial_pods + trace_pods
-        util = float(self.time_mean_req_util(all_pods))
+        util = float(self.time_mean_request_util(all_pods))
 
         max_priority = max((int(p.priority) for p in all_pods), default=0)
 
@@ -1191,7 +1206,7 @@ class TraceGenerator:
 
           Goal - Adjust the bounded-Pareto mean lifetime parameter
           (args.mean_life) so that the generated trace's time-mean requested CPU
-          utilization (as computed by time_mean_req_util) matches
+          utilization (as computed by time_mean_request_util) matches
           args.target_util within the configured tolerance.
 
           How it works:
@@ -1274,7 +1289,7 @@ class TraceGenerator:
         Write output files: initial JSON, trace JSON, info YAML.
         """
         all_pods = initial_pods + trace_pods
-        util_time = self.time_mean_req_util(all_pods)
+        util_time = self.time_mean_request_util(all_pods)
 
         self.pods_to_json(self.initial_path, initial_pods)
         self.pods_to_json(self.trace_path, trace_pods)
