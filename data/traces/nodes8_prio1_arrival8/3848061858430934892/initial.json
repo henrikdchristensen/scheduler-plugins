@@ -3,254 +3,227 @@
     {
       "id": 1,
       "start_time": 0.0,
-      "end_time": 295.068331,
-      "cpu": 0.233848,
-      "mem": 0.233848,
-      "priority": 1,
-      "replicas": 1
-    },
-    {
-      "id": 2,
-      "start_time": 0.0,
-      "end_time": 3109.68435,
-      "cpu": 0.055299,
-      "mem": 0.055299,
-      "priority": 1,
-      "replicas": 1
-    },
-    {
-      "id": 3,
-      "start_time": 0.0,
-      "end_time": 5456.561658,
-      "cpu": 0.396311,
-      "mem": 0.396311,
+      "end_time": 1496.159227,
+      "cpu": 0.153081,
+      "mem": 0.153081,
       "priority": 1,
       "replicas": 3
     },
     {
-      "id": 4,
+      "id": 2,
       "start_time": 0.0,
-      "end_time": 2480.867782,
-      "cpu": 0.09129,
-      "mem": 0.09129,
+      "end_time": 3396.144405,
+      "cpu": 0.068337,
+      "mem": 0.068337,
+      "priority": 1,
+      "replicas": 2
+    },
+    {
+      "id": 3,
+      "start_time": 0.0,
+      "end_time": 835.082476,
+      "cpu": 0.056836,
+      "mem": 0.056836,
       "priority": 1,
       "replicas": 1
+    },
+    {
+      "id": 4,
+      "start_time": 0.0,
+      "end_time": 2676.708648,
+      "cpu": 0.075341,
+      "mem": 0.075341,
+      "priority": 1,
+      "replicas": 3
     },
     {
       "id": 5,
       "start_time": 0.0,
-      "end_time": 1822.528343,
-      "cpu": 0.05353,
-      "mem": 0.05353,
+      "end_time": 797.894328,
+      "cpu": 0.13712,
+      "mem": 0.13712,
       "priority": 1,
-      "replicas": 1
+      "replicas": 2
     },
     {
       "id": 6,
       "start_time": 0.0,
-      "end_time": 1452.828177,
-      "cpu": 0.061009,
-      "mem": 0.061009,
+      "end_time": 1408.950015,
+      "cpu": 0.342835,
+      "mem": 0.342835,
       "priority": 1,
       "replicas": 1
     },
     {
       "id": 7,
       "start_time": 0.0,
-      "end_time": 4883.661544,
-      "cpu": 0.052472,
-      "mem": 0.052472,
+      "end_time": 905.994834,
+      "cpu": 0.06836,
+      "mem": 0.06836,
       "priority": 1,
-      "replicas": 2
+      "replicas": 3
     },
     {
       "id": 8,
       "start_time": 0.0,
-      "end_time": 1863.288782,
-      "cpu": 0.061815,
-      "mem": 0.061815,
-      "priority": 1,
-      "replicas": 2
-    },
-    {
-      "id": 9,
-      "start_time": 0.0,
-      "end_time": 273.509379,
-      "cpu": 0.254013,
-      "mem": 0.254013,
-      "priority": 1,
-      "replicas": 2
-    },
-    {
-      "id": 10,
-      "start_time": 0.0,
-      "end_time": 837.698876,
-      "cpu": 0.053581,
-      "mem": 0.053581,
+      "end_time": 184.46748,
+      "cpu": 0.055574,
+      "mem": 0.055574,
       "priority": 1,
       "replicas": 1
     },
     {
+      "id": 9,
+      "start_time": 0.0,
+      "end_time": 3696.955279,
+      "cpu": 0.145337,
+      "mem": 0.145337,
+      "priority": 1,
+      "replicas": 1
+    },
+    {
+      "id": 10,
+      "start_time": 0.0,
+      "end_time": 3643.358707,
+      "cpu": 0.051269,
+      "mem": 0.051269,
+      "priority": 1,
+      "replicas": 3
+    },
+    {
       "id": 11,
       "start_time": 0.0,
-      "end_time": 458.87386,
-      "cpu": 0.069719,
-      "mem": 0.069719,
+      "end_time": 473.953581,
+      "cpu": 0.113926,
+      "mem": 0.113926,
       "priority": 1,
       "replicas": 1
     },
     {
       "id": 12,
       "start_time": 0.0,
-      "end_time": 583.366715,
-      "cpu": 0.29194,
-      "mem": 0.29194,
+      "end_time": 331.633506,
+      "cpu": 0.131462,
+      "mem": 0.131462,
       "priority": 1,
       "replicas": 2
     },
     {
       "id": 13,
       "start_time": 0.0,
-      "end_time": 1492.835299,
-      "cpu": 0.063139,
-      "mem": 0.063139,
+      "end_time": 5178.819271,
+      "cpu": 0.070075,
+      "mem": 0.070075,
       "priority": 1,
       "replicas": 3
     },
     {
       "id": 14,
       "start_time": 0.0,
-      "end_time": 2575.894217,
-      "cpu": 0.059534,
-      "mem": 0.059534,
+      "end_time": 3386.648709,
+      "cpu": 0.05679,
+      "mem": 0.05679,
       "priority": 1,
-      "replicas": 1
+      "replicas": 2
     },
     {
       "id": 15,
       "start_time": 0.0,
-      "end_time": 145.856764,
-      "cpu": 0.175367,
-      "mem": 0.175367,
+      "end_time": 5170.664229,
+      "cpu": 0.056823,
+      "mem": 0.056823,
       "priority": 1,
-      "replicas": 1
+      "replicas": 3
     },
     {
       "id": 16,
       "start_time": 0.0,
-      "end_time": 4081.720941,
-      "cpu": 0.051515,
-      "mem": 0.051515,
+      "end_time": 798.942738,
+      "cpu": 0.459887,
+      "mem": 0.459887,
       "priority": 1,
       "replicas": 1
     },
     {
       "id": 17,
       "start_time": 0.0,
-      "end_time": 371.791782,
-      "cpu": 0.065646,
-      "mem": 0.065646,
+      "end_time": 776.631139,
+      "cpu": 0.09806,
+      "mem": 0.09806,
       "priority": 1,
       "replicas": 3
     },
     {
       "id": 18,
       "start_time": 0.0,
-      "end_time": 1203.611579,
-      "cpu": 0.102081,
-      "mem": 0.102081,
-      "priority": 1,
-      "replicas": 1
-    },
-    {
-      "id": 19,
-      "start_time": 0.0,
-      "end_time": 4563.968753,
-      "cpu": 0.269356,
-      "mem": 0.269356,
+      "end_time": 1644.249888,
+      "cpu": 0.080238,
+      "mem": 0.080238,
       "priority": 1,
       "replicas": 2
     },
     {
+      "id": 19,
+      "start_time": 0.0,
+      "end_time": 4890.895687,
+      "cpu": 0.082012,
+      "mem": 0.082012,
+      "priority": 1,
+      "replicas": 1
+    },
+    {
       "id": 20,
       "start_time": 0.0,
-      "end_time": 801.436382,
-      "cpu": 0.053401,
-      "mem": 0.053401,
+      "end_time": 272.315054,
+      "cpu": 0.116103,
+      "mem": 0.116103,
       "priority": 1,
       "replicas": 1
     },
     {
       "id": 21,
       "start_time": 0.0,
-      "end_time": 26.737719,
-      "cpu": 0.085135,
-      "mem": 0.085135,
+      "end_time": 527.013757,
+      "cpu": 0.06467,
+      "mem": 0.06467,
       "priority": 1,
-      "replicas": 3
+      "replicas": 2
     },
     {
       "id": 22,
       "start_time": 0.0,
-      "end_time": 3873.660076,
-      "cpu": 0.065394,
-      "mem": 0.065394,
+      "end_time": 44.908113,
+      "cpu": 0.105794,
+      "mem": 0.105794,
       "priority": 1,
       "replicas": 1
     },
     {
       "id": 23,
       "start_time": 0.0,
-      "end_time": 430.255111,
-      "cpu": 0.08658,
-      "mem": 0.08658,
-      "priority": 1,
-      "replicas": 2
-    },
-    {
-      "id": 24,
-      "start_time": 0.0,
-      "end_time": 826.540641,
-      "cpu": 0.138122,
-      "mem": 0.138122,
-      "priority": 1,
-      "replicas": 3
-    },
-    {
-      "id": 25,
-      "start_time": 0.0,
-      "end_time": 150.768693,
-      "cpu": 0.05141,
-      "mem": 0.05141,
-      "priority": 1,
-      "replicas": 2
-    },
-    {
-      "id": 26,
-      "start_time": 0.0,
-      "end_time": 102.91596,
-      "cpu": 0.058024,
-      "mem": 0.058024,
-      "priority": 1,
-      "replicas": 3
-    },
-    {
-      "id": 27,
-      "start_time": 0.0,
-      "end_time": 866.476862,
-      "cpu": 0.36195,
-      "mem": 0.36195,
+      "end_time": 238.727888,
+      "cpu": 0.118244,
+      "mem": 0.118244,
       "priority": 1,
       "replicas": 1
     },
     {
-      "id": 28,
+      "id": 24,
       "start_time": 0.0,
-      "end_time": 1017.039525,
-      "cpu": 0.358482,
-      "mem": 0.358482,
+      "end_time": 46.747474,
+      "cpu": 0.375153,
+      "mem": 0.375153,
       "priority": 1,
-      "replicas": 3
+      "replicas": 1
+    },
+    {
+      "id": 25,
+      "start_time": 0.0,
+      "end_time": 264.988572,
+      "cpu": 0.215925,
+      "mem": 0.215925,
+      "priority": 1,
+      "replicas": 1
     }
   ]
 }
