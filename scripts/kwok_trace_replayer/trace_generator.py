@@ -45,7 +45,7 @@ MAX_DECIMALS = 6
 MIN_LIFETIME_S = 2.0
 
 MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE = 0.01
-MEAN_LIFE_CALIBRATION_MAX_ITER = 20
+MEAN_LIFE_CALIBRATION_MAX_ITERATIONS = 20
 
 INITIAL_PODS_UTIL_TOLERANCE = 0.002
 INITIAL_MAX_PODS = 200_000
@@ -131,10 +131,32 @@ def build_arg_parser() -> argparse.ArgumentParser:
 # -----------------------------------------------------------------------------
 
 class TraceGenerator:
-    def __init__(self, cli_args: argparse.Namespace) -> None:
-        args = TraceGenerator.resolve_args(cli_args)
-        setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
-        self.init_from_args(args, create_figures_dir=not bool(getattr(args, "seed_file", None)), log_args=True)
+    def __init__(
+        self,
+        cli_args: argparse.Namespace,
+        *,
+        resolved: bool = False,
+        create_figures_dir: Optional[bool] = None,
+        log_args: bool = True,
+        setup_logger: bool = True,
+    ) -> None:
+        """
+        Create a TraceGenerator.
+
+        By default, this resolves and validates args (including optional job-file
+        merging) and configures logging.
+
+        For per-seed runs where args are already resolved, pass resolved=True and
+        provide create_figures_dir/log_args as desired.
+        """
+        args = cli_args if resolved else TraceGenerator.resolve_args(cli_args)
+        if setup_logger:
+            setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
+
+        if create_figures_dir is None:
+            create_figures_dir = not bool(getattr(args, "seed_file", None))
+
+        self.init_from_args(args, create_figures_dir=bool(create_figures_dir), log_args=bool(log_args))
 
     def init_from_args(self, args: argparse.Namespace, *, create_figures_dir: bool, log_args: bool) -> None:
         """
@@ -159,9 +181,9 @@ class TraceGenerator:
         self.hist_plot_path = self.figures_dir / "histograms.png"
 
         # Fitted Pareto alphas
-        self.alpha_req = None
         self.alpha_arrival = None
         self.alpha_life = None
+        self.alpha_req = None
 
         # Plot series
         self.times = []
@@ -356,6 +378,7 @@ class TraceGenerator:
     # -------------------------------------------------------------------------
     # Seed expansion for multi-run
     # -------------------------------------------------------------------------
+    
     @staticmethod
     def expand_seed_runs(args: argparse.Namespace) -> list[argparse.Namespace]:
         """
@@ -412,24 +435,10 @@ class TraceGenerator:
         ]
         log_args_block(LOG, self.args, title="ARGS", include=include)
 
-    def write_info_file(self, extra: Dict[str, object]) -> None:
-        """
-        Write info_generate.yaml with inputs + generated params.
-        """
-        try:
-            inputs = {
-                "cli-cmd": build_cli_cmd(),
-                "args": {k: v for k, v in vars(self.args).items()},
-                "generated": extra,
-            }
-            write_info_file(self.info_path, inputs=inputs, logger=LOG)
-            LOG.info("wrote %s", self.info_path)
-        except Exception as e:
-            LOG.warning("failed to write info_generate.yaml: %s", e)
-
     # -------------------------------------------------------------------------
     # Bounded Pareto: sampling + alpha solve + mean 
     # -------------------------------------------------------------------------
+    
     @staticmethod
     def sample_bounded_pareto(
         rng: np.random.Generator,
@@ -603,6 +612,7 @@ class TraceGenerator:
     # -------------------------------------------------------------------------
     # Mean-life inference and alpha fitting
     # -------------------------------------------------------------------------
+    
     def infer_mean_life_from_target_util(self) -> float:
         """
         Infer an initial guess for mean pod lifetime from a target steady-state
@@ -653,23 +663,26 @@ class TraceGenerator:
 
         return float(mean_life)
 
-#TODO: HERTIL
     def fit_pareto_alphas(self) -> None:
         """
-        Deterministically solve Pareto alphas from (xmin, xmax, mean).
-        Cache req/arrival; recompute life because mean_life changes during calibration.
-        """
-        if self.alpha_req is None:
-            self.alpha_req = round(
-                self.solve_alpha_for_bounded_mean(
-                    x_min=float(self.args.xmin_req),
-                    x_max=float(self.args.xmax_req),
-                    target_mean=float(self.args.mean_req),
-                ),
-                MAX_DECIMALS,
-            )
-            self.args.alpha_req = float(self.alpha_req)
+        Fit bounded-Pareto shape parameters (alphas) from configured bounds and
+        means.
 
+        For each bounded Pareto distribution (request size, inter-arrival time,
+        and pod lifetime), we solve the shape parameter alpha such that the
+        distribution on [x_min, x_max] has the desired mean. The solve is
+        deterministic and uses solve_alpha_for_bounded_mean.
+
+        Side effects:
+        - Sets self.alpha_arrival, self.alpha_life, self.alpha_req.
+        - Writes the corresponding args.alpha_* fields for logging/debugging.
+
+        Caching behavior:
+        - alpha_req and alpha_arrival are computed once and cached because
+            their target means are fixed for a run.
+        - alpha_life is recomputed on every call because args.mean_life may
+            be updated during utilization calibration.
+        """
         if self.alpha_arrival is None:
             self.alpha_arrival = round(
                 self.solve_alpha_for_bounded_mean(
@@ -690,24 +703,59 @@ class TraceGenerator:
             MAX_DECIMALS,
         )
         self.args.alpha_life = float(self.alpha_life)
+        
+        if self.alpha_req is None:
+            self.alpha_req = round(
+                self.solve_alpha_for_bounded_mean(
+                    x_min=float(self.args.xmin_req),
+                    x_max=float(self.args.xmax_req),
+                    target_mean=float(self.args.mean_req),
+                ),
+                MAX_DECIMALS,
+            )
+            self.args.alpha_req = float(self.alpha_req)
 
-        LOG.info("[pareto-fit] req:     mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
-                 float(self.args.mean_req), float(self.args.xmin_req), float(self.args.xmax_req), float(self.alpha_req))
         LOG.info("[pareto-fit] arrival: mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
                  float(self.args.mean_arrival), float(self.args.xmin_arrival), float(self.args.xmax_arrival), float(self.alpha_arrival))
         LOG.info("[pareto-fit] life:    mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
                  float(self.args.mean_life), float(self.args.xmin_life), float(self.args.xmax_life), float(self.alpha_life))
+        LOG.info("[pareto-fit] req:     mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+                 float(self.args.mean_req), float(self.args.xmin_req), float(self.args.xmax_req), float(self.alpha_req))
 
     # -------------------------------------------------------------------------
-    # Discrete helpers (priority/replicas)
+    # Geometric support + expected value
     # -------------------------------------------------------------------------
+    
     @staticmethod
     def build_trunc_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Build discrete support + probs for truncated geometric on [min_val, max_val] with given ratio.
-        1) If ratio == 1.0, uniform discrete on [min_val, max_val].
-        2) If ratio != 1.0, pmf p(k) ∝ ratio^{k - min_val} for k in [min_val, max_val].
-        3) If only one value in support, return uniform with single value.
+        Build a discrete integer support and PMF for a truncated geometric-like
+        distribution.
+
+        The returned support is the inclusive range k ∈ [min_val, max_val]. We
+        assign unnormalized weights that decay (or grow) geometrically across
+        the support:
+
+            w(k) = ratio^(k - min_val)
+
+        and normalize them over the finite interval to obtain probabilities.
+        This is equivalent to taking a geometric distribution (up to a constant
+        factor and a shift) and truncating/renormalizing it to a finite support.
+        See: https://en.wikipedia.org/wiki/Geometric_distribution
+
+        Interpretation of ratio: - ratio is the multiplicative factor between
+        successive masses on the
+          support: w(k+1) / w(k) = ratio.
+        - ratio < 1 biases probability toward smaller values (decaying tail).
+        - ratio > 1 biases probability toward larger values (increasing tail).
+        - ratio == 1 yields a uniform distribution over the support.
+
+        Returns:
+            A tuple (vals, probs) where vals is an int array of the support
+            values. If the distribution is uniform (ratio≈1 or a single support
+            value), probs is None and callers can treat the distribution as
+            uniform. Otherwise probs is a float array of the same length as vals
+            summing to 1.
         """
         if ratio <= 0:
             raise ValueError("ratio must be > 0.")
@@ -726,18 +774,38 @@ class TraceGenerator:
     @staticmethod
     def expected_value(vals: np.ndarray, probs: Optional[np.ndarray]) -> float:
         """
-        E[X] for discrete RV with support vals and optional probs.
+        Compute the expectation for a discrete random variable on a finite
+        support.
+
+        If probs is None, the distribution is treated as uniform over vals.
+
+        Args:
+            vals: Support values (one per outcome). probs: Optional
+            probabilities aligned with vals.
+
+        Returns:
+            The expected value E[X].
         """
         return float(np.mean(vals)) if probs is None else float(np.sum(vals.astype(float) * probs.astype(float)))
 
     # -------------------------------------------------------------------------
     # Util metric
     # -------------------------------------------------------------------------
-    def time_avg_req_util(self, pods: List[TraceRecord]) -> float:
+    
+    def time_mean_req_util(self, pods: List[TraceRecord]) -> float:
         """
-        Time-averaged requested CPU utilization over [0, T]:
-          U = (1 / (N*T)) * ∫[0 to T] Σ_{p in pods active at t} replicas_p * cpu_p dt
-        0 <= U <= 1
+        Compute the time-mean requested CPU utilization over the trace horizon.
+
+        This treats each pod record as requesting a constant CPU amount
+        (replicas * cpu) while it is active, and computes the mean (average
+        value) of the total requested CPU over the interval, normalized by total cluster
+        capacity (num_nodes).
+
+        In continuous time this corresponds to the mean (average value) of a function:
+            U = (1 / (N * T)) * \\int_0^T R(t) dt
+        where R(t) is the total requested CPU at time t and N is the
+        number of nodes (each assumed to have 1 CPU unit capacity in this model).
+        Each pod contributes replicas_p * cpu_p to R(t) for t in [start_time, end_time)
         """
         T = float(self.trace_time_s)
         if T <= 0.0:
@@ -751,42 +819,50 @@ class TraceGenerator:
             e = float(p.end_time)
             if e <= 0.0 or s >= T:
                 continue
-            active = max(0.0, min(e, T) - max(s, 0.0))
+            active = max(0.0, min(e, T) - max(s, 0.0)) # active means within [0, T]
             area += float(p.replicas) * float(p.cpu) * active
 
         return area / (N * T)
 
     # -------------------------------------------------------------------------
-    # Initial snapshot: fill to target util (stationary residual-life sampling)
+    # Sample initial pods: fill to target util (stationary residual-life sampling)
     # -------------------------------------------------------------------------
-    def build_initial_snapshot(
+    
+    def generate_initial_pods(
         self,
         rng: np.random.Generator,
+        tolerance: float = INITIAL_PODS_UTIL_TOLERANCE,
+        max_pods: int = INITIAL_MAX_PODS,
         *,
-        prio_vals: np.ndarray,
-        prio_probs: Optional[np.ndarray],
-        rep_vals: np.ndarray,
-        rep_probs: Optional[np.ndarray],
+        priority_vals: np.ndarray,
+        priority_probs: Optional[np.ndarray],
+        replicas_vals: np.ndarray,
+        replicas_probs: Optional[np.ndarray],
         next_id: int,
     ) -> Tuple[List[TraceRecord], int]:
         """
-        Sample pods until total requested ~= target_util * num_nodes (within tol).
+        Sample pods until total requested ≈ target_util * num_nodes (within
+        tolerance).
+        
+        Pods are sampled by drawing request sizes and lifetimes from the fitted
+        bounded Pareto distributions. Lifetimes are drawn as steady-state
+        residual lifetime to simulate a live cluster snapshot. Replicas and
+        priority are drawn from the configured truncated geometric-like
+        distributions.
         """
         assert self.alpha_req is not None and self.alpha_life is not None
 
         target_total = float(self.args.target_util) * float(self.args.num_nodes)
-        tol = float(INITIAL_PODS_UTIL_TOLERANCE)
-
         cur_total = 0.0
         pods: List[TraceRecord] = []
 
-        while cur_total < target_total * (1.0 - tol):
-            if len(pods) >= int(INITIAL_MAX_PODS):
-                LOG.warning("[snapshot] hit initial-max-pods=%d; stopping at util=%.3f",
-                            int(INITIAL_MAX_PODS), cur_total / float(self.args.num_nodes))
+        while cur_total < target_total * (1.0 - tolerance):
+            if len(pods) >= max_pods:
+                LOG.warning("[initial-pods] hit initial-max-pods=%d; stopping at util=%.3f",
+                            max_pods, cur_total / float(self.args.num_nodes))
                 break
 
-            req = float(self.sample_bounded_pareto(
+            request = float(self.sample_bounded_pareto(
                 rng,
                 alpha=float(self.alpha_req),
                 x_min=float(self.args.xmin_req),
@@ -794,8 +870,8 @@ class TraceGenerator:
                 size=1,
             )[0])
 
-            # sample steady-state residual life (equilibrium remaining lifetime)
-            life = float(self.sample_steady_state_residual_life(
+            # sample steady-state residual lifetime (equilibrium remaining lifetime)
+            lifetime = float(self.sample_steady_state_residual_lifetime(
                 rng,
                 alpha=float(self.alpha_life),
                 x_min=float(self.args.xmin_life),
@@ -803,38 +879,38 @@ class TraceGenerator:
                 size=1,
             )[0])
 
-            if life <= 1e-9:
+            if lifetime <= 1e-9:
                 continue
 
-            reps = int(rng.choice(rep_vals, p=rep_probs))
-            prio = int(rng.choice(prio_vals, p=prio_probs))
+            replicas = int(rng.choice(replicas_vals, p=replicas_probs))
+            priority = int(rng.choice(priority_vals, p=priority_probs))
 
-            cur_total += reps * req
+            cur_total += replicas * request
             next_id += 1
             pods.append(TraceRecord(
                 id=next_id,
                 start_time=0.0,
-                end_time=round(life, MAX_DECIMALS),
-                cpu=round(req, MAX_DECIMALS),
-                mem=round(req, MAX_DECIMALS),
-                priority=prio,
-                replicas=reps,
+                end_time=round(lifetime, MAX_DECIMALS),
+                cpu=round(request, MAX_DECIMALS),
+                mem=round(request, MAX_DECIMALS),
+                priority=priority,
+                replicas=replicas,
             ))
 
-        # small overshoot cleanup
-        while pods and cur_total > target_total * (1.0 + tol):
+        # Overshoot cleanup: remove last pod(s) until within tolerance
+        while pods and cur_total > target_total * (1.0 + tolerance):
             last = pods.pop()
             cur_total -= float(last.replicas) * float(last.cpu)
             next_id -= 1
 
-        LOG.info("[snapshot] pods=%d util=%.3f (target=%.3f tol=±%.3f)",
+        LOG.info("[initial-pods] pods=%d util=%.3f (target=%.3f tol=±%.3f)",
                  len(pods), cur_total / float(self.args.num_nodes),
-                 float(self.args.target_util), tol)
+                 float(self.args.target_util), tolerance)
 
         return pods, next_id
 
     @staticmethod
-    def sample_steady_state_residual_life(
+    def sample_steady_state_residual_lifetime(
         rng: np.random.Generator,
         *,
         alpha: float,
@@ -853,15 +929,14 @@ class TraceGenerator:
             f_{X*}(x) ∝ x f_X(x).
         2) Given X* = x, draw R ~ Uniform(0, x).
 
-        For the bounded Pareto used here, f_X(x) ∝ x^(-(\alpha+1)) on [x_min,
+        For the bounded Pareto used here, f_X(x) ∝ x^(-(alpha+1)) on [x_min,
         x_max], so the length-biased density simplifies to f_{X*}(x) ∝
-        x^(-\alpha). This function samples X* via an inverse-CDF construction
-        (with the \alpha=1 logarithmic special case) and then samples R
-        uniformly in [0, X*]. Using R instead of fresh X avoids a startup
-        transient where many pods would otherwise end quickly right after t=0.
-        With heavy tails (Pareto-like), the length bias intentionally
-        over-represents long lives, which matches what a real "live cluster"
-        snapshot tends to contain.
+        x^(-alpha). This function samples X* via an inverse-CDF construction
+        (with the alpha=1 logarithmic special case) and then samples R uniformly
+        in [0, X*]. Using R instead of fresh X avoids a startup transient where
+        many pods would otherwise end quickly right after t=0. With heavy tails
+        (Pareto-like), the length bias intentionally over-represents long lives,
+        which matches what a real "live cluster" snapshot tends to contain.
         """
         if not (alpha > 0 and x_min > 0 and x_max > x_min):
             raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
@@ -887,9 +962,10 @@ class TraceGenerator:
         return x_star * (1.0 - v)
 
     # -------------------------------------------------------------------------
-    # Trace events
+    # Generate trace pod events
     # -------------------------------------------------------------------------
-    def generate_trace_events(
+    
+    def generate_trace_pod_events(
         self,
         rng: np.random.Generator,
         *,
@@ -901,7 +977,14 @@ class TraceGenerator:
         initial_pods: List[TraceRecord],
     ) -> Tuple[List[TraceRecord], int, List[float], List[float], List[int]]:
         """
-        Generate trace pod events after initial snapshot.
+        Generate trace pod events over the trace horizon.
+        
+        We first initialize the cluster state with the initial pods. Then we
+        repeatedly sample inter-arrival times to get pod start times. At each
+        start time, we process any pod terminations that have occurred up to
+        that time, then sample a new pod (request size, lifetime, replicas,
+        priority) and add it to the cluster state. We continue until the trace
+        horizon is reached.
         """
         assert self.alpha_req is not None and self.alpha_arrival is not None and self.alpha_life is not None
 
@@ -909,11 +992,11 @@ class TraceGenerator:
         end_heap: List[EndHeapEntry] = []
 
         for p in initial_pods:
-            req = float(p.cpu)
-            reps = int(p.replicas)
-            state.live_req += reps * req
-            state.live_pods += reps
-            heapq.heappush(end_heap, EndHeapEntry(end_time=float(p.end_time), req=req, replicas=reps))
+            request = float(p.cpu)
+            replicas = int(p.replicas)
+            state.live_req += replicas * request
+            state.live_pods += replicas
+            heapq.heappush(end_heap, EndHeapEntry(end_time=float(p.end_time), req=request, replicas=replicas))
 
         pods: List[TraceRecord] = []
 
@@ -935,21 +1018,22 @@ class TraceGenerator:
             if start >= self.trace_time_s:
                 break
 
+            # Process terminations up to start time: remove from heap and update state
             while end_heap and end_heap[0].end_time <= start:
                 entry = heapq.heappop(end_heap)
                 state.live_req = max(0.0, state.live_req - entry.req * entry.replicas)
                 state.live_pods = max(0, state.live_pods - entry.replicas)
 
-            life = float(self.sample_bounded_pareto(
+            lifetime = float(self.sample_bounded_pareto(
                 rng,
                 alpha=float(self.alpha_life),
                 x_min=float(self.args.xmin_life),
                 x_max=float(self.args.xmax_life),
                 size=1,
             )[0])
-            end = start + life
+            end = start + lifetime
 
-            req = float(self.sample_bounded_pareto(
+            request = float(self.sample_bounded_pareto(
                 rng,
                 alpha=float(self.alpha_req),
                 x_min=float(self.args.xmin_req),
@@ -957,67 +1041,72 @@ class TraceGenerator:
                 size=1,
             )[0])
 
-            reps = int(rng.choice(rep_vals, p=rep_probs))
-            prio = int(rng.choice(prio_vals, p=prio_probs))
+            replicas = int(rng.choice(rep_vals, p=rep_probs))
+            priority = int(rng.choice(prio_vals, p=prio_probs))
 
-            state.live_req += reps * req
-            state.live_pods += reps
-            heapq.heappush(end_heap, EndHeapEntry(end_time=end, req=req, replicas=reps))
+            # Add new pod to state and end-heap
+            state.live_req += replicas * request
+            state.live_pods += replicas
+            heapq.heappush(end_heap, EndHeapEntry(end_time=end, req=request, replicas=replicas))
 
+            # Record new pod
             next_id += 1
             pods.append(TraceRecord(
                 id=next_id,
                 start_time=round(start, MAX_DECIMALS),
                 end_time=round(end, MAX_DECIMALS),
-                cpu=round(req, MAX_DECIMALS),
-                mem=round(req, MAX_DECIMALS),
-                priority=prio,
-                replicas=reps,
+                cpu=round(request, MAX_DECIMALS),
+                mem=round(request, MAX_DECIMALS),
+                priority=priority,
+                replicas=replicas,
             ))
-
             times.append(start)
             u_hist.append(state.live_req / float(self.args.num_nodes))
             pods_hist.append(state.live_pods)
 
+            # Advance time
             t = start
 
         return pods, next_id, times, u_hist, pods_hist
 
     # -------------------------------------------------------------------------
-    # One generation pass
+    # Make trace: one generation pass
     # -------------------------------------------------------------------------
-    def generate_once(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], float, Dict[str, object]]:
+    
+    def make_trace(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], float, Dict[str, object]]:
         """
-        Generate one initial + trace pod set with given iteration seed.
+        Make one trace generation pass: initial snapshot + trace events.
+        It also computes the time-averaged requested CPU utilization over the
+        trace horizon and provides extra info about the generation.
         """
         rng_initial = np.random.default_rng(derive_seed(iter_seed, "initial-snapshot"))
         rng_trace = np.random.default_rng(derive_seed(iter_seed, "trace-events"))
 
         self.fit_pareto_alphas()
 
-        prio_vals, prio_probs = self.build_trunc_geometric_support(
+        priority_vals, priority_probs = self.build_trunc_geometric_support(
             int(self.args.priority_min),
             int(self.args.priority_max),
             float(self.args.priority_ratio),
         )
-        rep_vals, rep_probs = self.build_trunc_geometric_support(
+        replicas_vals, replicas_probs = self.build_trunc_geometric_support(
             int(self.args.replicas_min),
             int(self.args.replicas_max),
             float(self.args.replicas_ratio),
         )
 
         next_id = 0
-        initial_pods, next_id = self.build_initial_snapshot(
+        initial_pods, next_id = self.generate_initial_pods(
             rng_initial,
-            prio_vals=prio_vals, prio_probs=prio_probs,
-            rep_vals=rep_vals, rep_probs=rep_probs,
+            priority_vals=priority_vals, priority_probs=priority_probs,
+            replicas_vals=replicas_vals, replicas_probs=replicas_probs,
             next_id=next_id,
         )
 
-        trace_pods, next_id, times, u_hist, pods_hist = self.generate_trace_events(
+        trace_pods, next_id, times, u_hist, pods_hist = self.generate_trace_pod_events(
             rng_trace,
-            prio_vals=prio_vals, prio_probs=prio_probs,
-            rep_vals=rep_vals, rep_probs=rep_probs,
+            prio_vals=priority_vals, prio_probs=priority_probs,
+            rep_vals=replicas_vals, rep_probs=replicas_probs,
             next_id=next_id,
             initial_pods=initial_pods,
         )
@@ -1028,9 +1117,9 @@ class TraceGenerator:
         self.initial_pods_count = int(sum(int(p.replicas) for p in initial_pods))
 
         all_pods = initial_pods + trace_pods
-        util = float(self.time_avg_req_util(all_pods))
+        util = float(self.time_mean_req_util(all_pods))
 
-        max_prio = max((int(p.priority) for p in all_pods), default=0)
+        max_priority = max((int(p.priority) for p in all_pods), default=0)
 
         extra_info: Dict[str, object] = {
             "num_nodes": int(self.args.num_nodes),
@@ -1043,11 +1132,11 @@ class TraceGenerator:
                     "trace_events": int(derive_seed(iter_seed, "trace-events")),
                 },
             },
-            "measured_util_time_avg": float(util),
-            "target_util_time_avg": float(self.args.target_util),
+            "measured_util_time_mean": float(util),
+            "target_util_time_mean": float(self.args.target_util),
             "calibration": {
                 "util_tol": float(MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE),
-                "calib_max_iter": int(MEAN_LIFE_CALIBRATION_MAX_ITER),
+                "calib_max_iter": int(MEAN_LIFE_CALIBRATION_MAX_ITERATIONS),
                 "initial_fill_tol": float(INITIAL_PODS_UTIL_TOLERANCE),
                 "initial_max_pods": int(INITIAL_MAX_PODS),
             },
@@ -1065,7 +1154,7 @@ class TraceGenerator:
                 "initial_replicas_total": int(sum(int(p.replicas) for p in initial_pods)),
                 "trace_replicas_total": int(sum(int(p.replicas) for p in trace_pods)),
             },
-            "max_priority_seen": int(max_prio),
+            "max_priority_seen": int(max_priority),
             "files": {
                 "initial_json": str(self.initial_path),
                 "trace_json": str(self.trace_path),
@@ -1077,45 +1166,83 @@ class TraceGenerator:
         return initial_pods, trace_pods, util, extra_info
 
     # -------------------------------------------------------------------------
-    # Calibration
+    # Calibrate mean-life to hit target utilization
     # -------------------------------------------------------------------------
-    def calibrate_mean_life(self) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
+    
+    def calibrate_mean_lifetime(
+        self,
+        tolerance=float(MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE),
+        max_iterations=int(MEAN_LIFE_CALIBRATION_MAX_ITERATIONS),
+    ) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
         """
-        Calibrate mean-life to hit target utilization within tolerance.
+          Calibrate args.mean_life to match the requested target utilization.
+
+          Goal - Adjust the bounded-Pareto mean lifetime parameter
+          (args.mean_life) so that the generated trace's time-mean requested CPU
+          utilization (as computed by time_mean_req_util) matches
+          args.target_util within the configured tolerance.
+
+          How it works:
+          
+            1) Fix a single iteration seed (CRN: common random
+            numbers) and reuse it for every calibration step. This keeps the
+            randomness aligned across iterations so that changes in measured
+            utilization mostly reflect the change in mean_lifetime rather than
+            new RNG noise.
+            
+            2) For each iteration, generate one full trace realization via
+               make_trace and measure utilization.
+            
+            3) Compute relative error err = |measured - target| / target.
+            
+            4) If within tolerance, stop and return the best trace seen.
+            
+            5) Otherwise update mean_life with a proportional rule:
+                    mean_lifetime <- mean_lifetime * (target / measured)
+              Intuition: if utilization is too low, increase lifetimes (pods
+              live longer) to raise average load; if too high, decrease
+              lifetimes.
+          
+          6) Clamp the updated mean to stay strictly within (xmin_life,
+             xmax_life) (with small margins) so the bounded-Pareto solver
+             remains valid.
+
+          Returns
+                (best_initial_pods, best_trace_pods, best_extra) for the closest
+                iteration encountered (including one that meets tolerance).
         """
         target = float(self.args.target_util)
-        tol = float(MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE)
 
         # fixed seed across iterations (CRN => stable updates)
-        iter_seed = int(derive_seed(self.base_seed, "calibrate-mean-life-crn"))
+        iteration_seed = int(derive_seed(self.base_seed, "calibrate-mean-life-crn"))
 
-        best_err = float("inf")
+        best_error = float("inf")
         best_initial: List[TraceRecord] = []
         best_trace: List[TraceRecord] = []
         best_extra: Dict[str, object] = {}
 
-        for it in range(1, int(MEAN_LIFE_CALIBRATION_MAX_ITER) + 1):
-            initial_pods, trace_pods, measured, extra = self.generate_once(iter_seed)
+        for it in range(1, max_iterations + 1):
+            initial_pods, trace_pods, measured, extra = self.make_trace(iteration_seed)
 
             err = abs(measured - target) / max(1e-12, target)
-            if err < best_err:
-                best_err = err
+            if err < best_error:
+                best_error = err
                 best_initial, best_trace, best_extra = initial_pods, trace_pods, extra
 
             LOG.info(
-                "[calibrate-mean-life] iter=%d measured=%.4f target=%.4f rel_err=%.2f%% mean_life=%.3fs",
+                "[calibrate-mean-life] iteration=%d measured=%.4f target=%.4f rel_err=%.2f%% mean_life=%.3fs",
                 it, measured, target, 100.0 * err, float(self.args.mean_life),
             )
 
-            if err <= tol:
+            if err <= tolerance:
                 return best_initial, best_trace, best_extra
-
             if measured <= 1e-12:
                 raise RuntimeError("Measured utilization is ~0; cannot calibrate mean-life.")
 
-            # proportional update
+            # Proportional update
             new_mean = float(self.args.mean_life) * (target / measured)
 
+            # Clamp to (xmin, xmax) with small margins
             xmin = float(self.args.xmin_life)
             xmax = float(self.args.xmax_life)
             new_mean = max(new_mean, xmin * 1.001)
@@ -1123,14 +1250,30 @@ class TraceGenerator:
 
             self.args.mean_life = float(new_mean)
 
-        LOG.warning("[calibrate-mean-life] did not reach util-tol; best rel_err=%.2f%%", 100.0 * best_err)
+        LOG.warning("[calibrate-mean-life] did not reach util-tolerance; best error=%.2f%%", 100.0 * best_error)
         return best_initial, best_trace, best_extra
 
     # -------------------------------------------------------------------------
-    # Output
+    # Write outputs: JSON and info YAML
     # -------------------------------------------------------------------------
+
+    def write_outputs(self, initial_pods: List[TraceRecord], trace_pods: List[TraceRecord], extra_info: Dict[str, object]) -> None:
+        """
+        Write output files: initial JSON, trace JSON, info YAML.
+        """
+        all_pods = initial_pods + trace_pods
+        util_time = self.time_mean_req_util(all_pods)
+
+        self.pods_to_json(self.initial_path, initial_pods)
+        self.pods_to_json(self.trace_path, trace_pods)
+
+        LOG.info("[utilization] util-time-mean over whole trace: %.4f (target=%.4f)",
+                 float(util_time), float(self.args.target_util))
+
+        self.write_info_file(extra=extra_info)
+
     @staticmethod
-    def write_json(path: Path, pods: List[TraceRecord]) -> None:
+    def pods_to_json(path: Path, pods: List[TraceRecord]) -> None:
         """
         Write pods to a JSON file at the given path.
         """
@@ -1139,20 +1282,20 @@ class TraceGenerator:
             json.dump(obj, f, indent=2)
         LOG.info("wrote %s (%d records)", path, len(pods))
 
-    def write_outputs(self, initial_pods: List[TraceRecord], trace_pods: List[TraceRecord], extra_info: Dict[str, object]) -> None:
+    def write_info_file(self, extra: Dict[str, object]) -> None:
         """
-        Write output files: initial JSON, trace JSON, info YAML.
+        Write info_generate.yaml with inputs + generated params.
         """
-        all_pods = initial_pods + trace_pods
-        util_time = self.time_avg_req_util(all_pods)
-
-        self.write_json(self.initial_path, initial_pods)
-        self.write_json(self.trace_path, trace_pods)
-
-        LOG.info("[utilization] util-time-avg over whole trace: %.4f (target=%.4f)",
-                 float(util_time), float(self.args.target_util))
-
-        self.write_info_file(extra=extra_info)
+        try:
+            inputs = {
+                "cli-cmd": build_cli_cmd(),
+                "args": {k: v for k, v in vars(self.args).items()},
+                "generated": extra,
+            }
+            write_info_file(self.info_path, inputs=inputs, logger=LOG)
+            LOG.info("wrote %s", self.info_path)
+        except Exception as e:
+            LOG.warning("failed to write info_generate.yaml: %s", e)
 
     # -------------------------------------------------------------------------
     # Runner
@@ -1160,7 +1303,7 @@ class TraceGenerator:
     
     def run_seed(self) -> None:
         """
-        Run a single seed instance.
+        Run one seeded experiment and generate outputs + plots.
         """
         if self.args.mean_life is None:
             self.args.mean_life = self.infer_mean_life_from_target_util()
@@ -1170,10 +1313,10 @@ class TraceGenerator:
                 float(self.args.target_util),
             )
 
-            initial_pods, trace_pods, extra_info = self.calibrate_mean_life()
+            initial_pods, trace_pods, extra_info = self.calibrate_mean_lifetime()
         else:
-            iter_seed = int(derive_seed(self.base_seed, "provided-mean-life"))
-            initial_pods, trace_pods, measured, extra_info = self.generate_once(iter_seed)
+            iteration_seed = int(derive_seed(self.base_seed, "provided-mean-life"))
+            initial_pods, trace_pods, measured, extra_info = self.make_trace(iteration_seed)
             extra_info.setdefault("calibration", {})
             extra_info["calibration"].update({"mode": "skipped", "reason": "mean_life_provided", "iterations": 1})
             LOG.info(
@@ -1233,13 +1376,17 @@ class TraceGenerator:
             )
             LOG.info("\n%s\nseed=%d output_dir=%s\n%s", header, int(a.seed), str(a.output_dir), footer)
 
-            # Per-seed run instance: resolved args, no re-logging of full ARGS block.
-            gen = TraceGenerator.__new__(TraceGenerator)
             setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=a.log_level)
-            gen.init_from_args(a, create_figures_dir=True, log_args=False)
+            gen = TraceGenerator(
+                a,
+                resolved=True,
+                create_figures_dir=True,
+                log_args=False,
+                setup_logger=False,
+            )
             gen.run_seed()
-
-        LOG.info("done.")
+        header, footer = make_header_footer("DONE")
+        LOG.info("\n%s\n%s\n%s", header, "All runs complete.", footer)
 
 # -----------------------------------------------------------------------------
 # Main
