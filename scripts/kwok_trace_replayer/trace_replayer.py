@@ -587,6 +587,8 @@ class TraceReplayer:
         """
         events: List[Event] = []
 
+        start_delay = float(getattr(self.args, "start_delay", 0.0) or 0.0)
+
         # Initial pods are created up-front by apply_initial_workload().
         # Schedule their deletions here so they don't persist forever.
         for p in self.initial_pods:
@@ -602,7 +604,7 @@ class TraceReplayer:
 
             events.append(
                 Event(
-                    sim_time_s=float(p.start_time),
+                    sim_time_s=start_delay + float(p.start_time),
                     kind="create",
                     record_id=p.id,
                     cpu_str=cpu_str,
@@ -611,10 +613,15 @@ class TraceReplayer:
                     replicas=replicas,
                 )
             )
-            events.append(Event(sim_time_s=float(p.end_time), kind="delete", record_id=p.id))
+            events.append(Event(sim_time_s=start_delay + float(p.end_time), kind="delete", record_id=p.id))
 
-        events.sort(key=lambda e: (e.sim_time_s, 0 if e.kind == "create" else 1))
+        # At identical timestamps, process deletes first to free capacity.
+        events.sort(key=lambda e: (e.sim_time_s, 0 if e.kind == "delete" else 1))
         self.events = events
+
+        # Ensure replay horizon covers any start_delay offset.
+        if events:
+            self.trace_time_s = max(float(self.trace_time_s), max(float(e.sim_time_s) for e in events))
         LOG.info(
             "built %d events (initial_deletes=%d, trace_pods=%d)",
             len(events),
@@ -729,8 +736,13 @@ class TraceReplayer:
                 if sleep_s > 0:
                     self.clock.sleep(sleep_s)
 
-                creates = [ev for ev in batch_events if ev.kind == "create"]
                 deletes = [ev for ev in batch_events if ev.kind == "delete"]
+                creates = [ev for ev in batch_events if ev.kind == "create"]
+
+                for ev in deletes:
+                    rs_name = self.rs_name_for_record(ev.record_id)
+                    LOG.info("DELETE @ sim_t=%.3f: rs=%s (id=%d)", ev.sim_time_s, rs_name, ev.record_id)
+                    futures.append(executor.submit(delete_rs, LOG, self.ctx, namespace, rs_name))
 
                 for ev in creates:
                     assert ev.cpu_str is not None and ev.mem_str is not None and ev.pc_name is not None
@@ -754,11 +766,6 @@ class TraceReplayer:
                         ev.pc_name,
                     )
                     futures.append(executor.submit(kubectl_apply_yaml, LOG, self.ctx, yaml_text))
-
-                for ev in deletes:
-                    rs_name = self.rs_name_for_record(ev.record_id)
-                    LOG.info("DELETE @ sim_t=%.3f: rs=%s (id=%d)", ev.sim_time_s, rs_name, ev.record_id)
-                    futures.append(executor.submit(delete_rs, LOG, self.ctx, namespace, rs_name))
 
             # Align to end
             target_wall_end = trace_start_wall + trace_end_s
@@ -1064,6 +1071,10 @@ class TraceReplayer:
             # 1) Apply initial workload now
             self.apply_initial_workload(self.args.namespace)
 
+            # Anchor sim_time_s=0 at the moment the initial workload has been applied.
+            # start_delay is modeled as an offset applied only to trace pod events.
+            trace_start_wall = float(self.clock.time())
+
             # 2) Start monitor ONLY AFTER initial load has been applied
             monitor_thread = threading.Thread(
                 target=self.monitor_loop,
@@ -1078,16 +1089,7 @@ class TraceReplayer:
             )
             monitor_thread.start()
 
-            # 3) Start-delay (wall time)
-            start_delay = float(self.args.start_delay or 0.0)
-            if start_delay > 0:
-                LOG.info("start-delay: sleeping %.3fs before trace replay", start_delay)
-                self.clock.sleep(start_delay)
-
-            # Trace starts after delay
-            trace_start_wall = float(self.clock.time())
-
-            # 4) Replay trace aligned so sim_time 0 happens at trace_start_wall
+            # 3) Replay trace aligned so sim_time 0 happens at trace_start_wall
             self.replay_trace_events(namespace=self.args.namespace, trace_start_wall=trace_start_wall)
 
         finally:

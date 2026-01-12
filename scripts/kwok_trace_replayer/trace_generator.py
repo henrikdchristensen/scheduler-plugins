@@ -491,7 +491,7 @@ class TraceGenerator:
         Because of monotonicity, we can solve for alpha with bisection:
         1) Validate that target_mean is achievable (x_min < target_mean < mean_max).
         2) Bracket the root by growing an upper bound hi until mean(hi) <= target_mean.
-        3) Bisect until the mean matches target_mean within a relative tolerance.
+        3) Bisection until the mean matches target_mean within a relative tolerance.
         """
         if not (x_min > 0 and x_max > x_min):
             raise ValueError("Require x_min>0 and x_max>x_min")
@@ -879,6 +879,9 @@ class TraceGenerator:
                 size=1,
             )[0])
 
+            # Ensure initial pods are not shorter than MIN_LIFETIME_S.
+            lifetime = max(float(lifetime), float(MIN_LIFETIME_S))
+
             if lifetime <= 1e-9:
                 continue
 
@@ -1020,9 +1023,18 @@ class TraceGenerator:
 
             # Process terminations up to start time: remove from heap and update state
             while end_heap and end_heap[0].end_time <= start:
-                entry = heapq.heappop(end_heap)
-                state.live_req = max(0.0, state.live_req - entry.req * entry.replicas)
-                state.live_pods = max(0, state.live_pods - entry.replicas)
+                end_t = float(end_heap[0].end_time)
+                # Pop all terminations at this same end time.
+                while end_heap and float(end_heap[0].end_time) == end_t:
+                    entry = heapq.heappop(end_heap)
+                    state.live_req = max(0.0, state.live_req - entry.req * entry.replicas)
+                    state.live_pods = max(0, state.live_pods - entry.replicas)
+
+                # Record utilization at the termination boundary.
+                if end_t <= self.trace_time_s and end_t >= times[-1]:
+                    times.append(end_t)
+                    u_hist.append(state.live_req / float(self.args.num_nodes))
+                    pods_hist.append(state.live_pods)
 
             lifetime = float(self.sample_bounded_pareto(
                 rng,

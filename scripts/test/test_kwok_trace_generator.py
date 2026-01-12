@@ -736,10 +736,13 @@ def test_generate_trace_pod_events_and_pops_end_heap(tmp_path: Path, monkeypatch
         initial_pods=initial_pods,
     )
 
-    assert len(pods) == 2
-    assert times == pytest.approx([0.0, 1.0, 2.0])
+    # Expect recorded points at initial t=0, termination at 0.5,
+    # arrival at 1.0, termination at 1.5, arrival at 2.0.
+    assert times == pytest.approx([0.0, 0.5, 1.0, 1.5, 2.0])
     assert len(u_hist) == len(times)
-    assert pods_hist == [1, 1, 1]
+    # Initial pod ends at 0.5 => pods drop to 0.
+    # The first generated pod ends at 1.5 (life=0.5), then the second arrives at 2.0.
+    assert pods_hist == [1, 0, 1, 0, 1]
 
 
 # ---------------------------------------------------------------------------

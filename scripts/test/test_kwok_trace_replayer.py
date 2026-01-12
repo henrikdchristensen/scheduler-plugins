@@ -523,7 +523,7 @@ def test_build_trace_events_creates_sorted_create_delete_pairs(tmp_path: Path, m
     rp.node_cpu_m = 1000
     rp.node_mem_b = 1000
     rp.trace_pods = [
-        tr.TraceRecord(id=1, start_time=1.0, end_time=1.0, cpu=0.0, mem=0.0, priority=2, replicas=0),
+        tr.TraceRecord(id=1, start_time=1.0, end_time=2.0, cpu=0.0, mem=0.0, priority=2, replicas=0),
     ]
 
     monkeypatch.setattr(tr, "qty_to_mcpu_str", lambda m: f"{m}m")
@@ -536,6 +536,50 @@ def test_build_trace_events_creates_sorted_create_delete_pairs(tmp_path: Path, m
     assert rp.events[0].cpu_str == "1m"
     assert rp.events[0].mem_str == "1"
     assert rp.events[0].replicas == 1
+
+
+def test_build_trace_events_applies_start_delay_only_to_trace_events(tmp_path: Path, monkeypatch):
+    rp, *_ = mk_replayer(tmp_path, monkeypatch)
+    rp.node_cpu_m = 1000
+    rp.node_mem_b = 1000
+    rp.args.start_delay = 5.0
+
+    # Initial pod delete should NOT be shifted.
+    rp.initial_pods = [tr.TraceRecord(id=10, start_time=0.0, end_time=3.0, cpu=0.1, mem=0.1, priority=1, replicas=1)]
+    # Trace pod events SHOULD be shifted by start_delay.
+    rp.trace_pods = [tr.TraceRecord(id=1, start_time=1.0, end_time=2.0, cpu=0.0, mem=0.0, priority=2, replicas=0)]
+
+    monkeypatch.setattr(tr, "qty_to_mcpu_str", lambda m: f"{m}m")
+    monkeypatch.setattr(tr, "qty_to_bytes_str", lambda b: f"{b}")
+
+    rp.build_trace_events()
+
+    kinds_times = [(e.kind, e.sim_time_s, e.record_id) for e in rp.events]
+    # initial delete at t=3.0
+    assert ("delete", pytest.approx(3.0), 10) in kinds_times
+    # trace create/delete shifted by +5.0
+    assert ("create", pytest.approx(6.0), 1) in kinds_times
+    assert ("delete", pytest.approx(7.0), 1) in kinds_times
+
+
+def test_build_trace_events_sorts_deletes_before_creates_at_same_time(tmp_path: Path, monkeypatch):
+    rp, *_ = mk_replayer(tmp_path, monkeypatch)
+    rp.node_cpu_m = 1000
+    rp.node_mem_b = 1000
+    rp.args.start_delay = 0.0
+
+    # Make an initial delete and a trace create land at the same sim time.
+    rp.initial_pods = [tr.TraceRecord(id=9, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=1)]
+    rp.trace_pods = [tr.TraceRecord(id=1, start_time=1.0, end_time=2.0, cpu=0.0, mem=0.0, priority=2, replicas=0)]
+
+    monkeypatch.setattr(tr, "qty_to_mcpu_str", lambda m: f"{m}m")
+    monkeypatch.setattr(tr, "qty_to_bytes_str", lambda b: f"{b}")
+
+    rp.build_trace_events()
+    assert rp.events[0].sim_time_s == pytest.approx(1.0)
+    assert rp.events[1].sim_time_s == pytest.approx(1.0)
+    assert rp.events[0].kind == "delete"
+    assert rp.events[1].kind == "create"
 
 
 # ---------------------------------------------------------------------------
