@@ -1,0 +1,12 @@
+trace-dir: data/traces/nodes16_prio1_arrival16
+result-dir: results/plugin/nodes16_prio1_arrival16_modeinterlude2_nonblocking
+kwokctl-config-file: data/configs-kwokctl/plugin-scheduler.yaml
+override-kwokctl-envs:
+  - name: SOLVER_PYTHON_TIMEOUT
+    value: 16s
+  - name: OPTIMIZE_MODE
+    value: interlude
+  - name: OPTIMIZE_BLOCKING_SOLVING
+    value: "false"
+  - name: OPTIMIZE_INTERLUDE_DELAY
+    value: 2s
