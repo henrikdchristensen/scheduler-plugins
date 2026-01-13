@@ -19,6 +19,8 @@ NOTE (initial pods / steady-state alignment):
     This avoids ramping from an empty cluster without explicitly simulating t<0 arrivals.
 """
 
+#TODO: make all initial pods lower than MIN_LIFETIME_S to MIN_LIFETIME_S
+
 import os, argparse, math, copy, heapq, json, logging, yaml
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -46,8 +48,8 @@ MAX_DECIMALS = 6
 
 MIN_LIFETIME_S = 2.0
 
-MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE = 0.01
-MEAN_LIFE_CALIBRATION_MAX_ITERATIONS = 20
+MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE = 0.01
+MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS = 20
 
 # Maximum initial pods to prevent runaway.
 MAX_INITIAL_PODS = 200_000
@@ -791,7 +793,7 @@ class TraceGenerator:
     # Mean-life inference and alpha fitting
     # -------------------------------------------------------------------------
 
-    def infer_mean_life_from_target_util(self) -> float:
+    def infer_mean_lifetime_from_target_util(self) -> float:
         """
         Infer an initial guess for mean pod lifetime from the target steady-state utilization.
 
@@ -1488,11 +1490,11 @@ class TraceGenerator:
             "measured_util_time_mean": float(util_eff),  # effective
             "target_util_time_mean": float(self.args.target_util),
             "calibration": {
-                "util_tol": float(MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE),
-                "calib_max_iter": int(MEAN_LIFE_CALIBRATION_MAX_ITERATIONS),
+                "util_tol": float(MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE),
+                "calib_max_iter": int(MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS),
                 "initial_max_pods": int(MAX_INITIAL_PODS),
             },
-            "derived_mean_life_s": round(float(self.args.mean_life), 6),
+            "derived_mean_lifetime_s": round(float(self.args.mean_life), 6),
             "pareto": {
                 "cpu": {"alpha": float(self.alpha_cpu), "xmin": float(self.args.xmin_cpu), "xmax": float(self.args.xmax_cpu), "mean": float(self.args.mean_cpu)},
                 "mem": {"alpha": float(self.alpha_mem), "xmin": float(self.args.xmin_mem), "xmax": float(self.args.xmax_mem), "mean": float(self.args.mean_mem)},
@@ -1524,8 +1526,8 @@ class TraceGenerator:
 
     def calibrate_mean_lifetime(
         self,
-        tolerance=float(MEAN_LIFE_CALIBRATION_UTIL_TOLERANCE),
-        max_iterations=int(MEAN_LIFE_CALIBRATION_MAX_ITERATIONS),
+        tolerance=float(MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE),
+        max_iterations=int(MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS),
     ) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
         """
         Calibrate args.mean_life to match the requested target utilization.
@@ -1651,7 +1653,7 @@ class TraceGenerator:
         Run one seeded experiment and generate outputs + plots.
         """
         if self.args.mean_life is None:
-            self.args.mean_life = self.infer_mean_life_from_target_util()
+            self.args.mean_life = self.infer_mean_lifetime_from_target_util()
             LOG.info(
                 "[inferred-mean-life] mean_life=%.3fs from target-util=%.3f",
                 float(self.args.mean_life),
@@ -1663,7 +1665,7 @@ class TraceGenerator:
             iteration_seed = int(derive_seed(self.base_seed, "provided-mean-life"))
             initial_pods, trace_pods, measured, extra_info = self.make_trace(iteration_seed)
             extra_info.setdefault("calibration", {})
-            extra_info["calibration"].update({"mode": "skipped", "reason": "mean_life_provided", "iterations": 1})
+            extra_info["calibration"].update({"mode": "skipped", "reason": "mean_lifetime_provided", "iterations": 1})
             LOG.info(
                 "[provided-mean-life] skipping calibration; measured=%.4f target=%.4f mean_life=%.3fs",
                 float(measured),

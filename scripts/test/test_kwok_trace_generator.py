@@ -626,7 +626,7 @@ def test_expected_value_handles_uniform_and_weighted():
 # Mean-life inference and alpha fitting
 # ---------------------------------------------------------------------------
 
-def test_infer_mean_life_from_target_util_happy_path(tmp_path: Path):
+def test_infer_mean_lifetime_from_target_util_happy_path(tmp_path: Path):
     args = make_required_args(
         tmp_path,
         num_nodes=2,
@@ -640,12 +640,12 @@ def test_infer_mean_life_from_target_util_happy_path(tmp_path: Path):
         xmax_life=100.0,
     )
     gen = tg.TraceGenerator(args)
-    mean_life = gen.infer_mean_life_from_target_util()
+    mean_life = gen.infer_mean_lifetime_from_target_util()
     assert mean_life > 0.0
     assert float(args.xmin_life) < mean_life < float(args.xmax_life)
 
 
-def test_infer_mean_life_from_target_util_raises_if_outside_bounds(tmp_path: Path):
+def test_infer_mean_lifetime_from_target_util_raises_if_outside_bounds(tmp_path: Path):
     # Too small => <= xmin-life
     args_small = make_required_args(
         tmp_path,
@@ -661,7 +661,7 @@ def test_infer_mean_life_from_target_util_raises_if_outside_bounds(tmp_path: Pat
     )
     gen_small = tg.TraceGenerator(args_small)
     with pytest.raises(ValueError):
-        gen_small.infer_mean_life_from_target_util()
+        gen_small.infer_mean_lifetime_from_target_util()
 
     # Too large => >= xmax-life
     args_big = make_required_args(
@@ -678,7 +678,7 @@ def test_infer_mean_life_from_target_util_raises_if_outside_bounds(tmp_path: Pat
     )
     gen_big = tg.TraceGenerator(args_big)
     with pytest.raises(ValueError):
-        gen_big.infer_mean_life_from_target_util()
+        gen_big.infer_mean_lifetime_from_target_util()
 
 
 def test_fit_pareto_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
