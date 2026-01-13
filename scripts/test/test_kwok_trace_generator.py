@@ -140,7 +140,7 @@ def test_init_from_args_creates_figures_dir(tmp_path: Path):
     assert gen.util_plot_path.name == "utilization.png"
     assert gen.hist_plot_path.name == "histograms.png"
     assert gen.times == []
-    assert gen.u_req_hist == []
+    assert gen.u_eff_hist == []
     assert gen.pods_hist == []
     assert gen.initial_pods_count == 0
 
@@ -895,7 +895,7 @@ def test_make_trace(tmp_path: Path, monkeypatch):
     assert util == pytest.approx(0.55)
 
     assert gen.times == times
-    assert gen.u_req_hist == u_hist
+    assert gen.u_eff_hist == u_hist
     assert gen.pods_hist == pods_hist
     assert gen.initial_pods_count == 2
 
@@ -1062,7 +1062,7 @@ def test_run_seed_infers_mean_life_writes_and_plots(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(gen, "write_outputs", lambda *_a, **_k: None)
 
     gen.times = [0.0]
-    gen.u_req_hist = [0.1]
+    gen.u_eff_hist = [0.1]
     gen.pods_hist = [1]
     gen.initial_pods_count = 1
 

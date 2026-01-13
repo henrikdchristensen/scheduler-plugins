@@ -143,7 +143,7 @@ def plot_utilization_and_num_pods(
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.22)
-    plt.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.savefig(out_path, bbox_inches="tight")
 
     if show_plots:
         plt.show()
@@ -166,9 +166,12 @@ def plot_generator_histograms(
     alpha_life: float,
     xmin_life: float,
     xmax_life: float | None,
-    alpha_req: float,
-    xmin_req: float,
-    xmax_req: float | None,
+    alpha_cpu: float,
+    xmin_cpu: float,
+    xmax_cpu: float | None,
+    alpha_mem: float,
+    xmin_mem: float,
+    xmax_mem: float | None,
     priority_ratio: float,
     priority_min: int,
     priority_max: int,
@@ -199,13 +202,13 @@ def plot_generator_histograms(
     prios = np.array([p.priority for p in pods_sorted], dtype=int)
     reps = np.array([p.replicas for p in pods_sorted], dtype=int)
 
-    fig, axes = plt.subplots(5, 1, figsize=(6, 10))
+    fig, axes = plt.subplots(6, 1, figsize=(6, 10))
     axes = axes.flatten()
 
     plot_histogram_with_pareto(
         axes[0],
         inter_arr,
-        title="Inter-arrival times (trace records)",
+        title="Inter-arrival times",
         x_label="Δt (seconds)",
         y_label="probability density",
         bins=80,
@@ -220,7 +223,7 @@ def plot_generator_histograms(
     plot_histogram_with_pareto(
         axes[1],
         lifetimes,
-        title="Lifetimes (all records)",
+        title="Lifetimes",
         x_label="lifetime (seconds)",
         y_label="probability density",
         bins=80,
@@ -235,20 +238,35 @@ def plot_generator_histograms(
     plot_histogram_with_pareto(
         axes[2],
         req_vals,
-        title="Requests (CPU = MEM)",
+        title="CPU requests",
         x_label="request (fraction of node capacity)",
         y_label="probability density",
         bins=80,
         log_y=True,
-        x_max=xmax_req,
+        x_max=xmax_cpu,
         scale=1.0,
         pareto_fit=True,
-        pareto_alpha=float(alpha_req),
-        pareto_xmin=float(xmin_req),
-        pareto_xmax=float(xmax_req) if xmax_req is not None else None,
+        pareto_alpha=float(alpha_cpu),
+        pareto_xmin=float(xmin_cpu),
+        pareto_xmax=float(xmax_cpu) if xmax_cpu is not None else None,
+    )
+    plot_histogram_with_pareto(
+        axes[3],
+        req_vals,
+        title="Memory requests",
+        x_label="request (fraction of node capacity)",
+        y_label="probability density",
+        bins=80,
+        log_y=True,
+        x_max=xmax_mem,
+        scale=1.0,
+        pareto_fit=True,
+        pareto_alpha=float(alpha_mem),
+        pareto_xmin=float(xmin_mem),
+        pareto_xmax=float(xmax_mem) if xmax_mem is not None else None,
     )
     plot_bar_with_geometric(
-        axes[3],
+        axes[4],
         prios,
         title="Priorities",
         x_label="priority",
@@ -259,10 +277,10 @@ def plot_generator_histograms(
         x_max=int(priority_max),
     )
     plot_bar_with_geometric(
-        axes[4],
+        axes[5],
         reps,
         title="Replicas",
-        x_label="replicas",
+        x_label="replicas", 
         y_label="probability mass",
         geom_fit=True,
         geom_ratio=float(replicas_ratio),
@@ -271,7 +289,7 @@ def plot_generator_histograms(
     )
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, bbox_inches="tight")
 
     if show_plots:
         plt.show()
