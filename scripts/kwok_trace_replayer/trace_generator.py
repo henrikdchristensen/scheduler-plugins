@@ -474,6 +474,53 @@ class TraceGenerator:
         return x_min * np.exp((-np.log(u)) / alpha)
 
     @staticmethod
+    def sample_steady_state_residual_lifetime(
+        rng: np.random.Generator,
+        *,
+        alpha: float,
+        x_min: float,
+        x_max: float,
+        size: int = 1,
+    ) -> np.ndarray:
+        """Sample the steady-state residual lifetime for a bounded Pareto.
+
+        In a renewal process observed at a random time, the *residual* lifetime R
+        (time remaining until completion) is not distributed as the original
+        lifetime X. Instead, X is size-biased and then R is uniform on [0, X].
+
+        For bounded Pareto with lifetime pdf f(x) ∝ x^{-(alpha+1)} on
+        [x_min, x_max], the size-biased lifetime has pdf g(x) ∝ x f(x) ∝ x^{-alpha}
+        on the same bounds.
+
+        Returns:
+            A numpy array of shape (size,) with values in [0, x_max].
+        """
+        if not (alpha > 0 and x_min > 0 and x_max > x_min):
+            raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
+        if not (isinstance(size, int) and size >= 1):
+            raise ValueError("Require size to be a positive int")
+
+        u = rng.random(size)
+
+        # Sample size-biased lifetime X with pdf ∝ x^{-alpha} on [x_min, x_max].
+        # CDF inversion:
+        #   alpha != 1: F(x) = (x^(1-alpha) - x_min^(1-alpha)) / (x_max^(1-alpha) - x_min^(1-alpha))
+        #   alpha == 1: F(x) = (ln x - ln x_min) / (ln x_max - ln x_min)
+        if abs(alpha - 1.0) < 1e-12:
+            log_min = math.log(x_min)
+            log_max = math.log(x_max)
+            x = np.exp(log_min + (log_max - log_min) * u)
+        else:
+            p = 1.0 - alpha
+            a = x_min ** p
+            b = x_max ** p
+            x = np.power(a + (b - a) * u, 1.0 / p)
+
+        # Given X, residual lifetime R is uniform on [0, X].
+        r = x * (1.0 - rng.random(size))
+        return r.astype(float)
+
+    @staticmethod
     def solve_alpha_for_bounded_mean(
         *,
         x_min: float,
@@ -854,60 +901,25 @@ class TraceGenerator:
         next_id: int,
         max_pods: int = INITIAL_WARMUP_MAX_PODS,
     ) -> Tuple[List[TraceRecord], int]:
-        """
-        Generate the initial snapshot by simulating a burn-in interval [−W, 0).
+        """Generate the initial snapshot at t=0.
 
-        We simulate arrivals using the same inter-arrival distribution as the
-        trace pods, sample fresh lifetimes and requests, and keep exactly those
-        pods whose end_time exceeds 0 (i.e., alive at the snapshot).
+        We generate a list of pods that are alive at the snapshot and aim for a
+        total requested CPU close to the target utilization.
 
-        Each returned initial pod has:
-          - start_time = 0.0
-          - end_time   = remaining lifetime at snapshot (original_end - 0)
+        Implementation notes:
+        - All returned pods have start_time = 0.0.
+        - end_time is a *residual* lifetime sampled from the steady-state
+          residual distribution (not the raw lifetime distribution).
+        - We add pods until we reach the target request, and if the last pod
+          causes an overshoot we pop it (and roll back next_id).
         """
         assert self.alpha_req is not None and self.alpha_life is not None and self.alpha_arrival is not None
 
-        warmup_s = self.compute_initial_warmup_time_s()
-        t = -warmup_s
-
         pods: List[TraceRecord] = []
+        total_req = 0.0
+        target_total_req = float(self.args.target_util) * float(self.args.num_nodes)
 
-        # (Optional) maintain a heap so we can keep a running "live" estimate during warm-up for logging.
-        state = ClusterState()
-        end_heap: List[EndHeapEntry] = []
-
-        def _pop_ended(up_to: float) -> None:
-            while end_heap and float(end_heap[0].end_time) <= up_to:
-                end_t = float(end_heap[0].end_time)
-                while end_heap and float(end_heap[0].end_time) == end_t:
-                    entry = heapq.heappop(end_heap)
-                    state.live_request = max(0.0, state.live_request - entry.request * entry.replicas)
-                    state.live_pods = max(0, state.live_pods - entry.replicas)
-
-        # Simulate arrivals until snapshot time 0
-        while t < 0.0:
-            dt = float(self.sample_bounded_pareto(
-                rng,
-                alpha=float(self.alpha_arrival),
-                x_min=float(self.args.xmin_arrival),
-                x_max=float(self.args.xmax_arrival),
-                size=1,
-            )[0])
-
-            start = t + dt
-            if start >= 0.0:
-                break
-
-            _pop_ended(start)
-
-            lifetime = float(self.sample_bounded_pareto(
-                rng,
-                alpha=float(self.alpha_life),
-                x_min=float(self.args.xmin_life),
-                x_max=float(self.args.xmax_life),
-                size=1,
-            )[0])
-
+        while total_req < target_total_req and len(pods) < int(max_pods):
             request = float(self.sample_bounded_pareto(
                 rng,
                 alpha=float(self.alpha_req),
@@ -916,54 +928,42 @@ class TraceGenerator:
                 size=1,
             )[0])
 
+            remaining = float(self.sample_steady_state_residual_lifetime(
+                rng,
+                alpha=float(self.alpha_life),
+                x_min=float(self.args.xmin_life),
+                x_max=float(self.args.xmax_life),
+                size=1,
+            )[0])
+            if remaining <= 0.0:
+                continue
+
             replicas = int(rng.choice(replicas_vals, p=replicas_probs))
             priority = int(rng.choice(priority_vals, p=priority_probs))
 
-            end = start + lifetime
+            next_id += 1
+            rec = TraceRecord(
+                id=next_id,
+                start_time=0.0,
+                end_time=round(remaining, MAX_DECIMALS),
+                cpu=round(request, MAX_DECIMALS),
+                mem=round(request, MAX_DECIMALS),
+                priority=priority,
+                replicas=replicas,
+            )
+            pods.append(rec)
+            total_req += float(rec.replicas) * float(rec.cpu)
 
-            # Track warm-up live state (for optional logging/diagnostics)
-            state.live_request += replicas * request
-            state.live_pods += replicas
-            heapq.heappush(end_heap, EndHeapEntry(end_time=end, request=request, replicas=replicas))
+            # If we overshoot, pop the last pod and roll back the id counter.
+            if total_req > target_total_req + 1e-12:
+                last = pods.pop()
+                total_req -= float(last.replicas) * float(last.cpu)
+                next_id -= 1
+                break
 
-            if end > 0.0:
-                # Pod is alive at snapshot. Keep remaining time in [0, lifetime).
-                remaining = float(end - 0.0)
-                if remaining <= 0.0:
-                    # numeric safety
-                    t = start
-                    continue
-
-                if len(pods) >= max_pods:
-                    LOG.warning(
-                        "[initial-pods] hit initial-max-pods=%d during warmup; truncating snapshot",
-                        max_pods,
-                    )
-                    break
-
-                next_id += 1
-                pods.append(TraceRecord(
-                    id=next_id,
-                    start_time=0.0,
-                    end_time=round(remaining, MAX_DECIMALS),
-                    cpu=round(request, MAX_DECIMALS),
-                    mem=round(request, MAX_DECIMALS),
-                    priority=priority,
-                    replicas=replicas,
-                ))
-
-            t = start
-
-        # Snapshot utilization estimate from kept records
-        total_req = float(sum(float(p.replicas) * float(p.cpu) for p in pods))
-        util = total_req / float(self.args.num_nodes)
-
+        util = total_req / float(self.args.num_nodes) if float(self.args.num_nodes) > 0 else 0.0
         LOG.info(
-            "[initial-pods] warmup_s=%.3f (trace_factor=%d meanlife_factor=%d) "
-            "records=%d util≈%.3f target=%.3f",
-            warmup_s,
-            INITIAL_WARMUP_TRACE_FACTOR,
-            INITIAL_WARMUP_MEAN_LIFE_FACTOR,
+            "[initial-pods] records=%d util≈%.3f target=%.3f",
             len(pods),
             util,
             float(self.args.target_util),
