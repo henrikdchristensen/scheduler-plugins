@@ -1,0 +1,3 @@
+trace-dir: data/traces/nodes8_prio4_arrival16
+result-dir: results/default/nodes8_prio4_arrival16
+kwokctl-config-file: data/configs-kwokctl/default.yaml
