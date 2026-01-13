@@ -2,7 +2,7 @@
 # trace_generator.py
 
 """
-python -m scripts.kwok_trace_replayer.trace_generator --job-file <job-file.yaml>
+python -m scripts.kwok_trace_replayer.trace_generator --job-dir data/jobs/kwok_trace_generator/
 
 High-level flow per seed:
   1) resolve args (CLI > job-file), validate (always bounded params)
@@ -93,6 +93,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # General
     p.add_argument("--job-file", dest="job_file", default=None,
                    help="Path to a YAML job file describing arguments. CLI overrides job file.")
+    p.add_argument(
+        "--job-dir",
+        dest="job_dir",
+        default=None,
+        help="Directory containing YAML job files; when set, all *.yaml/*.yml files are generated.",
+    )
     p.add_argument("--output-dir", dest="output_dir", default=None)
     p.add_argument("--seed", type=int, default=None, help="Run exactly this seed.")
     p.add_argument("--seed-file", dest="seed_file", default=None,
@@ -220,6 +226,45 @@ class TraceGenerator:
         return args
 
     @staticmethod
+    def expand_job_dir_runs(cli_args: argparse.Namespace) -> list[argparse.Namespace]:
+        """Expand a --job-dir invocation into one resolved args object per job file.
+
+        Each expanded run will:
+        - set job_file to the discovered YAML file
+        - resolve/merge/validate args against that job file
+        - place outputs under <output-dir>/<job-stem>/ to avoid collisions
+        """
+        if getattr(cli_args, "job_file", None) and getattr(cli_args, "job_dir", None):
+            raise SystemExit("--job-file and --job-dir cannot be used together")
+
+        job_dir = getattr(cli_args, "job_dir", None)
+        if not job_dir:
+            # Not in job-dir mode. Resolve single run normally.
+            return [TraceGenerator.resolve_args(cli_args)]
+
+        p = Path(job_dir).resolve()
+        if not p.exists() or not p.is_dir():
+            raise SystemExit(f"--job-dir must be an existing directory: {p}")
+
+        job_files = sorted(list(p.glob("*.yaml")) + list(p.glob("*.yml")))
+        if not job_files:
+            raise SystemExit(f"--job-dir contains no *.yaml/*.yml job files: {p}")
+
+        runs: list[argparse.Namespace] = []
+        for jf in job_files:
+            a = copy.copy(cli_args)
+            a.job_file = str(jf)
+            a.job_dir = None
+
+            resolved = TraceGenerator.resolve_args(a)
+
+            base_out = Path(resolved.output_dir)
+            resolved.output_dir = str(base_out / jf.stem)
+            runs.append(resolved)
+
+        return runs
+
+    @staticmethod
     def load_job_doc(path: str | Path) -> dict:
         """
         Load and parse a job YAML file.
@@ -300,6 +345,9 @@ class TraceGenerator:
         """
         missing: list[str] = []
 
+        if getattr(args, "job_file", None) and getattr(args, "job_dir", None):
+            raise SystemExit("--job-file and --job-dir cannot be used together")
+
         if getattr(args, "output_dir", None) is None:
             missing.append("output_dir")
 
@@ -368,6 +416,11 @@ class TraceGenerator:
             if not p.exists():
                 raise SystemExit(f"--job-file not found: {p}")
 
+        if getattr(args, "job_dir", None):
+            p = Path(args.job_dir).resolve()
+            if not p.exists() or not p.is_dir():
+                raise SystemExit(f"--job-dir must be an existing directory: {p}")
+
         if getattr(args, "seed_file", None):
             p = Path(args.seed_file).resolve()
             if not p.exists():
@@ -416,6 +469,7 @@ class TraceGenerator:
         """
         include = [
             "job_file",
+            "job_dir",
             "output_dir",
             "seed",
             "seed_file",
@@ -1412,6 +1466,27 @@ def main() -> None:
     if os.getenv("TRACE_GENERATOR_NOOP") == "1":
         return
     args = build_arg_parser().parse_args()
+
+    if getattr(args, "job_dir", None):
+        job_runs = TraceGenerator.expand_job_dir_runs(args)
+        total = len(job_runs)
+        for i, a in enumerate(job_runs, start=1):
+            header, footer = make_header_footer(
+                f"JOB {Path(a.job_file).name} ({i}/{total})" if total > 1 else f"JOB {Path(a.job_file).name}"
+            )
+            setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=a.log_level)
+            LOG.info("\n%s\njob_file=%s\noutput_dir=%s\n%s", header, str(a.job_file), str(a.output_dir), footer)
+
+            gen = TraceGenerator(
+                a,
+                resolved=True,
+                create_figures_dir=None,
+                log_args=True,
+                setup_logger=False,
+            )
+            gen.run()
+        return
+
     trace_generator = TraceGenerator(args)
     trace_generator.run()
 

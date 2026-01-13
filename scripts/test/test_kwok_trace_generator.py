@@ -400,10 +400,124 @@ def test_log_args_calls_log_args_block(tmp_path: Path, monkeypatch):
 
     assert seen["args"] is args
     assert seen["title"] == "ARGS"
-    assert seen["include"][:6] == ["job_file", "output_dir", "seed", "seed_file", "log_level", "show_plots"]
+    assert seen["include"][:7] == ["job_file", "job_dir", "output_dir", "seed", "seed_file", "log_level", "show_plots"]
     assert "xmax_arrival" in seen["include"]
     assert "xmax_life" in seen["include"]
     assert "target_util" in seen["include"]
+
+
+# ---------------------------------------------------------------------------
+# job-dir expansion
+# ---------------------------------------------------------------------------
+
+def test_expand_job_dir_runs_expands_yaml_files_and_names_output_subdirs(tmp_path: Path):
+    job_dir = tmp_path / "jobs"
+    job_dir.mkdir()
+
+    # Two simple job files; most required params come from the job.
+    (job_dir / "a.yaml").write_text(
+        """
+num-nodes: 2
+trace-time: 5s
+target-util: 0.75
+
+xmin-arrival: 0.1
+xmax-arrival: 10.0
+mean-arrival: 1.0
+
+xmin-life: 2.0
+xmax-life: 100.0
+mean-life: 10.0
+
+xmin-req: 0.1
+xmax-req: 1.0
+mean-req: 0.2
+
+priority-min: 1
+priority-max: 2
+priority-ratio: 1.0
+
+replicas-min: 1
+replicas-max: 2
+replicas-ratio: 1.0
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (job_dir / "b.yml").write_text(
+        """
+num-nodes: 3
+trace-time: 6s
+target-util: 0.8
+
+xmin-arrival: 0.2
+xmax-arrival: 10.0
+mean-arrival: 1.0
+
+xmin-life: 2.0
+xmax-life: 100.0
+mean-life: 10.0
+
+xmin-req: 0.1
+xmax-req: 1.0
+mean-req: 0.2
+
+priority-min: 1
+priority-max: 2
+priority-ratio: 1.0
+
+replicas-min: 1
+replicas-max: 2
+replicas-ratio: 1.0
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "out"
+
+    p = tg.build_arg_parser()
+    cli_args = p.parse_args(
+        [
+            "--job-dir",
+            str(job_dir),
+            "--output-dir",
+            str(out_dir),
+            "--seed",
+            "42",
+        ]
+    )
+
+    runs = tg.TraceGenerator.expand_job_dir_runs(cli_args)
+    assert len(runs) == 2
+
+    # Sorted by filename: a.yaml then b.yml
+    assert Path(runs[0].job_file).name == "a.yaml"
+    assert Path(runs[1].job_file).name == "b.yml"
+
+    assert Path(runs[0].output_dir).name == "a"
+    assert Path(runs[1].output_dir).name == "b"
+
+    # Still seed-expansion compatible.
+    assert runs[0].seed == 42
+    assert runs[1].seed == 42
+
+
+def test_expand_job_dir_runs_rejects_job_file_and_job_dir_together(tmp_path: Path):
+    job_dir = tmp_path / "jobs"
+    job_dir.mkdir()
+    (job_dir / "a.yaml").write_text("num-nodes: 1\n", encoding="utf-8")
+
+    p = tg.build_arg_parser()
+    cli_args = p.parse_args(
+        [
+            "--job-dir",
+            str(job_dir),
+            "--job-file",
+            str(job_dir / "a.yaml"),
+        ]
+    )
+
+    with pytest.raises(SystemExit):
+        tg.TraceGenerator.expand_job_dir_runs(cli_args)
 
 
 # ---------------------------------------------------------------------------
