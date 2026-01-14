@@ -359,6 +359,7 @@ class TraceReplayer:
         self.num_nodes: int = 0
         self.max_prio: int = 0
         self.trace_time_s: float = 0.0
+        self.replay_end_s: float = 0.0
 
         self.node_cpu_m: int = 0
         self.node_mem_b: int = 0
@@ -588,11 +589,16 @@ class TraceReplayer:
         events: List[Event] = []
 
         start_delay = float(getattr(self.args, "start_delay", 0.0) or 0.0)
+        replay_end_s = start_delay + float(self.trace_time_s)
+        self.replay_end_s = float(replay_end_s)
 
         # Initial pods are created up-front by apply_initial_workload().
         # Schedule their deletions here so they don't persist forever.
         for p in self.initial_pods:
-            events.append(Event(sim_time_s=float(p.end_time), kind="delete", record_id=p.id))
+            end_t = float(p.end_time)
+            # Only schedule deletes that happen within the replay horizon.
+            if end_t <= replay_end_s:
+                events.append(Event(sim_time_s=end_t, kind="delete", record_id=p.id))
 
         for p in self.trace_pods:
             cpu_m = max(1, int(round(p.cpu * self.node_cpu_m)))
@@ -602,31 +608,38 @@ class TraceReplayer:
             pc_name = f"p{int(p.priority)}"
             replicas = max(1, int(getattr(p, "replicas", 1)))
 
-            events.append(
-                Event(
-                    sim_time_s=start_delay + float(p.start_time),
-                    kind="create",
-                    record_id=p.id,
-                    cpu_str=cpu_str,
-                    mem_str=mem_str,
-                    pc_name=pc_name,
-                    replicas=replicas,
+            create_t = start_delay + float(p.start_time)
+            if create_t <= replay_end_s:
+                events.append(
+                    Event(
+                        sim_time_s=create_t,
+                        kind="create",
+                        record_id=p.id,
+                        cpu_str=cpu_str,
+                        mem_str=mem_str,
+                        pc_name=pc_name,
+                        replicas=replicas,
+                    )
                 )
-            )
-            events.append(Event(sim_time_s=start_delay + float(p.end_time), kind="delete", record_id=p.id))
+
+            # Only delete within horizon; if a pod would naturally end after the trace horizon,
+            # we just stop the replay while it’s still alive.
+            delete_t = start_delay + float(p.end_time)
+            if delete_t <= replay_end_s:
+                events.append(Event(sim_time_s=delete_t, kind="delete", record_id=p.id))
 
         # At identical timestamps, process deletes first to free capacity.
         events.sort(key=lambda e: (e.sim_time_s, 0 if e.kind == "delete" else 1))
         self.events = events
 
-        # Ensure replay horizon covers any start_delay offset.
-        if events:
-            self.trace_time_s = max(float(self.trace_time_s), max(float(e.sim_time_s) for e in events))
+        # IMPORTANT: Do NOT extend trace_time_s based on event times.
+        # trace_time_s is the trace length / horizon. replay_end_s controls the wall-clock stop.
         LOG.info(
-            "built %d events (initial_deletes=%d, trace_pods=%d)",
+            "built %d events (initial_deletes_in_horizon=%d, trace_pods=%d, replay_end_s=%.3f)",
             len(events),
-            len(self.initial_pods),
+            sum(1 for e in events if e.kind == "delete" and self.rs_name_for_record(e.record_id) in self.initial_rs_names),
             len(self.trace_pods),
+            self.replay_end_s,
         )
 
     # ------------------------------
@@ -704,7 +717,7 @@ class TraceReplayer:
 
         events = self.events
         num_events = len(events)
-        trace_end_s = float(self.trace_time_s)
+        trace_end_s = float(getattr(self, "replay_end_s", 0.0) or float(self.trace_time_s))
 
         if num_events == 0:
             LOG.info("no events in trace; sleeping to trace_end_s=%.3f", trace_end_s)
