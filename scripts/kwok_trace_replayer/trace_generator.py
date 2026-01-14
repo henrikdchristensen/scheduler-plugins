@@ -268,7 +268,7 @@ class TraceGenerator:
             resolved = TraceGenerator.resolve_args(a)
 
             base_out = Path(resolved.output_dir)
-            resolved.output_dir = str(base_out / jf.stem)
+            resolved.output_dir = str(base_out)
             runs.append(resolved)
 
         return runs

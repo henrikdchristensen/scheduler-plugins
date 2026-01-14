@@ -527,8 +527,8 @@ replicas-ratio: 1.0
     assert Path(runs[0].job_file).name == "a.yaml"
     assert Path(runs[1].job_file).name == "b.yml"
 
-    assert Path(runs[0].output_dir).name == "a"
-    assert Path(runs[1].output_dir).name == "b"
+    assert Path(runs[0].output_dir).name == "out"
+    assert Path(runs[1].output_dir).name == "out"
 
     # Still seed-expansion compatible.
     assert runs[0].seed == 42

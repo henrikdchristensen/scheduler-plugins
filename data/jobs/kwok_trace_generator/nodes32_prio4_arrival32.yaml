@@ -17,7 +17,7 @@ mean-arrival: 32s
 
 # Lifetime
 xmin-life: 4s
-xmax-life: 16h
+xmax-life: 24h
 
 # Priority
 priority-max: 4
