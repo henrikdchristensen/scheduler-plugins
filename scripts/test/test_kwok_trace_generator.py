@@ -38,10 +38,14 @@ def make_required_args(tmp_path: Path, **overrides):
         xmax_life=100.0,
         mean_life=10.0,
 
-        # Requests
-        xmin_req=0.1,
-        xmax_req=1.0,
-        mean_req=0.2,
+        # Requests (CPU + memory are independent distributions)
+        xmin_cpu=0.1,
+        xmax_cpu=1.0,
+        mean_cpu=0.2,
+
+        xmin_mem=0.1,
+        xmax_mem=1.0,
+        mean_mem=0.2,
 
         # Priority + replicas
         priority_min=1,
@@ -57,10 +61,12 @@ def make_required_args(tmp_path: Path, **overrides):
 
 
 def set_alphas(gen: tg.TraceGenerator, alpha: float = 2.0) -> None:
-    gen.alpha_req = float(alpha)
+    gen.alpha_cpu = float(alpha)
+    gen.alpha_mem = float(alpha)
     gen.alpha_arrival = float(alpha)
     gen.alpha_life = float(alpha)
-    gen.args.alpha_req = float(alpha)
+    gen.args.alpha_cpu = float(alpha)
+    gen.args.alpha_mem = float(alpha)
     gen.args.alpha_arrival = float(alpha)
     gen.args.alpha_life = float(alpha)
 
@@ -86,9 +92,13 @@ def test_build_arg_parser_defaults_and_required(tmp_path: Path):
             "--xmin-life", "10.0",
             "--xmax-life", "100.0",
 
-            "--xmin-req", "0.01",
-            "--xmax-req", "1.0",
-            "--mean-req", "0.2",
+            "--xmin-cpu", "0.01",
+            "--xmax-cpu", "1.0",
+            "--mean-cpu", "0.2",
+
+            "--xmin-mem", "0.02",
+            "--xmax-mem", "2.0",
+            "--mean-mem", "0.4",
 
             "--priority-min", "1",
             "--priority-max", "3",
@@ -163,9 +173,12 @@ def test_init_from_args_creates_figures_dir(tmp_path: Path):
         "--mean-arrival",
         "--xmin-life",
         "--xmax-life",
-        "--xmin-req",
-        "--xmax-req",
-        "--mean-req",
+        "--xmin-cpu",
+        "--xmax-cpu",
+        "--mean-cpu",
+        "--xmin-mem",
+        "--xmax-mem",
+        "--mean-mem",
         "--priority-min",
         "--priority-max",
         "--priority-ratio",
@@ -190,9 +203,13 @@ def test_resolve_args_missing_required_exits(tmp_path: Path, missing_flag: str):
         "--xmin-life", "10.0",
         "--xmax-life", "100.0",
 
-        "--xmin-req", "0.01",
-        "--xmax-req", "1.0",
-        "--mean-req", "0.2",
+        "--xmin-cpu", "0.01",
+        "--xmax-cpu", "1.0",
+        "--mean-cpu", "0.2",
+
+        "--xmin-mem", "0.02",
+        "--xmax-mem", "2.0",
+        "--mean-mem", "0.4",
 
         "--priority-min", "1",
         "--priority-max", "3",
@@ -221,7 +238,8 @@ def test_seed_and_seed_file_mutual_exclusion(tmp_path: Path):
             "--seed-file", str(seeds_path),
             "--target-util", "0.9",
             "--mean-arrival", "1.0",
-            "--mean-req", "0.2",
+            "--mean-cpu", "0.2",
+            "--mean-mem", "0.3",
         ]
     )
     with pytest.raises(SystemExit):
@@ -289,9 +307,13 @@ mean-arrival: 1.0
 xmin-life: 10.0
 xmax-life: 100.0
 
-xmin-req: 0.01
-xmax-req: 1.0
-mean-req: 0.2
+xmin-cpu: 0.01
+xmax-cpu: 1.0
+mean-cpu: 0.2
+
+xmin-mem: 0.02
+xmax-mem: 2.0
+mean-mem: 0.4
 
 priority-min: 1
 priority-max: 3
@@ -356,9 +378,13 @@ def test_expand_seed_runs_seed_file_expands_to_subdirs_under_output_dir(tmp_path
             "--xmin-life", "10.0",
             "--xmax-life", "100.0",
 
-            "--xmin-req", "0.01",
-            "--xmax-req", "1.0",
-            "--mean-req", "0.2",
+            "--xmin-cpu", "0.01",
+            "--xmax-cpu", "1.0",
+            "--mean-cpu", "0.2",
+
+            "--xmin-mem", "0.02",
+            "--xmax-mem", "2.0",
+            "--mean-mem", "0.4",
 
             "--priority-min", "1",
             "--priority-max", "3",
@@ -429,9 +455,13 @@ xmin-life: 2.0
 xmax-life: 100.0
 mean-life: 10.0
 
-xmin-req: 0.1
-xmax-req: 1.0
-mean-req: 0.2
+xmin-cpu: 0.1
+xmax-cpu: 1.0
+mean-cpu: 0.2
+
+xmin-mem: 0.1
+xmax-mem: 1.0
+mean-mem: 0.2
 
 priority-min: 1
 priority-max: 2
@@ -457,9 +487,13 @@ xmin-life: 2.0
 xmax-life: 100.0
 mean-life: 10.0
 
-xmin-req: 0.1
-xmax-req: 1.0
-mean-req: 0.2
+xmin-cpu: 0.1
+xmax-cpu: 1.0
+mean-cpu: 0.2
+
+xmin-mem: 0.1
+xmax-mem: 1.0
+mean-mem: 0.2
 
 priority-min: 1
 priority-max: 2
@@ -632,7 +666,8 @@ def test_infer_mean_lifetime_from_target_util_happy_path(tmp_path: Path):
         num_nodes=2,
         target_util=0.5,
         mean_arrival=2.0,
-        mean_req=0.25,
+        mean_cpu=0.25,
+        mean_mem=0.25,
         replicas_min=1,
         replicas_max=1,
         replicas_ratio=1.0,
@@ -651,8 +686,9 @@ def test_infer_mean_lifetime_from_target_util_raises_if_outside_bounds(tmp_path:
         tmp_path,
         num_nodes=1,
         target_util=0.01,
-        mean_arrival=0.1,
-        mean_req=1.0,
+        mean_arrival=0.11,
+        mean_cpu=0.3,
+        mean_mem=0.3,
         replicas_min=2,
         replicas_max=2,
         replicas_ratio=1.0,
@@ -668,8 +704,11 @@ def test_infer_mean_lifetime_from_target_util_raises_if_outside_bounds(tmp_path:
         tmp_path,
         num_nodes=50,
         target_util=1.0,
-        mean_arrival=10.0,
-        mean_req=0.1,
+        # mean_arrival must be achievable for bounded Pareto on [xmin_arrival, xmax_arrival]
+        xmax_arrival=10_000.0,
+        mean_arrival=100.0,
+        mean_cpu=0.11,
+        mean_mem=0.11,
         replicas_min=1,
         replicas_max=1,
         replicas_ratio=1.0,
@@ -687,23 +726,27 @@ def test_fit_pareto_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
 
     gen.fit_pareto_alphas()
 
-    assert gen.alpha_req is not None
     assert gen.alpha_arrival is not None
     assert gen.alpha_life is not None
+    assert gen.alpha_cpu is not None
+    assert gen.alpha_mem is not None
 
-    assert hasattr(args, "alpha_req")
     assert hasattr(args, "alpha_arrival")
     assert hasattr(args, "alpha_life")
+    assert hasattr(args, "alpha_cpu")
+    assert hasattr(args, "alpha_mem")
 
-    # If mean_life changes, only alpha_life should recompute (req/arrival cached)
-    old_req = gen.alpha_req
+    # If mean_life changes, only alpha_life should recompute (cpu/mem/arrival cached)
+    old_cpu = gen.alpha_cpu
+    old_mem = gen.alpha_mem
     old_arr = gen.alpha_arrival
     old_life = gen.alpha_life
 
     gen.args.mean_life = 12.0
     gen.fit_pareto_alphas()
 
-    assert gen.alpha_req == old_req
+    assert gen.alpha_cpu == old_cpu
+    assert gen.alpha_mem == old_mem
     assert gen.alpha_arrival == old_arr
     assert gen.alpha_life != old_life
 
@@ -720,7 +763,10 @@ def test_time_mean_request_util_basic(tmp_path: Path):
         tg.TraceRecord(id=1, start_time=0.0, end_time=10.0, cpu=0.5, mem=0.5, priority=1, replicas=1),
     ]
     # area = 0.5*10, divide by N*T = 2*10 => 0.25
-    assert gen.time_mean_request_util(pods) == pytest.approx(0.25)
+    util_cpu, util_mem, util_eff = gen.time_mean_request_utils(pods)
+    assert util_cpu == pytest.approx(0.25)
+    assert util_mem == pytest.approx(0.25)
+    assert util_eff == pytest.approx(0.25)
 
 
 # ---------------------------------------------------------------------------
@@ -820,10 +866,10 @@ def test_generate_trace_pod_events_and_pops_end_heap(tmp_path: Path, monkeypatch
     gen = tg.TraceGenerator(args)
     set_alphas(gen, alpha=2.0)
 
-    # dt1, life1, req1, dt2, life2, req2, dt3...
+    # dt1, life1, cpu1, mem1, dt2, life2, cpu2, mem2, dt3...
     samples = [
-        1.0, 0.5, 0.2,
-        1.0, 0.5, 0.2,
+        1.0, 0.5, 0.2, 0.2,
+        1.0, 0.5, 0.2, 0.2,
         10.0,
     ]
 
@@ -840,7 +886,7 @@ def test_generate_trace_pod_events_and_pops_end_heap(tmp_path: Path, monkeypatch
     prio_vals = tg.np.array([1], dtype=int)
     rep_vals = tg.np.array([1], dtype=int)
 
-    pods, _, times, u_hist, pods_hist = gen.generate_trace_pod_events(
+    pods, _, times, u_eff_hist, u_cpu_hist, u_mem_hist, pods_hist = gen.generate_trace_pod_events(
         tg.np.random.default_rng(0),
         prio_vals=prio_vals,
         prio_probs=None,
@@ -853,10 +899,15 @@ def test_generate_trace_pod_events_and_pops_end_heap(tmp_path: Path, monkeypatch
     # Expect recorded points at event boundaries (initial, terminations, arrivals).
     # The second generated pod ends at 2.5 (trace horizon).
     assert times == pytest.approx([0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
-    assert len(u_hist) == len(times)
+    assert len(u_eff_hist) == len(times)
+    assert len(u_cpu_hist) == len(times)
+    assert len(u_mem_hist) == len(times)
     # Initial pod ends at 0.5 => pods drop to 0.
     # The first generated pod ends at 1.5 (life=0.5), then the second arrives at 2.0 and ends at 2.5.
     assert pods_hist == [1, 0, 1, 0, 1, 0]
+
+    # Effective utilization should be max(cpu, mem) pointwise.
+    assert all(a == pytest.approx(max(b, c)) for a, b, c in zip(u_eff_hist, u_cpu_hist, u_mem_hist))
 
 
 # ---------------------------------------------------------------------------
@@ -872,7 +923,6 @@ def test_make_trace(tmp_path: Path, monkeypatch):
         set_alphas(gen, alpha=2.0)
 
     monkeypatch.setattr(gen, "fit_pareto_alphas", fake_fit_pareto_alphas)
-    monkeypatch.setattr(gen, "time_mean_request_util", lambda _pods: 0.55)
 
     initial_pods = [
         tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=2),
@@ -882,25 +932,33 @@ def test_make_trace(tmp_path: Path, monkeypatch):
     ]
 
     times = [0.0, 1.0]
-    u_hist = [0.1, 0.2]
+    u_eff_hist = [0.1, 0.2]
+    u_cpu_hist = [0.1, 0.2]
+    u_mem_hist = [0.1, 0.2]
     pods_hist = [2, 1]
 
     monkeypatch.setattr(gen, "generate_initial_pods", lambda *_a, **_k: (initial_pods, 1))
-    monkeypatch.setattr(gen, "generate_trace_pod_events", lambda *_a, **_k: (trace_pods, 2, times, u_hist, pods_hist))
+    monkeypatch.setattr(
+        gen,
+        "generate_trace_pod_events",
+        lambda *_a, **_k: (trace_pods, 2, times, u_eff_hist, u_cpu_hist, u_mem_hist, pods_hist),
+    )
 
     got_initial, got_trace, util, extra = gen.make_trace(iter_seed=1234)
 
     assert got_initial == initial_pods
     assert got_trace == trace_pods
-    assert util == pytest.approx(0.55)
+    assert util == pytest.approx(0.18)
 
     assert gen.times == times
-    assert gen.u_eff_hist == u_hist
+    assert gen.u_eff_hist == u_eff_hist
+    assert gen.u_cpu_hist == u_cpu_hist
+    assert gen.u_mem_hist == u_mem_hist
     assert gen.pods_hist == pods_hist
     assert gen.initial_pods_count == 2
 
     assert extra["seed"] == int(args.seed)
-    assert extra["measured_util_time_mean"] == pytest.approx(0.55)
+    assert extra["measured_util_time_mean"] == pytest.approx(0.18)
     assert "rng" in extra and "derived" in extra["rng"]
     assert "files" in extra and "initial_json" in extra["files"]
 
@@ -926,7 +984,8 @@ def test_calibrate_mean_lifetime_stops_within_tolerance(tmp_path: Path, monkeypa
 
 
 def test_calibrate_mean_lifetime_updates_mean_life_and_clamps_to_xmax(tmp_path: Path, monkeypatch):
-    args = make_required_args(tmp_path, target_util=0.9, xmin_life=2.0, xmax_life=15.0, mean_life=10.0)
+    # mean_life must be achievable for bounded Pareto on [xmin_life, xmax_life]
+    args = make_required_args(tmp_path, target_util=0.9, xmin_life=2.0, xmax_life=15.0, mean_life=6.0)
     gen = tg.TraceGenerator(args)
 
     calls = {"n": 0}
@@ -937,11 +996,11 @@ def test_calibrate_mean_lifetime_updates_mean_life_and_clamps_to_xmax(tmp_path: 
         return [], [], measured, {"iter": calls["n"]}
 
     monkeypatch.setattr(gen, "make_trace", fake_make_trace)
-    monkeypatch.setattr(tg, "MEAN_LIFE_CALIBRATION_MAX_ITERATIONS", 2)
+    monkeypatch.setattr(tg, "MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS", 2)
 
     gen.calibrate_mean_lifetime()
 
-    # After first iteration: new_mean=10*(0.9/0.1)=90 -> clamp to 0.999*xmax
+    # After first iteration: new_mean=6*(0.9/0.1)=54 -> clamp to 0.999*xmax
     assert gen.args.mean_life == pytest.approx(15.0 * 0.999)
 
 
@@ -968,7 +1027,7 @@ def test_write_outputs(tmp_path: Path, monkeypatch):
 
     calls = {"json": [], "info": 0}
 
-    monkeypatch.setattr(gen, "time_mean_request_util", lambda _pods: 0.6)
+    monkeypatch.setattr(gen, "time_mean_request_utils", lambda _pods: (0.0, 0.0, 0.6))
 
     def fake_pods_to_json(path: Path, pods_):
         calls["json"].append((path, len(pods_)))
@@ -1050,9 +1109,10 @@ def test_run_seed_infers_mean_life_writes_and_plots(tmp_path: Path, monkeypatch)
     # Ensure args.alpha_* exist for plotting call sites.
     gen.args.alpha_arrival = 2.0
     gen.args.alpha_life = 2.0
-    gen.args.alpha_req = 2.0
+    gen.args.alpha_cpu = 2.0
+    gen.args.alpha_mem = 2.0
 
-    monkeypatch.setattr(gen, "infer_mean_life_from_target_util", lambda: 12.3)
+    monkeypatch.setattr(gen, "infer_mean_lifetime_from_target_util", lambda: 12.3)
 
     initial = [tg.TraceRecord(id=1, start_time=0.0, end_time=1.0, cpu=0.1, mem=0.1, priority=1, replicas=1)]
     trace = []
@@ -1103,7 +1163,8 @@ def test_run_seed_skips_calibration_when_mean_life_provided(tmp_path: Path, monk
         # make_trace() normally fits alphas and stores them on args for plotting call sites.
         gen.args.alpha_arrival = 2.0
         gen.args.alpha_life = 2.0
-        gen.args.alpha_req = 2.0
+        gen.args.alpha_cpu = 2.0
+        gen.args.alpha_mem = 2.0
         return initial, trace, 0.1234, {"k": "v"}
 
     monkeypatch.setattr(gen, "make_trace", fake_make_trace)
