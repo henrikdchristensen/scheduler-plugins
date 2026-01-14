@@ -6,7 +6,7 @@
 output-dir: data/traces/nodes16_prio4_arrival16
 
 # Time horizon
-trace-time: 4h
+trace-time: 2h
 
 # Cluster
 num-nodes: 16
@@ -16,8 +16,8 @@ xmax-arrival: 256s
 mean-arrival: 16s
 
 # Lifetime
-xmin-life: 8s
-xmax-life: 4h
+xmin-life: 4s
+xmax-life: 16h
 
 # Priority
 priority-max: 4
@@ -33,7 +33,7 @@ seed-file: data/seeds/kwok_trace_generator/seeds.txt
 target-util: 0.90
 
 # Inter-arrival
-xmin-arrival: 0.001s
+xmin-arrival: 0.0001s
 
 # CPU requests
 xmin-cpu: 0.05

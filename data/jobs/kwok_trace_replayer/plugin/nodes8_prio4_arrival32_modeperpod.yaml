@@ -1,8 +1,0 @@
-trace-dir: data/traces/nodes8_prio4_arrival32
-result-dir: results/plugin/nodes8_prio4_arrival32_modeperpod
-kwokctl-config-file: data/configs-kwokctl/plugin-scheduler.yaml
-override-kwokctl-envs:
-  - name: SOLVER_PYTHON_TIMEOUT
-    value: 16s
-  - name: OPTIMIZE_MODE
-    value: per_pod

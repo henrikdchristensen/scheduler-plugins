@@ -577,29 +577,145 @@ class TraceGenerator:
         size: int = 1,
     ) -> np.ndarray:
         """
-        Sample from the bounded Pareto distribution on [x_min, x_max] via inverse-CDF.
+        Sample from the upper-truncated Pareto (Type I) distribution on [x_min, x_max]
+        via inverse-CDF sampling.
 
-        One convenient construction:
-        1) Let U ~ Uniform(u_min, 1), where u_min = (x_min/x_max)^alpha
-        2) Return X = x_min * U^(-1/alpha)
+        Paper alignment:
+          - Truncated Pareto CDF: Zaninetti & Ferraro (2008), Eq. (4), p. 2.
+          - Random variate generation: Zaninetti & Ferraro (2008), Eq. (13), p. 3.
 
-        This is equivalent to the Wikipedia bounded-Pareto inverse-CDF form; we use
-        this algebraic form because it is simple and numerically stable.
+        Using Eq. (13) with our notation (a=x_min, b=x_max, c=alpha):
+            X = x_min * ( 1 - R * (1 - (x_min/x_max)^alpha) )^(-1/alpha),
+        where R ~ Uniform(0,1).
 
-        See: https://en.wikipedia.org/wiki/Pareto_distribution#Bounded_Pareto_distribution
+        Args:
+            rng: NumPy Generator
+            alpha: shape parameter (>0)
+            x_min: lower bound (>0)
+            x_max: upper bound (>x_min)
+            size: number of samples
+
+        Returns:
+            np.ndarray of shape (size,)
         """
         if not (alpha > 0 and x_min > 0 and x_max > x_min):
             raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
+        if not (isinstance(size, int) and size >= 1):
+            raise ValueError("Require size to be a positive int")
 
-        u = rng.random(size)  # base U ~ Uniform(0, 1)
-        u = np.clip(u, 1e-12, 1.0 - 1e-12)  # clamp to avoid log/0 edge cases
+        r = rng.random(size)
+        r = np.clip(r, 1e-12, 1.0 - 1e-12)
 
-        # Uniform on [u_min, 1)
-        u_min = (x_min / x_max) ** alpha
-        u = u_min + (1.0 - u_min) * u
+        # Eq. (13): base = 1 - R*(1 - (a/b)^c)  in ( (a/b)^c, 1 ]
+        tail_factor = (x_min / x_max) ** alpha
+        base = 1.0 - r * (1.0 - tail_factor)
+        base = np.clip(base, 1e-300, 1.0)
 
-        # X = x_min * u^(-1/alpha)
-        return x_min * np.exp((-np.log(u)) / alpha)
+        return (x_min * np.power(base, -1.0 / alpha)).astype(float)
+
+    @staticmethod
+    def bounded_pareto_mean(alpha: float, x_min: float, x_max: float) -> float:
+        """
+        Mean E[X] of the upper-truncated Pareto (Type I) on [x_min, x_max].
+
+        Paper alignment:
+          - Zaninetti & Ferraro (2008), Eq. (5), p. 2 (mean for c != 1 and c = 1).
+
+        With a=x_min, b=x_max, c=alpha:
+
+        If alpha != 1:
+            E[X] = (alpha * x_min / (alpha - 1))
+                   * (1 - (x_min/x_max)^(alpha-1)) / (1 - (x_min/x_max)^alpha)
+
+        If alpha == 1:
+            E[X] = (alpha * x_min^alpha / (1 - (x_min/x_max)^alpha)) * ln(x_max/x_min)
+                 = (x_min / (1 - x_min/x_max)) * ln(x_max/x_min)
+        """
+        if not (x_min > 0 and x_max > x_min and alpha > 0):
+            raise ValueError("Require x_min>0, x_max>x_min, alpha>0")
+
+        r = x_min / x_max  # in (0,1)
+        log_r = math.log(r)  # < 0
+
+        # alpha == 1 case (Eq. 5, c=1)
+        if abs(alpha - 1.0) < 1e-10:
+            # Use stable forms for (1 - r) and log(x_max/x_min)
+            one_minus_r = -math.expm1(log_r)          # 1 - r
+            return (x_min / one_minus_r) * math.log(x_max / x_min)
+
+        # alpha != 1 case (Eq. 5, c != 1), computed stably with expm1
+        den = -math.expm1(alpha * log_r)              # 1 - r^alpha
+        num = -math.expm1((alpha - 1.0) * log_r)      # 1 - r^(alpha-1)
+        return (alpha * x_min / (alpha - 1.0)) * (num / den)
+
+    @staticmethod
+    def bounded_pareto_max_mean(x_min: float, x_max: float) -> float:
+        """
+        Maximum achievable mean for a truncated Pareto on [x_min, x_max].
+
+        This value is obtained by taking the limit alpha -> 0+ in the mean
+        expression of Zaninetti & Ferraro (2008), Eq. (5), p. 2, yielding:
+            mean_max = (x_max - x_min) / ln(x_max / x_min)
+
+        Used to validate that a requested target mean is achievable for the given
+        bounds.
+        """
+        if not (x_min > 0 and x_max > x_min):
+            raise ValueError("Require x_min>0, x_max>x_min")
+        return (x_max - x_min) / math.log(x_max / x_min)
+
+    @staticmethod
+    def solve_alpha_for_bounded_mean(
+        *,
+        x_min: float,
+        x_max: float,
+        target_mean: float,
+        max_iterations: int = ALPHA_SOLVE_MAX_ITER,
+        relative_tolerance: float = ALPHA_SOLVE_TOLERANCE,
+    ) -> float:
+        """
+        Solve the truncated-Pareto shape parameter alpha from a target mean.
+
+        We solve for alpha > 0 such that:
+            bounded_pareto_mean(alpha, x_min, x_max) == target_mean
+
+        Paper alignment:
+          - Mean formula is from Zaninetti & Ferraro (2008), Eq. (5), p. 2.
+          - Sampling (used elsewhere) is from Eq. (13), p. 3.
+
+        We rely on the fact that for fixed bounds [x_min, x_max], the mean is a
+        monotone decreasing function of alpha, so bisection applies.
+        """
+        if not (x_min > 0 and x_max > x_min):
+            raise ValueError("Require x_min>0 and x_max>x_min")
+        if not (x_min < target_mean < x_max):
+            raise ValueError(f"target_mean must be in (x_min, x_max); got {target_mean}")
+
+        mean_max = TraceGenerator.bounded_pareto_max_mean(x_min, x_max)
+        if target_mean >= mean_max:
+            raise ValueError(
+                f"target_mean={target_mean} is not achievable for truncated Pareto on [{x_min}, {x_max}]. "
+                f"Maximum achievable mean is about {mean_max:.6f}. Increase x_max or reduce target_mean."
+            )
+
+        lo = 1e-12
+        hi = 1.0
+        while TraceGenerator.bounded_pareto_mean(hi, x_min, x_max) > target_mean:
+            hi *= 2.0
+            if hi > 1e12:
+                raise RuntimeError("Failed to bracket alpha; hi grew too large.")
+
+        for _ in range(max_iterations):
+            mid = 0.5 * (lo + hi)
+            mm = TraceGenerator.bounded_pareto_mean(mid, x_min, x_max)
+            if abs(mm - target_mean) <= relative_tolerance * target_mean:
+                return float(mid)
+            if mm >= target_mean:
+                lo = mid
+            else:
+                hi = mid
+
+        return float(0.5 * (lo + hi))
 
     @staticmethod
     def sample_steady_state_residual_lifetime(
@@ -978,33 +1094,33 @@ class TraceGenerator:
     @staticmethod
     def build_trunc_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Build a discrete integer support and PMF for a truncated geometric-like
-        distribution.
+        Build the discrete integer support and PMF for a truncated geometric family
+        on the inclusive range k ∈ [min_val, max_val].
 
-        The returned support is the inclusive range k ∈ [min_val, max_val]. We
-        assign unnormalized weights that decay (or grow) geometrically across
-        the support:
+        Paper alignment (geometric + truncation):
+          - Geometric PMF: Chattopadhyay et al. (2014), Eq. (7), p. 31:
+                f(x) = p (1-p)^(x-1) = p q^(x-1),  x = 1,2,...
+          - Truncation/renormalization to a finite range: Chattopadhyay et al. (2014),
+            p. 26 (definition of truncation + table of truncated PMFs).
 
+        Mapping to this function:
+          - We expose a single "ratio" parameter which corresponds to q = (1-p).
+          - Over a finite support, the multiplicative constant p cancels during
+            renormalization, so it is sufficient to use weights proportional to q^(x-1).
+
+        Concretely, for k in [min_val, max_val], we assign unnormalized weights
             w(k) = ratio^(k - min_val)
+        and normalize over the finite interval to obtain probabilities.
 
-        and normalize them over the finite interval to obtain probabilities.
-        This is equivalent to taking a geometric distribution (up to a constant
-        factor and a shift) and truncating/renormalizing it to a finite support.
-        See: https://en.wikipedia.org/wiki/Geometric_distribution
-
-        Interpretation of ratio: - ratio is the multiplicative factor between
-        successive masses on the
-          support: w(k+1) / w(k) = ratio.
-        - ratio < 1 biases probability toward smaller values (decaying tail).
-        - ratio > 1 biases probability toward larger values (increasing tail).
-        - ratio == 1 yields a uniform distribution over the support.
+        Interpretation of ratio:
+          - ratio < 1 biases probability toward smaller values (fast decay).
+          - ratio > 1 biases probability toward larger values (increasing weights).
+          - ratio ≈ 1 yields a uniform distribution over the support.
 
         Returns:
-            A tuple (vals, probs) where vals is an int array of the support
-            values. If the distribution is uniform (ratio≈1 or a single support
-            value), probs is None and callers can treat the distribution as
-            uniform. Otherwise probs is a float array of the same length as vals
-            summing to 1.
+            (vals, probs) where vals is an int array of support values.
+            If ratio≈1 (or support size is 1), probs is None and callers may treat
+            the distribution as uniform.
         """
         if ratio <= 0:
             raise ValueError("ratio must be > 0.")
