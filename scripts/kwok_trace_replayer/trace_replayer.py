@@ -589,7 +589,18 @@ class TraceReplayer:
         events: List[Event] = []
 
         start_delay = float(getattr(self.args, "start_delay", 0.0) or 0.0)
-        replay_end_s = start_delay + float(self.trace_time_s)
+
+        # Unit tests (and some callers) may populate `initial_pods` / `trace_pods` directly
+        # without calling `load_initial_and_trace()`. In that case `trace_time_s` may still be 0.
+        # Fall back to an inferred trace horizon from the trace records.
+        effective_trace_time_s = float(getattr(self, "trace_time_s", 0.0) or 0.0)
+        if effective_trace_time_s <= 0.0 and self.trace_pods:
+            tmax = 0.0
+            for p in self.trace_pods:
+                tmax = max(tmax, float(p.end_time))
+            effective_trace_time_s = float(tmax)
+
+        replay_end_s = start_delay + effective_trace_time_s
         self.replay_end_s = float(replay_end_s)
 
         # Initial pods are created up-front by apply_initial_workload().
