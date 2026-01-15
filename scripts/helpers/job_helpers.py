@@ -16,7 +16,7 @@ class JobField:
     accept: Optional[Callable[[Any], bool]] = None
 
 
-def _accept_default(v: Any) -> bool:
+def accept_default(v: Any) -> bool:
     return v is not None and v != ""
 
 
@@ -98,7 +98,7 @@ def merge_job_fields_into_args(
             continue
 
         val = f.parse(raw) if f.parse else raw
-        accept = f.accept or _accept_default
+        accept = f.accept or accept_default
 
         if getattr(args, f.arg_attr, None) is None and accept(val):
             setattr(args, f.arg_attr, val)
