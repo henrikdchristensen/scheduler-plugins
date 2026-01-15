@@ -723,10 +723,12 @@ def test_snapshot_from_pods_computes_utilization_and_counts(tmp_path: Path, monk
     monkeypatch.setattr(tr, "qty_to_mcpu_int", lambda q: 0 if q is None else int(str(q).rstrip("m")))
     monkeypatch.setattr(tr, "qty_to_bytes_int", lambda q: 0 if q is None else int(str(q)))
 
-    cpu_u, mem_u, running_by_prio, pending_by_prio, items = rp.snapshot_from_pods("trace")
+    cpu_u, mem_u, cpu_req_u, mem_req_u, running_by_prio, pending_by_prio, items = rp.snapshot_from_pods("trace")
     assert items == pods_json["items"]
     assert cpu_u == pytest.approx(100 / (2 * 1000))
     assert mem_u == pytest.approx(10 / (2 * 1000))
+    assert cpu_req_u == pytest.approx((100 + 200) / (2 * 1000))
+    assert mem_req_u == pytest.approx((10 + 20) / (2 * 1000))
     assert running_by_prio == {1: 0, 2: 1}
     assert pending_by_prio == {1: 1, 2: 0}
 
@@ -769,7 +771,7 @@ def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Pat
     ]
 
     def snap(_ns):
-        return (0.25, 0.50, {1: 0, 2: 2}, {1: 0, 2: 0}, items)
+        return (0.25, 0.50, 0.75, 0.80, {1: 0, 2: 2}, {1: 0, 2: 0}, items)
 
     monkeypatch.setattr(rp, "snapshot_from_pods", snap)
     monkeypatch.setattr(tr, "get_timestamp", lambda: "T")
@@ -795,7 +797,7 @@ def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Pat
     # general has header + 1 row
     glines = general_csv.read_text(encoding="utf-8").splitlines()
     assert len(glines) == 2
-    assert glines[0].startswith("timestamp,time_s,cpu_run_util,mem_run_util,running_p1")
+    assert glines[0].startswith("timestamp,time_s,cpu_run_util,mem_run_util,cpu_req_util,mem_req_util,running_p1")
 
     # pod_stats should only include rs-000002... entries (not rs-000001...)
     plines = pod_csv.read_text(encoding="utf-8").splitlines()
@@ -842,13 +844,13 @@ def test_monitor_loop_deletions_count_running_to_pending_and_disappearance(tmp_p
         i = call_i["i"]
         if i >= len(snapshots):
             stop_event.set()
-            return (0.0, 0.0, {1: 0}, {1: 0}, [])
+            return (0.0, 0.0, 0.0, 0.0, {1: 0}, {1: 0}, [])
         items = snapshots[i]
         call_i["i"] += 1
         if call_i["i"] >= len(snapshots):
             stop_event.set()
         # utilization + counts are irrelevant for deletion metric assertion
-        return (0.0, 0.0, {1: 0}, {1: 0}, items)
+        return (0.0, 0.0, 0.0, 0.0, {1: 0}, {1: 0}, items)
 
     monkeypatch.setattr(rp, "snapshot_from_pods", snap)
     monkeypatch.setattr(tr, "get_timestamp", lambda: "T")

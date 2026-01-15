@@ -820,15 +820,17 @@ class TraceReplayer:
         """
         return float(self.clock.time()) - float(self.run_start_monotonic)
 
-    def snapshot_from_pods(self, ns: str) -> Tuple[float, float, Dict[int, int], Dict[int, int], List[Dict[str, Any]]]:
+    def snapshot_from_pods(self, ns: str) -> Tuple[float, float, float, float, Dict[int, int], Dict[int, int], List[Dict[str, Any]]]:
         """
-        Snapshot running utilization, priority counts, and raw pod items from the cluster.
+        Snapshot running utilization, requested utilization, priority counts, and raw pod items from the cluster.
         """
         pods_json = get_json_ctx(self.ctx, ["-n", ns, "get", "pods", "-o", "json"])
         items = pods_json.get("items", []) or []
 
-        total_cpu_m = 0
-        total_mem_b = 0
+        total_cpu_run_m = 0
+        total_mem_run_b = 0
+        total_cpu_req_m = 0
+        total_mem_req_b = 0
 
         running_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
         pending_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
@@ -847,23 +849,33 @@ class TraceReplayer:
                 if prio in running_by_prio:
                     running_by_prio[prio] += 1
 
+            elif phase == "Pending":
+                if prio in pending_by_prio:
+                    pending_by_prio[prio] += 1
+
+            # Requested utilization is based on resource requests of pods that are
+            # present and either Running or Pending.
+            if phase in ("Running", "Pending"):
                 containers = spec.get("containers", []) or []
                 for c in containers:
                     res = (c.get("resources") or {}).get("requests", {}) or {}
                     cpu_q = res.get("cpu")
                     mem_q = res.get("memory")
-                    total_cpu_m += qty_to_mcpu_int(cpu_q)
-                    total_mem_b += qty_to_bytes_int(mem_q)
-
-            elif phase == "Pending":
-                if prio in pending_by_prio:
-                    pending_by_prio[prio] += 1
+                    cpu_m = qty_to_mcpu_int(cpu_q)
+                    mem_b = qty_to_bytes_int(mem_q)
+                    total_cpu_req_m += cpu_m
+                    total_mem_req_b += mem_b
+                    if phase == "Running":
+                        total_cpu_run_m += cpu_m
+                        total_mem_run_b += mem_b
 
         cpu_capacity_m = self.num_nodes * self.node_cpu_m
         mem_capacity_b = self.num_nodes * self.node_mem_b
-        cpu_run_util = (total_cpu_m / cpu_capacity_m) if cpu_capacity_m > 0 else 0.0
-        mem_run_util = (total_mem_b / mem_capacity_b) if mem_capacity_b > 0 else 0.0
-        return cpu_run_util, mem_run_util, running_by_prio, pending_by_prio, items
+        cpu_run_util = (total_cpu_run_m / cpu_capacity_m) if cpu_capacity_m > 0 else 0.0
+        mem_run_util = (total_mem_run_b / mem_capacity_b) if mem_capacity_b > 0 else 0.0
+        cpu_req_util = (total_cpu_req_m / cpu_capacity_m) if cpu_capacity_m > 0 else 0.0
+        mem_req_util = (total_mem_req_b / mem_capacity_b) if mem_capacity_b > 0 else 0.0
+        return cpu_run_util, mem_run_util, cpu_req_util, mem_req_util, running_by_prio, pending_by_prio, items
 
     def pod_start_time(self, pod: Dict[str, Any]) -> Optional[float]:
         """
@@ -920,7 +932,7 @@ class TraceReplayer:
             psw = csv.writer(f_ps)
 
             # general_stats.csv header
-            header = ["timestamp", "time_s", "cpu_run_util", "mem_run_util"]
+            header = ["timestamp", "time_s", "cpu_run_util", "mem_run_util", "cpu_req_util", "mem_req_util"]
             for p in range(1, self.max_prio + 1):
                 header.append(f"running_p{p}")
             for p in range(1, self.max_prio + 1):
@@ -941,7 +953,7 @@ class TraceReplayer:
                 t_s = self.time_s()
 
                 try:
-                    cpu_run_util, mem_run_util, running_by_prio, pending_by_prio, pod_items = self.snapshot_from_pods(
+                    cpu_run_util, mem_run_util, cpu_req_util, mem_req_util, running_by_prio, pending_by_prio, pod_items = self.snapshot_from_pods(
                         namespace
                     )
                 except Exception as e:
@@ -1001,7 +1013,14 @@ class TraceReplayer:
                 prev_phase_by_uid = cur_phase_by_uid
 
                 # ---- write general_stats row ----
-                row = [now_ts, f"{t_s:.6f}", f"{cpu_run_util:.6f}", f"{mem_run_util:.6f}"]
+                row = [
+                    now_ts,
+                    f"{t_s:.6f}",
+                    f"{cpu_run_util:.6f}",
+                    f"{mem_run_util:.6f}",
+                    f"{cpu_req_util:.6f}",
+                    f"{mem_req_util:.6f}",
+                ]
                 for p in range(1, self.max_prio + 1):
                     row.append(str(int(running_by_prio.get(p, 0))))
                 for p in range(1, self.max_prio + 1):
