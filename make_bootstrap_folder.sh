@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Load environment variables
 ENV_FILE="opt-prio.env"
 echo "Loading versions from ${ENV_FILE}..."
 # shellcheck source=/dev/null
@@ -9,43 +8,79 @@ set -a
 source "${ENV_FILE}"
 set +a
 
-# 1) Create a new folder called "bootstrap" (remove existing one)
+# Normalize CRLF
+KUBECTL_VERSION="${KUBECTL_VERSION//$'\r'/}"
+KWOK_VERSION="${KWOK_VERSION//$'\r'/}"
+SCHEDULER_VERSION="${SCHEDULER_VERSION//$'\r'/}"
+
+# Normalize tags
+KUBECTL_TAG="${KUBECTL_VERSION}"
+[[ "${KUBECTL_TAG}" != v* ]] && KUBECTL_TAG="v${KUBECTL_TAG}"
+
+KWOK_TAG="${KWOK_VERSION}"
+[[ "${KWOK_TAG}" != v* ]] && KWOK_TAG="v${KWOK_TAG}"
+
 echo "Cleaning and creating bootstrap directory..."
 rm -rf bootstrap
 mkdir -p bootstrap/content
 
-# 2) Copy "data" subfolder into "bootstrap/content"
+echo "Copying ${ENV_FILE} into bootstrap..."
+cp "${ENV_FILE}" bootstrap/opt-prio.env
+
 echo "Copying data subfolder into bootstrap/content..."
-rsync -a --exclude='__pycache__'    data/    bootstrap/content/data
+rsync -a --exclude='__pycache__' data/ bootstrap/content/data
 
-# 3) Copy scripts subfolder into "bootstrap/content/scripts" (excluding __pycache__)
 echo "Copying scripts subfolder into bootstrap/content/scripts..."
-# Use rsync to skip __pycache__ directories
-rsync -a --exclude='__pycache__'    scripts/    bootstrap/content/scripts/
+rsync -a --exclude='__pycache__' scripts/ bootstrap/content/scripts/
 
-# 4) Move bootstrap file scripts to "bootstrap/" folder and make them executable
 echo "Move bootstrap files to 'bootstrap' folder and set permissions..."
-mv bootstrap/content/scripts/bootstrap/*    bootstrap/
+mv bootstrap/content/scripts/bootstrap/* bootstrap/
 rmdir bootstrap/content/scripts/bootstrap
-sed -i 's/\r$//' bootstrap/*.sh     # ensure line endings are LF (not CRLF)
-chmod +x bootstrap/*.sh             # make copied scripts executable
+sed -i 's/\r$//' bootstrap/*.sh
+chmod +x bootstrap/*.sh
 
-# 5) Copy manifests into "bootstrap/content/manifests" folder
 echo "Copying manifests files into 'manifests' folder..."
 mkdir -p bootstrap/content/manifests/mypriorityoptimizer
 mkdir -p bootstrap/content/manifests/mydeterministicscore
-cp -r manifests/mypriorityoptimizer/*   bootstrap/content/manifests/mypriorityoptimizer/
-cp -r manifests/mydeterministicscore/*  bootstrap/content/manifests/mydeterministicscore/
+cp -r manifests/mypriorityoptimizer/*  bootstrap/content/manifests/mypriorityoptimizer/
+cp -r manifests/mydeterministicscore/* bootstrap/content/manifests/mydeterministicscore/
 
-# 6) Call make to build the scheduler binary
-echo "Building scheduler binary with make..."
-make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64' VERSION="${SCHEDULER_VERSION}"
-chmod +x bin/kube-scheduler  # make sure the built binary is executable
+echo "Building scheduler binary + downloading kube-apiserver via build.sh..."
+bash ./build.sh
+chmod +x bin/kube-scheduler
 
-# 7) Copy built binary from "bin/kube-scheduler" to "bootstrap/content/bin" folder
-echo "Copying built kube-scheduler binary into 'bin' folder and set permissions..."
+echo "Creating bootstrap/content/bin and shipping binaries..."
 mkdir -p bootstrap/content/bin
-cp bin/kube-scheduler   bootstrap/content/bin/kube-scheduler
-chmod +x bootstrap/content/bin/kube-scheduler  # make the copied binary executable
+
+# Ship kube-scheduler (bootstrap.sh will only chmod +x it)
+cp bin/kube-scheduler bootstrap/content/bin/kube-scheduler
+chmod +x bootstrap/content/bin/kube-scheduler
+
+# Ship kube-apiserver (downloaded by build.sh)
+cp bin/kube-apiserver bootstrap/content/bin/kube-apiserver
+chmod +x bootstrap/content/bin/kube-apiserver
+
+# Ship kube-controller-manager (downloaded by build.sh)
+cp bin/kube-controller-manager bootstrap/content/bin/kube-controller-manager
+chmod +x bootstrap/content/bin/kube-controller-manager
+
+# Ship kubectl
+echo "Downloading kubectl ${KUBECTL_TAG}..."
+curl -fsSL -o bootstrap/content/bin/kubectl \
+  "https://dl.k8s.io/release/${KUBECTL_TAG}/bin/linux/amd64/kubectl"
+chmod +x bootstrap/content/bin/kubectl
+
+# Ship kwokctl + kwok
+echo "Downloading kwokctl/kwok ${KWOK_TAG}..."
+curl -fsSL -o bootstrap/content/bin/kwokctl \
+  "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_TAG}/kwokctl-linux-amd64"
+curl -fsSL -o bootstrap/content/bin/kwok \
+  "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_TAG}/kwok-linux-amd64"
+chmod +x bootstrap/content/bin/kwokctl bootstrap/content/bin/kwok
+
+# Verify binaries
+bootstrap/content/bin/kubectl version --client=true >/dev/null
+bootstrap/content/bin/kwokctl --version >/dev/null
+bootstrap/content/bin/kwok --version >/dev/null
 
 echo "Done."

@@ -106,25 +106,15 @@ Currently, it is only tested on **amd64** architecture and some code may need to
 
 ### Binary (recommended)
 
-To build the binary, run the following command in the root of the repo:
-
-```bash
-make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64'
-```
-
-NOTE: The issues of version mismatches between the scheduler-plugin and KWOK versions (see [Version mismatch between Scheduler-plugin and KWOK versions](#version-mismatch-between-scheduler-plugin-and-kwok-versions)) can be solved by specifying the `VERSION` field when building, e.g.:
-
-```bash
-make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64' VERSION=v1.33.0
-```
-
-or just run:
+To build the binary, run the following bash script in the root of the repo:
 
 ```bash
 ./build.sh
 ```
 
-The built binary will be located in `bin/kube-scheduler`.
+NOTE: The issues of version mismatches between the scheduler-plugin and KWOK versions (see [Version mismatch between Scheduler-plugin and KWOK versions](#version-mismatch-between-scheduler-plugin-and-kwok-versions)) which can be solved by specifying the `VERSION` field when building.
+
+The built binary will be located in `bin/kube-scheduler`. We also download the `kube-apiserver` binary to `bin/kube-apiserver`, as it is needed when running in KWOK clusters and to prevent it for downloading on each cluster creation we store it in the `bin/` folder.
 
 ### Docker image
 
