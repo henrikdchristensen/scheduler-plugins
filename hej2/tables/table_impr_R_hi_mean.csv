@@ -1,0 +1,9 @@
+k_max,row_label,plugin_mode,plugin_enforcement,with_default_preemption,N16_muA16
+1,Periodic (blk),periodic,blocking,False,7800.7427730000345
+1,"Periodic (blk, defpreempt)",periodic,blocking,True,7972.237899999949
+1,Periodic (non-blk),periodic,nonblocking,False,8187.805272000027
+1,"Periodic (non-blk, defpreempt)",periodic,nonblocking,True,7844.2589140000055
+1,Stable-queue (blk),stable-queue,blocking,False,8831.121906000073
+1,"Stable-queue (blk, defpreempt)",stable-queue,blocking,True,8943.048960000044
+1,Stable-queue (non-blk),stable-queue,nonblocking,False,8030.534315000055
+1,"Stable-queue (non-blk, defpreempt)",stable-queue,nonblocking,True,8929.290856000036

@@ -916,7 +916,9 @@ class TraceReplayer:
 
         # deletion semantics (for deletions_cum_pK):
         # Count a "deletion" when a pod UID has been observed Running since the last count
-        # and then transitions Running -> Pending.
+        # and then either:
+        #  - disappears from the live pod list (most common for actual deletes / preemptions), or
+        #  - transitions Running -> Pending (rare but kept for completeness).
         # The same UID can be counted multiple times if it becomes Running again later.
         prev_live_uids: set[str] = set()
         prev_phase_by_uid: Dict[str, str] = {}
@@ -961,7 +963,7 @@ class TraceReplayer:
                     self.clock.sleep(interval_s)
                     continue
 
-                # ---- deletions (Running -> Pending) ----
+                # ---- deletions (Running -> gone, or Running -> Pending) ----
                 cur_live_uids: set[str] = set()
                 cur_phase_by_uid: Dict[str, str] = {}
 
@@ -998,10 +1000,15 @@ class TraceReplayer:
                             delta_by_prio[p] += 1
                         eligible_uids.discard(uid)
 
-                # Cleanup: drop state for UIDs that disappeared to avoid unbounded growth.
+                # Count + cleanup: if a previously-running UID disappears from the pod list,
+                # treat it as a deletion event.
                 gone = prev_live_uids - cur_live_uids
                 if gone:
                     for uid in gone:
+                        if uid in eligible_uids and prev_phase_by_uid.get(uid) == "Running":
+                            p = int(uid_to_prio.get(uid, 0))
+                            if p in delta_by_prio:
+                                delta_by_prio[p] += 1
                         eligible_uids.discard(uid)
                         prev_phase_by_uid.pop(uid, None)
                         uid_to_prio.pop(uid, None)
