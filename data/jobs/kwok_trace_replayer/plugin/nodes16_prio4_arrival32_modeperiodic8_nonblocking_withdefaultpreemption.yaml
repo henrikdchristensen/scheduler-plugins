@@ -1,0 +1,12 @@
+trace-dir: data/traces/nodes16_prio4_arrival32
+result-dir: results/plugin/nodes16_prio4_arrival32_modeperiodic8_nonblocking
+kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-with-default-preemption.yaml
+override-kwokctl-envs:
+  - name: SOLVER_PYTHON_TIMEOUT
+    value: 16s
+  - name: OPTIMIZE_MODE
+    value: periodic
+  - name: OPTIMIZE_BLOCKING_SOLVING
+    value: "false"
+  - name: OPTIMIZE_PERIODIC_INTERVAL
+    value: 8s
