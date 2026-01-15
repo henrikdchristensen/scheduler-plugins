@@ -46,7 +46,6 @@ func buildPluginConfigSnapshot() PluginConfigSnapshot {
 		PlanConfigMapNamePrefix:     PlanConfigMapNamePrefix,
 		PlansToRetain:               PlansToRetain,
 		PlanCompletionCheckInterval: PlanCompletionCheckInterval.String(),
-		PlanPendingBindInterval:     PlanPendingBindInterval.String(),
 		PlanActivationTimeout:       PlanActivationTimeout.String(),
 		WaitPodsGoneInterval:        WaitPodsGoneInterval.String(),
 		EvictRecreateParallelism:    EvictRecreateParallelism,

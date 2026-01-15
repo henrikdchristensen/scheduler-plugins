@@ -48,7 +48,6 @@ type PluginConfigSnapshot struct {
 	PlanConfigMapLabelKey       string `json:"planConfigMapLabelKey"`
 	PlansToRetain               int    `json:"plansToRetain"`
 	PlanCompletionCheckInterval string `json:"planCompletionCheckInterval"`
-	PlanPendingBindInterval     string `json:"planPendingBindInterval"`
 	PlanActivationTimeout       string `json:"planActivationTimeout"`
 	WaitPodsGoneInterval        string `json:"waitPodsGoneInterval"`
 	EvictRecreateParallelism    int    `json:"evictRecreateParallelism"`

@@ -23,6 +23,8 @@ var OptimizeStableQueueDelay = parseTime(getEnv("OPTIMIZE_STABLE_QUEUE_DELAY", "
 // "free time" conditions.
 var OptimizeStableQueueCheckInterval = parseTime(getEnv("OPTIMIZE_STABLE_QUEUE_CHECK_INTERVAL", "250ms"))
 
+// ===============================
+
 // ======= Solver settings =======
 
 // Save failed attempts to config map (for debugging)
@@ -54,3 +56,5 @@ var SolverPythonMoveFractionOfTier = parseFloat(getEnv("SOLVER_PYTHON_MOVE_FRACT
 
 // SolverPythonGraceMs is the grace period for the python solver (ms).
 var SolverPythonGraceMs = parseInt(getEnv("SOLVER_PYTHON_GRACE_MS", "1000"))
+
+// ===============================
