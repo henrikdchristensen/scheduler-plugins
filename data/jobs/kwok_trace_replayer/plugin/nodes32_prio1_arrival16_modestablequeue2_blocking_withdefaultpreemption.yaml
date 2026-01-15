@@ -1,5 +1,5 @@
-trace-dir: data/traces/nodes16_prio4_arrival32
-result-dir: results/plugin/nodes16_prio4_arrival32_modestablequeue2_nonblocking
+trace-dir: data/traces/nodes32_prio1_arrival16
+result-dir: results/plugin/nodes32_prio1_arrival16_modestablequeue2_blocking_withdefaultpreemption
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-with-default-preemption.yaml
 override-kwokctl-envs:
   - name: SOLVER_PYTHON_TIMEOUT
@@ -7,6 +7,6 @@ override-kwokctl-envs:
   - name: OPTIMIZE_MODE
     value: stable_queue
   - name: OPTIMIZE_BLOCKING_SOLVING
-    value: "false"
+    value: "true"
   - name: OPTIMIZE_STABLE_QUEUE_DELAY
     value: 2s

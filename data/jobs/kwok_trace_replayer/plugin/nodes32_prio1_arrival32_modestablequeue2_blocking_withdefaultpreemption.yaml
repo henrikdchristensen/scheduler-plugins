@@ -1,5 +1,5 @@
-trace-dir: data/traces/nodes16_prio1_arrival32
-result-dir: results/plugin/nodes16_prio1_arrival32_modestablequeue2_blocking
+trace-dir: data/traces/nodes32_prio1_arrival32
+result-dir: results/plugin/nodes32_prio1_arrival32_modestablequeue2_blocking_withdefaultpreemption
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-with-default-preemption.yaml
 override-kwokctl-envs:
   - name: SOLVER_PYTHON_TIMEOUT

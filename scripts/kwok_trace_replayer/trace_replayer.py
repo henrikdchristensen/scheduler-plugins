@@ -902,8 +902,13 @@ class TraceReplayer:
         seen_apply: set[str] = set()     # pod_name
         seen_running: set[str] = set()   # pod_name
 
-        # deletion if UID disappears between snapshots
+        # deletion semantics (for deletions_cum_pK):
+        # Count a "deletion" when a pod UID has been observed Running since the last count
+        # and then transitions Running -> Pending.
+        # The same UID can be counted multiple times if it becomes Running again later.
         prev_live_uids: set[str] = set()
+        prev_phase_by_uid: Dict[str, str] = {}
+        eligible_uids: set[str] = set()  # UIDs eligible to be counted deleted (must have been Running)
         uid_to_prio: Dict[str, int] = {}  # last known prio for that uid (best-effort)
 
         deletions_cum_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
@@ -944,32 +949,56 @@ class TraceReplayer:
                     self.clock.sleep(interval_s)
                     continue
 
-                # ---- deletion (UID disappearance) ----
+                # ---- deletions (Running -> Pending) ----
                 cur_live_uids: set[str] = set()
+                cur_phase_by_uid: Dict[str, str] = {}
+
                 for pod in pod_items:
                     meta = pod.get("metadata", {}) or {}
+                    status = pod.get("status", {}) or {}
                     pod_uid = meta.get("uid", "")
                     pod_name = meta.get("name", "")
                     if not pod_uid or not pod_name:
                         continue
+
+                    phase = str(status.get("phase", "") or "")
                     cur_live_uids.add(pod_uid)
+                    cur_phase_by_uid[pod_uid] = phase
 
                     rs_name = rs_prefix_from_pod_name(pod_name)
                     prio = int(self.prio_by_rs.get(rs_name, 0))
                     if prio > 0:
                         uid_to_prio[pod_uid] = prio
 
-                gone = prev_live_uids - cur_live_uids
-                if gone:
-                    delta_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
-                    for uid in gone:
+                    # Once we've seen a UID Running, it becomes eligible to be counted deleted.
+                    if phase == "Running":
+                        eligible_uids.add(pod_uid)
+
+                delta_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
+
+                # Running -> Pending transitions
+                for uid in (prev_live_uids & cur_live_uids):
+                    if uid not in eligible_uids:
+                        continue
+                    if prev_phase_by_uid.get(uid) == "Running" and cur_phase_by_uid.get(uid) == "Pending":
                         p = int(uid_to_prio.get(uid, 0))
                         if p in delta_by_prio:
                             delta_by_prio[p] += 1
-                    for p in range(1, self.max_prio + 1):
-                        deletions_cum_by_prio[p] += delta_by_prio[p]
+                        eligible_uids.discard(uid)
+
+                # Cleanup: drop state for UIDs that disappeared to avoid unbounded growth.
+                gone = prev_live_uids - cur_live_uids
+                if gone:
+                    for uid in gone:
+                        eligible_uids.discard(uid)
+                        prev_phase_by_uid.pop(uid, None)
+                        uid_to_prio.pop(uid, None)
+
+                for p in range(1, self.max_prio + 1):
+                    deletions_cum_by_prio[p] += delta_by_prio[p]
 
                 prev_live_uids = cur_live_uids
+                prev_phase_by_uid = cur_phase_by_uid
 
                 # ---- write general_stats row ----
                 row = [now_ts, f"{t_s:.6f}", f"{cpu_run_util:.6f}", f"{mem_run_util:.6f}"]

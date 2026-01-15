@@ -52,7 +52,7 @@ chmod +x bin/kube-scheduler
 echo "Creating bootstrap/content/bin and shipping binaries..."
 mkdir -p bootstrap/content/bin
 
-# Ship kube-scheduler (bootstrap.sh will only chmod +x it)
+# Ship kube-scheduler
 cp bin/kube-scheduler bootstrap/content/bin/kube-scheduler
 chmod +x bootstrap/content/bin/kube-scheduler
 

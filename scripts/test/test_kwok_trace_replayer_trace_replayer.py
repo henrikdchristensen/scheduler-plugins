@@ -804,6 +804,75 @@ def test_monitor_loop_writes_csv_and_skips_initial_rs_in_pod_stats(tmp_path: Pat
     assert not any("rs-000001-aaa-0" in ln for ln in plines[1:])
 
 
+def test_monitor_loop_deletions_count_running_to_pending_and_disappearance(tmp_path: Path, monkeypatch):
+    rp, *_ = mk_replayer(tmp_path, monkeypatch)
+
+    rp.clock = FakeClock(0.0)
+    rp.max_prio = 1
+    rp.run_start_monotonic = 0.0
+    rp.run_start_wall = 0.0
+
+    rp.prio_by_rs = {"rs-000002": 1}
+    rp.initial_rs_names = set()
+
+    # Sequence:
+    #  1) u2 Running           -> eligible
+    #  2) u2 Pending           -> count +1 (Running->Pending)
+    #  3) u2 Running           -> eligible again
+    #  4) u2 Pending           -> count +1 (Running->Pending)
+    snapshots = [
+        [
+            {"metadata": {"name": "rs-000002-bbb-0", "uid": "u2"}, "status": {"phase": "Running"}},
+        ],
+        [
+            {"metadata": {"name": "rs-000002-bbb-0", "uid": "u2"}, "status": {"phase": "Pending"}},
+        ],
+        [
+            {"metadata": {"name": "rs-000002-bbb-0", "uid": "u2"}, "status": {"phase": "Running"}},
+        ],
+        [
+            {"metadata": {"name": "rs-000002-bbb-0", "uid": "u2"}, "status": {"phase": "Pending"}},
+        ],
+    ]
+
+    call_i = {"i": 0}
+    stop_event = tr.threading.Event()
+
+    def snap(_ns):
+        i = call_i["i"]
+        if i >= len(snapshots):
+            stop_event.set()
+            return (0.0, 0.0, {1: 0}, {1: 0}, [])
+        items = snapshots[i]
+        call_i["i"] += 1
+        if call_i["i"] >= len(snapshots):
+            stop_event.set()
+        # utilization + counts are irrelevant for deletion metric assertion
+        return (0.0, 0.0, {1: 0}, {1: 0}, items)
+
+    monkeypatch.setattr(rp, "snapshot_from_pods", snap)
+    monkeypatch.setattr(tr, "get_timestamp", lambda: "T")
+
+    general_csv = tmp_path / "general.csv"
+    pod_csv = tmp_path / "pod.csv"
+
+    rp.monitor_loop(
+        namespace="trace",
+        interval_s=0.0,
+        general_csv=general_csv,
+        pod_stats_csv=pod_csv,
+        stop_event=stop_event,
+    )
+
+    glines = general_csv.read_text(encoding="utf-8").splitlines()
+    assert len(glines) >= 2  # header + at least one row
+
+    header = glines[0].split(",")
+    idx_del = header.index("deletions_cum_p1")
+    last_row = glines[-1].split(",")
+    assert last_row[idx_del] == "2"
+
+
 # ---------------------------------------------------------------------------
 # TraceReplayer.run_seed()
 # ---------------------------------------------------------------------------
