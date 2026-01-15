@@ -1,12 +1,12 @@
 trace-dir: data/traces/nodes32_prio4_arrival8
-result-dir: results/plugin/nodes32_prio4_arrival8_modeinterlude2_nonblocking
+result-dir: results/plugin/nodes32_prio4_arrival8_modestablequeue2_nonblocking
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler.yaml
 override-kwokctl-envs:
   - name: SOLVER_PYTHON_TIMEOUT
     value: 16s
   - name: OPTIMIZE_MODE
-    value: interlude
+    value: stable_queue
   - name: OPTIMIZE_BLOCKING_SOLVING
     value: "false"
-  - name: OPTIMIZE_INTERLUDE_DELAY
+  - name: OPTIMIZE_STABLE_QUEUE_DELAY
     value: 2s

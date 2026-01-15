@@ -99,9 +99,9 @@ NODE_NAMES = [f"kwok-node-{i+1}" for i in range(NUM_NODES)]
 PYTEST_MODE_CASES: List[Tuple[str, bool, List[str]]] = [
     ("manual_blocking", True, ["prioaware"]),
     ("manual", True, ["sameprio"]),
-    ("per_pod", True, ["sameprio"]),
+    ("scheduling_failure", True, ["sameprio"]),
     ("periodic", True, ["sameprio"]),
-    ("interlude", True, ["higharrival"]),
+    ("stable_queue", True, ["higharrival"]),
 ]
 
 # ---------------------------------------------------------------------------

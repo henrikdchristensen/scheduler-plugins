@@ -68,8 +68,8 @@ func TestStartLoops_StartsPeriodicLoopWhenModePeriodic(t *testing.T) {
 	)
 }
 
-func TestStartLoops_StartsInterludeLoopWhenModeInterlude(t *testing.T) {
-	withVar(t, &OptimizeMode, ModeInterlude)
+func TestStartLoops_StartsStableQueueLoopWhenModeStableQueue(t *testing.T) {
+	withVar(t, &OptimizeMode, ModeStableQueue)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -85,11 +85,11 @@ func TestStartLoops_StartsInterludeLoopWhenModeInterlude(t *testing.T) {
 			pl.startLoops(ctx)
 			select {
 			case cfg := <-cfgCh:
-				if cfg.Label != "InterludeLoop" {
-					t.Fatalf("expected Label=InterludeLoop, got %q", cfg.Label)
+				if cfg.Label != "StableQueueLoop" {
+					t.Fatalf("expected Label=StableQueueLoop, got %q", cfg.Label)
 				}
 			case <-time.After(500 * time.Millisecond):
-				t.Fatalf("optimizeBackgroundLoopFunc was not called for ModeInterlude")
+				t.Fatalf("optimizeBackgroundLoopFunc was not called for ModeStableQueue")
 			}
 		},
 	)
@@ -107,10 +107,10 @@ func TestOptimizeBackgroundLoop_ImmediateCancel(t *testing.T) {
 	cancel() // cancel before entering => hit ctx.Done path immediately
 
 	cfg := OptimizeLoopConfig{
-		Label:          "TestLoop",
-		Interval:       0, // covers interval<=0 => default 1s path
-		InterludeDelay: 0,
-		CancelOnChange: false,
+		Label:            "TestLoop",
+		Interval:         0, // covers interval<=0 => default 1s path
+		StableQueueDelay: 0,
+		CancelOnChange:   false,
 	}
 
 	// No hooks needed; it should exit immediately on ctx.Done.
@@ -121,10 +121,10 @@ func TestOptimizeBackgroundLoop_Scenarios(t *testing.T) {
 	pl := &SharedState{}
 
 	cfg := OptimizeLoopConfig{
-		Label:          "TestLoop",
-		Interval:       5 * time.Millisecond,
-		InterludeDelay: 15 * time.Millisecond,
-		CancelOnChange: true,
+		Label:            "TestLoop",
+		Interval:         5 * time.Millisecond,
+		StableQueueDelay: 15 * time.Millisecond,
+		CancelOnChange:   true,
 	}
 
 	// Snapshots we will “serve” via the hook.

@@ -2,11 +2,11 @@
 package mypriorityoptimizer
 
 // -------------------------
-// isPerPodMode
+// isSchedulingFailureMode
 // -------------------------
 
-// isPerPodMode is the optimizer cadence that optimizes for every new pod.
-func isPerPodMode() bool { return OptimizeMode == ModePerPod }
+// isSchedulingFailureMode is the optimizer cadence that optimizes for every new pod.
+func isSchedulingFailureMode() bool { return OptimizeMode == ModeSchedulingFailure }
 
 // -------------------------
 // isManualBlockingMode
@@ -22,9 +22,9 @@ func isManualBlockingMode() bool { return OptimizeMode == ModeManualBlocking }
 // isNonBlockingSolving is true for modes where we:
 // - collect pods at PostFilter, and
 // - take Active only after we know a plan is worthwhile.
-// PerPod is always treated as blocking.
+// SchedulingFailure is always treated as blocking.
 func isNonBlockingSolving() bool {
-	return OptimizeMode != ModePerPod && !OptimizeBlockingSolving
+	return OptimizeMode != ModeSchedulingFailure && !OptimizeBlockingSolving
 }
 
 // -------------------------
@@ -55,12 +55,12 @@ func getModeCombinedAsString() string {
 // String returns the string representation of the ModeType.
 func (m ModeType) String() string {
 	switch m {
-	case ModePerPod:
-		return "PerPod"
+	case ModeSchedulingFailure:
+		return "SchedulingFailure"
 	case ModePeriodic:
 		return "Periodic"
-	case ModeInterlude:
-		return "Interlude"
+	case ModeStableQueue:
+		return "StableQueue"
 	case ModeManual:
 		return "Manual"
 	case ModeManualBlocking:

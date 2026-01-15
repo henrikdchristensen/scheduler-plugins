@@ -14,9 +14,9 @@ type OptimizeLoopConfig struct {
 	Label string
 	// Tick interval for the loop.
 	Interval time.Duration
-	// InterludeDelay is the duration of the idle window required for stability.
+	// StableQueueDelay is the duration of the idle window required for stability.
 	// 0 means no idle window; >0 means require this long of stability.
-	InterludeDelay time.Duration
+	StableQueueDelay time.Duration
 	// CancelOnChange indicates whether to cancel in-flight run if pending set changes.
 	CancelOnChange bool
 }

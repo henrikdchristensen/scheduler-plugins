@@ -12,9 +12,9 @@ import (
 
 func TestModePredicates(t *testing.T) {
 	modes := []ModeType{
-		ModePerPod,
+		ModeSchedulingFailure,
 		ModePeriodic,
-		ModeInterlude,
+		ModeStableQueue,
 		ModeManual,
 		ModeManualBlocking,
 		ModeType(999),
@@ -27,9 +27,9 @@ func TestModePredicates(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				withMode(mode, blocking, func() {
 					// Expected behavior derived directly from implementation contracts.
-					wantPerPod := mode == ModePerPod
+					wantSchedulingFailure := mode == ModeSchedulingFailure
 					wantManualBlocking := mode == ModeManualBlocking
-					wantNonBlocking := (mode != ModePerPod) && !blocking
+					wantNonBlocking := (mode != ModeSchedulingFailure) && !blocking
 
 					wantBlockingStr := "Blocking"
 					if wantNonBlocking {
@@ -37,8 +37,8 @@ func TestModePredicates(t *testing.T) {
 					}
 					wantCombined := mode.String() + "/" + wantBlockingStr
 
-					if got := isPerPodMode(); got != wantPerPod {
-						t.Fatalf("isPerPodMode()=%v want %v", got, wantPerPod)
+					if got := isSchedulingFailureMode(); got != wantSchedulingFailure {
+						t.Fatalf("isSchedulingFailureMode()=%v want %v", got, wantSchedulingFailure)
 					}
 					if got := isManualBlockingMode(); got != wantManualBlocking {
 						t.Fatalf("isManualBlockingMode()=%v want %v", got, wantManualBlocking)
@@ -67,9 +67,9 @@ func TestModeType_String(t *testing.T) {
 		in   ModeType
 		want string
 	}{
-		{ModePerPod, "PerPod"},
+		{ModeSchedulingFailure, "SchedulingFailure"},
 		{ModePeriodic, "Periodic"},
-		{ModeInterlude, "Interlude"},
+		{ModeStableQueue, "StableQueue"},
 		{ModeManual, "Manual"},
 		{ModeManualBlocking, "ManualBlocking"},
 		{ModeType(999), "Periodic"}, // default case

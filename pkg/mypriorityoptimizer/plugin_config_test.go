@@ -73,8 +73,7 @@ func TestPersistPluginConfig_CreateThenUpdate(t *testing.T) {
 		Client:             client,
 		BlockedWhileActive: newPodSet("x"),
 	}
-	// First create with one HTTP addr...
-	withVar(t, &HTTPAddr, "127.0.0.1:1111")
+	// First create.
 	if err := pl.persistPluginConfig(ctx); err != nil {
 		t.Fatalf("persistPluginConfig(create) error: %v", err)
 	}
@@ -82,12 +81,19 @@ func TestPersistPluginConfig_CreateThenUpdate(t *testing.T) {
 	cm1 := mustGetPluginCfgCM(t, ctx, client)
 	mustLabelTrue(t, cm1, PluginCfgConfigMapLabelKey)
 	snap1 := mustDecodePluginCfgSnap(t, cm1)
-	if snap1.HTTPAddr != "127.0.0.1:1111" {
-		t.Fatalf("snap1.HTTPAddr=%q want %q", snap1.HTTPAddr, "127.0.0.1:1111")
+	if snap1.HTTPAddr != HTTPAddr {
+		t.Fatalf("snap1.HTTPAddr=%q want %q", snap1.HTTPAddr, HTTPAddr)
+	}
+	key := PluginCfgConfigMapLabelKey + ".json"
+	raw1 := cm1.Data[key]
+	if raw1 == "" {
+		t.Fatalf("expected snapshot data %q to be non-empty", key)
 	}
 
-	// ...then update with a different HTTP addr and verify it changed.
-	withVar(t, &HTTPAddr, "127.0.0.1:2222")
+	// Ensure the next snapshot is very likely to differ (timestamp is part of the snapshot).
+	time.Sleep(2 * time.Millisecond)
+
+	// ...then persist again and verify it updated.
 	if err := pl.persistPluginConfig(ctx); err != nil {
 		t.Fatalf("persistPluginConfig(update) error: %v", err)
 	}
@@ -95,8 +101,15 @@ func TestPersistPluginConfig_CreateThenUpdate(t *testing.T) {
 	cm2 := mustGetPluginCfgCM(t, ctx, client)
 	mustLabelTrue(t, cm2, PluginCfgConfigMapLabelKey)
 	snap2 := mustDecodePluginCfgSnap(t, cm2)
-	if snap2.HTTPAddr != "127.0.0.1:2222" {
-		t.Fatalf("snap2.HTTPAddr=%q want %q", snap2.HTTPAddr, "127.0.0.1:2222")
+	if snap2.HTTPAddr != HTTPAddr {
+		t.Fatalf("snap2.HTTPAddr=%q want %q", snap2.HTTPAddr, HTTPAddr)
+	}
+	raw2 := cm2.Data[key]
+	if raw2 == "" {
+		t.Fatalf("expected snapshot data %q to be non-empty on update", key)
+	}
+	if raw1 == raw2 {
+		t.Fatalf("expected snapshot JSON to change between create and update")
 	}
 }
 

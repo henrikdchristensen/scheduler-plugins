@@ -36,7 +36,7 @@ func (pl *SharedState) planCompletionWatch(ap *ActivePlan) {
 	klog.InfoS(msg(label, "started"),
 		"planID", ap.ID,
 		"interval", interval,
-		"timeout", PlanExecutionTimeout,
+		"timeout", PlanRealizationTimeout,
 	)
 
 	ticker := time.NewTicker(interval)
@@ -52,7 +52,7 @@ func (pl *SharedState) planCompletionWatch(ap *ActivePlan) {
 				if cur != nil && cur.ID == ap.ID {
 					klog.InfoS(msg(label, "plan timed out; settling as failed"),
 						"planID", ap.ID,
-						"timeout", PlanExecutionTimeout,
+						"timeout", PlanRealizationTimeout,
 					)
 					onPlanCompletedFn(pl, PlanStatusFailed)
 				}

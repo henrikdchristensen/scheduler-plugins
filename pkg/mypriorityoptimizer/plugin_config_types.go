@@ -19,10 +19,10 @@ type PluginConfigSnapshot struct {
 	PluginReadinessUsableNodeInterval string `json:"pluginReadinessUsableNodeInterval"`
 
 	// Optimization settings (from args.go)
-	OptimizeMode                   string `json:"optimizeMode"`
-	OptimizePeriodicInterval       string `json:"optimizePeriodicInterval"`
-	OptimizeInterludeDelay         string `json:"optimizeInterludeDelay"`
-	OptimizeInterludeCheckInterval string `json:"optimizeInterludeCheckInterval"`
+	OptimizeMode                     string `json:"optimizeMode"`
+	OptimizePeriodicInterval         string `json:"optimizePeriodicInterval"`
+	OptimizeStableQueueDelay         string `json:"optimizeStableQueueDelay"`
+	OptimizeStableQueueCheckInterval string `json:"optimizeStableQueueCheckInterval"`
 
 	// HTTP / control
 	HTTPAddr string `json:"httpAddr"`
@@ -43,18 +43,13 @@ type PluginConfigSnapshot struct {
 	SolverStatsConfigMapLabelKey string `json:"solverStatsConfigMapLabelKey"`
 
 	// Plan settings
-	PlanExecutionTimeout        string `json:"planExecutionTimeout"`
+	PlanRealizationTimeout      string `json:"planRealizationTimeout"`
 	PlanConfigMapNamePrefix     string `json:"planConfigMapNamePrefix"`
 	PlanConfigMapLabelKey       string `json:"planConfigMapLabelKey"`
 	PlansToRetain               int    `json:"plansToRetain"`
 	PlanCompletionCheckInterval string `json:"planCompletionCheckInterval"`
 	PlanPendingBindInterval     string `json:"planPendingBindInterval"`
-	PlanOverallTimeout          string `json:"planOverallTimeout"`
-	NudgeBlockedInterval        string `json:"nudgeBlockedInterval"`
-	EvictTimeout                string `json:"evictTimeout"`
-	RecreateTimeout             string `json:"recreateTimeout"`
-	WaitPodsGoneTimeout         string `json:"waitPodsGoneTimeout"`
+	PlanActivationTimeout       string `json:"planActivationTimeout"`
 	WaitPodsGoneInterval        string `json:"waitPodsGoneInterval"`
-	EvictParallelism            int    `json:"evictParallelism"`
-	RecreatePodParallelism      int    `json:"recreatePodParallelism"`
+	EvictRecreateParallelism    int    `json:"evictRecreateParallelism"`
 }

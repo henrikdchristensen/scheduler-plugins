@@ -4,7 +4,7 @@ package mypriorityoptimizer
 // ======= Optimality where/when settings =======
 
 // OptimizeMode is the frequency at which optimization is performed. Choices:
-// "per_pod", "periodic", "interlude", "manual", "manual_blocking"
+// "scheduling_failure", "periodic", "stable_queue", "manual", "manual_blocking"
 var OptimizeMode = parseOptimizeMode(getEnv("OPTIMIZE_MODE", "periodic"))
 
 // OptimizeBlockingSolving controls whether solver runs blocks normal scheduling
@@ -13,20 +13,15 @@ var OptimizeBlockingSolving = parseBool(getEnv("OPTIMIZE_BLOCKING_SOLVING", "tru
 
 // OptimizePeriodicInterval is the duration between consecutive optimization
 // runs in periodic mode. If a plan is currently active, the loop is skipped.
-var OptimizePeriodicInterval = parseTime(getEnv("OPTIMIZE_PERIODIC_INTERVAL", "30s"))
+var OptimizePeriodicInterval = parseTime(getEnv("OPTIMIZE_PERIODIC_INTERVAL", "8s"))
 
-// OptimizeInterludeDelay is the duration of idle time (no changes in the
-// pending set) before triggering interlude optimization.
-var OptimizeInterludeDelay = parseTime(getEnv("OPTIMIZE_INTERLUDE_DELAY", "2s"))
+// OptimizeStableQueueDelay is the duration of idle time (no changes in the
+// pending set) before triggering stable queue optimization.
+var OptimizeStableQueueDelay = parseTime(getEnv("OPTIMIZE_STABLE_QUEUE_DELAY", "2s"))
 
-// OptimizeInterludeCheckInterval is the interval at which we poll for interlude
+// OptimizeStableQueueCheckInterval is the interval at which we poll for stable queue
 // "free time" conditions.
-var OptimizeInterludeCheckInterval = parseTime(getEnv("OPTIMIZE_INTERLUDE_CHECK_INTERVAL", "250ms"))
-
-// Address the HTTP server should listen on (used for manual optimization and
-// debugging in all modes). Only works on a KWOK cluster if running with binary
-// runtime. Examples: ":18080", "0.0.0.0:18080"
-var HTTPAddr = getEnv("HTTP_ADDR", ":18080")
+var OptimizeStableQueueCheckInterval = parseTime(getEnv("OPTIMIZE_STABLE_QUEUE_CHECK_INTERVAL", "250ms"))
 
 // ======= Solver settings =======
 
@@ -37,7 +32,7 @@ var SolverSaveAllAttempts = parseBool(getEnv("SOLVER_SAVE_FAILED_ATTEMPTS", "tru
 var SolverPythonEnabled = parseBool(getEnv("SOLVER_PYTHON_ENABLED", "false"))
 
 // SolverPythonTimeout is the timeout for the python solver to complete.
-var SolverPythonTimeout = parseTime(getEnv("SOLVER_PYTHON_TIMEOUT", "10s"))
+var SolverPythonTimeout = parseTime(getEnv("SOLVER_PYTHON_TIMEOUT", "16s"))
 
 // SolverPythonScriptPath is the path to the solver executable.
 var SolverPythonScriptPath = getEnv("SOLVER_PATH", "/opt/solver/main.py")
@@ -59,9 +54,3 @@ var SolverPythonMoveFractionOfTier = parseFloat(getEnv("SOLVER_PYTHON_MOVE_FRACT
 
 // SolverPythonGraceMs is the grace period for the python solver (ms).
 var SolverPythonGraceMs = parseInt(getEnv("SOLVER_PYTHON_GRACE_MS", "1000"))
-
-// ======= Plan settings =======
-
-// PlanExecutionTimeout is the maximum duration a plan may run before being
-// terminated.
-var PlanExecutionTimeout = parseTime(getEnv("PLAN_EXECUTION_TIMEOUT", "20s"))

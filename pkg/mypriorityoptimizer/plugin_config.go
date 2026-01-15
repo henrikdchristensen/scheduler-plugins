@@ -20,10 +20,10 @@ func buildPluginConfigSnapshot() PluginConfigSnapshot {
 		CacheWarmupSettleDelay:            CacheWarmupSettleDelay.String(),
 		PluginReadinessUsableNodeInterval: PluginReadinessUsableNodeInterval.String(),
 
-		OptimizeMode:                   getModeCombinedAsString(),
-		OptimizePeriodicInterval:       OptimizePeriodicInterval.String(),
-		OptimizeInterludeDelay:         OptimizeInterludeDelay.String(),
-		OptimizeInterludeCheckInterval: OptimizeInterludeCheckInterval.String(),
+		OptimizeMode:                     getModeCombinedAsString(),
+		OptimizePeriodicInterval:         OptimizePeriodicInterval.String(),
+		OptimizeStableQueueDelay:         OptimizeStableQueueDelay.String(),
+		OptimizeStableQueueCheckInterval: OptimizeStableQueueCheckInterval.String(),
 
 		HTTPAddr: HTTPAddr,
 
@@ -41,20 +41,15 @@ func buildPluginConfigSnapshot() PluginConfigSnapshot {
 		SolverStatsConfigMapName:     SolverStatsConfigMapName,
 		SolverStatsConfigMapLabelKey: SolverStatsConfigMapLabelKey,
 
-		PlanExecutionTimeout:        PlanExecutionTimeout.String(),
+		PlanRealizationTimeout:      PlanRealizationTimeout.String(),
 		PlanConfigMapLabelKey:       PlanConfigMapLabelKey,
 		PlanConfigMapNamePrefix:     PlanConfigMapNamePrefix,
 		PlansToRetain:               PlansToRetain,
 		PlanCompletionCheckInterval: PlanCompletionCheckInterval.String(),
 		PlanPendingBindInterval:     PlanPendingBindInterval.String(),
-		PlanOverallTimeout:          PlanOverallTimeout.String(),
-		NudgeBlockedInterval:        NudgeBlockedInterval.String(),
-		EvictTimeout:                EvictTimeout.String(),
-		RecreateTimeout:             RecreateTimeout.String(),
-		WaitPodsGoneTimeout:         WaitPodsGoneTimeout.String(),
+		PlanActivationTimeout:       PlanActivationTimeout.String(),
 		WaitPodsGoneInterval:        WaitPodsGoneInterval.String(),
-		EvictParallelism:            EvictParallelism,
-		RecreatePodParallelism:      RecreatePodParallelism,
+		EvictRecreateParallelism:    EvictRecreateParallelism,
 	}
 }
 

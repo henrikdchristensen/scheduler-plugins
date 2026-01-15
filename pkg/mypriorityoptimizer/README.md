@@ -43,9 +43,9 @@ Our goal is to schedule as many *high-priority* pods as possible, especially whe
 
 The solver can be triggered in different **optimization modes**:
 
-- *PerPod* – optimize for every new pod that arrives (not recommended for large clusters).
+- *SchedulingFailure* – optimize for every new pod that arrives (not recommended for large clusters).
 - *Periodic* – optimize all pods (running and pending) at fixed intervals.
-- *Interlude* – optimize all pods during interlude windows (i.e. when no pods are arriving).
+- *StableQueue* – optimize all pods during stable queue windows (i.e. when no pods are arriving).
 - *Manual* – runs normal scheduling like the ones above, but optimization is only triggered manually (via HTTP). Used for testing and evaluation.
 - *ManualBlocking* – same as *Manual*, but all pods are blocked from entering the cluster until the solver is triggered via HTTP and completes. Used for testing and evaluation.
 
@@ -68,7 +68,7 @@ Some of the main files and their purpose are described below:
 - `optimization_flow.go`: Contains the main logic for running the optimization flow, including triggering the solver, applying the plan, etc.
 - `hook_preenqueue.go`: Implements the PreEnqueue scheduling extension point. This is mainly used for blocking new pods while an optimization is running or a plan is being applied.
 - `hook_prefilter.go`: Implements the PreFilter scheduling extension point. Its main purpose is targeting the pod onto the node assigned by the solver in the plan (if any).
-- `hook_postfilter.go`: Implements the PostFilter scheduling extension point. This is mainly used to mark a pod as unschedulable as the default scheduler failed to place it. If in mode *PerPod*, it also triggers the optimization for every new pod that arrives.
+- `hook_postfilter.go`: Implements the PostFilter scheduling extension point. This is mainly used to mark a pod as unschedulable as the default scheduler failed to place it. If in mode *SchedulingFailure*, it also triggers the optimization for every new pod that arrives.
 - `hook_reserve_unreserve.go`: Implements the Reserve/Unreserve scheduling extension points. It is used as we cannot rely on specific pod names (e.g. pods from a ReplicaSets), instead we count how many of each that should be placed on each node.
 - `plan_completion_watch.go`: A background watcher for plan completion, checking that all pods in the plan are assigned to the correct nodes.
 
@@ -167,7 +167,7 @@ componentsPatches:
     #     value: "10"
     extraEnvs:
       - name: OPTIMIZE_MODE
-        value: "periodic" # choices: per_pod, periodic, interlude, manual, manual_blocking
+        value: "periodic" # choices: scheduling_failure, periodic, stable_queue, manual, manual_blocking
       - name: OPTIMIZE_BLOCKING_SOLVING
         value: "true" # choices: true, false
       - name: OPTIMIZE_PERIODIC_INTERVAL

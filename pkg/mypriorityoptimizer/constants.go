@@ -41,6 +41,14 @@ const (
 	SolverStatsConfigMapName = "solver-stats"
 	// SolverStatsConfigMapLabelKey is the label key used for solver configuration config maps.
 	SolverStatsConfigMapLabelKey = "runs"
+	// Solver optimal status string.
+	SolverStatusOptimal = "OPTIMAL"
+	// Solver feasible status string.
+	SolverStatusFeasible = "FEASIBLE"
+	// Address the HTTP server should listen on (used for manual optimization and
+	// debugging in all modes). Only works on a KWOK cluster if running with binary
+	// runtime. Examples: ":18080", "0.0.0.0:18080"
+	HTTPAddr = ":18080"
 	// =========================================================
 
 	// ================ Plan settings ==========================
@@ -55,41 +63,23 @@ const (
 	PlanPendingBindInterval = 250 * time.Millisecond
 	// PlansToRetain is the number of ConfigMaps plans to retain before the oldest are deleted.
 	PlansToRetain = 32
-	// NudgeBlockedInterval is how often to try waking one blocked pod when idle in PerPod@PreEnqueue.
-	// We need this functionality at this mode, as if we activate all blocked pods at once
-	// over and over again in onPlanCompleted, we end up with a large waiting time in the queue.
-	NudgeBlockedInterval = 250 * time.Millisecond
-	// The overall timeout for plan execution.
-	PlanOverallTimeout = 10 * time.Second
-	// Timeout for individual evict operations.
-	EvictTimeout = 10 * time.Second
-	// Timeout for individual recreate operations.
-	RecreateTimeout = 10 * time.Second
-	// Timeout for waiting for pods to be gone after eviction.
-	WaitPodsGoneTimeout = 10 * time.Second
+	// The overall timeout for plan activation operations (like evictions and recreations).
+	PlanActivationTimeout = 4 * time.Second
 	// Interval for waiting for pods to be gone after eviction.
 	WaitPodsGoneInterval = 250 * time.Millisecond
-	// Degree of parallelism for eviction operations.
-	EvictParallelism = 8
-	// Degree of parallelism for pod recreation operations.
-	RecreatePodParallelism = 8
-	// =========================================================
-
-	// ================ Solver constants =======================
-
-	// Solver optimal status string.
-	SolverStatusOptimal = "OPTIMAL"
-	// Solver feasible status string.
-	SolverStatusFeasible = "FEASIBLE"
-
+	// Degree of parallelism for eviction and recreate operations.
+	EvictRecreateParallelism = 8
+	// PlanRealizationTimeout is the maximum duration a plan may run before
+	// being terminated.
+	PlanRealizationTimeout = 4 * time.Second
 	// =========================================================
 
 	// ================ Loop config defaults ===================
-	// OptimizeInterludeCancelOnChange indicates whether interlude optimization
-	// runs should be cancelled if the pending set changes.
-	OptimizeInterludeCancelOnChange = true
 	// OptimizePeriodicCancelOnChange indicates whether periodic optimization
 	// runs should be cancelled if the pending set changes.
 	OptimizePeriodicCancelOnChange = false // do NOT cancel if new pods arrive (can be made configurable later)
+	// OptimizeStableQueueCancelOnChange indicates whether stable queue
+	// optimization runs should be cancelled if the pending set changes.
+	OptimizeStableQueueCancelOnChange = true
 	// =========================================================
 )

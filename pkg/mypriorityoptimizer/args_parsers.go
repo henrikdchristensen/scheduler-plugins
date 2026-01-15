@@ -92,12 +92,12 @@ func parseTime(s string) time.Duration {
 func parseOptimizeMode(s string) ModeType {
 	v := strings.ToLower(strings.TrimSpace(s))
 	switch v {
-	case "per_pod", "perpod":
-		return ModePerPod
+	case "scheduling_failure", "schedulingfailure":
+		return ModeSchedulingFailure
 	case "periodic":
 		return ModePeriodic
-	case "interlude":
-		return ModeInterlude
+	case "stable_queue", "stablequeue":
+		return ModeStableQueue
 	case "manual":
 		return ModeManual
 	case "manual_blocking", "manualblocking":

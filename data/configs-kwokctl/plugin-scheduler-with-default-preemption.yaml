@@ -12,7 +12,7 @@ componentsPatches:
     #     value: "10"
     extraEnvs:
       - name: OPTIMIZE_MODE
-        value: "periodic" # choices: per_pod, periodic, interlude, manual, manual_blocking
+        value: "periodic" # choices: scheduling_failure, periodic, stable_queue, manual, manual_blocking
       - name: OPTIMIZE_PERIODIC_INTERVAL
         value: "10s" # for periodic mode
       - name: PLAN_EXECUTION_TIMEOUT

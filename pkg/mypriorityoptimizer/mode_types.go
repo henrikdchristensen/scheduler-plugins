@@ -5,13 +5,13 @@ package mypriorityoptimizer
 type ModeType int
 
 const (
-	// ModePerPod optimizes for every new pod.
-	ModePerPod ModeType = iota
+	// ModeSchedulingFailure optimizes for every new pod.
+	ModeSchedulingFailure ModeType = iota
 	// ModePeriodic runs periodic optimization over the accumulated pending set.
 	ModePeriodic
-	// ModeInterlude runs optimization only during "quiet" periods where the
+	// ModeStableQueue runs optimization only during "quiet" periods where the
 	// pending set has been stable for some time.
-	ModeInterlude
+	ModeStableQueue
 	// ModeManual collects like ModePeriodic but only optimizes when the HTTP
 	// /solve endpoint is called.
 	ModeManual

@@ -75,7 +75,7 @@ func newFromHandle(
 
 	// Plugin configuration logging
 	klog.InfoS("Plugin initialized", "name", Name, "version", PluginVersion, "mode", getModeCombinedAsString())
-	klog.InfoS("Plan configuration", "executionTimeout", PlanExecutionTimeout.String())
+	klog.InfoS("Plan configuration", "executionTimeout", PlanRealizationTimeout.String())
 	klog.InfoS("Solver configuration", solverConfigArgs()...)
 
 	// Start HTTP server (hooked for tests)

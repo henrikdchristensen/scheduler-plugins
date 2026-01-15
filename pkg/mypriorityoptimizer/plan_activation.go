@@ -31,7 +31,7 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 	} else {
 		baseCtx = context.Background()
 	}
-	overallCtx, cancel := context.WithTimeout(baseCtx, PlanOverallTimeout)
+	overallCtx, cancel := context.WithTimeout(baseCtx, PlanActivationTimeout)
 	defer cancel()
 
 	// Resolve unique targets (pods that are moved or evicted)
@@ -75,9 +75,7 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 			if err := pl.evictTargets(overallCtx, targets); err != nil {
 				return err
 			}
-			waitCtx, cancel := context.WithTimeout(overallCtx, WaitPodsGoneTimeout)
-			defer cancel()
-			if err := pl.waitPodsGone(waitCtx, targets); err != nil {
+			if err := pl.waitPodsGone(overallCtx, targets); err != nil {
 				return fmt.Errorf("wait for targeted pods gone: %w", err)
 			}
 		}

@@ -310,7 +310,7 @@ func (pl *SharedState) setActivePlan(plan *Plan, id string, _ []*v1.Pod) {
 		old.Cancel()
 	}
 
-	ctxPlan, cancel := context.WithTimeout(context.Background(), PlanExecutionTimeout)
+	ctxPlan, cancel := context.WithTimeout(context.Background(), PlanRealizationTimeout)
 	ap := &ActivePlan{
 		ID:              id,
 		WorkloadQuotas:  buildWorkloadQuotas(plan.WorkloadQuotas),
@@ -358,7 +358,8 @@ func buildWorkloadQuotas(wkQuotas WorkloadQuotas) WorkloadQuotasAtomics {
 // evictTargets
 // -------------------------
 
-// evictTargets evicts all target pods with bounded parallelism and per-op timeouts.
+// evictTargets evicts all target pods with bounded parallelism. Cancellation and
+// timeouts are controlled by the provided ctx (typically PlanActivationTimeout).
 func (pl *SharedState) evictTargets(ctx context.Context, targets []*v1.Pod) error {
 	if evictTargetsHook != nil {
 		return evictTargetsHook(pl, ctx, targets)
@@ -368,7 +369,7 @@ func (pl *SharedState) evictTargets(ctx context.Context, targets []*v1.Pod) erro
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(EvictParallelism)
+	g.SetLimit(EvictRecreateParallelism)
 
 	for _, pod := range targets {
 		p := pod // explicit capture (even though Go 1.22+ fixes range capture)
@@ -376,9 +377,7 @@ func (pl *SharedState) evictTargets(ctx context.Context, targets []*v1.Pod) erro
 			continue
 		}
 		g.Go(func() error {
-			opCtx, cancel := context.WithTimeout(gctx, EvictTimeout)
-			defer cancel()
-			if err := pl.evictPod(opCtx, p); err != nil && !apierrors.IsNotFound(err) {
+			if err := pl.evictPod(gctx, p); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("evict %s: %w", podRef(p), err)
 			}
 			return nil

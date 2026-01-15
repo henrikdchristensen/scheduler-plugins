@@ -37,7 +37,7 @@ NUM_PRIORITIES = 3
 POD_TIMEOUT_S = 10
 
 # Valid optimization modes (just for CLI/pytest validation)
-VALID_OPT_MODES = {"per_pod", "periodic", "interlude", "manual", "manual_blocking"}
+VALID_OPT_MODES = {"scheduling_failure", "periodic", "stable_queue", "manual", "manual_blocking"}
 
 # Global default: by default we DO NOT disable waits & active checks.
 DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS = False
@@ -219,7 +219,7 @@ def _scenario_high_arrival() -> WorkloadScenario:
         id="higharrival",
         description=(
             "High-arrival scenario: many small p1 pods in quick succession, "
-            "useful for testing 'interlude' behavior."
+            "useful for testing 'stable_queue' behavior."
         ),
         steps=steps1 + steps2,
     )

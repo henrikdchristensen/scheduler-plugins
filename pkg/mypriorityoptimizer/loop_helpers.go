@@ -24,8 +24,8 @@ func (pl *SharedState) startLoops(ctx context.Context) {
 	switch OptimizeMode {
 	case ModePeriodic:
 		go pl.loopPeriodic(ctx)
-	case ModeInterlude:
-		go pl.loopInterlude(ctx)
+	case ModeStableQueue:
+		go pl.loopStableQueue(ctx)
 	}
 }
 
@@ -33,8 +33,8 @@ func (pl *SharedState) startLoops(ctx context.Context) {
 // optimizeBackgroundLoop
 // -------------------------
 
-// optimizeBackgroundLoop runs optimization in the background periodically or
-// in interludes, based on the provided configuration.
+// optimizeBackgroundLoop runs optimization in the background periodically or in
+// stable queue mode, based on the provided configuration.
 func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeLoopConfig) {
 	strategy := getModeCombinedAsString()
 
@@ -46,7 +46,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 	klog.InfoS(msg(cfg.Label, "started"),
 		"mode", strategy,
 		"interval", interval,
-		"interludeDelay", cfg.InterludeDelay,
+		"stableQueueDelay", cfg.StableQueueDelay,
 		"cancelOnChange", cfg.CancelOnChange,
 	)
 
@@ -176,11 +176,11 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// Free-time gating: require a stable window if InterludeDelay > 0
-			if cfg.InterludeDelay > 0 {
+			// Free-time gating: require a stable window if StableQueueDelay > 0
+			if cfg.StableQueueDelay > 0 {
 				idleFor := time.Since(lastChange)
-				if idleFor < cfg.InterludeDelay {
-					timer.Reset(cfg.InterludeDelay - idleFor)
+				if idleFor < cfg.StableQueueDelay {
+					timer.Reset(cfg.StableQueueDelay - idleFor)
 					continue
 				}
 			}

@@ -19,8 +19,8 @@ import (
 func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pending *v1.Pod, m framework.NodeToStatusMap) (*framework.PostFilterResult, *fwk.Status) {
 	stage := "PostFilter"
 
-	// Only proceed if PerPod is enabled; otherwise, just skip.
-	if !postFilterPerPodEnabled() {
+	// Only proceed if SchedulingFailure is enabled; otherwise, just skip.
+	if !postFilterSchedulingFailureEnabled() {
 		klog.V(MyV).InfoS(msg(stage, "no nomination"), "pod", klog.KObj(pending))
 		return nil, fwk.NewStatus(fwk.Unschedulable, msg(stage, "no nomination"))
 	}
@@ -62,9 +62,9 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 // -------------------------
 
 var (
-	postFilterSleep           = time.Sleep
-	postFilterPerPodEnabled   = isPerPodMode
-	postFilterRunOptimization = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
+	postFilterSleep                    = time.Sleep
+	postFilterSchedulingFailureEnabled = isSchedulingFailureMode
+	postFilterRunOptimization          = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
 		plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)
 		return plan, err
 	}

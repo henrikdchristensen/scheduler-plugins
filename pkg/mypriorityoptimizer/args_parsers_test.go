@@ -228,11 +228,12 @@ func TestParseOptimizeMode(t *testing.T) {
 		in   string
 		want ModeType
 	}{
-		{"perpod", ModePerPod},
-		{"per_pod", ModePerPod},
-		{"PER_POD ", ModePerPod}, // test for 'with spaces' and 'uppercase'
+		{"schedulingfailure", ModeSchedulingFailure},
+		{"scheduling_failure", ModeSchedulingFailure},
+		{"SCHEDULING_FAILURE ", ModeSchedulingFailure}, // test for 'with spaces' and 'uppercase'
 		{"periodic", ModePeriodic},
-		{"interlude", ModeInterlude},
+		{"stablequeue", ModeStableQueue},
+		{"stable_queue", ModeStableQueue},
 		{"manual", ModeManual},
 		{"manualblocking", ModeManualBlocking},
 		{"manual_blocking", ModeManualBlocking},

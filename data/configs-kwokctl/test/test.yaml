@@ -21,5 +21,5 @@ componentsPatches:
         value: 10s
       - name: OPTIMIZE_PERIODIC_INTERVAL
         value: 10s
-      - name: OPTIMIZE_INTERLUDE_DELAY # time cluster state must be stable before solving
+      - name: OPTIMIZE_STABLE_QUEUE_DELAY # time cluster state must be stable before solving
         value: 5s

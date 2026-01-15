@@ -23,31 +23,31 @@ func TestLoopConfigs(t *testing.T) {
 		wantAfter func(t *testing.T)
 	}{
 		{
-			name: "interlude defaults",
+			name: "stable queue defaults",
 			setup: func(t *testing.T) {
-				withVar(t, &OptimizeInterludeDelay, time.Duration(0))
-				withVar(t, &OptimizeInterludeCheckInterval, time.Duration(0))
+				withVar(t, &OptimizeStableQueueDelay, time.Duration(0))
+				withVar(t, &OptimizeStableQueueCheckInterval, time.Duration(0))
 			},
-			call: func() { pl.loopInterlude(ctx) },
+			call: func() { pl.loopStableQueue(ctx) },
 			wantCfg: OptimizeLoopConfig{
-				Label:          "InterludeLoop",
-				Interval:       250 * time.Millisecond,
-				InterludeDelay: 2 * time.Second,
-				CancelOnChange: true,
+				Label:            "StableQueueLoop",
+				Interval:         250 * time.Millisecond,
+				StableQueueDelay: 2 * time.Second,
+				CancelOnChange:   true,
 			},
 		},
 		{
-			name: "interlude configured",
+			name: "stable queue configured",
 			setup: func(t *testing.T) {
-				withVar(t, &OptimizeInterludeDelay, 5*time.Second)
-				withVar(t, &OptimizeInterludeCheckInterval, 123*time.Millisecond)
+				withVar(t, &OptimizeStableQueueDelay, 5*time.Second)
+				withVar(t, &OptimizeStableQueueCheckInterval, 123*time.Millisecond)
 			},
-			call: func() { pl.loopInterlude(ctx) },
+			call: func() { pl.loopStableQueue(ctx) },
 			wantCfg: OptimizeLoopConfig{
-				Label:          "InterludeLoop",
-				Interval:       123 * time.Millisecond,
-				InterludeDelay: 5 * time.Second,
-				CancelOnChange: true,
+				Label:            "StableQueueLoop",
+				Interval:         123 * time.Millisecond,
+				StableQueueDelay: 5 * time.Second,
+				CancelOnChange:   true,
 			},
 		},
 		{
@@ -57,10 +57,10 @@ func TestLoopConfigs(t *testing.T) {
 			},
 			call: func() { pl.loopPeriodic(ctx) },
 			wantCfg: OptimizeLoopConfig{
-				Label:          "PeriodicLoop",
-				Interval:       2 * time.Second,
-				InterludeDelay: 0,
-				CancelOnChange: false,
+				Label:            "PeriodicLoop",
+				Interval:         2 * time.Second,
+				StableQueueDelay: 0,
+				CancelOnChange:   false,
 			},
 			wantAfter: func(t *testing.T) {
 				if OptimizePeriodicInterval != 2*time.Second {
@@ -75,10 +75,10 @@ func TestLoopConfigs(t *testing.T) {
 			},
 			call: func() { pl.loopPeriodic(ctx) },
 			wantCfg: OptimizeLoopConfig{
-				Label:          "PeriodicLoop",
-				Interval:       5 * time.Second,
-				InterludeDelay: 0,
-				CancelOnChange: false,
+				Label:            "PeriodicLoop",
+				Interval:         5 * time.Second,
+				StableQueueDelay: 0,
+				CancelOnChange:   false,
 			},
 			wantAfter: func(t *testing.T) {
 				if OptimizePeriodicInterval != 5*time.Second {
@@ -133,8 +133,8 @@ func assertCfg(t *testing.T, got, want OptimizeLoopConfig) {
 	if got.Interval != want.Interval {
 		t.Fatalf("Interval=%v, want %v", got.Interval, want.Interval)
 	}
-	if got.InterludeDelay != want.InterludeDelay {
-		t.Fatalf("InterludeDelay=%v, want %v", got.InterludeDelay, want.InterludeDelay)
+	if got.StableQueueDelay != want.StableQueueDelay {
+		t.Fatalf("StableQueueDelay=%v, want %v", got.StableQueueDelay, want.StableQueueDelay)
 	}
 	if got.CancelOnChange != want.CancelOnChange {
 		t.Fatalf("CancelOnChange=%v, want %v", got.CancelOnChange, want.CancelOnChange)

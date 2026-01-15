@@ -51,7 +51,7 @@ func (pl *SharedState) pluginReadiness(ctx context.Context, informers ...cache.S
 	// Activate all currently blocked pods
 	activateBlockedPodsForReadiness(pl)
 
-	// Start optimization loops (periodic / interlude / nudge)
+	// Start optimization loops (periodic / stable_queue / nudge)
 	startLoopsForReadiness(pl, ctx)
 }
 

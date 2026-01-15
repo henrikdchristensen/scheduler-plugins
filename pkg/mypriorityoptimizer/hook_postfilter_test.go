@@ -20,10 +20,10 @@ func TestPostFilter(t *testing.T) {
 	t.Cleanup(func() { postFilterSleep = origSleep })
 
 	type tc struct {
-		name          string
-		perPodEnabled bool
-		setupPL       func(pl *SharedState)
-		runOpt        func(pl *SharedState, ctx context.Context, p *v1.Pod) (*Plan, error)
+		name                     string
+		schedulingFailureEnabled bool
+		setupPL                  func(pl *SharedState)
+		runOpt                   func(pl *SharedState, ctx context.Context, p *v1.Pod) (*Plan, error)
 
 		wantCode     fwk.Code
 		wantMsgSub   string
@@ -34,8 +34,8 @@ func TestPostFilter(t *testing.T) {
 
 	tests := []tc{
 		{
-			name:          "no per-pod -> no nomination",
-			perPodEnabled: false,
+			name:                     "no scheduling failure -> no nomination",
+			schedulingFailureEnabled: false,
 			runOpt: func(_ *SharedState, _ context.Context, _ *v1.Pod) (*Plan, error) {
 				t.Fatalf("run optimization should not be called")
 				return nil, nil
@@ -45,8 +45,8 @@ func TestPostFilter(t *testing.T) {
 			wantResIsNil: true,
 		},
 		{
-			name:          "active plan -> blocks pod",
-			perPodEnabled: true,
+			name:                     "active plan -> blocks pod",
+			schedulingFailureEnabled: true,
 			setupPL: func(pl *SharedState) {
 				pl.ActivePlan.Store(&ActivePlan{ID: "ap1", PlacementByName: map[string]string{}})
 			},
@@ -60,8 +60,8 @@ func TestPostFilter(t *testing.T) {
 			wantResIsNil: true,
 		},
 		{
-			name:          "optimization returns ErrActiveInProgress -> blocks pod",
-			perPodEnabled: true,
+			name:                     "optimization returns ErrActiveInProgress -> blocks pod",
+			schedulingFailureEnabled: true,
 			runOpt: func(_ *SharedState, _ context.Context, _ *v1.Pod) (*Plan, error) {
 				return nil, ErrActiveInProgress
 			},
@@ -71,8 +71,8 @@ func TestPostFilter(t *testing.T) {
 			wantResIsNil: true,
 		},
 		{
-			name:          "optimization returns generic error -> plan registration failed",
-			perPodEnabled: true,
+			name:                     "optimization returns generic error -> plan registration failed",
+			schedulingFailureEnabled: true,
 			runOpt: func(_ *SharedState, _ context.Context, _ *v1.Pod) (*Plan, error) {
 				return nil, context.Canceled
 			},
@@ -82,8 +82,8 @@ func TestPostFilter(t *testing.T) {
 			wantResIsNil: true,
 		},
 		{
-			name:          "success -> returns nomination",
-			perPodEnabled: true,
+			name:                     "success -> returns nomination",
+			schedulingFailureEnabled: true,
 			runOpt: func(_ *SharedState, _ context.Context, _ *v1.Pod) (*Plan, error) {
 				return &Plan{NominatedNode: "nodeA"}, nil
 			},
@@ -95,12 +95,12 @@ func TestPostFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			origPerPod := postFilterPerPodEnabled
+			origSchedulingFailure := postFilterSchedulingFailureEnabled
 			origRun := postFilterRunOptimization
-			postFilterPerPodEnabled = func() bool { return tt.perPodEnabled }
+			postFilterSchedulingFailureEnabled = func() bool { return tt.schedulingFailureEnabled }
 			postFilterRunOptimization = tt.runOpt
 			t.Cleanup(func() {
-				postFilterPerPodEnabled = origPerPod
+				postFilterSchedulingFailureEnabled = origSchedulingFailure
 				postFilterRunOptimization = origRun
 			})
 

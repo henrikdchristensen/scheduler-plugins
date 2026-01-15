@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -12,9 +13,29 @@ import (
 // getUniqueId
 // -------------------------
 
+var (
+	uniqueIdMu   sync.Mutex
+	uniqueIdLast int64
+	uniqueIdSeq  int64
+)
+
 // getUniqueId generates a unique identifier with the given prefix.
 func getUniqueId(prefix string) string {
-	return fmt.Sprintf("%s%d", prefix, nowUnixNano())
+	uniqueIdMu.Lock()
+	defer uniqueIdMu.Unlock()
+
+	ts := nowUnixNano()
+	if ts == uniqueIdLast {
+		uniqueIdSeq++
+	} else {
+		uniqueIdLast = ts
+		uniqueIdSeq = 0
+	}
+
+	if uniqueIdSeq == 0 {
+		return fmt.Sprintf("%s%d", prefix, ts)
+	}
+	return fmt.Sprintf("%s%d-%d", prefix, ts, uniqueIdSeq)
 }
 
 // -------------------------
