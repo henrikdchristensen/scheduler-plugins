@@ -1,8 +1,0 @@
-trace-dir: data/traces/nodes32_prio1_arrival8
-result-dir: results/plugin/nodes32_prio1_arrival8_modeschedulingfailure
-kwokctl-config-file: data/configs-kwokctl/plugin-scheduler.yaml
-override-kwokctl-envs:
-  - name: SOLVER_PYTHON_TIMEOUT
-    value: 16s
-  - name: OPTIMIZE_MODE
-    value: scheduling_failure

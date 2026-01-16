@@ -1,5 +1,5 @@
 ﻿workload-config-file: data/configs-workload/base.yaml
-kwokctl-config-file: data/configs-kwokctl/plugin-scheduler.yaml
+kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 seed-file: data/seeds/kwok_workload_once/nodes16_pods64_prio1_util095.txt
 output-dir: results/plugin-scheduler/nodes16_pods64_prio1_util095_timeout20
 save-scheduler-logs: true

@@ -20,10 +20,6 @@
       - [Job file](#job-file)
       - [Bootstrap script](#bootstrap-script)
         - [Using Vagrant for bootstrap script development](#using-vagrant-for-bootstrap-script-development)
-      - [Generating test jobs](#generating-test-jobs)
-        - [Deterministic jobs with default scheduler](#deterministic-jobs-with-default-scheduler)
-        - [Default scheduler jobs](#default-scheduler-jobs)
-        - [Python solver jobs](#python-solver-jobs)
       - [Result replication and running test jobs](#result-replication-and-running-test-jobs)
       - [Expected folder structure after running all jobs](#expected-folder-structure-after-running-all-jobs)
       - [Estimate time to complete all jobs in UCloud](#estimate-time-to-complete-all-jobs-in-ucloud)
@@ -315,7 +311,7 @@ All the test jobs used previously to evaluate the plugin can be found under `dat
 
 ```yaml
 workload-config-file: data/configs-workload/base.yaml
-kwokctl-config-file: data/configs-kwokctl/plugin-scheduler.yaml
+kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 seed-file: data/seeds/kwok_workload_once/nodes4_pods16_prio4_util095.txt
 output-dir: results/plugin-scheduler/nodes4_pods16_prio4_util095_timeout10
 save-scheduler-logs: true
@@ -366,109 +362,9 @@ To delete the VM, run:
 vagrant destroy -f
 ```
 
-#### Generating test jobs
-
-Jobs can be generated using the provided job generator script `scripts/helpers/job_generator.py`.
-It generates one job file per combination of `--num-nodes`, `--avg-pods-per-node`, `--num-priorities`, `--utils`, and `--timeouts`.
-
-To regenerate the jobs, follow the steps in the below sections.
-
-Note that the [deterministic jobs](#deterministic-jobs-with-default-scheduler) should be run first to discover 'not-all-running' seeds under the default scheduler. For each combination, take the produced `seeds_not_all_running.txt` and place it in `data/seeds/` as one file per combination (name it `nodes<N>_pods<P>_prio<R>_util<XYZ>.txt`). Then run both the [default scheduler](#default-scheduler-jobs) and [Python solver jobs](#python-solver-jobs) sets, passing `--seed-file data/seeds/` so they automatically pick the per-combo seed lists.
-
-##### Deterministic jobs with default scheduler
-
-```bash
-python -m scripts.helpers.job_generator.py \
---out-dir data/jobs/kwok_workload_once/default-deterministic \
---output-dir results/kwok_workload_once/default-deterministic \
---workload-config-file data/configs-workload/base.yaml \
---kwokctl-config-file data/configs-kwokctl/default-deterministic.yaml \
---seed-file data/seeds/kwok_workload_once/seeds_all.txt \
---num-nodes 4 8 16 32 \
---avg-pods-per-node 4 8 \
---num-priorities 1 2 4 \
---utils 0.90 0.95 1.00 1.05 \
---seeds-not-all-running 100 \
---default-scheduler
-```
-
-##### Default scheduler jobs
-
-0.90-0.95 utils runs on the seeds found using the deterministic job generation above.
-
-```bash
-python -m scripts.helpers.job_generator \
---out-dir data/jobs/kwok_workload_once/default \
---output-dir results/kwok_workload_once/default \
---workload-config-file data/configs-workload/base.yaml \
---kwokctl-config-file data/configs-kwokctl/default.yaml \
---seed-file data/seeds/kwok_workload_once/ \
---num-nodes 4 8 16 32 \
---avg-pods-per-node 4 8 \
---num-priorities 1 2 4 \
---utils 0.90 0.95 \
---default-scheduler
-```
-
-1.00-1.05 utils runs on a fixed seed file with 100 seeds.
-
-```bash
-python -m scripts.helpers.job_generator \
---out-dir data/jobs/kwok_workload_once/default \
---output-dir results/kwok_workload_once/default \
---workload-config-file data/configs-workload/base.yaml \
---kwokctl-config-file data/configs-kwokctl/default.yaml \
---seed-file data/seeds/kwok_workload_once/seeds_100.txt \
---num-nodes 4 8 16 32 \
---avg-pods-per-node 4 8 \
---num-priorities 1 2 4 \
---utils 1.00 1.05 \
---default-scheduler
-```
-
-##### Python solver jobs
-
-0.90-0.95 utils runs on the seeds found using the deterministic job generation above.
-
-```bash
-python -m scripts.helpers.job_generator \
---out-dir data/jobs/kwok_workload_once/plugin-scheduler \
---output-dir results/kwok_workload_once/plugin-scheduler \
---workload-config-file data/configs-workload/base.yaml \
---kwokctl-config-file data/configs-kwokctl/plugin-scheduler.yaml \
---seed-file data/seeds/kwok_workload_once/ \
---num-nodes 4 8 16 32 \
---avg-pods-per-node 4 8 \
---num-priorities 1 2 4 \
---utils 0.90 0.95 \
---timeouts 1 10 20 \
---save-scheduler-logs \
---save-solver-stats \
---solver-trigger
-```
-
-1.00-1.05 utils runs on a fixed seed file with 100 seeds.
-
-```bash
-python -m scripts.helpers.job_generator \
---out-dir data/jobs/kwok_workload_once/plugin-scheduler \
---output-dir results/kwok_workload_once/plugin-scheduler \
---workload-config-file data/configs-workload/base.yaml \
---kwokctl-config-file data/configs-kwokctl/plugin-scheduler.yaml \
---seed-file data/seeds/kwok_workload_once/seeds_100.txt \
---num-nodes 4 8 16 32 \
---avg-pods-per-node 4 8 \
---num-priorities 1 2 4 \
---utils 1.00 1.05 \
---timeouts 1 10 20 \
---save-scheduler-logs \
---save-solver-stats \
---solver-trigger
-```
-
 #### Result replication and running test jobs
 
-After generating the jobs, they are ready to run. For faster evaluation, run them in parallel via the bootstrap script on HPC or VM resources.
+Once the jobs are generated, they can be run. For faster evaluation, run them in parallel via the bootstrap script on HPC or VM resources.
 
 To run a test jobs, follow these steps:
 
