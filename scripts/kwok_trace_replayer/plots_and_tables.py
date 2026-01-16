@@ -198,6 +198,24 @@ def _fmt_signed(x: object, *, decimals: int) -> str:
         s = s.replace("-", "+", 1)
     return s
 
+def _fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
+    """Signed numeric for LaTeX cells, after scaling. NaN -> \\text{--}.
+
+    Example: scale=100 turns util deltas (0..1) into percentage points.
+    """
+    try:
+        v = float(x) * float(scale)
+    except Exception:
+        return r"\text{--}"
+    if not math.isfinite(v):
+        return r"\text{--}"
+    fmt = f"{{:+.{int(decimals)}f}}"
+    s = fmt.format(v)
+    # avoid "-0.0" (or "-0.00", etc.)
+    if s.startswith("-0") and abs(v) < 0.5 * (10 ** (-decimals)):
+        s = s.replace("-", "+", 1)
+    return s
+
 
 def _sanitize_filename(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._=-]+", "_", s)
@@ -403,19 +421,50 @@ def prio_cell_from_row(
     return r"{\scriptsize$\langle" + inner + r"\rangle$}"
 
 
+# --- ADD this helper right after _fmt_signed(...) ---
+
+def _fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
+    """Signed numeric for LaTeX cells, after scaling. NaN -> \\text{--}.
+
+    Example: scale=100 turns util deltas (0..1) into percentage points.
+    """
+    try:
+        v = float(x) * float(scale)
+    except Exception:
+        return r"\text{--}"
+    if not math.isfinite(v):
+        return r"\text{--}"
+    fmt = f"{{:+.{int(decimals)}f}}"
+    s = fmt.format(v)
+    # avoid "-0.0" (or "-0.00", etc.)
+    if s.startswith("-0") and abs(v) < 0.5 * (10 ** (-decimals)):
+        s = s.replace("-", "+", 1)
+    return s
+
+
+# --- REPLACE your angle_pair_cell_from_row(...) with this version ---
+
 def angle_pair_cell_from_row(
     row: pd.Series,
     *,
     col_a: str,
     col_b: str,
     decimals: int,
+    as_percentage_points: bool = False,
 ) -> str:
     r"""
-    Emit a 2-tuple in angle brackets, e.g.:
-      {\scriptsize$\langle+0.02,-0.01\rangle$}
+    Emit a 2-tuple in angle brackets.
+
+    If as_percentage_points=True, interpret inputs as fractions (0..1) and output
+    percentage points (×100), e.g. 0.024 -> +2.4.
     """
-    a = _fmt_signed(row.get(col_a, np.nan), decimals=decimals)
-    b = _fmt_signed(row.get(col_b, np.nan), decimals=decimals)
+    if as_percentage_points:
+        a = _fmt_signed_scaled(row.get(col_a, np.nan), decimals=decimals, scale=100.0)
+        b = _fmt_signed_scaled(row.get(col_b, np.nan), decimals=decimals, scale=100.0)
+    else:
+        a = _fmt_signed(row.get(col_a, np.nan), decimals=decimals)
+        b = _fmt_signed(row.get(col_b, np.nan), decimals=decimals)
+
     if a == r"\text{--}" and b == r"\text{--}":
         return r"\text{--}"
     return r"{\scriptsize$\langle" + f"{a},{b}" + r"\rangle$}"
@@ -614,16 +663,18 @@ def write_latex_tables(
             ),
             "label": "tab:delta-deletions",
         },
-        # ---- NEW: CPU+MEM running util as ONE table with angle brackets ----
         {
             "name": "delta_run_util_mean",
-            "title": r"$\mathbf{\Delta u_{\mathrm{run}}}$ (running utilisation), mean paired difference vs.\ baseline",
+            # (optional but recommended) make it explicit these are pp:
+            "title": r"$\mathbf{\Delta u_{\mathrm{run}}}$ (running utilisation, pp), mean paired difference vs.\ baseline",
             "kind": "angle_pair",
             "col_a": "delta_cpu_run_util_mean_mean",
             "col_b": "delta_mem_run_util_mean_mean",
+            # FIXED caption: no nested $ ... $ ... $
             "caption_tex": (
                 r"Mean paired difference in running utilisation between plugin and baseline. "
-                r"Each cell reports ${\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$}$."
+                r"Each cell reports {\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$} "
+                r"in percentage points (pp)."
             ),
             "label": "tab:delta-run-util",
         },
@@ -686,10 +737,16 @@ def write_latex_tables(
                 continue
 
             def _pair(r: pd.Series) -> str:
-                return angle_pair_cell_from_row(r, col_a=col_a, col_b=col_b, decimals=decimals)
+                return angle_pair_cell_from_row(
+                    r,
+                    col_a=col_a,
+                    col_b=col_b,
+                    decimals=decimals,
+                    as_percentage_points=True,   # <-- Option A
+                )
 
             df_metric.attrs["value_fn"] = _pair
-
+        
         else:
             col = str(md["col"])
             if col not in df_metric.columns:
