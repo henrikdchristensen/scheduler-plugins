@@ -4,8 +4,6 @@ options:
   kubeSchedulerConfig: manifests/mypriorityoptimizer/plugin-scheduler-config-defpreempt=0.yaml
   kubeSchedulerBinary: bin/kube-scheduler
   kubeSchedulerImage: localhost:5000/scheduler-plugins/kube-scheduler:dev
-  kubeApiserverBinary: bin/kube-apiserver
-  kubeControllerManagerBinary: bin/kube-controller-manager
 componentsPatches:
   - name: kube-scheduler
     # uncomment for more verbose logging
