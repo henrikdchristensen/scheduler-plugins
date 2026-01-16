@@ -451,7 +451,7 @@ python -m scripts.helpers.jobs_eta
 
 Analyzed results are placed under `analysis/kwok_workload_once/`. They assume the layout shown in [Expected folder structure after running all jobs](#expected-folder-structure-after-running-all-jobs); if yours differs, code changes may be needed.
 
-1. First, merge all job outputs into a single CSV by running `python scripts/kwok_workload_once/combine_results.py` (it writes `analysis/kwok_workload_once/per_combo_results.csv`; adjust input/output paths in the script if needed).
+1. First, merge all job outputs into a single CSV by running `python scripts/kwok_workload_once/seal_results.py` (it writes `analysis/kwok_workload_once/per_combo_results.csv`; adjust input/output paths in the script if needed).
 2. Then run `python scripts/kwok_workload_once/plots_and_tables.py` to produce every figure and table used in the report.
    Outputs are saved under `analysis/kwok_workload_once/figures/` and `analysis/kwok_workload_once/tables/`.
 

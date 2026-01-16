@@ -11,7 +11,7 @@ import matplotlib.ticker as mtick
 
 #################################################################
 # Load data
-# Note: combine_results.py must be run first to produce the required CSV
+# Note: seal_results.py must be run first to produce the required CSV
 #################################################################
 DF_PER_COMBO_PATH = Path("analysis/per_combo_results.csv")
 df_per_combo = pd.read_csv(DF_PER_COMBO_PATH)

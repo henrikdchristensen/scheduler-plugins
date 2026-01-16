@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_combine_results.py
+# test_seal_results.py
 
 import pytest
 
@@ -7,7 +7,7 @@ import csv, math
 from pathlib import Path
 import pandas as pd
 
-from scripts.kwok_workload_once import combine_results as cr
+from scripts.kwok_workload_once import seal_results as cr
 
 # ---------------------------------------------------------------------------
 # Test helpers

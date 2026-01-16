@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# combine_results.py
+# seal_results.py
 
 import argparse
 import json
