@@ -583,16 +583,16 @@ def test_build_trace_events_sorts_deletes_before_creates_at_same_time(tmp_path: 
 
 
 # ---------------------------------------------------------------------------
-# TraceReplayer._apply_initial_workload()
+# TraceReplayer._apply_initial_pods()
 # ---------------------------------------------------------------------------
 
-def test_apply_initial_workload_no_initial_is_noop(tmp_path: Path, monkeypatch):
+def test_apply_initial_pods_no_initial_is_noop(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
     rp.initial_pods = []
     rp.apply_initial_pods(namespace="trace")  # should not raise
 
 
-def test_apply_initial_workload_submits_kubectl_tasks(tmp_path: Path, monkeypatch):
+def test_apply_initial_pods_submits_kubectl_tasks(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
     rp.ctx = "ctx"
     rp.node_cpu_m = 1000
@@ -899,7 +899,7 @@ def test_run_orchestrates_cluster_setup_and_saves_logs(tmp_path: Path, monkeypat
     called = {k: 0 for k in ["build_events", "ensure_cluster", "create_nodes", "ensure_ns", "ensure_pcs", "apply_initial", "replay", "save_logs"]}
 
     monkeypatch.setattr(rp, "build_trace_events", lambda: called.__setitem__("build_events", called["build_events"] + 1))
-    monkeypatch.setattr(rp, "apply_initial_workload", lambda *_a, **_k: called.__setitem__("apply_initial", called["apply_initial"] + 1))
+    monkeypatch.setattr(rp, "apply_initial_pods", lambda *_a, **_k: called.__setitem__("apply_initial", called["apply_initial"] + 1))
     monkeypatch.setattr(rp, "replay_trace_events", lambda **_k: called.__setitem__("replay", called["replay"] + 1))
     monkeypatch.setattr(rp, "save_scheduler_logs", lambda: called.__setitem__("save_logs", called["save_logs"] + 1))
 
@@ -979,7 +979,7 @@ def test_run_finally_saves_logs_even_if_replay_raises(tmp_path: Path, monkeypatc
             return None
 
     monkeypatch.setattr(tr.threading, "Thread", DummyThread)
-    monkeypatch.setattr(rp, "apply_initial_workload", lambda *_a, **_k: None)
+    monkeypatch.setattr(rp, "apply_initial_pods", lambda *_a, **_k: None)
 
     monkeypatch.setattr(rp, "replay_trace_events", lambda **_k: (_ for _ in ()).throw(RuntimeError("replay failed")))
 

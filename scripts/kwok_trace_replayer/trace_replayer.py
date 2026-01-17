@@ -585,7 +585,7 @@ class TraceReplayer:
         replay_end_s = start_delay + effective_trace_time_s
         self.replay_end_s = float(replay_end_s)
 
-        # Initial pods are created up-front by apply_initial_workload().
+        # Initial pods are created up-front by apply_initial_pods().
         # Schedule their deletions here so they don't persist forever.
         for p in self.initial_pods:
             end_t = float(p.end_time)
@@ -725,30 +725,31 @@ class TraceReplayer:
         futures: List[Future] = []
 
         try:
-            while idx < num_events:
+            while idx < num_events: # while there are events left
                 current_t = events[idx].sim_time_s
-                if current_t > trace_end_s:
+                if current_t > trace_end_s: # bail if past trace end
                     break
 
+                # Gather all events at current_t
                 batch_events: List[Event] = []
                 while idx < num_events and events[idx].sim_time_s == current_t:
                     batch_events.append(events[idx])
                     idx += 1
-
+                
+                # Sleep until current_t
                 target_wall = trace_start_wall + max(0.0, current_t)
                 now_before = float(self.clock.time())
                 sleep_s = max(0.0, target_wall - now_before)
                 if sleep_s > 0:
                     self.clock.sleep(sleep_s)
 
+                # Apply batch events (deletes first)
                 deletes = [ev for ev in batch_events if ev.kind == "delete"]
                 creates = [ev for ev in batch_events if ev.kind == "create"]
-
                 for ev in deletes:
                     rs_name = self.rs_name_for_record(ev.record_id)
                     LOG.info("DELETE @ sim_t=%.3f: rs=%s (id=%d)", ev.sim_time_s, rs_name, ev.record_id)
                     futures.append(executor.submit(delete_rs, LOG, self.ctx, namespace, rs_name))
-
                 for ev in creates:
                     assert ev.cpu_str is not None and ev.mem_str is not None and ev.pc_name is not None
                     rs_name = self.rs_name_for_record(ev.record_id)
@@ -772,13 +773,14 @@ class TraceReplayer:
                     )
                     futures.append(executor.submit(kubectl_apply_yaml, LOG, self.ctx, yaml_text))
 
-            # Align to end
+            # Align replayer to trace end time even if no events at the end
             target_wall_end = trace_start_wall + trace_end_s
             now = float(self.clock.time())
             sleep_s = max(0.0, target_wall_end - now)
             if sleep_s > 0:
                 self.clock.sleep(sleep_s)
 
+        # Ensure all kubectl tasks complete
         finally:
             for fut in futures:
                 try:
@@ -803,10 +805,10 @@ class TraceReplayer:
 
     def snapshot_from_pods(self, ns: str) -> Tuple[float, float, float, float, Dict[int, int], Dict[int, int], List[Dict[str, Any]]]:
         """
-        Snapshot running utilization, requested utilization, priority counts, and raw pod items from the cluster.
+        Snapshot req/run utilization, priority counts, and raw pod items from current pods.
         """
         pods_json = get_json_ctx(self.ctx, ["-n", ns, "get", "pods", "-o", "json"])
-        items = pods_json.get("items", []) or []
+        pods = pods_json.get("items", []) or []
 
         total_cpu_run_m = 0
         total_mem_run_b = 0
@@ -816,26 +818,25 @@ class TraceReplayer:
         running_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
         pending_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
 
-        for pod in items:
+        for pod in pods:
             meta = pod.get("metadata", {}) or {}
             spec = pod.get("spec", {}) or {}
             status = pod.get("status", {}) or {}
             pod_name = meta.get("name", "")
             phase = status.get("phase", "")
-
             rs_name = rs_prefix_from_pod_name(pod_name)
             prio = int(self.prio_by_rs.get(rs_name, 0))
 
+            # Count running / pending by priority
             if phase == "Running":
                 if prio in running_by_prio:
                     running_by_prio[prio] += 1
-
             elif phase == "Pending":
                 if prio in pending_by_prio:
                     pending_by_prio[prio] += 1
 
-            # Requested utilization is based on resource requests of pods that are
-            # present and either Running or Pending.
+            # Requested utilization is based on resource requests of pods that
+            # are either Running or Pending
             if phase in ("Running", "Pending"):
                 containers = spec.get("containers", []) or []
                 for c in containers:
@@ -856,7 +857,7 @@ class TraceReplayer:
         mem_run_util = (total_mem_run_b / mem_capacity_b) if mem_capacity_b > 0 else 0.0
         cpu_req_util = (total_cpu_req_m / cpu_capacity_m) if cpu_capacity_m > 0 else 0.0
         mem_req_util = (total_mem_req_b / mem_capacity_b) if mem_capacity_b > 0 else 0.0
-        return cpu_run_util, mem_run_util, cpu_req_util, mem_req_util, running_by_prio, pending_by_prio, items
+        return cpu_run_util, mem_run_util, cpu_req_util, mem_req_util, running_by_prio, pending_by_prio, pods
 
     def pod_start_time(self, pod: Dict[str, Any]) -> Optional[float]:
         """
@@ -895,24 +896,21 @@ class TraceReplayer:
         seen_apply: set[str] = set()     # pod_name
         seen_running: set[str] = set()   # pod_name
 
-        # deletion semantics (for deletions_cum_pK):
-        # Count a "deletion" when a pod UID has been observed Running since the last count
-        # and then either:
-        #  - disappears from the live pod list (most common for actual deletes / preemptions), or
-        #  - transitions Running -> Pending (rare but kept for completeness).
-        # The same UID can be counted multiple times if it becomes Running again later.
+        # deletion semantics (for deletions_cum_pK): Count a "deletion" when a
+        # pod UID has been observed Running since the last count and then either
+        # disappears from the live pod list, or transitions Running -> Pending.
+        # The same UID can be counted multiple times if it becomes Running again
+        # later.
         prev_live_uids: set[str] = set()
         prev_phase_by_uid: Dict[str, str] = {}
         eligible_uids: set[str] = set()  # UIDs eligible to be counted deleted (must have been Running)
         uid_to_prio: Dict[str, int] = {}  # last known prio for that uid (best-effort)
-
         deletions_cum_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
-
         with open(general_csv, "w", encoding="utf-8", newline="") as f_ts, open(
             pod_stats_csv, "w", encoding="utf-8", newline=""
         ) as f_ps:
-            tsw = csv.writer(f_ts)
-            psw = csv.writer(f_ps)
+            timestamp_writer = csv.writer(f_ts)
+            pod_stats_writer = csv.writer(f_ps)
 
             # general_stats.csv header
             header = ["timestamp", "time_s", "cpu_run_util", "mem_run_util", "cpu_req_util", "mem_req_util"]
@@ -925,11 +923,12 @@ class TraceReplayer:
             for p in range(1, self.max_prio + 1):
                 header.append(f"deletions_cum_p{p}")
 
-            tsw.writerow(header)
+            timestamp_writer.writerow(header)
 
             # pod_stats.csv header
-            psw.writerow(["timestamp", "event", "pod_name", "pod_uid", "priority", "time_s"])
+            pod_stats_writer.writerow(["timestamp", "event", "pod_name", "pod_uid", "priority", "time_s"])
 
+            # monitoring loop
             while not stop_event.is_set():
                 loop_start = float(self.clock.time())
                 now_ts = get_timestamp()
@@ -943,8 +942,8 @@ class TraceReplayer:
                     LOG.warning("monitor: snapshot failed: %s", e)
                     self.clock.sleep(interval_s)
                     continue
-
-                # ---- deletions (Running -> gone, or Running -> Pending) ----
+                
+                #### deletions_cum_pK logic ###
                 cur_live_uids: set[str] = set()
                 cur_phase_by_uid: Dict[str, str] = {}
 
@@ -999,8 +998,9 @@ class TraceReplayer:
 
                 prev_live_uids = cur_live_uids
                 prev_phase_by_uid = cur_phase_by_uid
+                ###############################
 
-                # ---- write general_stats row ----
+                #### Write general_stats row ##
                 row = [
                     now_ts,
                     f"{t_s:.6f}",
@@ -1016,10 +1016,10 @@ class TraceReplayer:
                 for p in range(1, self.max_prio + 1):
                     row.append(str(int(deletions_cum_by_prio.get(p, 0))))
 
-                tsw.writerow(row)
+                timestamp_writer.writerow(row)
                 f_ts.flush()
 
-                # ---- pod_stats: apply-time + running-time (only pods from trace.json) ----
+                #### pod_stats: apply-time + running-time (only pods from trace.json) ####
                 for pod in pod_items:
                     meta = pod.get("metadata", {}) or {}
                     status = pod.get("status", {}) or {}
@@ -1030,32 +1030,32 @@ class TraceReplayer:
 
                     rs_name = rs_prefix_from_pod_name(pod_name)
                     if rs_name in self.initial_rs_names:
-                        # skip initial pods entirely in pod_stats.csv
+                        # skip initial pods in pod_stats.csv
                         continue
 
                     prio = int(self.prio_by_rs.get(rs_name, 0))
 
-                    # APPLY: first time we observe the pod at all
+                    # APPLY: first time we observe the pod
                     if pod_name not in seen_apply:
                         seen_apply.add(pod_name)
-                        ce = self.pod_creation_time(pod)
-                        if ce is not None and self.run_start_wall > 0:
-                            apply_time_s = max(0.0, ce - self.run_start_wall)
+                        creation_time = self.pod_creation_time(pod)
+                        if creation_time is not None and self.run_start_wall > 0:
+                            apply_time_s = max(0.0, creation_time - self.run_start_wall)
                         else:
                             apply_time_s = float(t_s)
-                        psw.writerow([now_ts, "apply-time", pod_name, pod_uid, prio, f"{apply_time_s:.6f}"])
+                        pod_stats_writer.writerow([now_ts, "apply-time", pod_name, pod_uid, prio, f"{apply_time_s:.6f}"])
                         f_ps.flush()
 
                     # RUNNING: first time we see it Running
                     phase = status.get("phase", "")
                     if phase == "Running" and pod_name not in seen_running:
                         seen_running.add(pod_name)
-                        st = self.pod_start_time(pod)  # status.startTime only
-                        if st is not None and self.run_start_wall > 0:
-                            run_time_s = max(0.0, st - self.run_start_wall)
+                        start_time = self.pod_start_time(pod)
+                        if start_time is not None and self.run_start_wall > 0:
+                            run_time_s = max(0.0, start_time - self.run_start_wall)
                         else:
                             run_time_s = float(t_s)
-                        psw.writerow([now_ts, "running-time", pod_name, pod_uid, prio, f"{run_time_s:.6f}"])
+                        pod_stats_writer.writerow([now_ts, "running-time", pod_name, pod_uid, prio, f"{run_time_s:.6f}"])
                         f_ps.flush()
 
                 elapsed = float(self.clock.time()) - loop_start
@@ -1089,14 +1089,14 @@ class TraceReplayer:
         # Build trace events (needs node_* set)
         self.build_trace_events()
 
-        # Create KWOK cluster
+        # KWOK config
         kwok_cfg_path = Path(self.args.kwokctl_config_file).resolve()
         with open(kwok_cfg_path, "r", encoding="utf-8") as f:
             config_doc = yaml.safe_load(f) or {}
-
         if self.override_kwokctl_envs:
             config_doc = merge_kwokctl_envs(config_doc, self.override_kwokctl_envs)
 
+        # Create KWOK cluster
         ensure_kwok_cluster(
             logger=LOG,
             cluster_name=self.args.cluster_name,
@@ -1124,18 +1124,20 @@ class TraceReplayer:
         self.run_start_wall = time.time()
         LOG.info("run start: %s", get_timestamp())
 
+        # Monitoring + Replay
         stop_event = threading.Event()
         monitor_thread: Optional[threading.Thread] = None
 
         try:
-            # 1) Apply initial workload now
+            # 1) Apply initial pods now
             self.apply_initial_pods(self.args.namespace)
 
-            # Anchor sim_time_s=0 at the moment the initial workload has been applied.
-            # start_delay is modeled as an offset applied only to trace pod events.
+            # Anchor sim_time_s=0 at the moment the initial pods have been
+            # applied. start_delay is modeled as an offset applied only to trace
+            # pod events.
             trace_start_wall = float(self.clock.time())
 
-            # 2) Start monitor ONLY AFTER initial load has been applied
+            # 2) Start monitor AFTER initial pods have been applied
             monitor_thread = threading.Thread(
                 target=self.monitor_loop,
                 args=(
@@ -1152,6 +1154,7 @@ class TraceReplayer:
             # 3) Replay trace aligned so sim_time 0 happens at trace_start_wall
             self.replay_trace_events(namespace=self.args.namespace, trace_start_wall=trace_start_wall)
 
+        # 4) Cleanup
         finally:
             stop_event.set()
             if monitor_thread is not None:
@@ -1172,10 +1175,12 @@ class TraceReplayer:
         run_dirs = discover_trace_run_dirs(trace_dir)
         base_results_dir = Path(self.args.result_dir).resolve()
 
+        # Determine if multi-seed mode
         multi_seed = len(run_dirs) > 1 or run_dirs[0] != trace_dir
         if multi_seed:
             LOG.info("discovered %d seed trace directories under %s", len(run_dirs), trace_dir)
 
+        # Run each seed
         for run_dir in run_dirs:
             if multi_seed:
                 seed_name = run_dir.name
