@@ -18,10 +18,10 @@ from scripts.kwok_trace_replayer.trace_helpers import (
     TraceRecord,
 )
 
-
 # -----------------------------------------------------------------------------
 # Shared time scaling (align with trace_generator)
 # -----------------------------------------------------------------------------
+
 def choose_time_unit(max_time_s: float) -> tuple[float, str]:
     """
     Match trace_generator behavior:
@@ -36,7 +36,6 @@ def choose_time_unit(max_time_s: float) -> tuple[float, str]:
     if max_time_s <= 7 * 24 * 3600:
         return 1.0 / 3600.0, "time (hours)"
     return 1.0 / (24.0 * 3600.0), "time (days)"
-
 
 # -----------------------------------------------------------------------------
 # Utilization time series
@@ -151,7 +150,6 @@ def plot_utilization_and_num_pods(
 
     if logger is not None:
         logger.info("saved utilization plot to %s", out_path)
-
 
 # -----------------------------------------------------------------------------
 # Generator histograms

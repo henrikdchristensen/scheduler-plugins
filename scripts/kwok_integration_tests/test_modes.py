@@ -16,43 +16,29 @@ except ImportError:  # pragma: no cover
     pytest = None  # type: ignore
 
 from scripts.helpers.general_helpers import (
-    setup_logging,
-    make_header_footer,
-    qty_to_mcpu_int,
-    qty_to_bytes_int,
-    solver_trigger_http,
-    get_solver_active_status_http,
+    setup_logging, make_header_footer,
+    qty_to_mcpu_int, qty_to_bytes_int,
+    solver_trigger_http, get_solver_active_status_http,
 )
 from scripts.helpers.kubectl_helpers import (
-    ensure_namespace,
-    ensure_priority_classes,
-    wait_rs_pods,
-    get_json_ctx,
+    ensure_namespace, ensure_priority_classes,
+    wait_rs_pods, get_json_ctx,
 )
 from scripts.helpers.kwokctl_helpers import (
-    ensure_kwok_cluster,
-    create_kwok_nodes,
+    ensure_kwok_cluster, create_kwok_nodes,
     kwok_pods_cap,
 )
 from scripts.kwok_integration_tests.test_helpers import (
-    DEFAULT_CLUSTER_NAME,
-    DEFAULT_KWOK_RUNTIME,
-    DEFAULT_KWOKCTL_CONFIG,
-    NUM_NODES,
-    NODE_CPU,
-    NODE_MEM,
-    NUM_PRIORITIES,
-    VALID_OPT_MODES,
-    WORKLOAD_SCENARIOS,
+    DEFAULT_CLUSTER_NAME, DEFAULT_KWOK_RUNTIME,
+    DEFAULT_KWOKCTL_CONFIG, NUM_NODES,
+    NODE_CPU, NODE_MEM, NUM_PRIORITIES,
+    VALID_OPT_MODES, WORKLOAD_SCENARIOS,
     DEFAULT_WORKLOAD_ID,
     DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS,
-    WorkloadStep,
-    WorkloadScenario,
-    rs_name_for_pod,
-    load_kwokctl_config,
+    WorkloadStep, WorkloadScenario,
+    rs_name_for_pod, load_kwokctl_config,
     build_kwokctl_config_for_mode,
-    scenario_max_priority,
-    scenario_total_replicas,
+    scenario_max_priority, scenario_total_replicas,
     apply_workload_step,
 )
 
@@ -161,7 +147,6 @@ def wait_for_plugin_configmap(
     )
     return None
 
-
 def get_latest_plan_configmap(
     ctx: str,
     logger: logging.Logger,
@@ -205,7 +190,6 @@ def get_latest_plan_configmap(
     logger.warning("no plan ConfigMap found within %ss", timeout_s)
     return None
 
-
 def stored_plan_is_done(sp: Dict[str, Any]) -> bool:
     """
     Return True if the StoredPlan JSON reports done.
@@ -214,7 +198,6 @@ def stored_plan_is_done(sp: Dict[str, Any]) -> bool:
     if isinstance(status, str):
         return status.lower() == "completed"
     return False
-
 
 def wait_for_plan_done(
     logger: logging.Logger,
@@ -319,7 +302,6 @@ def wait_for_plan_done(
     )
     return None
 
-
 def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
     """
     Given a StoredPlan dict, compute the FINAL planned placement:
@@ -363,7 +345,6 @@ def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
 
     return mapping
 
-
 def build_expected_assignment(
     scenario: WorkloadScenario,
     namespace: str,
@@ -381,7 +362,6 @@ def build_expected_assignment(
             rs_name = rs_name_for_pod(scenario, pod)
             mapping[(namespace, rs_name)] = bool(pod.expected_assignment)
     return mapping
-
 
 def wait_for_workload_step(
     logger: logging.Logger,
@@ -489,7 +469,6 @@ def wait_for_workload_step(
 
     return True
 
-
 def write_plan_debug_files(
     logger: logging.Logger,
     out_dir: Path,
@@ -550,7 +529,6 @@ def write_plan_debug_files(
         )
     except Exception as e:
         logger.warning("failed to write plan debug files: %s", e)
-
 
 def evaluate_plan_and_cluster_state(
     logger: logging.Logger,
@@ -666,7 +644,6 @@ def evaluate_plan_and_cluster_state(
     )
     return True
 
-
 def assert_no_active_plan_http(logger: logging.Logger, *, when: str) -> bool:
     """
     Call GET /active via the shared helper and assert that no active plan is reported.
@@ -694,7 +671,6 @@ def assert_no_active_plan_http(logger: logging.Logger, *, when: str) -> bool:
         return False
 
     return True
-
 
 # ---------------------------------------------------------------------------
 # Core integration function
@@ -872,7 +848,6 @@ def run_mode_integration(
     )
     return ok
 
-
 # ---------------------------------------------------------------------------
 # Pytest entrypoint
 # ---------------------------------------------------------------------------
@@ -900,7 +875,6 @@ if pytest is not None:
             kwokctl_config_file=DEFAULT_KWOKCTL_CONFIG,
         )
 
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -924,20 +898,15 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--workload-id", default=DEFAULT_WORKLOAD_ID,
                     choices=sorted(WORKLOAD_SCENARIOS.keys()),
                     help=f"Workload scenario id (default: {DEFAULT_WORKLOAD_ID})")
-    ap.add_argument(
-        "--disable-wait-and-active-checks",
-        action="store_true",
+    ap.add_argument("--disable-wait-and-active-checks", action="store_true",
         help="Disable waiting for pods and /active invariants while applying workloads.",
     )
     return ap
 
-
 def main() -> None:
     ap = build_argparser()
     args = ap.parse_args()
-
     scenario = WORKLOAD_SCENARIOS[args.workload_id]
-
     ok = run_mode_integration(
         opt_mode=args.optimize_mode,
         opt_sync=args.optimize_sync,

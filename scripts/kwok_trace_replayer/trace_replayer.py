@@ -37,9 +37,9 @@ from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 # ---------------------------------------------------------------------
 
 MAX_REPLAY_WORKERS = 5 # max concurrent kubectl apply/delete calls during replay
-RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$") # regex to extract rs prefix from pod name
 LOGGER_NAME = "trace-replayer" # logger name
 LOG = logging.getLogger(LOGGER_NAME) # module logger
+from scripts.kwok_trace_replayer.trace_helpers import TraceRecord, rs_prefix_from_pod_name
 
 # ---------------------------------------------------------------------
 # CLI + Job File
@@ -186,17 +186,6 @@ def parse_optional_bool_strict(v: Any) -> bool | None:
     Parse a job-file value that must be a real boolean (or None).
     """
     return v if isinstance(v, bool) else None
-
-def rs_prefix_from_pod_name(pod_name: str) -> str:
-    """
-    Extract the rs prefix (e.g. "rs-000001") from a pod name.
-    """
-    m = RS_PREFIX_RE.match(pod_name)
-    if m:
-        return m.group(1)
-    if "-" in pod_name:
-        return pod_name.split("-", 1)[0]
-    return pod_name
 
 def parse_rfc3339_to_epoch(ts: str) -> Optional[float]:
     """

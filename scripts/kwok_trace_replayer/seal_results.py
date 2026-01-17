@@ -57,6 +57,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from scripts.kwok_trace_replayer.trace_helpers import rs_prefix_from_pod_name
+
 # -----------------------------
 # Numeric formatting
 # -----------------------------
@@ -87,7 +89,6 @@ POD_UID_COL = "pod_uid"
 POD_PRIO_COL = "priority"
 POD_TIME_COL = "time_s"
 
-RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
 
 # -----------------------------
 # Types
@@ -239,14 +240,6 @@ def parse_plugin_dirname(dirname: str) -> Tuple[TestCombo, PluginConfig]:
 
     cfg = PluginConfig(mode_raw=mode_raw, blocking=blocking, defpreempt=defpreempt)
     return test_combo, cfg
-
-def rs_prefix_from_pod_name(pod_name: str) -> str:
-    m = RS_PREFIX_RE.match(pod_name or "")
-    if m:
-        return m.group(1)
-    if "-" in (pod_name or ""):
-        return (pod_name or "").split("-", 1)[0]
-    return pod_name or ""
 
 def require_cols(df: pd.DataFrame, path: Path, cols: List[str]) -> None:
     missing = [c for c in cols if c not in df.columns]

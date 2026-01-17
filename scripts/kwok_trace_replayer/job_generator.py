@@ -10,12 +10,11 @@ Creates:
   <out-dir>/plugin/*.yaml
 """
 
-from __future__ import annotations
+#TODO: TO BE DELETED BEFORE SUBMISSION
 
 import argparse
 from pathlib import Path
 from typing import Iterable, List, Tuple
-
 
 # ----------------------------- Constants -----------------------------
 
@@ -34,13 +33,11 @@ PLUGIN_KWOKCTL_CONFIG_TEMPLATE = "data/configs-kwokctl/plugin-scheduler-defpreem
 
 SOLVER_TIMEOUT = "16s"
 
-
 # ----------------------------- YAML helpers -----------------------------
 
 def _yaml_quote(value: str) -> str:
     escaped = value.replace('"', '\\"')
     return f'"{escaped}"'
-
 
 def render_job_yaml(
     trace_dir: str,
@@ -62,29 +59,23 @@ def render_job_yaml(
 
     return "\n".join(lines) + "\n"
 
-
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-
 
 # ----------------------------- Path conventions -----------------------------
 
 def trace_dir(nodes: int, prio: int, arrival_s: int) -> str:
     return f"data/traces/nodes={nodes}_prio={prio}_arrival={arrival_s}s"
 
-
 def default_result_dir(nodes: int, prio: int, arrival_s: int) -> str:
     return f"results/default/nodes={nodes}_prio={prio}_arrival={arrival_s}s"
-
 
 def plugin_result_dir(base_filename_no_ext: str) -> str:
     return f"results/plugin/{base_filename_no_ext}"
 
-
 def plugin_config_for(defpreempt: int) -> str:
     return PLUGIN_KWOKCTL_CONFIG_TEMPLATE.format(defpreempt=defpreempt)
-
 
 # ----------------------------- Generators -----------------------------
 
@@ -103,7 +94,6 @@ def iter_default_jobs(out_dir: Path) -> Iterable[Path]:
                 )
                 write_text(path, yml)
                 yield path
-
 
 def iter_plugin_jobs(out_dir: Path) -> Iterable[Path]:
     for n in NODES:
@@ -172,15 +162,11 @@ def iter_plugin_jobs(out_dir: Path) -> Iterable[Path]:
                         write_text(path, yml)
                         yield path
 
-
 # ----------------------------- CLI -----------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--out-dir",
-        required=True,
-        type=Path,
+    ap.add_argument("--out-dir", required=True, type=Path,
         help="Output directory root, e.g. data/jobs/kwok_trace_replayer",
     )
     args = ap.parse_args()
@@ -196,7 +182,6 @@ def main() -> None:
     print(f"Wrote {written} job files under: {out_dir}")
     print(f"  - {out_dir / 'default'}")
     print(f"  - {out_dir / 'plugin'}")
-
 
 if __name__ == "__main__":
     main()

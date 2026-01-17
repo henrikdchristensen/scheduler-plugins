@@ -53,9 +53,7 @@ class Workload:
     mem: float
     priority: int
     replicas: int = 1
-    # Only used by tests; setup_cluster ignores this.
     expected_assignment: Optional[bool] = None
-
 
 @dataclass
 class WorkloadStep:
@@ -63,16 +61,13 @@ class WorkloadStep:
     pods: List[Workload]
     wait_mode: str = "exist"  # "exist", "running", or "none"
     wait_timeout_s: int = POD_TIMEOUT_S
-    # Only used by tests; setup_cluster ignores this.
     active_plan_check_mode: str = "none" # "each_pod", "after_step", "none"
-
 
 @dataclass
 class WorkloadScenario:
     id: str
     description: str
     steps: List[WorkloadStep]
-
 
 # ---------------------------------------------------------------------------
 # Scenario helpers + definitions
@@ -82,8 +77,7 @@ def rs_name_for_pod(scenario: WorkloadScenario, rs: Workload) -> str:
     """Stable ReplicaSet name derived from (scenario.id, rs.id)."""
     return f"{scenario.id}-rs-{rs.id:03d}"
 
-
-def _scenario_all_scheduled_by_default() -> WorkloadScenario:
+def scenario_all_scheduled_by_default() -> WorkloadScenario:
     step = WorkloadStep(
         name="all-scheduled",
         pods=[
@@ -105,8 +99,7 @@ def _scenario_all_scheduled_by_default() -> WorkloadScenario:
         steps=[step],
     )
 
-
-def _scenario_same_priority() -> WorkloadScenario:
+def scenario_same_priority() -> WorkloadScenario:
     big_step = WorkloadStep(
         name="big-first",
         pods=[
@@ -138,8 +131,7 @@ def _scenario_same_priority() -> WorkloadScenario:
         steps=[big_step, small_step],
     )
 
-
-def _scenario_different_priority() -> WorkloadScenario:
+def scenario_different_priority() -> WorkloadScenario:
     """
     Mixed priorities:
 
@@ -177,8 +169,7 @@ def _scenario_different_priority() -> WorkloadScenario:
         steps=[low_step, high_step],
     )
 
-
-def _scenario_high_arrival() -> WorkloadScenario:
+def scenario_high_arrival() -> WorkloadScenario:
     steps1 = [
         WorkloadStep(
             name=f"step-{100+i}",
@@ -224,16 +215,14 @@ def _scenario_high_arrival() -> WorkloadScenario:
         steps=steps1 + steps2,
     )
 
-
 WORKLOAD_SCENARIOS: Dict[str, WorkloadScenario] = {
-    "allscheduled": _scenario_all_scheduled_by_default(),
-    "sameprio": _scenario_same_priority(),
-    "prioaware": _scenario_different_priority(),
-    "higharrival": _scenario_high_arrival(),
+    "allscheduled": scenario_all_scheduled_by_default(),
+    "sameprio": scenario_same_priority(),
+    "prioaware": scenario_different_priority(),
+    "higharrival": scenario_high_arrival(),
 }
 
 DEFAULT_WORKLOAD_ID = "sameprio"
-
 
 def scenario_max_priority(scenario: WorkloadScenario) -> int:
     m = 0
@@ -242,14 +231,12 @@ def scenario_max_priority(scenario: WorkloadScenario) -> int:
             m = max(m, pod.priority)
     return m
 
-
 def scenario_total_replicas(scenario: WorkloadScenario) -> int:
     total = 0
     for step in scenario.steps:
         for pod in step.pods:
             total += int(pod.replicas)
     return total
-
 
 # ---------------------------------------------------------------------------
 # KWOK / kube-scheduler helpers
@@ -266,7 +253,6 @@ def load_kwokctl_config(path: str | Path) -> Dict[str, Any]:
         raise SystemExit(f"{p}: expected KwokctlConfiguration mapping")
     return doc
 
-
 def build_kwokctl_config_for_mode(
     base_doc: Dict[str, Any],
     opt_mode: str,
@@ -281,7 +267,6 @@ def build_kwokctl_config_for_mode(
         {"name": "OPTIMIZE_BLOCKING_SOLVING", "value": "true" if opt_sync else "false"},
     ]
     return merge_kwokctl_envs(base_doc, envs, component="kube-scheduler")
-
 
 def apply_workload_step(
     logger: logging.Logger,
@@ -330,7 +315,6 @@ def apply_workload_step(
 
     yaml_text = "".join(yaml_chunks)
     kubectl_apply_yaml(logger, ctx, yaml_text)
-
 
 def wait_for_workload_step_simple(
     logger: logging.Logger,

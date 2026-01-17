@@ -2,6 +2,7 @@
 # trace_helpers.py
 
 from dataclasses import dataclass
+import re
 import numpy as np
 from scipy.stats import pareto as pareto_dist
 
@@ -25,6 +26,23 @@ class TraceRecord:
     mem: float
     priority: int
     replicas: int = 1
+
+
+# -------------------------------------------------------------------
+# Pod naming helpers
+# -------------------------------------------------------------------
+
+RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
+
+
+def rs_prefix_from_pod_name(pod_name: str) -> str:
+    """Extract the ReplicaSet prefix (e.g. "rs-000001") from a pod name."""
+    m = RS_PREFIX_RE.match(pod_name or "")
+    if m:
+        return m.group(1)
+    if "-" in (pod_name or ""):
+        return (pod_name or "").split("-", 1)[0]
+    return pod_name or ""
 
 # ----------------------------------------------------------------------
 # Pareto I estimation helper
