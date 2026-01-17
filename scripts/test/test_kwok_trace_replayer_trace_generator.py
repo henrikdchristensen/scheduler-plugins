@@ -750,25 +750,6 @@ def test_fit_pareto_alphas_sets_fields_and_attaches_to_args(tmp_path: Path):
     assert gen.alpha_arrival == old_arr
     assert gen.alpha_life != old_life
 
-
-# ---------------------------------------------------------------------------
-# Util metric
-# ---------------------------------------------------------------------------
-
-def test_time_mean_request_util_basic(tmp_path: Path):
-    args = make_required_args(tmp_path, num_nodes=2, trace_time="10s")
-    gen = tg.TraceGenerator(args)
-
-    pods = [
-        tg.TraceRecord(id=1, start_time=0.0, end_time=10.0, cpu=0.5, mem=0.5, priority=1, replicas=1),
-    ]
-    # area = 0.5*10, divide by N*T = 2*10 => 0.25
-    util_cpu, util_mem, util_eff = gen.time_mean_request_utils(pods)
-    assert util_cpu == pytest.approx(0.25)
-    assert util_mem == pytest.approx(0.25)
-    assert util_eff == pytest.approx(0.25)
-
-
 # ---------------------------------------------------------------------------
 # Initial pods
 # ---------------------------------------------------------------------------
@@ -1026,8 +1007,6 @@ def test_write_outputs(tmp_path: Path, monkeypatch):
     extra = {"x": 1}
 
     calls = {"json": [], "info": 0}
-
-    monkeypatch.setattr(gen, "time_mean_request_utils", lambda _pods: (0.0, 0.0, 0.6))
 
     def fake_pods_to_json(path: Path, pods_):
         calls["json"].append((path, len(pods_)))

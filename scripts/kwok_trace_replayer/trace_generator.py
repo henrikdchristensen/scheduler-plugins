@@ -1050,79 +1050,6 @@ class TraceGenerator:
 
         return area_cpu / T, area_mem / T, area_eff / T
 
-    def time_mean_request_utils(self, pods: List[TraceRecord]) -> Tuple[float, float, float]:
-        """
-        Return (cpu_util_time_mean, mem_util_time_mean, eff_util_time_mean),
-        where eff(t) = max(cpu_total(t), mem_total(t)).
-        """
-        T = float(self.trace_time_s)
-        if T <= 0.0:
-            return 0.0, 0.0, 0.0
-
-        N = float(self.args.num_nodes)
-        if N <= 0.0:
-            return 0.0, 0.0, 0.0
-
-        # CPU/MEM time-mean (separable)
-        area_cpu = 0.0
-        area_mem = 0.0
-
-        # Effective time-mean: integrate max(cpu_total(t), mem_total(t)) via event sweep
-        events: List[Tuple[float, float, float]] = []  # (t, d_cpu, d_mem)
-
-        for p in pods:
-            s = float(p.start_time)
-            e = float(p.end_time)
-
-            # Clip to [0, T]
-            s_clip = max(0.0, s)
-            e_clip = min(T, e)
-            if e_clip <= s_clip:
-                continue
-
-            cpu = float(p.replicas) * float(p.cpu)
-            mem = float(p.replicas) * float(p.mem)
-
-            dt = e_clip - s_clip
-            area_cpu += cpu * dt
-            area_mem += mem * dt
-
-            events.append((s_clip, +cpu, +mem))
-            events.append((e_clip, -cpu, -mem))
-
-        # Sweep for effective area
-        events.sort(key=lambda x: x[0])
-        cur_cpu = 0.0
-        cur_mem = 0.0
-        prev_t = 0.0
-        area_eff = 0.0
-
-        i = 0
-        while i < len(events):
-            t = float(events[i][0])
-            if t > prev_t:
-                area_eff += max(cur_cpu, cur_mem) * (t - prev_t)
-                prev_t = t
-
-            # apply all deltas at time t
-            while i < len(events) and float(events[i][0]) == t:
-                cur_cpu += float(events[i][1])
-                cur_mem += float(events[i][2])
-                # numerical guard
-                if cur_cpu < 0.0 and cur_cpu > -1e-9:
-                    cur_cpu = 0.0
-                if cur_mem < 0.0 and cur_mem > -1e-9:
-                    cur_mem = 0.0
-                i += 1
-
-        if prev_t < T:
-            area_eff += max(cur_cpu, cur_mem) * (T - prev_t)
-
-        cpu_util = area_cpu / (N * T)
-        mem_util = area_mem / (N * T)
-        eff_util = area_eff / (N * T)
-        return cpu_util, mem_util, eff_util
-
     # -------------------------------------------------------------------------
     # Initial pods via warm-up simulation
     # -------------------------------------------------------------------------
@@ -1562,13 +1489,7 @@ class TraceGenerator:
         """
         Write output files: initial JSON, trace JSON, info YAML.
         """
-        # Prefer computing utilization from histories (fast + consistent with make_trace).
-        if self.times and self.u_cpu_hist and self.u_mem_hist and len(self.times) == len(self.u_cpu_hist) == len(self.u_mem_hist):
-            _, _, util_eff = self.time_mean_utils_from_hist(self.times, self.u_cpu_hist, self.u_mem_hist)
-        else:
-            all_pods = initial_pods + trace_pods
-            _, _, util_eff = self.time_mean_request_utils(all_pods)
-
+        _, _, util_eff = self.time_mean_utils_from_hist(self.times, self.u_cpu_hist, self.u_mem_hist)
         self.pods_to_json(self.initial_path, initial_pods)
         self.pods_to_json(self.trace_path, trace_pods)
 
