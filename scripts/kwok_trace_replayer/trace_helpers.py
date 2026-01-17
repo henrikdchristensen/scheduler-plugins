@@ -5,9 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import pareto as pareto_dist
 
-MC_MEAN_SAMPLES = 100_000  # number of MC samples for mean estimation
-MC_MEAN_SEED = 12345       # fixed seed for reproducibility
-
 # -------------------------------------------------------------------
 # Font size configuration (single source of truth)
 # -------------------------------------------------------------------

@@ -34,22 +34,14 @@ Metrics:
     if you want to reduce output volume.
 """
 
-from __future__ import annotations
-
-import argparse
-import math
-import re
+import argparse, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-
-import matplotlib
-matplotlib.use("Agg")  # headless
 import matplotlib.pyplot as plt
-
 
 # -----------------------------
 # Constants / formatting
@@ -57,9 +49,9 @@ import matplotlib.pyplot as plt
 META_COLS = {"scheduler", "job_name", "n_seed", "time_s"}
 DEFAULT_TABLE_DECIMALS = 1
 
-_JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s$")
+JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s$")
 
-_LATEX_SPECIALS = {
+LATEX_SPECIALS = {
     "\\": r"\textbackslash{}",
     "&": r"\&",
     "%": r"\%",
@@ -72,62 +64,37 @@ _LATEX_SPECIALS = {
     "^": r"\textasciicircum{}",
 }
 
-
-def latex_escape_text(s: str) -> str:
-    """Escape LaTeX special chars for TEXT context (caption, plain text)."""
-    out = []
-    for ch in str(s):
-        out.append(_LATEX_SPECIALS.get(ch, ch))
-    return "".join(out)
-
-
 # -----------------------------
 # CLI
 # -----------------------------
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Plot + LaTeX tables from sealed_out results.")
-    p.add_argument(
-        "--in-dir",
-        required=True,
+    p.add_argument("--in-dir", required=True,
         help="Directory produced by seal_results.py (contains results_paired.csv and series/).",
     )
-    p.add_argument(
-        "--out-dir",
-        default=None,
+    p.add_argument("--out-dir", default=None,
         help="Output directory (default: <in-dir>/report_out).",
     )
 
-    # Scheduler filtering (plots only)
-    p.add_argument(
-        "--only-schedulers",
-        default="",
+    # Scheduler filtering
+    p.add_argument("--only-schedulers", default="",
         help="Comma-separated scheduler keys to include in plots. Empty = all.",
     )
-    p.add_argument(
-        "--include-scheduler-regex",
-        default="",
+    p.add_argument("--include-scheduler-regex", default="",
         help="Regex: keep schedulers matching this (applied after --only-schedulers).",
     )
-    p.add_argument(
-        "--exclude-scheduler-regex",
-        default="",
+    p.add_argument("--exclude-scheduler-regex", default="",
         help="Regex: drop schedulers matching this (applied last).",
     )
 
-    # Metric filtering (plots only)
-    p.add_argument(
-        "--only-metrics",
-        default="",
+    # Metric filtering
+    p.add_argument("--only-metrics", default="",
         help="Comma-separated metric columns to plot from series files (e.g., cpu_run_util_mean). Empty = all numeric.",
     )
-    p.add_argument(
-        "--include-metric-regex",
-        default="",
+    p.add_argument("--include-metric-regex", default="",
         help="Regex: keep metrics matching this (applied after --only-metrics).",
     )
-    p.add_argument(
-        "--exclude-metric-regex",
-        default="",
+    p.add_argument("--exclude-metric-regex", default="",
         help="Regex: drop metrics matching this (applied last).",
     )
 
@@ -137,28 +104,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dpi", type=int, default=200, help="PNG DPI (default: 200).")
 
     # Tables
-    p.add_argument(
-        "--table-decimals",
-        type=int,
-        default=DEFAULT_TABLE_DECIMALS,
+    p.add_argument("--table-decimals", type=int, default=DEFAULT_TABLE_DECIMALS,
         help="Decimals for LaTeX table cell formatting (default: 1).",
     )
-    p.add_argument(
-        "--no-tables",
-        action="store_true",
+    p.add_argument("--no-tables", action="store_true",
         help="Skip LaTeX table generation.",
     )
-    p.add_argument(
-        "--no-plots",
-        action="store_true",
+    p.add_argument("--no-plots", action="store_true",
         help="Skip plot generation.",
     )
     return p.parse_args()
 
-
 # -----------------------------
 # Helpers: parsing / formatting
 # -----------------------------
+
 @dataclass(frozen=True)
 class JobKey:
     job_name: str
@@ -166,9 +126,15 @@ class JobKey:
     k_max: int
     arrival_s: float
 
+def latex_escape_text(s: str) -> str:
+    """Escape LaTeX special chars for TEXT context (caption, plain text)."""
+    out = []
+    for ch in str(s):
+        out.append(LATEX_SPECIALS.get(ch, ch))
+    return "".join(out)
 
 def parse_job_name(job_name: str) -> JobKey:
-    m = _JOB_RE.match(job_name.strip())
+    m = JOB_RE.match(job_name.strip())
     if not m:
         raise ValueError(f"Unrecognized job_name format: {job_name}")
     n = int(m.group(1))
@@ -176,14 +142,12 @@ def parse_job_name(job_name: str) -> JobKey:
     a = float(m.group(3))
     return JobKey(job_name=job_name, n_nodes=n, k_max=k, arrival_s=a)
 
-
-def _fmt_arrival(a: float) -> str:
+def fmt_arrival(a: float) -> str:
     if abs(a - round(a)) < 1e-9:
         return str(int(round(a)))
     return f"{a:g}"
 
-
-def _fmt_signed(x: object, *, decimals: int) -> str:
+def fmt_signed(x: object, *, decimals: int) -> str:
     """Signed numeric for LaTeX cells. NaN -> \\text{--}."""
     try:
         v = float(x)
@@ -198,7 +162,7 @@ def _fmt_signed(x: object, *, decimals: int) -> str:
         s = s.replace("-", "+", 1)
     return s
 
-def _fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
+def fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
     """Signed numeric for LaTeX cells, after scaling. NaN -> \\text{--}.
 
     Example: scale=100 turns util deltas (0..1) into percentage points.
@@ -216,12 +180,10 @@ def _fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
         s = s.replace("-", "+", 1)
     return s
 
-
-def _sanitize_filename(s: str) -> str:
+def sanitize_filename(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._=-]+", "_", s)
 
-
-def _scheduler_row_label(scheduler_key: str) -> str:
+def scheduler_row_label(scheduler_key: str) -> str:
     """Make a compact row label from scheduler key (plugin_config)."""
     if scheduler_key == "default":
         return "Default"
@@ -268,10 +230,10 @@ def _scheduler_row_label(scheduler_key: str) -> str:
         return base.replace(")", ", defpreempt)")
     return base
 
-
 # -----------------------------
 # Series scanning + filtering
 # -----------------------------
+
 def iter_series_files(series_dir: Path) -> Iterable[Tuple[str, str, Path]]:
     """Yield (scheduler, job_name, path) from series/<scheduler>__<job_name>.csv"""
     if not series_dir.exists():
@@ -282,7 +244,6 @@ def iter_series_files(series_dir: Path) -> Iterable[Tuple[str, str, Path]]:
             continue
         scheduler, job_name = stem.split("__", 1)
         yield scheduler, job_name, p
-
 
 def filter_values(
     values: Sequence[str],
@@ -307,7 +268,6 @@ def filter_values(
 
     return out
 
-
 def discover_jobs_and_schedulers(series_dir: Path) -> Tuple[List[str], List[str], Dict[Tuple[str, str], Path]]:
     """Return (jobs, schedulers, (scheduler,job)->path)."""
     paths: Dict[Tuple[str, str], Path] = {}
@@ -319,10 +279,10 @@ def discover_jobs_and_schedulers(series_dir: Path) -> Tuple[List[str], List[str]
         scheds.add(scheduler)
     return sorted(jobs), sorted(scheds), paths
 
-
 # -----------------------------
 # Plotting
 # -----------------------------
+
 def load_series_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     if "time_s" not in df.columns:
@@ -330,7 +290,6 @@ def load_series_csv(path: Path) -> pd.DataFrame:
     df["time_s"] = pd.to_numeric(df["time_s"], errors="coerce")
     df = df.sort_values("time_s")
     return df
-
 
 def plot_job(
     *,
@@ -342,7 +301,7 @@ def plot_job(
     fig_h: float,
     dpi: int,
 ) -> None:
-    job_dir = out_dir / "plots" / _sanitize_filename(job_name)
+    job_dir = out_dir / "plots" / sanitize_filename(job_name)
     job_dir.mkdir(parents=True, exist_ok=True)
 
     series: Dict[str, pd.DataFrame] = {}
@@ -373,7 +332,7 @@ def plot_job(
                 continue
             x = df["time_s"].to_numpy(dtype=float)
             y = pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float)
-            plt.plot(x, y, label=_scheduler_row_label(sched))
+            plt.plot(x, y, label=scheduler_row_label(sched))
 
         plt.xlabel("time (s)")
         plt.ylabel(metric)
@@ -381,13 +340,12 @@ def plot_job(
         plt.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.6)
         plt.legend(loc="best", fontsize=8)
 
-        png_path = job_dir / f"{_sanitize_filename(metric)}.png"
-        pdf_path = job_dir / f"{_sanitize_filename(metric)}.pdf"
+        png_path = job_dir / f"{sanitize_filename(metric)}.png"
+        pdf_path = job_dir / f"{sanitize_filename(metric)}.pdf"
         plt.tight_layout()
         plt.savefig(png_path, dpi=dpi)
         plt.savefig(pdf_path)
         plt.close()
-
 
 # -----------------------------
 # LaTeX tables from results_paired.csv
@@ -407,10 +365,10 @@ def prio_cell_from_row(
         return r"\text{--}"
 
     if k_max == 1:
-        return _fmt_signed(row.get(f"{prefix}1_mean", np.nan), decimals=decimals)
+        return fmt_signed(row.get(f"{prefix}1_mean", np.nan), decimals=decimals)
 
     vals = [
-        _fmt_signed(row.get(f"{prefix}{p}_mean", np.nan), decimals=decimals)
+        fmt_signed(row.get(f"{prefix}{p}_mean", np.nan), decimals=decimals)
         for p in range(1, k_max + 1)
     ]
 
@@ -419,30 +377,6 @@ def prio_cell_from_row(
 
     inner = ",".join(vals)
     return r"{\scriptsize$\langle" + inner + r"\rangle$}"
-
-
-# --- ADD this helper right after _fmt_signed(...) ---
-
-def _fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
-    """Signed numeric for LaTeX cells, after scaling. NaN -> \\text{--}.
-
-    Example: scale=100 turns util deltas (0..1) into percentage points.
-    """
-    try:
-        v = float(x) * float(scale)
-    except Exception:
-        return r"\text{--}"
-    if not math.isfinite(v):
-        return r"\text{--}"
-    fmt = f"{{:+.{int(decimals)}f}}"
-    s = fmt.format(v)
-    # avoid "-0.0" (or "-0.00", etc.)
-    if s.startswith("-0") and abs(v) < 0.5 * (10 ** (-decimals)):
-        s = s.replace("-", "+", 1)
-    return s
-
-
-# --- REPLACE your angle_pair_cell_from_row(...) with this version ---
 
 def angle_pair_cell_from_row(
     row: pd.Series,
@@ -459,16 +393,15 @@ def angle_pair_cell_from_row(
     percentage points (×100), e.g. 0.024 -> +2.4.
     """
     if as_percentage_points:
-        a = _fmt_signed_scaled(row.get(col_a, np.nan), decimals=decimals, scale=100.0)
-        b = _fmt_signed_scaled(row.get(col_b, np.nan), decimals=decimals, scale=100.0)
+        a = fmt_signed_scaled(row.get(col_a, np.nan), decimals=decimals, scale=100.0)
+        b = fmt_signed_scaled(row.get(col_b, np.nan), decimals=decimals, scale=100.0)
     else:
-        a = _fmt_signed(row.get(col_a, np.nan), decimals=decimals)
-        b = _fmt_signed(row.get(col_b, np.nan), decimals=decimals)
+        a = fmt_signed(row.get(col_a, np.nan), decimals=decimals)
+        b = fmt_signed(row.get(col_b, np.nan), decimals=decimals)
 
     if a == r"\text{--}" and b == r"\text{--}":
         return r"\text{--}"
     return r"{\scriptsize$\langle" + f"{a},{b}" + r"\rangle$}"
-
 
 def latex_full_table_for_metric(
     *,
@@ -505,7 +438,7 @@ def latex_full_table_for_metric(
 
         row_keys = sorted(
             dfk["plugin_config"].astype(str).unique(),
-            key=lambda s: _scheduler_row_label(str(s)),
+            key=lambda s: scheduler_row_label(str(s)),
         )
         row_keys_by_k[int(k)] = row_keys
 
@@ -556,7 +489,7 @@ def latex_full_table_for_metric(
     arr_hdr = ["& "]
     for _n in nodes:
         for a in arrivals:
-            arr_hdr.append(r"$\mu_A{=}" + _fmt_arrival(a) + r"$s")
+            arr_hdr.append(r"$\mu_A{=}" + fmt_arrival(a) + r"$s")
             arr_hdr.append(" & ")
     lines.append("".join(arr_hdr).rstrip(" & ") + r" \\")
     lines.append(r"\midrule")
@@ -577,7 +510,7 @@ def latex_full_table_for_metric(
         row_keys = row_keys_by_k.get(int(k), [])
 
         for rk in row_keys:
-            label_txt = _scheduler_row_label(rk)
+            label_txt = scheduler_row_label(rk)
             row = [label_txt]
             for n in nodes:
                 for a in arrivals:
@@ -599,12 +532,11 @@ def latex_full_table_for_metric(
     if label is not None and str(label).strip():
         lines.append(r"\label{" + str(label) + r"}")
     else:
-        safe_label = _sanitize_filename(metric_name).replace("_", "-")
+        safe_label = sanitize_filename(metric_name).replace("_", "-")
         lines.append(r"\label{tab:" + safe_label + r"}")
 
     lines.append(r"\end{table}")
     return "\n".join(lines)
-
 
 def write_latex_tables(
     *,
@@ -635,7 +567,7 @@ def write_latex_tables(
     # ---- table specs (mean only) ----
     def scalar_value_fn(col: str):
         def _fn(r: pd.Series) -> str:
-            return _fmt_signed(r.get(col, np.nan), decimals=decimals)
+            return fmt_signed(r.get(col, np.nan), decimals=decimals)
         return _fn
 
     metric_defs = [
@@ -762,7 +694,6 @@ def write_latex_tables(
             label=md.get("label"),
         )
         out_txt.write_text(table_tex + "\n", encoding="utf-8")
-
 
 # -----------------------------
 # Main

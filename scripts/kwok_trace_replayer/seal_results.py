@@ -49,18 +49,13 @@ Notes:
 
 """
 
-from __future__ import annotations
-
-import argparse
-import math
-import re
+import argparse, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-
 
 # -----------------------------
 # Numeric formatting
@@ -69,10 +64,10 @@ import pandas as pd
 # Round floating outputs to this many decimals when writing CSVs.
 FLOAT_DECIMALS = 4
 
-
 # -----------------------------
 # Filenames / schema
 # -----------------------------
+
 GENERAL_STATS_FILENAME = "general_stats.csv"
 POD_STATS_FILENAME = "pod_stats.csv"
 
@@ -92,19 +87,18 @@ POD_UID_COL = "pod_uid"
 POD_PRIO_COL = "priority"
 POD_TIME_COL = "time_s"
 
-_RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
-
+RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
 
 # -----------------------------
 # Types
 # -----------------------------
+
 @dataclass(frozen=True)
-class Regime:
-    job_name: str  # canonical: nodes=<N>_prio=<K>_arrival=<A>s
+class TestCombo:
+    job_name: str  # nodes=<N>_prio=<K>_arrival=<A>s
     n_nodes: int
     k_max: int
     mean_arrival_s: float
-
 
 @dataclass(frozen=True)
 class PluginConfig:
@@ -118,10 +112,8 @@ class PluginConfig:
         d = "1" if self.defpreempt else "0"
         return f"mode={self.mode_raw}_blocking={b}_defpreempt={d}"
 
-
 # latency key that is stable across runs
 LatencyKey = Tuple[int, str, int]  # (priority, rs_prefix, replica_index_in_first_batch)
-
 
 # -----------------------------
 # CLI
@@ -131,32 +123,17 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Aggregate KWOK trace replayer outputs across seeds and write CSV summaries."
     )
-    p.add_argument(
-        "--root",
-        required=True,
+    p.add_argument("--root", required=True,
         help="Root directory containing 'default/' and 'plugin/' subfolders.",
     )
-    p.add_argument(
-        "--out-dir",
-        default=None,
+    p.add_argument("--out-dir", default=None,
         help="Where to write outputs (default: <root>/sealed_out).",
     )
-    p.add_argument(
-        "--eps-s",
-        type=float,
-        default=1.0,
+    p.add_argument("--eps-s", type=float, default=1.0,
         help="Epsilon window (seconds) for the first-batch latency heuristic (default: 1.0).",
     )
-    p.add_argument(
-        "--time-round",
-        type=int,
-        default=3,
+    p.add_argument("--time-round", type=int, default=3,
         help="Decimals to round time_s when building the cross-seed time grid (default: 3).",
-    )
-    p.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Reduce warnings about missing matches.",
     )
     return p.parse_args()
 
@@ -165,7 +142,7 @@ def parse_args() -> argparse.Namespace:
 # Parsing helpers
 # -----------------------------
 
-def _parse_int_token(tok: str, prefix: str) -> Optional[int]:
+def parse_int_token(tok: str, prefix: str) -> Optional[int]:
     if not tok.startswith(prefix):
         return None
     v = tok.split("=", 1)[1] if "=" in tok else tok[len(prefix) :]
@@ -173,7 +150,7 @@ def _parse_int_token(tok: str, prefix: str) -> Optional[int]:
     return int(v) if v else None
 
 
-def _parse_float_seconds_token(tok: str, prefix: str) -> Optional[float]:
+def parse_float_seconds_token(tok: str, prefix: str) -> Optional[float]:
     if not tok.startswith(prefix):
         return None
     v = tok.split("=", 1)[1] if "=" in tok else tok[len(prefix) :]
@@ -183,17 +160,17 @@ def _parse_float_seconds_token(tok: str, prefix: str) -> Optional[float]:
     return float(v) if v else None
 
 
-def _fmt_arrival(x: float) -> str:
+def fmt_arrival(x: float) -> str:
     if abs(x - round(x)) < 1e-9:
         return str(int(round(x)))
     return f"{x:g}"
 
 
-def _canon_job_name(n_nodes: int, k_max: int, mean_arrival_s: float) -> str:
-    return f"nodes={n_nodes}_prio={k_max}_arrival={_fmt_arrival(mean_arrival_s)}s"
+def canon_job_name(n_nodes: int, k_max: int, mean_arrival_s: float) -> str:
+    return f"nodes={n_nodes}_prio={k_max}_arrival={fmt_arrival(mean_arrival_s)}s"
 
 
-def parse_regime(dirname: str) -> Regime:
+def parse_test_combo(dirname: str) -> TestCombo:
     """Parse default job dir names.
 
     Accepts:
@@ -208,11 +185,11 @@ def parse_regime(dirname: str) -> Regime:
 
     for tok in tokens:
         if n is None and tok.startswith("nodes"):
-            n = _parse_int_token(tok, "nodes")
+            n = parse_int_token(tok, "nodes")
         if k is None and tok.startswith("prio"):
-            k = _parse_int_token(tok, "prio")
+            k = parse_int_token(tok, "prio")
         if arr is None and tok.startswith("arrival"):
-            arr = _parse_float_seconds_token(tok, "arrival")
+            arr = parse_float_seconds_token(tok, "arrival")
 
     if n is None or k is None or arr is None:
         raise SystemExit(
@@ -220,11 +197,11 @@ def parse_regime(dirname: str) -> Regime:
             "Expected tokens like nodes=16, prio=4, arrival=8s (or without '=' / 's')."
         )
 
-    job_name = _canon_job_name(n, k, arr)
-    return Regime(job_name=job_name, n_nodes=n, k_max=k, mean_arrival_s=arr)
+    job_name = canon_job_name(n, k, arr)
+    return TestCombo(job_name=job_name, n_nodes=n, k_max=k, mean_arrival_s=arr)
 
 
-def parse_plugin_dirname(dirname: str) -> Tuple[Regime, PluginConfig]:
+def parse_plugin_dirname(dirname: str) -> Tuple[TestCombo, PluginConfig]:
     """Parse plugin run dir names.
 
     Expected key-value tokens separated by underscores, e.g.:
@@ -247,7 +224,7 @@ def parse_plugin_dirname(dirname: str) -> Tuple[Regime, PluginConfig]:
     except Exception as e:
         raise SystemExit(f"Could not parse regime fields from plugin dir '{dirname}': {e}")
 
-    regime = Regime(job_name=_canon_job_name(n, kmax, arr), n_nodes=n, k_max=kmax, mean_arrival_s=arr)
+    test_combo = TestCombo(job_name=canon_job_name(n, kmax, arr), n_nodes=n, k_max=kmax, mean_arrival_s=arr)
 
     mode_raw = kv.get("mode", "unknown")
 
@@ -261,30 +238,29 @@ def parse_plugin_dirname(dirname: str) -> Tuple[Regime, PluginConfig]:
         defpreempt = False
 
     cfg = PluginConfig(mode_raw=mode_raw, blocking=blocking, defpreempt=defpreempt)
-    return regime, cfg
-
+    return test_combo, cfg
 
 def rs_prefix_from_pod_name(pod_name: str) -> str:
-    m = _RS_PREFIX_RE.match(pod_name or "")
+    m = RS_PREFIX_RE.match(pod_name or "")
     if m:
         return m.group(1)
     if "-" in (pod_name or ""):
         return (pod_name or "").split("-", 1)[0]
     return pod_name or ""
 
-
-def _require_cols(df: pd.DataFrame, path: Path, cols: List[str]) -> None:
+def require_cols(df: pd.DataFrame, path: Path, cols: List[str]) -> None:
     missing = [c for c in cols if c not in df.columns]
     if missing:
         raise SystemExit(f"{path} is missing columns: {', '.join(missing)}")
-
 
 # -----------------------------
 # Metric computation
 # -----------------------------
 
-def _sorted_time_and_dt(df: pd.DataFrame, time_col: str = TIME_COL) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (t, dt, order) where t is sorted and normalized to start at 0."""
+def sorted_time_and_dt(df: pd.DataFrame, time_col: str = TIME_COL) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Return (t, dt, order) where t is sorted and normalized to start at 0.
+    """
     t_raw = df[time_col].astype(float).to_numpy()
     if t_raw.size == 0:
         return np.array([], dtype=float), np.array([], dtype=float), np.array([], dtype=int)
@@ -296,9 +272,10 @@ def _sorted_time_and_dt(df: pd.DataFrame, time_col: str = TIME_COL) -> Tuple[np.
     dt = np.clip(dt, 0.0, None)
     return t, dt, order
 
-
-def _step_values_at(t: np.ndarray, y: np.ndarray, grid: np.ndarray, *, default: float = 0.0) -> np.ndarray:
-    """Stepwise-constant y(t) at each time in grid, using last observation carried forward."""
+def step_values_at(t: np.ndarray, y: np.ndarray, grid: np.ndarray, *, default: float = 0.0) -> np.ndarray:
+    """
+    Stepwise-constant y(t) at each time in grid, using last observation carried forward.
+    """
     if t.size == 0 or y.size == 0:
         return np.full_like(grid, fill_value=float(default), dtype=float)
     idx = np.searchsorted(t, grid, side="right") - 1
@@ -308,9 +285,9 @@ def _step_values_at(t: np.ndarray, y: np.ndarray, grid: np.ndarray, *, default: 
     out[ok] = y[idx2[ok]]
     return out
 
-def _nearest_values_at(t: np.ndarray, y: np.ndarray, grid: np.ndarray, *, default: float = 0.0) -> np.ndarray:
-    """Nearest-neighbor sampling of y(t) at each time in grid.
-
+def nearest_values_at(t: np.ndarray, y: np.ndarray, grid: np.ndarray, *, default: float = 0.0) -> np.ndarray:
+    """
+    Nearest-neighbor sampling of y(t) at each time in grid.
     For each grid point g, pick the observation y(t_i) where |t_i - g| is minimal.
     Uses default when inputs are empty.
     """
@@ -327,10 +304,10 @@ def _nearest_values_at(t: np.ndarray, y: np.ndarray, grid: np.ndarray, *, defaul
     idx_best = np.where(choose_l, idx_l, idx_r)
     return y[idx_best]
 
-
-def _latency_map_first_batch(pod_df: pd.DataFrame, *, eps_s: float) -> Dict[LatencyKey, float]:
-    """Latency map keyed by (priority, rs_prefix, replica_index_in_first_batch)."""
-
+def latency_map_first_batch(pod_df: pd.DataFrame, *, eps_s: float) -> Dict[LatencyKey, float]:
+    """
+    Latency map keyed by (priority, rs_prefix, replica_index_in_first_batch).
+    """
     apply_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
     run_df = pod_df[pod_df[POD_EVENT_COL] == "running-time"].copy()
 
@@ -371,12 +348,10 @@ def _latency_map_first_batch(pod_df: pd.DataFrame, *, eps_s: float) -> Dict[Late
 
     return out
 
-
-def _percentiles(vals: np.ndarray, qs: List[float]) -> Dict[float, float]:
+def percentiles(vals: np.ndarray, qs: List[float]) -> Dict[float, float]:
     if vals.size == 0:
         return {q: float("nan") for q in qs}
     return {q: float(np.quantile(vals, q)) for q in qs}
-
 
 def compute_run_metrics(
     general_path: Path,
@@ -386,9 +361,9 @@ def compute_run_metrics(
 ) -> Tuple[Dict[str, float], Dict[LatencyKey, float]]:
     """Compute per-run scalar metrics + per-run latency map."""
     df_g = pd.read_csv(general_path)
-    _require_cols(df_g, general_path, [TIME_COL, CPU_RUN_COL, MEM_RUN_COL, CPU_REQ_COL, MEM_REQ_COL])
+    require_cols(df_g, general_path, [TIME_COL, CPU_RUN_COL, MEM_RUN_COL, CPU_REQ_COL, MEM_REQ_COL])
 
-    t, dt, order = _sorted_time_and_dt(df_g, TIME_COL)
+    t, dt, order = sorted_time_and_dt(df_g, TIME_COL)
     T_end = float(t[-1]) if t.size else 0.0
 
     cpu_run = df_g[CPU_RUN_COL].astype(float).to_numpy()[order] if t.size else np.array([], dtype=float)
@@ -448,7 +423,7 @@ def compute_run_metrics(
         metrics[f"D_p{p}"] = float(y[-1]) if y.size else 0.0
 
     df_p = pd.read_csv(pod_path)
-    _require_cols(df_p, pod_path, [POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL])
+    require_cols(df_p, pod_path, [POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL])
 
     df_p[POD_TIME_COL] = df_p[POD_TIME_COL].astype(float)
     df_p[POD_PRIO_COL] = df_p[POD_PRIO_COL].astype(int)
@@ -456,11 +431,11 @@ def compute_run_metrics(
     df_p[POD_NAME_COL] = df_p[POD_NAME_COL].astype(str)
     df_p[POD_UID_COL] = df_p[POD_UID_COL].astype(str)
 
-    lat_map = _latency_map_first_batch(df_p, eps_s=float(eps_s))
+    lat_map = latency_map_first_batch(df_p, eps_s=float(eps_s))
     lat_vals = np.asarray(list(lat_map.values()), dtype=float)
 
     qs = [0.05, 0.25, 0.5, 0.75, 0.95]
-    pct = _percentiles(lat_vals, qs)
+    pct = percentiles(lat_vals, qs)
 
     metrics["latency_first_admit_p05_s"] = pct[0.05]
     metrics["latency_first_admit_p25_s"] = pct[0.25]
@@ -471,11 +446,12 @@ def compute_run_metrics(
 
     return metrics, lat_map
 
-
-def _series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str, object]:
-    """Horizon-aware metrics using stepwise carry-forward."""
+def series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str, object]:
+    """
+    Horizon-aware metrics using stepwise carry-forward.
+    """
     df = pd.read_csv(general_csv)
-    _require_cols(df, general_csv, [TIME_COL, CPU_RUN_COL, MEM_RUN_COL, CPU_REQ_COL, MEM_REQ_COL])
+    require_cols(df, general_csv, [TIME_COL, CPU_RUN_COL, MEM_RUN_COL, CPU_REQ_COL, MEM_REQ_COL])
 
     t_raw = df[TIME_COL].astype(float).to_numpy()
     if t_raw.size == 0:
@@ -505,12 +481,12 @@ def _series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str,
     eff_run = np.maximum(cpu_run, mem_run)
     eff_req = np.maximum(cpu_req, mem_req)
 
-    cpu_run_clip = _step_values_at(t, cpu_run, t_clip, default=0.0)
-    mem_run_clip = _step_values_at(t, mem_run, t_clip, default=0.0)
-    cpu_req_clip = _step_values_at(t, cpu_req, t_clip, default=0.0)
-    mem_req_clip = _step_values_at(t, mem_req, t_clip, default=0.0)
-    eff_run_clip = _step_values_at(t, eff_run, t_clip, default=0.0)
-    eff_req_clip = _step_values_at(t, eff_req, t_clip, default=0.0)
+    cpu_run_clip = step_values_at(t, cpu_run, t_clip, default=0.0)
+    mem_run_clip = step_values_at(t, mem_run, t_clip, default=0.0)
+    cpu_req_clip = step_values_at(t, cpu_req, t_clip, default=0.0)
+    mem_req_clip = step_values_at(t, mem_req, t_clip, default=0.0)
+    eff_run_clip = step_values_at(t, eff_run, t_clip, default=0.0)
+    eff_req_clip = step_values_at(t, eff_req, t_clip, default=0.0)
 
     def _time_mean_clip(y_clip: np.ndarray) -> float:
         return float(np.sum(y_clip * dt) / float(horizon_s)) if horizon_s > 0 else 0.0
@@ -537,13 +513,13 @@ def _series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str,
     for p in prios:
         run_col = f"{RUNNING_PREFIX}{p}"
         y_run = df[run_col].fillna(0).astype(float).to_numpy()[order]
-        y_vals = _step_values_at(t, y_run, t_clip, default=0.0)
+        y_vals = step_values_at(t, y_run, t_clip, default=0.0)
         R[p] = float(np.sum(y_vals * dt))
 
         del_col = f"{DELETIONS_CUM_PREFIX}{p}"
         if del_col in df.columns:
             y_del = df[del_col].fillna(0).astype(float).to_numpy()[order]
-            D[p] = float(_step_values_at(t, y_del, np.array([horizon_s], dtype=float), default=0.0)[0])
+            D[p] = float(step_values_at(t, y_del, np.array([horizon_s], dtype=float), default=0.0)[0])
 
     return {
         "prios": prios,
@@ -558,7 +534,6 @@ def _series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str,
         "util_eff_req_mean": util_eff_req_mean,
     }
 
-
 # -----------------------------
 # Filesystem scanning
 # -----------------------------
@@ -572,24 +547,26 @@ def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
         if (d / GENERAL_STATS_FILENAME).exists() and (d / POD_STATS_FILENAME).exists():
             yield d.name, d
 
-
 def scan_default(default_root: Path) -> Dict[Tuple[str, str], Tuple[Path, Path]]:
-    """(job_name, seed) -> (general_csv, pod_csv)."""
+    """
+    (job_name, seed) -> (general_csv, pod_csv).
+    """
     idx: Dict[Tuple[str, str], Tuple[Path, Path]] = {}
     for job_dir in sorted(default_root.iterdir()):
         if not job_dir.is_dir():
             continue
         try:
-            r = parse_regime(job_dir.name)
+            r = parse_test_combo(job_dir.name)
         except SystemExit:
             continue
         for seed, seed_dir in iter_seed_dirs(job_dir):
             idx[(r.job_name, seed)] = (seed_dir / GENERAL_STATS_FILENAME, seed_dir / POD_STATS_FILENAME)
     return idx
 
-
 def iter_plugin_runs(plugin_root: Path) -> Iterable[Tuple[str, str, Path]]:
-    """Yield (job_name, plugin_config_key, run_dir_path)."""
+    """
+    Yield (job_name, plugin_config_key, run_dir_path).
+    """
     if not plugin_root.exists() or not plugin_root.is_dir():
         return
     for run_dir in sorted(plugin_root.iterdir()):
@@ -601,13 +578,14 @@ def iter_plugin_runs(plugin_root: Path) -> Iterable[Tuple[str, str, Path]]:
             continue
         yield regime.job_name, cfg.key(), run_dir
 
-
 # -----------------------------
 # Output schemas
 # -----------------------------
 
-def _round_numeric_df(df: pd.DataFrame, *, exclude: List[str] | None = None) -> pd.DataFrame:
-    """Round numeric columns to FLOAT_DECIMALS, excluding some columns."""
+def round_numeric_df(df: pd.DataFrame, *, exclude: List[str] | None = None) -> pd.DataFrame:
+    """
+    Round numeric columns to FLOAT_DECIMALS, excluding some columns.
+    """
     if exclude is None:
         exclude = []
     num_cols = [c for c in df.columns if c not in set(exclude) and pd.api.types.is_numeric_dtype(df[c])]
@@ -615,8 +593,7 @@ def _round_numeric_df(df: pd.DataFrame, *, exclude: List[str] | None = None) -> 
         df[num_cols] = df[num_cols].round(FLOAT_DECIMALS)
     return df
 
-
-def _metric_cols_for_k(max_k: int, *, t_end_col: str = "T_end_s") -> List[str]:
+def metric_cols_for_k(max_k: int, *, t_end_col: str = "T_end_s") -> List[str]:
     cols: List[str] = [
         t_end_col,
         "cpu_run_util_mean",
@@ -640,22 +617,20 @@ def _metric_cols_for_k(max_k: int, *, t_end_col: str = "T_end_s") -> List[str]:
     ]
     return cols
 
+def results_long_columns(max_k: int) -> List[str]:
+    return ["scheduler", "job_name", "seed", *metric_cols_for_k(max_k, t_end_col="T_end_s")]
 
-def _results_long_columns(max_k: int) -> List[str]:
-    return ["scheduler", "job_name", "seed", *_metric_cols_for_k(max_k, t_end_col="T_end_s")]
 
-
-def _results_agg_columns(max_k: int) -> List[str]:
-    return ["scheduler", "job_name", "n_seeds", *_metric_cols_for_k(max_k, t_end_col="T_end_s_mean")]
-
+def results_agg_columns(max_k: int) -> List[str]:
+    return ["scheduler", "job_name", "n_seeds", *metric_cols_for_k(max_k, t_end_col="T_end_s_mean")]
 
 # -----------------------------
 # Time-series aggregation
 # -----------------------------
 
-def _load_series(general_csv: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+def load_series(general_csv: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     df = pd.read_csv(general_csv)
-    _require_cols(df, general_csv, [TIME_COL])
+    require_cols(df, general_csv, [TIME_COL])
 
     t_raw = df[TIME_COL].astype(float).to_numpy()
     if t_raw.size == 0:
@@ -676,10 +651,9 @@ def _load_series(general_csv: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     return t, cols
 
 
-def _sanitize_filename(s: str) -> str:
+def sanitize_filename(s: str) -> str:
     # keep it filesystem-friendly
     return re.sub(r"[^A-Za-z0-9._=-]+", "_", s)
-
 
 def write_series_means(
     *,
@@ -690,7 +664,8 @@ def write_series_means(
     k_max: int,
     time_round: int,
 ) -> None:
-    """Write mean time-series across seeds for a single scheduler+job.
+    """
+    Write mean time-series across seeds for a single scheduler+job.
 
     Output grid: one row per *integer* second (0,1,2,...) up to the minimum
     observed T_end across seeds (so each time point is comparable across seeds).
@@ -705,7 +680,7 @@ def write_series_means(
     t_ends: List[float] = []
 
     for p in seed_general_paths:
-        t, cols = _load_series(p)
+        t, cols = load_series(p)
         if t.size == 0:
             continue
         series_list.append((t.astype(float), cols))
@@ -760,7 +735,7 @@ def write_series_means(
                 continue
 
             y_clean = np.nan_to_num(y.astype(float), nan=default_val)
-            vals_per_seed.append(_nearest_values_at(t, y_clean, grid, default=default_val))
+            vals_per_seed.append(nearest_values_at(t, y_clean, grid, default=default_val))
 
         mat = np.vstack(vals_per_seed)
         out_cols[cout] = np.mean(mat, axis=0)
@@ -771,14 +746,13 @@ def write_series_means(
     df_out.insert(0, "scheduler", scheduler)
 
     # Round numeric outputs (keep time_s as integer)
-    _round_numeric_df(df_out, exclude=["scheduler", "job_name", "n_seed", "time_s"])
+    round_numeric_df(df_out, exclude=["scheduler", "job_name", "n_seed", "time_s"])
 
     series_dir = out_dir / "series"
     series_dir.mkdir(parents=True, exist_ok=True)
 
-    fname = f"{_sanitize_filename(scheduler)}__{_sanitize_filename(job_name)}.csv"
+    fname = f"{sanitize_filename(scheduler)}__{sanitize_filename(job_name)}.csv"
     df_out.to_csv(series_dir / fname, index=False)
-
 
 # -----------------------------
 # Main
@@ -804,14 +778,14 @@ def main() -> None:
     k_candidates: List[int] = []
     for (job_name, _seed) in default_idx.keys():
         try:
-            k_candidates.append(parse_regime(job_name).k_max)
+            k_candidates.append(parse_test_combo(job_name).k_max)
         except SystemExit:
             # parse_regime expects dir-ish names; job_name is canonical so should parse
             k_candidates.append(int(re.search(r"prio=(\d+)", job_name).group(1)))
 
-    for job_name, _cfg_key, _run_dir in iter_plugin_runs(plugin_root):
+    for job_name, _, _ in iter_plugin_runs(plugin_root):
         try:
-            k_candidates.append(parse_regime(job_name).k_max)
+            k_candidates.append(parse_test_combo(job_name).k_max)
         except SystemExit:
             m = re.search(r"prio=(\d+)", job_name)
             if m:
@@ -850,7 +824,7 @@ def main() -> None:
     df_long = pd.DataFrame(rows_long)
 
     # Ensure stable column set
-    for c in _results_long_columns(max_k_global):
+    for c in results_long_columns(max_k_global):
         if c not in df_long.columns:
             df_long[c] = np.nan
 
@@ -862,12 +836,12 @@ def main() -> None:
                 df_long[col] = pd.to_numeric(df_long[col], errors="coerce").fillna(0.0)
 
     # numeric coercion
-    for c in _metric_cols_for_k(max_k_global):
+    for c in metric_cols_for_k(max_k_global):
         if c in df_long.columns:
             df_long[c] = pd.to_numeric(df_long[c], errors="coerce")
 
-    df_long = df_long[_results_long_columns(max_k_global)]
-    _round_numeric_df(df_long, exclude=["scheduler", "job_name", "seed"])
+    df_long = df_long[results_long_columns(max_k_global)]
+    round_numeric_df(df_long, exclude=["scheduler", "job_name", "seed"])
     df_long.to_csv(out_dir / "results_long.csv", index=False)
 
     # -------------------------
@@ -877,7 +851,7 @@ def main() -> None:
         print("No runs found.")
         return
 
-    numeric_cols = _metric_cols_for_k(max_k_global, t_end_col="T_end_s")
+    numeric_cols = metric_cols_for_k(max_k_global, t_end_col="T_end_s")
 
     grp = df_long.groupby(["scheduler", "job_name"], dropna=False)
 
@@ -888,14 +862,14 @@ def main() -> None:
     if "T_end_s" in df_agg.columns:
         df_agg = df_agg.rename(columns={"T_end_s": "T_end_s_mean"})
 
-    _round_numeric_df(df_agg, exclude=["scheduler", "job_name", "n_seeds"])
+    round_numeric_df(df_agg, exclude=["scheduler", "job_name", "n_seeds"])
 
     # ensure column order and presence
-    for c in _results_agg_columns(max_k_global):
+    for c in results_agg_columns(max_k_global):
         if c not in df_agg.columns:
             df_agg[c] = np.nan
 
-    df_agg = df_agg[_results_agg_columns(max_k_global)]
+    df_agg = df_agg[results_agg_columns(max_k_global)]
     df_agg.to_csv(out_dir / "results_agg.csv", index=False)
 
     # -------------------------
@@ -915,16 +889,8 @@ def main() -> None:
         default_seeds = {seed for (jn, seed) in default_idx.keys() if jn == job_name}
         common_seeds = sorted(plugin_seeds & default_seeds)
         if not common_seeds:
-            if not args.quiet:
-                print(f"[warn] no common seeds for job={job_name} plugin={plugin_cfg_key}")
+            print(f"[warn] no common seeds for job={job_name} plugin={plugin_cfg_key}")
             continue
-
-        # job k_max for priority loops
-        try:
-            job_k = parse_regime(job_name).k_max
-        except SystemExit:
-            m = re.search(r"prio=(\d+)", job_name)
-            job_k = int(m.group(1)) if m else max_k_global
 
         for seed in common_seeds:
             def_gen, def_pod = default_idx[(job_name, seed)]
@@ -945,10 +911,8 @@ def main() -> None:
 
             T_common = min(float(def_metrics.get("T_end_s", 0.0)), float(plu_metrics.get("T_end_s", 0.0)))
 
-            def_series = _series_metrics_at_horizon(def_gen, T_common)
-            plu_series = _series_metrics_at_horizon(plug_gen, T_common)
-
-            prios = sorted(set(def_series["prios"]) | set(plu_series["prios"]))
+            def_series = series_metrics_at_horizon(def_gen, T_common)
+            plu_series = series_metrics_at_horizon(plug_gen, T_common)
 
             row: Dict[str, object] = {
                 "job_name": job_name,
@@ -1065,7 +1029,7 @@ def main() -> None:
                 df_pair_agg[c] = np.nan
 
         df_pair_agg = df_pair_agg[out_cols]
-        _round_numeric_df(df_pair_agg, exclude=["job_name", "plugin_config", "n_seed"])
+        round_numeric_df(df_pair_agg, exclude=["job_name", "plugin_config", "n_seed"])
         df_pair_agg.to_csv(out_dir / "results_paired.csv", index=False)
 
     # -------------------------
@@ -1086,7 +1050,7 @@ def main() -> None:
 
     for (scheduler, job_name), gen_paths in sorted(series_groups.items()):
         try:
-            k_max = parse_regime(job_name).k_max
+            k_max = parse_test_combo(job_name).k_max
         except SystemExit:
             m = re.search(r"prio=(\d+)", job_name)
             k_max = int(m.group(1)) if m else max_k_global
@@ -1101,7 +1065,6 @@ def main() -> None:
         )
 
     print(f"Wrote outputs to: {out_dir}")
-
 
 if __name__ == "__main__":
     main()
