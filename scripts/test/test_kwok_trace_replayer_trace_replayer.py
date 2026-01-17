@@ -589,7 +589,7 @@ def test_build_trace_events_sorts_deletes_before_creates_at_same_time(tmp_path: 
 def test_apply_initial_workload_no_initial_is_noop(tmp_path: Path, monkeypatch):
     rp, *_ = mk_replayer(tmp_path, monkeypatch)
     rp.initial_pods = []
-    rp.apply_initial_workload(namespace="trace")  # should not raise
+    rp.apply_initial_pods(namespace="trace")  # should not raise
 
 
 def test_apply_initial_workload_submits_kubectl_tasks(tmp_path: Path, monkeypatch):
@@ -618,7 +618,7 @@ def test_apply_initial_workload_submits_kubectl_tasks(tmp_path: Path, monkeypatc
 
     rp.executor_factory = lambda **_k: CapturingExec()
 
-    rp.apply_initial_workload(namespace="trace")
+    rp.apply_initial_pods(namespace="trace")
     assert len(submitted) == 1
     assert submitted[0][0] == tr.kubectl_apply_yaml
 
