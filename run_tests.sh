@@ -114,11 +114,27 @@ if "$RUN_UNIT_GO"; then
   go test ./pkg/mypriorityoptimizer -timeout 3s -coverprofile=coverage/go/go_coverage.out
   go tool cover -func=coverage/go/go_coverage.out
   go tool cover -html=coverage/go/go_coverage.out -o coverage/go/coverage.html
+
   # Enforce minimum total coverage threshold
   THRESHOLD="${GO_COVERAGE_FAIL_UNDER}"
   TOTAL=$(go tool cover -func=coverage/go/go_coverage.out | awk '/total:/ {print $3}' | sed 's/%//')
-  echo "Go total coverage: ${TOTAL}% (threshold: ${THRESHOLD}%)"
-  awk -v t="$THRESHOLD" -v c="$TOTAL" 'BEGIN { if (c+0 < t+0) { print "Go coverage below threshold"; exit 1 } }'
+
+  GREEN='\033[0;32m'
+  RED='\033[0;31m'
+  NC='\033[0m'
+
+  # Print colored status + fail if below threshold
+  awk -v t="$THRESHOLD" -v c="$TOTAL" -v g="$GREEN" -v r="$RED" -v n="$NC" '
+    BEGIN {
+      if (c+0 < t+0) {
+        printf "%sGo total coverage: %s%% (threshold: %s%%)%s\n", r, c, t, n
+        print "Go coverage below threshold"
+        exit 1
+      } else {
+        printf "%sGo total coverage: %s%% (threshold: %s%%)%s\n", g, c, t, n
+      }
+    }'
+
   echo "Go coverage reports generated in coverage/go/"
 fi
 
