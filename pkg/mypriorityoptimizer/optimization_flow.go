@@ -3,6 +3,7 @@ package mypriorityoptimizer
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -19,6 +20,12 @@ import (
 func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Pod) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
 	strategy := getModeCombinedAsString()
 
+	// Cumulative persistent stats (one write per optimization-flow call).
+	delta := &OptimizationStatsDelta{OptimizationFlowCalls: 1}
+	defer func() {
+		pl.persistOptimizationStatsDelta(context.Background(), *delta)
+	}()
+
 	// Sync modes: take PlanActive now.
 	// Async modes: will take PlanActive later, after plan computation.
 	if !isNonBlockingSolvingFn() {
@@ -33,6 +40,7 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 		klog.InfoS(msg(strategy, InfoOptimizationInProgress))
 		return nil, nil, "", nil, nil, ErrOptimizationInProgress
 	}
+	delta.OptimizationFlowEntered = 1
 	defer pl.tryLeaveOptimizationFlow()
 
 	start := time.Now()
@@ -57,12 +65,27 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 	// Plan computation
 	bestName, hadImp, bestAttempt, bestOut, attempts := planComputationFn(pl, ctx, inp)
 
+	// Count solver calls (attempts = one entry per enabled solver attempt run).
+	delta.SolverAttempts = int64(len(attempts))
+
 	// Check if any solver solution was improving, if not, exit early.
 	if !hadImp {
 		klog.Error(msg(strategy, InfoNoImprovingSolutionFromAnySolver))
 		pl.tryLeaveActivePlan()
+		if len(attempts) > 0 {
+			delta.BestSolverFailed = 1
+		}
 		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrNoImprovingSolutionFromAnySolver.Error())
 		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrNoImprovingSolutionFromAnySolver
+	}
+
+	// Best solver status counters (when we have an improving solution).
+	if bestAttempt != nil {
+		if strings.EqualFold(bestAttempt.Status, SolverStatusOptimal) {
+			delta.BestSolverOptimal = 1
+		} else if strings.EqualFold(bestAttempt.Status, SolverStatusFeasible) {
+			delta.BestSolverFeasible = 1
+		}
 	}
 
 	// Verify that plan (still) can be applied
@@ -71,6 +94,7 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 	if !ok {
 		klog.Error(msg(strategy, InfoPlanNotApplicable), "solver", bestName, "status", bestOut.Status, "reason", why)
 		pl.tryLeaveActivePlan()
+		delta.PlanNotApplicable = 1
 		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrPlanNotApplicable.Error())
 		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrPlanNotApplicable
 	}
@@ -111,6 +135,8 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrPlanActivationFailed.Error())
 		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrPlanActivationFailed
 	}
+
+	delta.PlanActivated = 1
 
 	// Start a periodically plan completion watcher. The watcher stops itself.
 	startPlanCompletionWatchFn(pl, ap)

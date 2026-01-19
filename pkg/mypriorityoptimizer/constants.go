@@ -42,6 +42,13 @@ const (
 	PlansToRetain = 32
 	// =========================================================
 
+	// ================ Optimization cumulative stats ==========
+	// OptimizationStatsConfigMapName stores persistent cumulative counters.
+	OptimizationStatsConfigMapName = "optimization-stats"
+	// OptimizationStatsConfigMapLabelKey is the label key used for the
+	// optimization stats CM.
+	OptimizationStatsConfigMapLabelKey = "optimization-stats"
+
 	// ================ Loop settings  =========================
 	// OptimizePeriodicCancelOnChange indicates whether periodic optimization
 	// runs should be cancelled if the pending set changes.
