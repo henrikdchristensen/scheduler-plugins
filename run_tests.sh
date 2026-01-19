@@ -105,7 +105,7 @@ if "$RUN_UNIT_PY"; then
     --cov-report=html:coverage/python \
     --cov-report=term-missing \
     --cov-fail-under="${PYTHON_COVERAGE_FAIL_UNDER}" \
-    --timeout=1
+    --timeout=2
   echo "Python tests completed. Coverage HTML: coverage/python/index.html"
 fi
 

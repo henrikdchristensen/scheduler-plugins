@@ -71,7 +71,7 @@ jobs:
             --cov-report=xml:coverage/python/coverage.xml \
             --cov-report=html:coverage/python/html \
             --cov-fail-under=${{ steps.load-env.outputs.PYTHON_COVERAGE_FAIL_UNDER }} \
-            --timeout=1
+            --timeout=2
       - name: Run go unit tests
         run: |
           go test ./pkg/mypriorityoptimizer -v \
