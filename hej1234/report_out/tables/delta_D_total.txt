@@ -1,0 +1,44 @@
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{0.95}
+
+\begin{adjustbox}{max width=\linewidth}
+
+\begin{tabular}{l c c c c}
+\toprule
+\multicolumn{5}{l}{$\mathbf{\Delta \textit{D}_{\mathrm{total}}\textit{(T)}}$ (deletions), mean paired difference vs.\ baseline} \\
+\addlinespace[0.2em]
+& \multicolumn{2}{c}{$N=16$} & \multicolumn{2}{c}{$N=32$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+& $\mu_A{=}8$s & $\mu_A{=}16$s & $\mu_A{=}8$s & $\mu_A{=}16$s \\
+\midrule
+\multicolumn{5}{l}{$k_{\max}=1$ (no priorities)} \\
+\midrule
+Periodic-8s (blk) & +107.0 & +71.5 & +87.0 & +55.5 \\
+Periodic-8s (blk, defpreempt) & +78.5 & +61.0 & +82.0 & +53.5 \\
+Periodic-8s (non-blk) & +89.0 & +51.0 & +79.5 & +58.5 \\
+Periodic-8s (non-blk, defpreempt) & +76.5 & +53.0 & +80.5 & +56.0 \\
+Stable-queue-2s (blk) & +147.0 & +81.5 & +98.0 & +67.5 \\
+Stable-queue-2s (blk, defpreempt) & +157.0 & +89.0 & +120.5 & +67.5 \\
+Stable-queue-2s (non-blk) & +158.0 & +91.5 & +88.5 & +62.5 \\
+Stable-queue-2s (non-blk, defpreempt) & +141.0 & +84.5 & +93.5 & +50.0 \\
+\midrule
+\multicolumn{5}{l}{$k_{\max}=4$ (priorities enabled)} \\
+\midrule
+Periodic-8s (blk) & -496.0 & -244.0 & -269.0 & -130.5 \\
+Periodic-8s (blk, defpreempt) & +184.0 & +142.0 & +103.0 & +80.0 \\
+Periodic-8s (non-blk) & -491.5 & -242.5 & -284.0 & -129.5 \\
+Periodic-8s (non-blk, defpreempt) & +192.0 & +108.5 & +91.0 & +90.0 \\
+Stable-queue-2s (blk) & -375.0 & -190.5 & -243.0 & -113.0 \\
+Stable-queue-2s (blk, defpreempt) & +267.0 & +193.0 & +112.5 & +89.0 \\
+Stable-queue-2s (non-blk) & -399.0 & -175.5 & -257.0 & -90.0 \\
+Stable-queue-2s (non-blk, defpreempt) & +272.0 & +159.0 & +117.0 & +101.0 \\
+\bottomrule
+\end{tabular}
+
+\end{adjustbox}
+\caption{Mean paired difference in total cumulative re-queue events $\Delta D_{\mathrm{total}}(T)$ between plugin and baseline.}
+\label{tab:delta-D-total}
+\end{table}

@@ -1,0 +1,44 @@
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{0.95}
+
+\begin{adjustbox}{max width=\linewidth}
+
+\begin{tabular}{l c c c c}
+\toprule
+\multicolumn{5}{l}{$\mathbf{\Delta \mathrm{latency}}$ (s), mean paired difference vs.\ baseline} \\
+\addlinespace[0.2em]
+& \multicolumn{2}{c}{$N=16$} & \multicolumn{2}{c}{$N=32$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+& $\mu_A{=}8$s & $\mu_A{=}16$s & $\mu_A{=}8$s & $\mu_A{=}16$s \\
+\midrule
+\multicolumn{5}{l}{$k_{\max}=1$ (no priorities)} \\
+\midrule
+Periodic-8s (blk) & -1.3 & -8.2 & -2.0 & -9.9 \\
+Periodic-8s (blk, defpreempt) & -1.1 & -7.7 & -1.6 & -9.4 \\
+Periodic-8s (non-blk) & -1.2 & -7.8 & -2.1 & -9.9 \\
+Periodic-8s (non-blk, defpreempt) & -1.0 & -7.9 & -1.7 & -9.7 \\
+Stable-queue-2s (blk) & -1.6 & -9.1 & -1.5 & -9.7 \\
+Stable-queue-2s (blk, defpreempt) & -1.7 & -8.8 & -2.6 & -10.1 \\
+Stable-queue-2s (non-blk) & -1.8 & -8.7 & -1.8 & -9.3 \\
+Stable-queue-2s (non-blk, defpreempt) & -1.7 & -8.8 & -1.7 & -10.6 \\
+\midrule
+\multicolumn{5}{l}{$k_{\max}=4$ (priorities enabled)} \\
+\midrule
+Periodic-8s (blk) & +5.0 & +5.4 & +2.5 & +5.1 \\
+Periodic-8s (blk, defpreempt) & +0.0 & +0.4 & -0.1 & -0.6 \\
+Periodic-8s (non-blk) & +5.0 & +6.0 & +3.1 & +4.3 \\
+Periodic-8s (non-blk, defpreempt) & -0.1 & +0.1 & -0.1 & -0.1 \\
+Stable-queue-2s (blk) & +4.2 & +5.6 & +2.4 & +5.1 \\
+Stable-queue-2s (blk, defpreempt) & +0.0 & +0.2 & -0.2 & -0.8 \\
+Stable-queue-2s (non-blk) & +4.4 & +6.6 & +2.4 & +3.1 \\
+Stable-queue-2s (non-blk, defpreempt) & -0.1 & -0.2 & -0.1 & -0.8 \\
+\bottomrule
+\end{tabular}
+
+\end{adjustbox}
+\caption{Mean paired difference in time-to-first-admit (seconds) between plugin and baseline.}
+\label{tab:delta-latency}
+\end{table}
