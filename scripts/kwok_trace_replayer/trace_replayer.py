@@ -41,6 +41,12 @@ LOGGER_NAME = "trace-replayer" # logger name
 LOG = logging.getLogger(LOGGER_NAME) # module logger
 from scripts.kwok_trace_replayer.trace_helpers import TraceRecord, rs_prefix_from_pod_name
 
+# Plugin-exported cumulative optimization stats
+OPT_STATS_NS = "kube-system"
+OPT_STATS_CM = "optimization-stats"
+OPT_STATS_KEY = "optimization-stats.json"
+OPT_STATS_DUMP_INTERVAL_S = 30.0
+
 # ---------------------------------------------------------------------
 # CLI + Job File
 # ---------------------------------------------------------------------
@@ -328,6 +334,7 @@ class TraceReplayer:
 
         self.general_stats_path = self.results_dir / "general_stats.csv"
         self.pod_stats_path = self.results_dir / "pod_stats.csv"
+        self.optimization_stats_path = self.results_dir / "optimization_stats.json"
 
         self.trace_pods: List[TraceRecord] = []
         self.initial_pods: List[TraceRecord] = []
@@ -792,6 +799,40 @@ class TraceReplayer:
         """
         return float(self.clock.time()) - float(self.run_start_monotonic)
 
+    def dump_optimization_stats(self) -> tuple[bool, str | None]:
+        """
+        Dump optimization stats ConfigMap to a local JSON file.
+        """
+        try:
+            cm = get_json_ctx(
+                self.ctx,
+                ["-n", OPT_STATS_NS, "get", "configmap", OPT_STATS_CM, "-o", "json"],
+            )
+        except Exception as e:
+            LOG.debug("opt-stats: CM not readable: %s", e)
+            return False, None
+
+        data = (cm.get("data") or {}) if isinstance(cm, dict) else {}
+        raw = data.get(OPT_STATS_KEY)
+        if not isinstance(raw, str) or not raw.strip():
+            LOG.debug("opt-stats: missing key %s in CM %s/%s", OPT_STATS_KEY, OPT_STATS_NS, OPT_STATS_CM)
+            return False, None
+
+        updated_at = None
+        try:
+            doc = json.loads(raw)
+            updated_at = doc.get("updated_at")
+        except Exception:
+            pass
+
+        try:
+            self.optimization_stats_path.parent.mkdir(parents=True, exist_ok=True)
+            self.optimization_stats_path.write_text(raw.strip() + "\n", encoding="utf-8")
+            return True, updated_at
+        except Exception as e:
+            LOG.debug("opt-stats: write failed: %s", e)
+            return False, None
+
     def snapshot_from_pods(self, ns: str) -> Tuple[float, float, float, float, Dict[int, int], Dict[int, int], List[Dict[str, Any]]]:
         """
         Snapshot req/run utilization, priority counts, and raw pod items from current pods.
@@ -916,6 +957,8 @@ class TraceReplayer:
 
             # pod_stats.csv header
             pod_stats_writer.writerow(["timestamp", "event", "pod_name", "pod_uid", "priority", "time_s"])
+            
+            last_opt_dump_s = -1e18
 
             # monitoring loop
             while not stop_event.is_set():
@@ -923,10 +966,17 @@ class TraceReplayer:
                 now_ts = get_timestamp()
                 t_s = self.time_s()
 
+                # Dump optimization-stats every 30s (observable)
+                if (t_s - last_opt_dump_s) >= OPT_STATS_DUMP_INTERVAL_S:
+                    did_write, updated_at = self.dump_optimization_stats()
+                    if did_write:
+                        LOG.info("opt-stats: dumped (t=%.1fs, updated_at=%s) -> %s",
+                                t_s, updated_at, self.optimization_stats_path)
+                    last_opt_dump_s = t_s
+
                 try:
-                    cpu_run_util, mem_run_util, cpu_req_util, mem_req_util, running_by_prio, pending_by_prio, pod_items = self.snapshot_from_pods(
-                        namespace
-                    )
+                    cpu_run_util, mem_run_util, cpu_req_util, mem_req_util, running_by_prio, pending_by_prio, pod_items = \
+                        self.snapshot_from_pods(namespace)
                 except Exception as e:
                     LOG.warning("monitor: snapshot failed: %s", e)
                     self.clock.sleep(interval_s)
@@ -1149,6 +1199,9 @@ class TraceReplayer:
             if monitor_thread is not None:
                 monitor_thread.join(timeout=10.0)
             LOG.info("monitor thread joined; done.")
+
+            # Final best-effort snapshot
+            self.dump_optimization_stats()
 
             if self.args.save_scheduler_logs:
                 LOG.info("saving scheduler logs via kwokctl...")

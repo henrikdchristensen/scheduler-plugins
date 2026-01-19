@@ -42,6 +42,9 @@ type PluginConfigSnapshot struct {
 	SolverStatsConfigMapName     string `json:"solverStatsConfigMapName"`
 	SolverStatsConfigMapLabelKey string `json:"solverStatsConfigMapLabelKey"`
 
+	OptimizationStatsConfigMapName     string `json:"optimizationStatsConfigMapName"`
+	OptimizationStatsConfigMapLabelKey string `json:"optimizationStatsConfigMapLabelKey"`
+
 	// Plan settings
 	PlanRealizationTimeout      string `json:"planRealizationTimeout"`
 	PlanConfigMapNamePrefix     string `json:"planConfigMapNamePrefix"`

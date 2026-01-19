@@ -3,7 +3,7 @@
 Generate KWOK trace replayer job files for all combinations.
 
 Usage:
-  python make_kwok_trace_jobs.py --out-dir data/jobs/kwok_trace_replayer
+  python -m scripts.kwok_trace_replayer.job_generator --out-dir data/jobs/kwok_trace_replayer
 
 Creates:
   <out-dir>/default/*.yaml
@@ -20,7 +20,7 @@ from typing import Iterable, List, Tuple
 
 NODES = [16, 32]
 PRIOS = [1, 4]
-ARRIVALS_S = [8, 16, 32]
+ARRIVALS_S = [4, 8, 16, 32]
 
 BLOCKING_VALUES = [0, 1]
 DEFPREEMPT_VALUES = [0, 1]

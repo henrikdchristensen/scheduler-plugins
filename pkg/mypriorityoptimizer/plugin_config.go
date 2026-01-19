@@ -41,6 +41,9 @@ func buildPluginConfigSnapshot() PluginConfigSnapshot {
 		SolverStatsConfigMapName:     SolverStatsConfigMapName,
 		SolverStatsConfigMapLabelKey: SolverStatsConfigMapLabelKey,
 
+		OptimizationStatsConfigMapName:     OptimizationStatsConfigMapName,
+		OptimizationStatsConfigMapLabelKey: OptimizationStatsConfigMapLabelKey,
+
 		PlanRealizationTimeout:      PlanRealizationTimeout.String(),
 		PlanConfigMapLabelKey:       PlanConfigMapLabelKey,
 		PlanConfigMapNamePrefix:     PlanConfigMapNamePrefix,
