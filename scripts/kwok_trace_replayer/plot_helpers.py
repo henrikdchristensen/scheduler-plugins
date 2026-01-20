@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/plot_helpers.py
 
-from __future__ import annotations
-
 import math
 from typing import Any, List
 

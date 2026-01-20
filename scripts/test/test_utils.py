@@ -4,14 +4,8 @@ This module is imported by multiple test suites. Keep helpers stable and
 backwards compatible.
 """
 
-from __future__ import annotations
-
-import io
-import logging
-import subprocess
-import threading
-from typing import IO, Optional, Tuple, Callable, Any, List
-
+import io, logging, subprocess
+from typing import IO, Optional, Tuple, Callable, List
 
 # ---------------------------------------------------------------------------
 # Lock helpers (for testing thread-safe code)
