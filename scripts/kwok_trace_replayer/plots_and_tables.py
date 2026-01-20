@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""scripts/kwok_trace_replayer/plot_sealed_results.py
+"""scripts/kwok_trace_replayer/plots_and_tables.py
+
+python -m scripts.kwok_trace_replayer.plots_and_tables --in-dir analysis/kwok_trace_replayer/sealed --out-dir analysis/kwok_trace_replayer/plots_and_tables
 
 Plot + LaTeX table generation from sealed outputs produced by seal_results.py.
 
@@ -74,6 +76,7 @@ DEFAULT_PLOT_METRICS = [
     "util_eff_run_mean",
     "running_total_mean",
     "deletions_cum_total_mean",
+    "latency_s_total_mean",
 ]
 
 # Explicitly never save these, even if present / requested.
@@ -140,6 +143,31 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--fig-w", type=float, default=8.0, help="Figure width in inches (default: 8).")
     p.add_argument("--fig-h", type=float, default=4.5, help="Figure height in inches (default: 4.5).")
     p.add_argument("--dpi", type=int, default=200, help="PNG DPI (default: 200).")
+    # Smoothing
+    p.add_argument(
+        "--smooth-s",
+        type=float,
+        default=100.0,
+        help="Rolling mean window in seconds (0 = no smoothing). Applied per-series after seed-aggregation.",
+    )
+    
+    p.add_argument(
+        "--lat-hist-bin-s",
+        type=float,
+        default=1.0,
+        help="Latency histogram bin width in seconds (default: 1.0).",
+    )
+    p.add_argument(
+        "--lat-hist-max-s",
+        type=float,
+        default=0.0,
+        help="Max latency shown in histogram (0 = auto).",
+    )
+    p.add_argument(
+        "--lat-hist-density",
+        action="store_true",
+        help="Normalize latency histogram to probability density instead of counts.",
+    )
 
     # Tables
     p.add_argument(
@@ -262,6 +290,36 @@ def scheduler_row_label_hide_defpreempt(scheduler_key: str) -> str:
     return f"{mode_title} ({enf})"
 
 
+def parse_scheduler_kv(scheduler_key: str) -> Dict[str, str]:
+    kv: Dict[str, str] = {}
+    for part in str(scheduler_key).split("_"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            kv[k.strip().lower()] = v.strip()
+    return kv
+
+
+def is_target_plugin_mode(scheduler_key: str) -> bool:
+    if scheduler_key == "default":
+        return False
+
+    kv = parse_scheduler_kv(scheduler_key)
+    mode = kv.get("mode", "").lower()
+    mode_norm = mode.replace("_", "-")
+
+    is_periodic = mode_norm.startswith("periodic")
+    is_stableq = ("stable" in mode_norm) and ("queue" in mode_norm)
+    if not (is_periodic or is_stableq):
+        return False
+
+    # Periodic: only keep 8s
+    if is_periodic:
+        return "8s" in mode_norm
+
+    # Stable-queue: keep regardless of interval (e.g. stablequeue2s)
+    return True
+
+
 # -----------------------------
 # Series scanning + filtering
 # -----------------------------
@@ -341,8 +399,79 @@ def load_series_csv(path: Path) -> pd.DataFrame:
     if "time_s" not in df.columns:
         raise ValueError(f"{path} missing time_s column")
     df["time_s"] = pd.to_numeric(df["time_s"], errors="coerce")
-    df = df.dropna(subset=["time_s"]).sort_values("time_s")
+    df = df.dropna(subset=["time_s"])
+
+    # numeric coercion for metric cols
+    value_cols = [c for c in df.columns if c not in META_COLS]
+    for c in value_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # collapse multiple seeds -> mean series per time_s
+    if "n_seed" in df.columns:
+        df = df.groupby("time_s", as_index=False)[value_cols].mean(numeric_only=True)
+
+    df = df.sort_values("time_s")
     return df
+
+def _is_cumulative_metric(metric: str) -> bool:
+    m = metric.lower()
+    return ("_cum_" in m) or m.startswith("cum_") or m.endswith("_cum") or m.startswith("deletions_cum")
+
+def smooth_series(df: pd.DataFrame, metric: str, window_s: float) -> np.ndarray:
+    """Time-based rolling mean. For cumulative metrics, smooth increments then re-cumsum."""
+    if window_s <= 0:
+        return pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float)
+
+    t = pd.to_timedelta(df["time_s"].to_numpy(dtype=float), unit="s")
+    s = pd.Series(pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float), index=t)
+
+    win = f"{float(window_s)}s"
+    if _is_cumulative_metric(metric):
+        inc = s.diff().fillna(0.0)
+        inc_sm = inc.rolling(win, min_periods=1).mean()
+        return inc_sm.cumsum().to_numpy(dtype=float)
+    else:
+        return s.rolling(win, min_periods=1).mean().to_numpy(dtype=float)
+
+def interp_on_grid(t_src: np.ndarray, y_src: np.ndarray, t_grid: np.ndarray) -> np.ndarray:
+    """Interpolate y_src(t_src) onto t_grid; outside range -> NaN."""
+    m = np.isfinite(t_src) & np.isfinite(y_src)
+    t_src = t_src[m]
+    y_src = y_src[m]
+    if t_src.size < 2:
+        return np.full_like(t_grid, np.nan, dtype=float)
+
+    y_i = np.interp(t_grid, t_src, y_src)
+    in_range = (t_grid >= t_src.min()) & (t_grid <= t_src.max())
+    return np.where(in_range, y_i, np.nan)
+
+
+def delta_series_vs_default(default_df: pd.DataFrame, plugin_df: pd.DataFrame, metric: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Return (t, plugin(t)-default(t)) on default time grid."""
+    t0 = default_df["time_s"].to_numpy(dtype=float)
+    y0 = pd.to_numeric(default_df[metric], errors="coerce").to_numpy(dtype=float)
+
+    t1 = plugin_df["time_s"].to_numpy(dtype=float)
+    y1 = pd.to_numeric(plugin_df[metric], errors="coerce").to_numpy(dtype=float)
+
+    y1i = interp_on_grid(t1, y1, t0)
+    return t0, (y1i - y0)
+
+
+def cumtrapz_from_delta(t: np.ndarray, delta: np.ndarray) -> np.ndarray:
+    """Cumulative integral of delta over time using trapezoidal rule."""
+    out = np.zeros_like(delta, dtype=float)
+    for i in range(1, len(t)):
+        dt = float(t[i] - t[i - 1])
+        if not (math.isfinite(dt) and dt >= 0):
+            dt = 0.0
+        a = delta[i - 1]
+        b = delta[i]
+        if not (math.isfinite(a) and math.isfinite(b)):
+            out[i] = out[i - 1]
+        else:
+            out[i] = out[i - 1] + 0.5 * (a + b) * dt
+    return out
 
 
 def _select_plot_metrics(
@@ -392,6 +521,10 @@ def plot_job(
     only_metrics_csv: str,
     include_metric_regex: str,
     exclude_metric_regex: str,
+    smooth_s: float,
+    lat_hist_bin_s: float,
+    lat_hist_max_s: float,
+    lat_hist_density: bool,
 ) -> None:
     job_dir = out_dir / "plots" / sanitize_filename(job_name)
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -406,6 +539,17 @@ def plot_job(
     if not series:
         return
 
+    if "default" not in series:
+        print(f"[warn] no default series for {job_name}; skipping")
+        return
+
+    default_df = series["default"]
+
+    # only your plugin modes (periodic8s + stable-queue*), still already defpreempt-filtered in main()
+    plugin_series = {s: df for s, df in series.items() if is_target_plugin_mode(s)}
+    if not plugin_series:
+        return
+
     metric_cols = _select_plot_metrics(
         series_frames=series,
         only_metrics_csv=only_metrics_csv,
@@ -418,26 +562,176 @@ def plot_job(
     for metric in metric_cols:
         plt.figure(figsize=(fig_w, fig_h))
 
-        for sched, df in series.items():
-            if metric not in df.columns:
+        # Reference line at 0 since we plot deltas
+        plt.axhline(0.0, linewidth=0.8)
+
+        for sched, df in plugin_series.items():
+            if metric not in df.columns or metric not in default_df.columns:
                 continue
-            x = df["time_s"].to_numpy(dtype=float)
-            y = pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float)
-            plt.plot(x, y, label=scheduler_row_label_hide_defpreempt(sched))
+
+            # --- util deltas (line) ---
+            if metric in {"cpu_run_util_mean", "mem_run_util_mean", "util_eff_run_mean"}:
+                x, d = delta_series_vs_default(default_df, df, metric)
+                # smooth delta directly
+                if smooth_s > 0:
+                    t = pd.to_timedelta(x, unit="s")
+                    s = pd.Series(d, index=t)
+                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
+                plt.plot(x, d, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
+
+            # --- deletions: delta of cumulative curves (still cumulative trend) ---
+            elif metric == "deletions_cum_total_mean":
+                x, d_cum = delta_series_vs_default(default_df, df, metric)
+                # (optional) smoothing: smooth increments then re-cumsum (reuse your idea)
+                if smooth_s > 0:
+                    t = pd.to_timedelta(x, unit="s")
+                    s = pd.Series(d_cum, index=t)
+                    inc = s.diff().fillna(0.0)
+                    inc_sm = inc.rolling(f"{float(smooth_s)}s", min_periods=1).mean()
+                    d_cum = inc_sm.cumsum().to_numpy(dtype=float)
+                plt.plot(x, d_cum, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
+
+            # --- running pods: cumulative integral of delta running pods (pod-seconds) ---
+            elif metric == "running_total_mean":
+                x, d = delta_series_vs_default(default_df, df, metric)  # Δ running pods over time
+
+                if smooth_s > 0:
+                    t = pd.to_timedelta(x, unit="s")
+                    s = pd.Series(d, index=t)
+                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
+
+                # ∫ Δn(t) dt  (pod-seconds)
+                d_pod_seconds = cumtrapz_from_delta(x, d)
+
+                # Convert to pods by dividing by elapsed time (running average)
+                elapsed = x - x[0]
+                elapsed = np.where(elapsed > 0, elapsed, np.nan)  # avoid divide-by-zero at t0
+                d_avg_pods = d_pod_seconds / elapsed
+                d_avg_pods[0] = 0.0  # define at start
+
+                plt.plot(x, d_avg_pods, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
+
+            # --- latency: keep as delta vs default for time-series (optional, but consistent) ---
+            elif metric == "latency_s_total_mean":
+                x, d = delta_series_vs_default(default_df, df, metric)
+                if smooth_s > 0:
+                    t = pd.to_timedelta(x, unit="s")
+                    s = pd.Series(d, index=t)
+                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
+                plt.plot(x, d, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
+
+            # fallback: plot delta
+            else:
+                x, d = delta_series_vs_default(default_df, df, metric)
+                if smooth_s > 0:
+                    t = pd.to_timedelta(x, unit="s")
+                    s = pd.Series(d, index=t)
+                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
+                plt.plot(x, d, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
 
         plt.xlabel("time (s)")
-        plt.ylabel(metric)
-        plt.title(f"{job_name}: {metric}")
+
+        if metric == "running_total_mean":
+            plt.ylabel("Δ mean running pods vs Default")
+            title = f"{job_name}: Δ mean running pods"
+        elif metric == "deletions_cum_total_mean":
+            plt.ylabel("Δ deletions (cum) vs Default")
+            title = f"{job_name}: Δ deletions (cum)"
+        else:
+            plt.ylabel(f"Δ {metric} vs Default")
+            title = f"{job_name}: Δ {metric}"
+
+        plt.title(title)
         plt.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.6)
         plt.legend(loc="best", fontsize=8)
 
-        png_path = job_dir / f"{sanitize_filename(metric)}.png"
-        pdf_path = job_dir / f"{sanitize_filename(metric)}.pdf"
+        png_path = job_dir / f"delta__{sanitize_filename(metric)}.png"
+        pdf_path = job_dir / f"delta__{sanitize_filename(metric)}.pdf"
         plt.tight_layout()
         plt.savefig(png_path, dpi=dpi)
         plt.savefig(pdf_path)
         plt.close()
+        
+    plot_latency_histogram(
+        job_dir=job_dir,
+        job_name=job_name,
+        default_df=default_df,
+        plugin_series=plugin_series,
+        dpi=dpi,
+        bin_s=lat_hist_bin_s,
+        max_s=lat_hist_max_s,
+        density=lat_hist_density,
+    )
 
+def plot_latency_histogram(
+    *,
+    job_dir: Path,
+    job_name: str,
+    default_df: pd.DataFrame,
+    plugin_series: Dict[str, pd.DataFrame],
+    dpi: int,
+    bin_s: float,
+    max_s: float,
+    density: bool,
+) -> None:
+    col = "latency_s_total_mean"
+    if col not in default_df.columns:
+        return
+
+    # Collect series for histogram (Default + plugins)
+    series_map: List[Tuple[str, np.ndarray]] = []
+    y0 = pd.to_numeric(default_df[col], errors="coerce").to_numpy(dtype=float)
+    y0 = y0[np.isfinite(y0)]
+    series_map.append(("Default", y0))
+
+    for sched, df in plugin_series.items():
+        if col not in df.columns:
+            continue
+        y = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
+        y = y[np.isfinite(y)]
+        series_map.append((scheduler_row_label_hide_defpreempt(sched), y))
+
+    if not series_map:
+        return
+
+    # Determine histogram range
+    all_vals = np.concatenate([v for _, v in series_map if v.size > 0])
+    if all_vals.size == 0:
+        return
+
+    vmax = float(max_s) if max_s and max_s > 0 else float(np.quantile(all_vals, 0.995))
+    vmax = max(vmax, float(bin_s))
+    edges = np.arange(0.0, vmax + float(bin_s), float(bin_s))
+    centers = 0.5 * (edges[:-1] + edges[1:])
+
+    # compute hist
+    hists = []
+    for name, vals in series_map:
+        h, _ = np.histogram(vals, bins=edges, density=density)
+        hists.append((name, h))
+
+    # plot grouped bars
+    import numpy as _np
+    n = len(hists)
+    width = (edges[1] - edges[0]) * 0.9 / max(1, n)
+
+    plt.figure(figsize=(10.0, 4.5))
+    for i, (name, h) in enumerate(hists):
+        x = centers - 0.45 * (edges[1] - edges[0]) + (i + 0.5) * width
+        plt.bar(x, h, width=width, label=name, alpha=0.8)
+
+    plt.xlabel("latency_s_total_mean (s)")
+    plt.ylabel("density" if density else "count")
+    plt.title(f"{job_name}: Latency histogram (mean over time samples)")
+    plt.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.6)
+    plt.legend(loc="best", fontsize=8)
+
+    png_path = job_dir / "latency_hist.png"
+    pdf_path = job_dir / "latency_hist.pdf"
+    plt.tight_layout()
+    plt.savefig(png_path, dpi=dpi)
+    plt.savefig(pdf_path)
+    plt.close()
 
 # -----------------------------
 # LaTeX tables from results_paired.csv
@@ -1129,6 +1423,8 @@ def main() -> None:
 
     out_dir = Path(args.out_dir) if args.out_dir else (in_dir / "report_out")
     out_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("This may take a while...")
 
     jobs, schedulers_all, paths = discover_jobs_and_schedulers(series_root)
 
@@ -1162,6 +1458,10 @@ def main() -> None:
                 only_metrics_csv=args.only_metrics,
                 include_metric_regex=args.include_metric_regex,
                 exclude_metric_regex=args.exclude_metric_regex,
+                smooth_s=float(args.smooth_s),
+                lat_hist_bin_s=float(args.lat_hist_bin_s),
+                lat_hist_max_s=float(args.lat_hist_max_s),
+                lat_hist_density=bool(args.lat_hist_density),
             )
 
     if not args.no_tables:
