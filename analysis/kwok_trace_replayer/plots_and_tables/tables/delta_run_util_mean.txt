@@ -1,0 +1,46 @@
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{0.95}
+
+\begin{adjustbox}{max width=\linewidth}
+
+\begin{tabular}{l c c c c c c}
+\toprule
+\multicolumn{7}{l}{$\mathbf{\Delta u_{\mathrm{run}}}$ (running utilisation, pp), mean paired difference vs.\ baseline} \\
+\addlinespace[0.2em]
+& \multicolumn{3}{c}{$N=16$} & \multicolumn{3}{c}{$N=32$} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& $\mu_A{=}4$s & $\mu_A{=}8$s & $\mu_A{=}16$s & $\mu_A{=}4$s & $\mu_A{=}8$s & $\mu_A{=}16$s \\
+\midrule
+\multicolumn{7}{l}{$k_{\max}=1$ (no priorities)} \\
+\midrule
+Periodic-8s (blk) & {\scriptsize$\langle+1.8,+0.4\rangle$} & {\scriptsize$\langle+2.1,+0.8\rangle$} & {\scriptsize$\langle+3.4,+1.6\rangle$} & {\scriptsize$\langle+1.6,+0.6\rangle$} & {\scriptsize$\langle+1.1,+0.5\rangle$} & {\scriptsize$\langle+2.7,+1.1\rangle$} \\
+Periodic-8s (blk, defpreempt) & {\scriptsize$\langle+1.7,+0.3\rangle$} & {\scriptsize$\langle+2.1,+0.8\rangle$} & {\scriptsize$\langle+3.5,+1.6\rangle$} & {\scriptsize$\langle+1.3,+0.4\rangle$} & {\scriptsize$\langle+1.2,+0.6\rangle$} & {\scriptsize$\langle+2.6,+1.1\rangle$} \\
+Periodic-8s (non-blk) & {\scriptsize$\langle+1.9,+0.4\rangle$} & {\scriptsize$\langle+2.1,+0.9\rangle$} & {\scriptsize$\langle+3.5,+1.7\rangle$} & {\scriptsize$\langle+1.6,+0.6\rangle$} & {\scriptsize$\langle+1.4,+0.6\rangle$} & {\scriptsize$\langle+2.6,+1.1\rangle$} \\
+Periodic-8s (non-blk, defpreempt) & {\scriptsize$\langle+1.8,+0.5\rangle$} & {\scriptsize$\langle+2.2,+0.9\rangle$} & {\scriptsize$\langle+3.4,+1.6\rangle$} & {\scriptsize$\langle+1.5,+0.5\rangle$} & {\scriptsize$\langle+1.2,+0.4\rangle$} & {\scriptsize$\langle+2.3,+1.1\rangle$} \\
+Scheduling-failure (non-blk) & {\scriptsize$\langle+1.3,+1.2\rangle$} & {\scriptsize$\langle+1.9,+0.7\rangle$} & {\scriptsize$\langle+3.4,+1.5\rangle$} & {\scriptsize$\langle+1.0,+0.0\rangle$} & {\scriptsize$\langle+0.8,+0.1\rangle$} & {\scriptsize$\langle+2.5,+0.9\rangle$} \\
+Stable-queue-2s (blk) & {\scriptsize$\langle+2.1,+0.6\rangle$} & {\scriptsize$\langle+2.3,+1.0\rangle$} & {\scriptsize$\langle+3.6,+1.8\rangle$} & {\scriptsize$\langle+1.5,+0.5\rangle$} & {\scriptsize$\langle+1.5,+0.7\rangle$} & {\scriptsize$\langle+2.5,+1.1\rangle$} \\
+Stable-queue-2s (blk, defpreempt) & {\scriptsize$\langle+2.1,+0.7\rangle$} & {\scriptsize$\langle+2.3,+1.1\rangle$} & {\scriptsize$\langle+3.5,+1.7\rangle$} & {\scriptsize$\langle+1.5,+0.5\rangle$} & {\scriptsize$\langle+1.4,+0.6\rangle$} & {\scriptsize$\langle+2.8,+1.2\rangle$} \\
+Stable-queue-2s (non-blk) & {\scriptsize$\langle+1.9,+0.6\rangle$} & {\scriptsize$\langle+2.3,+1.0\rangle$} & {\scriptsize$\langle+3.5,+1.7\rangle$} & {\scriptsize$\langle+1.6,+0.5\rangle$} & {\scriptsize$\langle+1.2,+0.6\rangle$} & {\scriptsize$\langle+2.7,+1.1\rangle$} \\
+Stable-queue-2s (non-blk, defpreempt) & {\scriptsize$\langle+1.9,+0.6\rangle$} & {\scriptsize$\langle+2.3,+1.0\rangle$} & {\scriptsize$\langle+3.5,+1.7\rangle$} & {\scriptsize$\langle+1.5,+0.5\rangle$} & {\scriptsize$\langle+1.4,+0.5\rangle$} & {\scriptsize$\langle+2.7,+1.2\rangle$} \\
+\midrule
+\multicolumn{7}{l}{$k_{\max}=4$ (priorities enabled)} \\
+\midrule
+Periodic-8s (blk) & {\scriptsize$\langle+0.9,+0.9\rangle$} & {\scriptsize$\langle+1.4,+1.3\rangle$} & {\scriptsize$\langle+1.3,+1.4\rangle$} & {\scriptsize$\langle+1.1,+0.7\rangle$} & {\scriptsize$\langle+0.7,+0.6\rangle$} & {\scriptsize$\langle+0.8,+0.6\rangle$} \\
+Periodic-8s (blk, defpreempt) & {\scriptsize$\langle+0.9,+0.7\rangle$} & {\scriptsize$\langle+1.3,+1.1\rangle$} & {\scriptsize$\langle+1.5,+1.5\rangle$} & {\scriptsize$\langle+1.0,+0.6\rangle$} & {\scriptsize$\langle+0.7,+0.6\rangle$} & {\scriptsize$\langle+0.9,+0.7\rangle$} \\
+Periodic-8s (non-blk) & {\scriptsize$\langle+1.0,+0.9\rangle$} & {\scriptsize$\langle+1.3,+1.3\rangle$} & {\scriptsize$\langle+1.2,+1.4\rangle$} & {\scriptsize$\langle+1.0,+0.7\rangle$} & {\scriptsize$\langle+0.7,+0.6\rangle$} & {\scriptsize$\langle+0.9,+0.8\rangle$} \\
+Periodic-8s (non-blk, defpreempt) & {\scriptsize$\langle+0.9,+0.7\rangle$} & {\scriptsize$\langle+1.3,+1.1\rangle$} & {\scriptsize$\langle+1.3,+1.2\rangle$} & {\scriptsize$\langle+1.2,+0.7\rangle$} & {\scriptsize$\langle+0.6,+0.4\rangle$} & {\scriptsize$\langle+1.0,+0.8\rangle$} \\
+Scheduling-failure (non-blk) & {\scriptsize$\langle+0.6,+0.5\rangle$} & {\scriptsize$\langle+1.2,+1.1\rangle$} & {\scriptsize$\langle+1.3,+1.5\rangle$} & {\scriptsize$\langle+0.8,+0.3\rangle$} & {\scriptsize$\langle+0.7,+0.6\rangle$} & {\scriptsize$\langle+0.8,+0.6\rangle$} \\
+Stable-queue-2s (blk) & {\scriptsize$\langle+1.4,+1.2\rangle$} & {\scriptsize$\langle+1.6,+1.5\rangle$} & {\scriptsize$\langle+1.4,+1.5\rangle$} & {\scriptsize$\langle+1.2,+0.8\rangle$} & {\scriptsize$\langle+0.8,+0.7\rangle$} & {\scriptsize$\langle+1.0,+0.9\rangle$} \\
+Stable-queue-2s (blk, defpreempt) & {\scriptsize$\langle+1.2,+1.0\rangle$} & {\scriptsize$\langle+1.5,+1.2\rangle$} & {\scriptsize$\langle+1.5,+1.4\rangle$} & {\scriptsize$\langle+1.1,+0.7\rangle$} & {\scriptsize$\langle+0.7,+0.5\rangle$} & {\scriptsize$\langle+1.1,+0.9\rangle$} \\
+Stable-queue-2s (non-blk) & {\scriptsize$\langle+1.3,+1.2\rangle$} & {\scriptsize$\langle+1.6,+1.4\rangle$} & {\scriptsize$\langle+1.5,+1.6\rangle$} & {\scriptsize$\langle+1.2,+0.8\rangle$} & {\scriptsize$\langle+0.8,+0.7\rangle$} & {\scriptsize$\langle+1.0,+0.8\rangle$} \\
+Stable-queue-2s (non-blk, defpreempt) & {\scriptsize$\langle+1.1,+0.8\rangle$} & {\scriptsize$\langle+1.6,+1.3\rangle$} & {\scriptsize$\langle+1.6,+1.5\rangle$} & {\scriptsize$\langle+1.1,+0.7\rangle$} & {\scriptsize$\langle+0.8,+0.6\rangle$} & {\scriptsize$\langle+1.0,+0.8\rangle$} \\
+\bottomrule
+\end{tabular}
+
+\end{adjustbox}
+\caption{Mean paired difference in running utilisation between plugin and baseline. Each cell reports {\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$} in percentage points (pp).}
+\label{tab:delta-run-util}
+\end{table}

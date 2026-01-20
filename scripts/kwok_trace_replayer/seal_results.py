@@ -3,33 +3,22 @@
 
 python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer/sealed
 
-Compute ONE CSV: results_paired.csv
+Compute:
+  1) results_paired.csv  (as before)
+  2) series/ mean time-series CSVs for plotting:
+       - series/default/<job_name>.csv
+       - series/plugin/<plugin_config>__<job_name>.csv    (NO nested subdirs)
 
-Output: one row per (job_name, plugin_config) aggregated across the seeds that exist in
-both default and plugin runs.
+Series CSV schema:
+  scheduler, job_name, n_seed, time_s, <metric>_mean...
 
-Columns (exact):
-  job_name,plugin_config,n_seed,T_end_s_mean,
-  delta_cpu_run_util_mean_mean,delta_mem_run_util_mean_mean,delta_util_eff_run_mean,
-  cpu_req_util_mean,mem_req_util_mean,util_eff_req_mean,
-  delta_R_p1_mean,delta_R_p2_mean,delta_R_p3_mean,delta_R_p4_mean,delta_R_total_mean,
-  delta_D_p1_mean,delta_D_p2_mean,delta_D_p3_mean,delta_D_p4_mean,delta_D_total_mean,
-  delta_latency_s_p1_mean,delta_latency_s_p2_mean,delta_latency_s_p3_mean,delta_latency_s_p4_mean,delta_latency_s_total_mean,
-  solver_attempts_total_mean,best_solver_optimal_total_mean,best_solver_feasible_total_mean,best_solver_failed_total_mean,
-  plan_not_applicable_total_mean,plan_activated_total_mean
-
-Conventions:
-  - "delta_*" columns are plugin - default, computed per-seed on a common horizon T_common
-    (min(T_end_default, T_end_plugin)), then averaged across common seeds.
-  - cpu_req_util_mean / mem_req_util_mean / util_eff_req_mean are taken from DEFAULT
-    at the same T_common (mean across seeds).
-  - Latency deltas are computed over the intersection of comparable pods/replicas keyed by
-    (priority, rs_prefix, replica_index) using the first-batch heuristic.
-  - Optimization stats are taken from the PLUGIN as-is (default has none), then averaged
-    across seeds.
+Notes:
+  - Default series are aggregated across all seeds found for that job.
+  - Plugin series are aggregated across all seeds found for that plugin run dir.
+  - We do not create per-config subdirectories under series/plugin/.
 """
 
-import argparse, json, math
+import argparse, json, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -114,7 +103,7 @@ class PluginConfig:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Write results_paired.csv from KWOK replayer outputs.")
+    p = argparse.ArgumentParser(description="Write results_paired.csv + series/ time-series from KWOK replayer outputs.")
     p.add_argument("--root", required=True, help="Root directory containing 'default/' and 'plugin/' subfolders.")
     p.add_argument("--out-dir", default=None, help="Where to write outputs (default: <root>/sealed).")
     p.add_argument(
@@ -219,7 +208,6 @@ def parse_plugin_dirname(dirname: str) -> Tuple[TestCombo, PluginConfig]:
     )
 
     mode_raw = kv.get("mode", "unknown")
-
     blocking_raw = kv.get("blocking", "0")
     blocking = str(blocking_raw).strip().lower() in {"1", "true", "yes"}
 
@@ -237,6 +225,11 @@ def require_cols(df: pd.DataFrame, path: Path, cols: List[str]) -> None:
     missing = [c for c in cols if c not in df.columns]
     if missing:
         raise SystemExit(f"{path} is missing columns: {', '.join(missing)}")
+
+
+def sanitize_filename(s: str) -> str:
+    # keep = and _ and . and -; replace everything else
+    return re.sub(r"[^A-Za-z0-9._=\-]+", "_", str(s))
 
 
 # -----------------------------
@@ -261,6 +254,15 @@ def read_opt_stats_plugin(opt_path: Path) -> Dict[str, float]:
     except Exception:
         return out
     return out
+
+
+def round_numeric_df(df: pd.DataFrame, *, exclude: Optional[List[str]] = None) -> pd.DataFrame:
+    if exclude is None:
+        exclude = []
+    num_cols = [c for c in df.columns if c not in set(exclude) and pd.api.types.is_numeric_dtype(df[c])]
+    if num_cols:
+        df[num_cols] = df[num_cols].round(FLOAT_DECIMALS)
+    return df
 
 
 # -----------------------------
@@ -426,12 +428,7 @@ def latency_map_first_batch(pod_df: pd.DataFrame, *, eps_s: float) -> Dict[Laten
     return out
 
 
-def latency_deltas_for_seed(
-    def_pod_csv: Path,
-    plu_pod_csv: Path,
-    *,
-    eps_s: float,
-) -> Dict[str, float]:
+def latency_deltas_for_seed(def_pod_csv: Path, plu_pod_csv: Path, *, eps_s: float) -> Dict[str, float]:
     """Return dict with delta_latency_s_p{1..4} and delta_latency_s_total (plugin-default)."""
     df_def = pd.read_csv(def_pod_csv)
     df_plu = pd.read_csv(plu_pod_csv)
@@ -520,23 +517,14 @@ def iter_plugin_runs(plugin_root: Path) -> Iterable[Tuple[str, str, Path]]:
 # -----------------------------
 
 
-def round_numeric_df(df: pd.DataFrame, *, exclude: Optional[List[str]] = None) -> pd.DataFrame:
-    if exclude is None:
-        exclude = []
-    num_cols = [c for c in df.columns if c not in set(exclude) and pd.api.types.is_numeric_dtype(df[c])]
-    if num_cols:
-        df[num_cols] = df[num_cols].round(FLOAT_DECIMALS)
-    return df
-
-
 def out_columns_exact() -> List[str]:
     return [
         "job_name",
         "plugin_config",
         "n_seed",
         "T_end_s_mean",
-        "delta_cpu_run_util_mean_mean",
-        "delta_mem_run_util_mean_mean",
+        "delta_cpu_run_util_mean",
+        "delta_mem_run_util_mean",
         "delta_util_eff_run_mean",
         "cpu_req_util_mean",
         "mem_req_util_mean",
@@ -566,6 +554,135 @@ def out_columns_exact() -> List[str]:
 
 
 # -----------------------------
+# Series writer (NEW layout)
+# -----------------------------
+
+
+def _read_and_normalize_series(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    require_cols(df, path, [TIME_COL])
+    df[TIME_COL] = pd.to_numeric(df[TIME_COL], errors="coerce")
+    df = df.dropna(subset=[TIME_COL]).copy()
+    if df.empty:
+        return df
+    df = df.sort_values(TIME_COL).copy()
+    t0 = float(df[TIME_COL].iloc[0])
+    df[TIME_COL] = df[TIME_COL] - t0
+    # reduce float noise so we can group across seeds robustly
+    df[TIME_COL] = df[TIME_COL].round(6)
+    return df
+
+
+def _mean_series_across_seeds(general_paths: List[Path]) -> pd.DataFrame:
+    """Return DF with time_s and <metric>_mean columns (mean across seeds)."""
+    frames: List[pd.DataFrame] = []
+    for p in general_paths:
+        try:
+            dfi = _read_and_normalize_series(p)
+        except Exception:
+            continue
+        if dfi.empty:
+            continue
+        frames.append(dfi)
+
+    if not frames:
+        return pd.DataFrame(columns=[TIME_COL])
+
+    df_all = pd.concat(frames, axis=0, ignore_index=True)
+
+    # Keep only numeric metric columns + time
+    metric_cols: List[str] = []
+    for c in df_all.columns:
+        if c == TIME_COL:
+            continue
+        if pd.api.types.is_numeric_dtype(df_all[c]):
+            metric_cols.append(c)
+
+    if not metric_cols:
+        return df_all[[TIME_COL]].drop_duplicates().sort_values(TIME_COL)
+
+    # group by time and compute mean for each metric
+    g = df_all.groupby(TIME_COL, dropna=False)[metric_cols].mean(numeric_only=True).reset_index()
+    g = g.sort_values(TIME_COL)
+
+    # rename metric columns -> <metric>_mean
+    rename = {c: f"{c}_mean" for c in metric_cols}
+    g = g.rename(columns=rename)
+    return g
+
+
+def write_series_files(*, default_root: Path, plugin_root: Path, out_dir: Path) -> None:
+    """Write series/default/*.csv and series/plugin/*.csv with NEW layout."""
+    series_root = out_dir / "series"
+    default_out = series_root / "default"
+    plugin_out = series_root / "plugin"
+    default_out.mkdir(parents=True, exist_ok=True)
+    plugin_out.mkdir(parents=True, exist_ok=True)
+
+    # ---- default: per job_name across all seeds ----
+    for job_dir in sorted(default_root.iterdir()):
+        if not job_dir.is_dir():
+            continue
+        try:
+            r = parse_test_combo(job_dir.name)
+        except SystemExit:
+            continue
+
+        seed_general_paths: List[Path] = []
+        for _seed, seed_dir in iter_seed_dirs(job_dir):
+            seed_general_paths.append(seed_dir / GENERAL_STATS_FILENAME)
+
+        df_mean = _mean_series_across_seeds(seed_general_paths)
+        if df_mean.empty:
+            continue
+
+        # time_s already exists
+        df_mean["time_s"] = df_mean["time_s"].astype(float)
+
+        # add metadata columns
+        df_mean.insert(0, "n_seed", int(len(seed_general_paths)))
+        df_mean.insert(0, "job_name", r.job_name)
+        df_mean.insert(0, "scheduler", "default")
+
+        out_path = default_out / f"{sanitize_filename(r.job_name)}.csv"
+        round_numeric_df(df_mean, exclude=["scheduler", "job_name"])
+        df_mean.to_csv(out_path, index=False)
+
+    # ---- plugin: per (plugin_config, job_name) across all seeds in run dir ----
+    for run_dir in sorted(plugin_root.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        try:
+            regime, cfg = parse_plugin_dirname(run_dir.name)
+        except SystemExit:
+            continue
+
+        seed_general_paths: List[Path] = []
+        for _seed, seed_dir in iter_seed_dirs(run_dir):
+            seed_general_paths.append(seed_dir / GENERAL_STATS_FILENAME)
+
+        df_mean = _mean_series_across_seeds(seed_general_paths)
+        if df_mean.empty:
+            continue
+
+        sched_key = cfg.key()
+
+        # time_s already exists
+        df_mean["time_s"] = df_mean["time_s"].astype(float)
+
+        # add metadata columns
+        df_mean.insert(0, "n_seed", int(len(seed_general_paths)))
+        df_mean.insert(0, "job_name", regime.job_name)
+        df_mean.insert(0, "scheduler", sched_key)
+
+        # encode scheduler in filename
+        out_name = f"{sanitize_filename(sched_key)}__{sanitize_filename(regime.job_name)}.csv"
+        out_path = plugin_out / out_name
+        round_numeric_df(df_mean, exclude=["scheduler", "job_name"])
+        df_mean.to_csv(out_path, index=False)
+
+
+# -----------------------------
 # Main
 # -----------------------------
 
@@ -583,6 +700,9 @@ def main() -> None:
 
     out_dir = Path(args.out_dir) if args.out_dir else (root / "sealed")
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # NEW: write series files with flat plugin layout
+    write_series_files(default_root=default_root, plugin_root=plugin_root, out_dir=out_dir)
 
     default_idx = scan_default(default_root)
 
@@ -707,9 +827,8 @@ def main() -> None:
     # Rename into requested output names
     rename_map = {
         "T_end_s": "T_end_s_mean",
-        "delta_cpu_run_util_mean": "delta_cpu_run_util_mean_mean",
-        "delta_mem_run_util_mean": "delta_mem_run_util_mean_mean",
-        # requested schema has no trailing _mean here
+        "delta_cpu_run_util_mean": "delta_cpu_run_util_mean",
+        "delta_mem_run_util_mean": "delta_mem_run_util_mean",
         "delta_util_eff_run_mean": "delta_util_eff_run_mean",
         "delta_R_p1": "delta_R_p1_mean",
         "delta_R_p2": "delta_R_p2_mean",

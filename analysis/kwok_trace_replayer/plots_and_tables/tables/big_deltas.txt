@@ -1,0 +1,38 @@
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{2.5pt}
+\renewcommand{\arraystretch}{0.92}
+
+\begin{adjustbox}{max width=\linewidth}
+
+\begin{tabular}{l c c c c c c c c c c c c c c c c c c}
+\toprule
+\multicolumn{19}{l}{Mean paired deltas vs.\ baseline: {\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$} (pp), $\Delta \mathrm{latency}$ (s), $\Delta R_p(T)$ (pod-seconds)} \\
+\addlinespace[0.2em]
+& \multicolumn{9}{c}{$N=16$} & \multicolumn{9}{c}{$N=32$} \\
+\cmidrule(lr){2-10}\cmidrule(lr){11-19}
+& \multicolumn{3}{c}{$\mu_A{=}4$s} & \multicolumn{3}{c}{$\mu_A{=}8$s} & \multicolumn{3}{c}{$\mu_A{=}16$s} & \multicolumn{3}{c}{$\mu_A{=}4$s} & \multicolumn{3}{c}{$\mu_A{=}8$s} & \multicolumn{3}{c}{$\mu_A{=}16$s} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}\cmidrule(lr){14-16}\cmidrule(lr){17-19}
+& $\Delta u$ & $\Delta \mathrm{lat}$ & $\Delta R_p$ & $\Delta u$ & $\Delta \mathrm{lat}$ & $\Delta R_p$ & $\Delta u$ & $\Delta \mathrm{lat}$ & $\Delta R_p$ & $\Delta u$ & $\Delta \mathrm{lat}$ & $\Delta R_p$ & $\Delta u$ & $\Delta \mathrm{lat}$ & $\Delta R_p$ & $\Delta u$ & $\Delta \mathrm{lat}$ & $\Delta R_p$ \\
+\midrule
+\multicolumn{19}{l}{$k_{\max}=1$ (no priorities)} \\
+\midrule
+Periodic-8s (blk) & {\scriptsize$\langle+1.7,+0.3\rangle$} & -0.1 & +2918.1 & {\scriptsize$\langle+2.1,+0.8\rangle$} & -0.4 & +5647.9 & {\scriptsize$\langle+3.5,+1.6\rangle$} & -4.0 & +9773.4 & {\scriptsize$\langle+1.3,+0.4\rangle$} & -1.6 & +7219.7 & {\scriptsize$\langle+1.2,+0.6\rangle$} & -1.6 & +7647.1 & {\scriptsize$\langle+2.6,+1.1\rangle$} & -5.6 & +14756.2 \\
+Periodic-8s (non-blk) & {\scriptsize$\langle+1.8,+0.5\rangle$} & -0.3 & +3699.1 & {\scriptsize$\langle+2.2,+0.9\rangle$} & -0.6 & +6208.5 & {\scriptsize$\langle+3.4,+1.6\rangle$} & -3.6 & +9283.0 & {\scriptsize$\langle+1.5,+0.5\rangle$} & -1.9 & +8421.3 & {\scriptsize$\langle+1.2,+0.4\rangle$} & -1.0 & +6532.5 & {\scriptsize$\langle+2.3,+1.1\rangle$} & -4.6 & +13794.9 \\
+Stable-queue-2s (blk) & {\scriptsize$\langle+2.1,+0.7\rangle$} & -0.3 & +4751.6 & {\scriptsize$\langle+2.3,+1.1\rangle$} & -0.8 & +7089.3 & {\scriptsize$\langle+3.5,+1.7\rangle$} & -3.8 & +9979.5 & {\scriptsize$\langle+1.5,+0.5\rangle$} & -1.8 & +8224.9 & {\scriptsize$\langle+1.4,+0.6\rangle$} & -2.0 & +8442.0 & {\scriptsize$\langle+2.8,+1.2\rangle$} & -6.4 & +15859.9 \\
+Stable-queue-2s (non-blk) & {\scriptsize$\langle+1.9,+0.6\rangle$} & -0.3 & +4401.4 & {\scriptsize$\langle+2.3,+1.0\rangle$} & -0.6 & +6564.2 & {\scriptsize$\langle+3.5,+1.7\rangle$} & -3.6 & +9822.2 & {\scriptsize$\langle+1.5,+0.5\rangle$} & -1.8 & +8587.6 & {\scriptsize$\langle+1.4,+0.5\rangle$} & -1.5 & +7851.2 & {\scriptsize$\langle+2.7,+1.2\rangle$} & -6.7 & +15674.4 \\
+\midrule
+\multicolumn{19}{l}{$k_{\max}=4$ (priorities enabled)} \\
+\midrule
+Periodic-8s (blk) & {\scriptsize$\langle+0.9,+0.7\rangle$} & {\scriptsize$\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+3296.4,-36.8,-40.4,-27.7\rangle$} & {\scriptsize$\langle+1.3,+1.1\rangle$} & {\scriptsize$\langle+0.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+5001.7,-44.2,-36.6,-29.5\rangle$} & {\scriptsize$\langle+1.5,+1.5\rangle$} & {\scriptsize$\langle-2.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+6308.8,-9.5,-21.7,-4.9\rangle$} & {\scriptsize$\langle+1.0,+0.6\rangle$} & {\scriptsize$\langle-0.4,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+6154.6,-52.7,-66.2,-27.8\rangle$} & {\scriptsize$\langle+0.7,+0.6\rangle$} & {\scriptsize$\langle-0.7,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+5216.3,+116.7,-21.3,-15.8\rangle$} & {\scriptsize$\langle+0.9,+0.7\rangle$} & {\scriptsize$\langle-2.5,+0.0,+0.0,+0.1\rangle$} & {\scriptsize$\langle+7095.3,-70.6,-72.5,-55.6\rangle$} \\
+Periodic-8s (non-blk) & {\scriptsize$\langle+0.9,+0.7\rangle$} & {\scriptsize$\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+3021.0,-52.0,-61.5,-22.6\rangle$} & {\scriptsize$\langle+1.3,+1.1\rangle$} & {\scriptsize$\langle-0.1,+0.0,+0.1,+0.0\rangle$} & {\scriptsize$\langle+4968.7,-47.7,-16.4,-16.2\rangle$} & {\scriptsize$\langle+1.3,+1.2\rangle$} & {\scriptsize$\langle-0.9,+0.1,+0.1,+0.1\rangle$} & {\scriptsize$\langle+5000.3,-59.3,-29.3,-11.0\rangle$} & {\scriptsize$\langle+1.2,+0.7\rangle$} & {\scriptsize$\langle-0.4,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+6180.4,+3652.9,-42.7,-43.1\rangle$} & {\scriptsize$\langle+0.6,+0.4\rangle$} & {\scriptsize$\langle-0.8,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+4058.2,+88.9,-24.9,-9.0\rangle$} & {\scriptsize$\langle+1.0,+0.8\rangle$} & {\scriptsize$\langle-2.3,+0.0,+0.0,+0.1\rangle$} & {\scriptsize$\langle+7578.8,-15.9,-31.5,-21.0\rangle$} \\
+Stable-queue-2s (blk) & {\scriptsize$\langle+1.2,+1.0\rangle$} & {\scriptsize$\langle-0.4,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+4468.1,-60.7,-58.4,-16.3\rangle$} & {\scriptsize$\langle+1.5,+1.2\rangle$} & {\scriptsize$\langle-0.3,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+5632.5,-26.8,-6.3,-18.7\rangle$} & {\scriptsize$\langle+1.5,+1.4\rangle$} & {\scriptsize$\langle-1.7,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+5851.1,-48.1,-34.8,-8.2\rangle$} & {\scriptsize$\langle+1.1,+0.7\rangle$} & {\scriptsize$\langle-0.5,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+7325.2,-42.1,-70.2,-63.4\rangle$} & {\scriptsize$\langle+0.7,+0.5\rangle$} & {\scriptsize$\langle-1.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+4972.8,+80.9,-51.9,-21.2\rangle$} & {\scriptsize$\langle+1.1,+0.9\rangle$} & {\scriptsize$\langle-2.9,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+8362.3,-27.7,-20.0,-20.2\rangle$} \\
+Stable-queue-2s (non-blk) & {\scriptsize$\langle+1.1,+0.8\rangle$} & {\scriptsize$\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+3543.6,-65.4,-77.8,-31.5\rangle$} & {\scriptsize$\langle+1.6,+1.3\rangle$} & {\scriptsize$\langle-0.4,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+5965.5,-41.4,-29.0,-39.1\rangle$} & {\scriptsize$\langle+1.6,+1.5\rangle$} & {\scriptsize$\langle-2.1,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+6530.7,-23.2,-18.3,-8.4\rangle$} & {\scriptsize$\langle+1.1,+0.7\rangle$} & {\scriptsize$\langle-0.3,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+6938.8,-78.5,-81.7,-51.4\rangle$} & {\scriptsize$\langle+0.8,+0.6\rangle$} & {\scriptsize$\langle-0.8,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+5717.7,+9.5,-40.2,-9.3\rangle$} & {\scriptsize$\langle+1.0,+0.8\rangle$} & {\scriptsize$\langle-3.1,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+8020.8,-11.9,-31.3,-26.7\rangle$} \\
+\bottomrule
+\end{tabular}
+
+\end{adjustbox}
+\caption{Big table of mean paired deltas vs baseline.}
+\label{tab:big-deltas}
+\end{table}

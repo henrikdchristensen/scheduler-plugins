@@ -18,7 +18,8 @@ Each series CSV contains:
 Outputs (under --out-dir):
   - plots/<job_name>/<metric>.png
   - plots/<job_name>/<metric>.pdf
-  - tables/<metric>.txt     (LaTeX table for each metric)
+  - tables/<metric>.txt         (LaTeX table for each metric)
+  - tables/big_deltas.txt       (NEW big table: util + latency + running pod-seconds)
 
 Default behavior:
   - Plot ALL schedulers found for each job (including "default").
@@ -175,7 +176,6 @@ def fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
         return r"\text{--}"
     fmt = f"{{:+.{int(decimals)}f}}"
     s = fmt.format(v)
-    # avoid "-0.0" (or "-0.00", etc.)
     if s.startswith("-0") and abs(v) < 0.5 * (10 ** (-decimals)):
         s = s.replace("-", "+", 1)
     return s
@@ -188,7 +188,6 @@ def scheduler_row_label(scheduler_key: str) -> str:
     if scheduler_key == "default":
         return "Default"
 
-    # Expected: mode=<mode>_blocking=<0/1>_defpreempt=<0/1>
     kv = {}
     for part in scheduler_key.split("_"):
         if "=" in part:
@@ -199,7 +198,6 @@ def scheduler_row_label(scheduler_key: str) -> str:
     blocking = kv.get("blocking", "0") in {"1", "true", "yes"}
     defp = kv.get("defpreempt", "0") in {"1", "true", "yes"}
 
-    # Mode name + optional param
     mode_title = "Unknown"
     mode_param = ""
     mr = mode_raw.lower()
@@ -230,20 +228,73 @@ def scheduler_row_label(scheduler_key: str) -> str:
         return base.replace(")", ", defpreempt)")
     return base
 
+def scheduler_row_label_hide_defpreempt(scheduler_key: str) -> str:
+    """Row label, but NEVER mentions defpreempt (used for the new big table)."""
+    if scheduler_key == "default":
+        return "Default"
+
+    kv = {}
+    for part in scheduler_key.split("_"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            kv[k.strip().lower()] = v.strip()
+
+    mode_raw = kv.get("mode", scheduler_key)
+    blocking = kv.get("blocking", "0") in {"1", "true", "yes"}
+
+    mode_title = "Unknown"
+    mode_param = ""
+    mr = mode_raw.lower()
+
+    if mr.startswith("periodic"):
+        mode_title = "Periodic"
+        tail = mr[len("periodic") :]
+        if tail:
+            mode_param = tail
+    elif mr.startswith("stable-queue") or mr.startswith("stablequeue"):
+        mode_title = "Stable-queue"
+        tail = mr.replace("stable-queue", "").replace("stablequeue", "")
+        if tail:
+            mode_param = tail
+    elif mr.startswith("scheduling-failure") or mr.startswith("schedulingfailure"):
+        mode_title = "Scheduling-failure"
+    else:
+        mode_title = mode_raw
+
+    enf = "blk" if blocking else "non-blk"
+    if mode_param:
+        return f"{mode_title}-{mode_param} ({enf})"
+    return f"{mode_title} ({enf})"
+
 # -----------------------------
 # Series scanning + filtering
 # -----------------------------
 
-def iter_series_files(series_dir: Path) -> Iterable[Tuple[str, str, Path]]:
-    """Yield (scheduler, job_name, path) from series/<scheduler>__<job_name>.csv"""
-    if not series_dir.exists():
+def iter_series_files(series_root: Path) -> Iterable[Tuple[str, str, Path]]:
+    """
+    Yield (scheduler, job_name, path) from:
+      - series/default/<job_name>.csv              (scheduler="default")
+      - series/plugin/<scheduler>__<job_name>.csv  (scheduler parsed from filename)
+    """
+    if not series_root.exists():
         return
-    for p in sorted(series_dir.glob("*.csv")):
-        stem = p.stem  # "<scheduler>__<job_name>"
-        if "__" not in stem:
-            continue
-        scheduler, job_name = stem.split("__", 1)
-        yield scheduler, job_name, p
+
+    # default series
+    ddir = series_root / "default"
+    if ddir.exists():
+        for p in sorted(ddir.glob("*.csv")):
+            job_name = p.stem
+            yield "default", job_name, p
+
+    # plugin series
+    pdir = series_root / "plugin"
+    if pdir.exists():
+        for p in sorted(pdir.glob("*.csv")):
+            stem = p.stem
+            if "__" not in stem:
+                continue
+            scheduler, job_name = stem.split("__", 1)
+            yield scheduler, job_name, p
 
 def filter_values(
     values: Sequence[str],
@@ -350,6 +401,7 @@ def plot_job(
 # -----------------------------
 # LaTeX tables from results_paired.csv
 # -----------------------------
+
 def prio_cell_from_row(
     row: pd.Series,
     *,
@@ -523,7 +575,6 @@ def latex_full_table_for_metric(
     lines.append(r"\end{adjustbox}")
 
     if caption_tex is not None and str(caption_tex).strip():
-        # caption_tex is assumed to be valid LaTeX (may include math)
         lines.append(r"\caption{" + str(caption_tex) + r"}")
     else:
         caption_txt = latex_escape_text(f"{metric_name} (mean paired difference vs.\\ baseline).")
@@ -538,6 +589,181 @@ def latex_full_table_for_metric(
     lines.append(r"\end{table}")
     return "\n".join(lines)
 
+def _latex_big_table(
+    *,
+    df_all: pd.DataFrame,
+    decimals: int,
+) -> str:
+    """
+    NEW: One big table. For each (N, mu_A) we create 3 columns in this order:
+      1) Δutilisation = <Δcpu, Δmem> in percentage points (pp)
+      2) Δlatency     = per-priority vector (seconds)
+      3) ΔR_p(T)      = per-priority vector (pod-seconds)
+
+    Rows: scheduler configs (ONLY defpreempt=1, but not stated in row label).
+
+    Sections: k_max=1 and k_max>1 as in other tables.
+    """
+    nodes = sorted({int(x) for x in df_all["n_nodes"].unique()})
+    arrivals = sorted({float(x) for x in df_all["mean_arrival_s"].unique()})
+    k_values = sorted({int(x) for x in pd.to_numeric(df_all["k_max"], errors="coerce").dropna().unique()})
+
+    # 3 metric columns per (n, a)
+    ncols = 1 + len(nodes) * len(arrivals) * 3
+
+    def section_header(k: int) -> str:
+        if k == 1:
+            return rf"$k_{{\max}}={k}$ (no priorities)"
+        return rf"$k_{{\max}}={k}$ (priorities enabled)"
+
+    def util_cell(r: pd.Series) -> str:
+        return angle_pair_cell_from_row(
+            r,
+            col_a="delta_cpu_run_util_mean_mean",
+            col_b="delta_mem_run_util_mean_mean",
+            decimals=decimals,
+            as_percentage_points=True,
+        )
+
+    def latency_cell(r: pd.Series, k: int) -> str:
+        kk = max(1, min(int(k), 4))
+        if kk == 1:
+            return fmt_signed(r.get("delta_latency_s_p1_mean", np.nan), decimals=decimals)
+        vals = [fmt_signed(r.get(f"delta_latency_s_p{p}_mean", np.nan), decimals=decimals) for p in range(1, kk + 1)]
+        if all(v == r"\text{--}" for v in vals):
+            return r"\text{--}"
+        return r"{\scriptsize$\langle" + ",".join(vals) + r"\rangle$}"
+
+    def running_cell(r: pd.Series, k: int) -> str:
+        kk = max(1, min(int(k), 4))
+        if kk == 1:
+            return fmt_signed(r.get("delta_R_p1_mean", np.nan), decimals=decimals)
+        vals = [fmt_signed(r.get(f"delta_R_p{p}_mean", np.nan), decimals=decimals) for p in range(1, kk + 1)]
+        if all(v == r"\text{--}" for v in vals):
+            return r"\text{--}"
+        return r"{\scriptsize$\langle" + ",".join(vals) + r"\rangle$}"
+
+    # Build cell maps per k: (rk, n, a) -> (util, lat, run)
+    cell_maps: Dict[int, Dict[Tuple[str, int, float], Tuple[str, str, str]]] = {}
+    row_keys_by_k: Dict[int, List[str]] = {}
+
+    for k in k_values:
+        dfk = df_all[df_all["k_max"].astype(int) == int(k)].copy()
+        if dfk.empty:
+            continue
+
+        row_keys = sorted(
+            dfk["plugin_config"].astype(str).unique(),
+            key=lambda s: scheduler_row_label_hide_defpreempt(str(s)),
+        )
+        row_keys_by_k[int(k)] = row_keys
+
+        cm: Dict[Tuple[str, int, float], Tuple[str, str, str]] = {}
+        for _, r in dfk.iterrows():
+            rk = str(r["plugin_config"])
+            n = int(r["n_nodes"])
+            a = float(r["mean_arrival_s"])
+            cm[(rk, n, a)] = (util_cell(r), latency_cell(r, int(k)), running_cell(r, int(k)))
+        cell_maps[int(k)] = cm
+
+    # ---- LaTeX assembly ----
+    lines: List[str] = []
+    lines.append(r"\begin{table}[t]")
+    lines.append(r"\centering")
+    lines.append(r"\small")
+    lines.append(r"\setlength{\tabcolsep}{2.5pt}")
+    lines.append(r"\renewcommand{\arraystretch}{0.92}")
+    lines.append("")
+    lines.append(r"\begin{adjustbox}{max width=\linewidth}")
+    lines.append("")
+    lines.append(r"\begin{tabular}{" + "l " + " ".join(["c"] * (ncols - 1)) + "}")
+    lines.append(r"\toprule")
+
+    title_line = (
+        r"Mean paired deltas vs.\ baseline: "
+        r"{\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$} (pp), "
+        r"$\Delta \mathrm{latency}$ (s), $\Delta R_p(T)$ (pod-seconds)"
+    )
+    lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + title_line + r"} \\")
+    lines.append(r"\addlinespace[0.2em]")
+
+    # Header row: N groups (each has len(arrivals)*3 columns)
+    if len(nodes) > 1:
+        parts = ["& "]
+        for n in nodes:
+            parts.append(r"\multicolumn{" + str(len(arrivals) * 3) + r"}{c}{$N=" + str(n) + r"$}")
+            parts.append(" & ")
+        lines.append("".join(parts).rstrip(" & ") + r" \\")
+        # cmidrules for each N group
+        start = 2
+        cmr = []
+        for _ in nodes:
+            end = start + len(arrivals) * 3 - 1
+            cmr.append(r"\cmidrule(lr){" + f"{start}-{end}" + "}")
+            start = end + 1
+        lines.append("".join(cmr))
+    else:
+        lines.append(r"& \multicolumn{" + str(len(arrivals) * 3) + r"}{c}{$N=" + str(nodes[0]) + r"$} \\")
+        lines.append(r"\cmidrule(lr){2-" + str(1 + len(arrivals) * 3) + "}")
+
+    # Header row: arrivals (each arrival has 3 columns)
+    arr_hdr = ["& "]
+    for _n in nodes:
+        for a in arrivals:
+            arr_hdr.append(r"\multicolumn{3}{c}{$\mu_A{=}" + fmt_arrival(a) + r"$s}")
+            arr_hdr.append(" & ")
+    lines.append("".join(arr_hdr).rstrip(" & ") + r" \\")
+    # cmidrules for each arrival triplet
+    start = 2
+    cmr2 = []
+    for _n in nodes:
+        for _a in arrivals:
+            end = start + 2
+            cmr2.append(r"\cmidrule(lr){" + f"{start}-{end}" + "}")
+            start = end + 1
+    lines.append("".join(cmr2))
+
+    # Subheader row: the 3 metric columns
+    sub = ["& "]
+    for _n in nodes:
+        for _a in arrivals:
+            sub += [r"$\Delta u$", " & ", r"$\Delta \mathrm{lat}$", " & ", r"$\Delta R_p$", " & "]
+    lines.append("".join(sub).rstrip(" & ") + r" \\")
+    lines.append(r"\midrule")
+
+    first_section = True
+    for k in k_values:
+        if int(k) not in cell_maps:
+            continue
+        if not first_section:
+            lines.append(r"\midrule")
+        first_section = False
+
+        lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + section_header(int(k)) + r"} \\")
+        lines.append(r"\midrule")
+
+        cm = cell_maps[int(k)]
+        row_keys = row_keys_by_k.get(int(k), [])
+
+        for rk in row_keys:
+            label_txt = scheduler_row_label_hide_defpreempt(rk)
+            row_cells: List[str] = [label_txt]
+            for n in nodes:
+                for a in arrivals:
+                    util, lat, run = cm.get((rk, n, a), (r"\text{--}", r"\text{--}", r"\text{--}"))
+                    row_cells.extend([util, lat, run])
+            lines.append(" & ".join(row_cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    lines.append("")
+    lines.append(r"\end{adjustbox}")
+    lines.append(r"\caption{" + latex_escape_text("Big table of mean paired deltas vs baseline.") + r"}")
+    lines.append(r"\label{tab:big-deltas}")
+    lines.append(r"\end{table}")
+
+    return "\n".join(lines)
+
 def write_latex_tables(
     *,
     in_dir: Path,
@@ -549,7 +775,11 @@ def write_latex_tables(
         print(f"[warn] not found: {paired_path} (skipping tables)")
         return
 
-    df = pd.read_csv(paired_path)
+    df = pd.read_csv(paired_path, skipinitialspace=True)
+    df.columns = [c.strip() for c in df.columns]
+    for c in df.columns:
+        if df[c].dtype == object:
+            df[c] = df[c].astype(str).str.strip()
 
     if not {"n_nodes", "k_max", "mean_arrival_s"}.issubset(df.columns):
         rows = []
@@ -564,7 +794,7 @@ def write_latex_tables(
     tables_dir = out_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---- table specs (mean only) ----
+    # ---- existing per-metric tables (mean only) ----
     def scalar_value_fn(col: str):
         def _fn(r: pd.Series) -> str:
             return fmt_signed(r.get(col, np.nan), decimals=decimals)
@@ -597,28 +827,16 @@ def write_latex_tables(
         },
         {
             "name": "delta_run_util_mean",
-            # (optional but recommended) make it explicit these are pp:
             "title": r"$\mathbf{\Delta u_{\mathrm{run}}}$ (running utilisation, pp), mean paired difference vs.\ baseline",
             "kind": "angle_pair",
             "col_a": "delta_cpu_run_util_mean_mean",
             "col_b": "delta_mem_run_util_mean_mean",
-            # FIXED caption: no nested $ ... $ ... $
             "caption_tex": (
                 r"Mean paired difference in running utilisation between plugin and baseline. "
                 r"Each cell reports {\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$} "
                 r"in percentage points (pp)."
             ),
             "label": "tab:delta-run-util",
-        },
-        {
-            "name": "delta_latency_mean_s",
-            "title": r"$\mathbf{\Delta \mathrm{latency}}$ (s), mean paired difference vs.\ baseline",
-            "kind": "scalar",
-            "col": "delta_latency_mean_s_mean",
-            "caption_tex": (
-                r"Mean paired difference in time-to-first-admit (seconds) between plugin and baseline."
-            ),
-            "label": "tab:delta-latency",
         },
         {
             "name": "delta_R_total",
@@ -674,11 +892,11 @@ def write_latex_tables(
                     col_a=col_a,
                     col_b=col_b,
                     decimals=decimals,
-                    as_percentage_points=True,   # <-- Option A
+                    as_percentage_points=True,
                 )
 
             df_metric.attrs["value_fn"] = _pair
-        
+
         else:
             col = str(md["col"])
             if col not in df_metric.columns:
@@ -694,6 +912,29 @@ def write_latex_tables(
             label=md.get("label"),
         )
         out_txt.write_text(table_tex + "\n", encoding="utf-8")
+
+    # ---- NEW: one big table (util + latency + running pod-seconds) ----
+    # Keep ONLY scheduler-configs with defpreempt=1, but do NOT mention it in the table.
+    df_big = df.copy()
+    df_big["plugin_config"] = df_big["plugin_config"].astype(str)
+    df_big = df_big[df_big["plugin_config"].str.contains(r"(?:^|_)defpreempt=1(?:_|$)", regex=True)].copy()
+
+    required_cols = [
+        "delta_cpu_run_util_mean_mean",
+        "delta_mem_run_util_mean_mean",
+        "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean",
+        "delta_latency_s_p1_mean", "delta_latency_s_p2_mean", "delta_latency_s_p3_mean", "delta_latency_s_p4_mean",
+    ]
+    # Only write if columns exist (so the script is robust when columns evolve)
+    if not df_big.empty and all(c in df_big.columns for c in required_cols):
+        big_tex = _latex_big_table(df_all=df_big, decimals=decimals)
+        (tables_dir / "big_deltas.txt").write_text(big_tex + "\n", encoding="utf-8")
+    else:
+        if df_big.empty:
+            print("[warn] big_deltas: no rows after filtering defpreempt=1")
+        else:
+            missing = [c for c in required_cols if c not in df_big.columns]
+            print(f"[warn] big_deltas: missing columns in results_paired.csv: {missing}")
 
 # -----------------------------
 # Main
