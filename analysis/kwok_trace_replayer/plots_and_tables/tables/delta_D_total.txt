@@ -17,26 +17,26 @@
 \multicolumn{7}{l}{$k_{\max}=1$ (no priorities)} \\
 \midrule
 Periodic-8s (blk) & -62.7 & +6.7 & +19.7 & +87.7 & +46.0 & +11.3 \\
-Periodic-8s (blk, defpreempt) & -59.3 & +32.7 & +35.0 & +63.7 & +55.7 & +1.0 \\
+Periodic-8s (blk) & -59.3 & +32.7 & +35.0 & +63.7 & +55.7 & +1.0 \\
 Periodic-8s (non-blk) & -29.7 & +17.0 & +20.0 & +86.0 & +46.3 & -6.3 \\
-Periodic-8s (non-blk, defpreempt) & -9.0 & +23.0 & +27.3 & +75.7 & +66.3 & +23.0 \\
+Periodic-8s (non-blk) & -9.0 & +23.0 & +27.3 & +75.7 & +66.3 & +23.0 \\
 Scheduling-failure (non-blk) & -571.0 & -83.7 & -11.7 & -539.0 & -202.0 & -85.7 \\
 Stable-queue-2s (blk) & +46.3 & +99.0 & +65.0 & +97.0 & +66.7 & +19.7 \\
-Stable-queue-2s (blk, defpreempt) & +75.7 & +106.7 & +50.3 & +89.7 & +71.3 & +23.7 \\
+Stable-queue-2s (blk) & +75.7 & +106.7 & +50.3 & +89.7 & +71.3 & +23.7 \\
 Stable-queue-2s (non-blk) & +79.3 & +102.3 & +69.7 & +98.7 & +77.7 & +25.0 \\
-Stable-queue-2s (non-blk, defpreempt) & +68.7 & +83.0 & +52.7 & +101.3 & +67.7 & +23.3 \\
+Stable-queue-2s (non-blk) & +68.7 & +83.0 & +52.7 & +101.3 & +67.7 & +23.3 \\
 \midrule
 \multicolumn{7}{l}{$k_{\max}=4$ (priorities enabled)} \\
 \midrule
 Periodic-8s (blk) & -1116.3 & -502.7 & -250.7 & -639.0 & -303.7 & -143.0 \\
-Periodic-8s (blk, defpreempt) & +177.7 & +183.0 & +117.7 & +161.0 & +86.0 & +83.7 \\
+Periodic-8s (blk) & +177.7 & +183.0 & +117.7 & +161.0 & +86.0 & +83.7 \\
 Periodic-8s (non-blk) & -1087.3 & -512.3 & -265.3 & -627.3 & -321.7 & -125.7 \\
-Periodic-8s (non-blk, defpreempt) & +201.3 & +193.7 & +109.3 & +173.3 & +92.3 & +82.0 \\
+Periodic-8s (non-blk) & +201.3 & +193.7 & +109.3 & +173.3 & +92.3 & +82.0 \\
 Scheduling-failure (non-blk) & -1220.7 & -391.7 & -197.0 & -990.7 & -394.0 & -171.0 \\
 Stable-queue-2s (blk) & -916.7 & -431.0 & -166.0 & -592.3 & -279.3 & -106.3 \\
-Stable-queue-2s (blk, defpreempt) & +353.3 & +261.7 & +176.0 & +207.7 & +123.3 & +91.7 \\
+Stable-queue-2s (blk) & +353.3 & +261.7 & +176.0 & +207.7 & +123.3 & +91.7 \\
 Stable-queue-2s (non-blk) & -910.7 & -407.7 & -172.0 & -603.0 & -286.0 & -107.7 \\
-Stable-queue-2s (non-blk, defpreempt) & +386.0 & +274.0 & +169.0 & +203.7 & +120.0 & +90.0 \\
+Stable-queue-2s (non-blk) & +386.0 & +274.0 & +169.0 & +203.7 & +120.0 & +90.0 \\
 \bottomrule
 \end{tabular}
 

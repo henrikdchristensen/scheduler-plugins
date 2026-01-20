@@ -289,7 +289,8 @@ def series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str, 
     Returns:
       cpu_run_util_mean, mem_run_util_mean, util_eff_run_mean,
       cpu_req_util_mean, mem_req_util_mean, util_eff_req_mean,
-      R (dict), D (dict)
+      R (dict): mean running pods per priority over the horizon
+      D (dict): cumulative deletions at horizon
     """
     df = pd.read_csv(general_csv)
     require_cols(df, general_csv, [TIME_COL, CPU_RUN_COL, MEM_RUN_COL, CPU_REQ_COL, MEM_REQ_COL])
@@ -349,7 +350,7 @@ def series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str, 
     util_eff_run_mean = _time_mean_clip(eff_run_clip)
     util_eff_req_mean = _time_mean_clip(eff_req_clip)
 
-    R: Dict[int, float] = {}
+    R: Dict[int, float] = {}  # now: MEAN running pods over horizon, not pod-seconds
     D: Dict[int, float] = {}
 
     for p in range(1, MAX_K_OUT + 1):
@@ -357,7 +358,9 @@ def series_metrics_at_horizon(general_csv: Path, horizon_s: float) -> Dict[str, 
         if run_col in df.columns:
             y_run = pd.to_numeric(df[run_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)[order]
             y_vals = step_values_at(t, y_run, t_clip, default=0.0)
-            R[p] = float(np.sum(y_vals * dt))
+
+            # mean number of running pods over [0, H]
+            R[p] = float(np.sum(y_vals * dt) / H) if H > 0 else float("nan")
         else:
             R[p] = 0.0
 
@@ -608,6 +611,24 @@ def _mean_series_across_seeds(general_paths: List[Path]) -> pd.DataFrame:
     # rename metric columns -> <metric>_mean
     rename = {c: f"{c}_mean" for c in metric_cols}
     g = g.rename(columns=rename)
+
+    # effective utilisation (dominant resource)
+    if "cpu_run_util_mean" in g.columns and "mem_run_util_mean" in g.columns:
+        g["util_eff_run_mean"] = g[["cpu_run_util_mean", "mem_run_util_mean"]].max(axis=1)
+
+    if "cpu_req_util_mean" in g.columns and "mem_req_util_mean" in g.columns:
+        g["util_eff_req_mean"] = g[["cpu_req_util_mean", "mem_req_util_mean"]].max(axis=1)
+
+    # total running pods (mean across seeds; stepwise values)
+    run_cols = [f"running_p{p}_mean" for p in range(1, MAX_K_OUT + 1) if f"running_p{p}_mean" in g.columns]
+    if run_cols:
+        g["running_total_mean"] = g[run_cols].sum(axis=1)
+
+    # total cumulative deletions (still stepwise, just summed)
+    del_cols = [f"deletions_cum_p{p}_mean" for p in range(1, MAX_K_OUT + 1) if f"deletions_cum_p{p}_mean" in g.columns]
+    if del_cols:
+        g["deletions_cum_total_mean"] = g[del_cols].sum(axis=1)
+
     return g
 
 
@@ -700,8 +721,10 @@ def main() -> None:
 
     out_dir = Path(args.out_dir) if args.out_dir else (root / "sealed")
     out_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("This may take a while...")
 
-    # NEW: write series files with flat plugin layout
+    # write series files with flat plugin layout
     write_series_files(default_root=default_root, plugin_root=plugin_root, out_dir=out_dir)
 
     default_idx = scan_default(default_root)

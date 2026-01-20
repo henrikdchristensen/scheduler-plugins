@@ -1,0 +1,38 @@
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{2.5pt}
+\renewcommand{\arraystretch}{0.92}
+
+\begin{adjustbox}{max width=\linewidth}
+
+\begin{tabular}{l c c c c c c c c c c c c}
+\toprule
+\multicolumn{13}{l}{Mean paired deltas vs.\ baseline: $\Delta \mathrm{latency}_{\mathrm{total}}$ (s) and solver runs} \\
+\addlinespace[0.2em]
+& \multicolumn{6}{c}{$N=16$} & \multicolumn{6}{c}{$N=32$} \\
+\cmidrule(lr){2-7}\cmidrule(lr){8-13}
+& \multicolumn{2}{c}{$\mu_A{=}4$s} & \multicolumn{2}{c}{$\mu_A{=}8$s} & \multicolumn{2}{c}{$\mu_A{=}16$s} & \multicolumn{2}{c}{$\mu_A{=}4$s} & \multicolumn{2}{c}{$\mu_A{=}8$s} & \multicolumn{2}{c}{$\mu_A{=}16$s} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(lr){10-11}\cmidrule(lr){12-13}
+& $\Delta \mathrm{lat}_{\mathrm{tot}}$ & solver & $\Delta \mathrm{lat}_{\mathrm{tot}}$ & solver & $\Delta \mathrm{lat}_{\mathrm{tot}}$ & solver & $\Delta \mathrm{lat}_{\mathrm{tot}}$ & solver & $\Delta \mathrm{lat}_{\mathrm{tot}}$ & solver & $\Delta \mathrm{lat}_{\mathrm{tot}}$ & solver \\
+\midrule
+\multicolumn{13}{l}{$k_{\max}=1$ (no priorities)} \\
+\midrule
+Periodic-8s (blk) & -0.1 & +47 & -0.4 & +43 & -4.0 & +54 & -1.6 & +65 & -1.6 & +68 & -5.6 & +69 \\
+Periodic-8s (non-blk) & -0.3 & +44 & -0.6 & +43 & -3.6 & +54 & -1.9 & +60 & -1.0 & +74 & -4.6 & +75 \\
+Stable-queue-2s (blk) & -0.3 & +246 & -0.8 & +190 & -3.8 & +161 & -1.8 & +272 & -2.0 & +216 & -6.4 & +151 \\
+Stable-queue-2s (non-blk) & -0.3 & +249 & -0.6 & +195 & -3.6 & +155 & -1.8 & +271 & -1.5 & +213 & -6.7 & +160 \\
+\midrule
+\multicolumn{13}{l}{$k_{\max}=4$ (priorities enabled)} \\
+\midrule
+Periodic-8s (blk) & +0.0 & +66 & +0.0 & +75 & -0.5 & +61 & -0.1 & +54 & -0.2 & +47 & -0.8 & +51 \\
+Periodic-8s (non-blk) & +0.0 & +73 & +0.0 & +64 & -0.2 & +74 & -0.1 & +62 & -0.2 & +50 & -0.7 & +45 \\
+Stable-queue-2s (blk) & -0.1 & +352 & -0.1 & +324 & -0.5 & +238 & -0.1 & +228 & -0.3 & +158 & -0.9 & +100 \\
+Stable-queue-2s (non-blk) & +0.0 & +396 & -0.1 & +246 & -0.6 & +210 & -0.1 & +240 & -0.2 & +161 & -1.0 & +96 \\
+\bottomrule
+\end{tabular}
+
+\end{adjustbox}
+\caption{Latency(total) and solver runs (mean across seeds), reported as paired deltas vs baseline.}
+\label{tab:latency-solver}
+\end{table}
