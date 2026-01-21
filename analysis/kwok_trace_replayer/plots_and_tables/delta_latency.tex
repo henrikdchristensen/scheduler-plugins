@@ -1,0 +1,33 @@
+\begin{tabular}{l c c c c c c}
+\toprule
+\multicolumn{7}{l}{$\mathbf{\Delta \mathrm{latency}}$ (s), mean paired difference vs.\ baseline} \\
+\addlinespace[0.2em]
+& \multicolumn{3}{c}{$N=16$} & \multicolumn{3}{c}{$N=32$} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& $\mu_A{=}4\,\mathrm{s}$ & $\mu_A{=}8\,\mathrm{s}$ & $\mu_A{=}16\,\mathrm{s}$ & $\mu_A{=}4\,\mathrm{s}$ & $\mu_A{=}8\,\mathrm{s}$ & $\mu_A{=}16\,\mathrm{s}$ \\
+\midrule
+\multicolumn{7}{l}{$k_{\max}=1$ (no priorities)} \\
+\midrule
+Sched.-failure & +2.5 & +1.6 & -2.6 & +1.2 & +4.7 & +0.2 \\
+Periodic-8s (blk) & -0.1 & -0.4 & -4.0 & -1.6 & -1.6 & -5.6 \\
+Periodic-8s (blk, w/o defpreempt) & -0.2 & -0.2 & -3.4 & -1.9 & -1.1 & -6.2 \\
+Periodic-8s (non-blk) & -0.3 & -0.6 & -3.6 & -1.9 & -1.0 & -4.6 \\
+Periodic-8s (non-blk, w/o defpreempt) & -0.1 & -0.4 & -4.4 & -2.0 & -1.7 & -5.4 \\
+Stable-queue-2s (blk) & -0.3 & -0.8 & -3.8 & -1.8 & -2.0 & -6.4 \\
+Stable-queue-2s (blk, w/o defpreempt) & -0.3 & -0.6 & -4.6 & -1.8 & -2.1 & -5.7 \\
+Stable-queue-2s (non-blk) & -0.3 & -0.6 & -3.6 & -1.8 & -1.5 & -6.7 \\
+Stable-queue-2s (non-blk, w/o defpreempt) & -0.4 & -0.6 & -4.0 & -1.9 & -1.7 & -6.1 \\
+\midrule
+\multicolumn{7}{l}{$k_{\max}=4$ (priorities enabled)} \\
+\midrule
+Sched.-failure & {\scriptsize$\langle+2.6,+3.7,+3.6,+3.1\rangle$} & {\scriptsize$\langle+3.9,+3.9,+3.2,+4.5\rangle$} & {\scriptsize$\langle+5.6,+6.0,+5.3,+6.5\rangle$} & {\scriptsize$\langle+3.0,+4.3,+3.1,+2.8\rangle$} & {\scriptsize$\langle+3.1,+5.3,+4.1,+4.2\rangle$} & {\scriptsize$\langle+5.4,+7.4,+4.9,+14.0\rangle$} \\
+Periodic-8s (blk) & {\scriptsize$\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle+0.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-2.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-0.4,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-0.7,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-2.5,+0.0,+0.0,+0.1\rangle$} \\
+Periodic-8s (blk, w/o defpreempt) & {\scriptsize$\langle+0.9,+1.9,+2.1,+1.8\rangle$} & {\scriptsize$\langle+1.7,+2.5,+2.7,+4.1\rangle$} & {\scriptsize$\langle+2.1,+4.3,+7.5,+5.3\rangle$} & {\scriptsize$\langle+0.3,+1.8,+1.6,+1.3\rangle$} & {\scriptsize$\langle+1.0,+2.2,+3.7,+3.3\rangle$} & {\scriptsize$\langle-1.6,+3.7,+4.1,+11.9\rangle$} \\
+Periodic-8s (non-blk) & {\scriptsize$\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-0.1,+0.0,+0.1,+0.0\rangle$} & {\scriptsize$\langle-0.9,+0.1,+0.1,+0.1\rangle$} & {\scriptsize$\langle-0.4,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-0.8,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-2.3,+0.0,+0.0,+0.1\rangle$} \\
+Periodic-8s (non-blk, w/o defpreempt) & {\scriptsize$\langle+0.8,+1.7,+2.1,+1.8\rangle$} & {\scriptsize$\langle+2.1,+3.4,+3.3,+4.5\rangle$} & {\scriptsize$\langle+3.7,+4.2,+7.0,+5.9\rangle$} & {\scriptsize$\langle+0.2,+1.7,+1.8,+1.3\rangle$} & {\scriptsize$\langle+0.5,+2.1,+1.9,+3.3\rangle$} & {\scriptsize$\langle-0.3,+3.6,+5.8,+6.0\rangle$} \\
+Stable-queue-2s (blk) & {\scriptsize$\langle-0.4,+0.0,-0.0,+0.0\rangle$} & {\scriptsize$\langle-0.3,+0.0,+0.0,-0.0\rangle$} & {\scriptsize$\langle-1.7,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-0.5,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-1.0,+0.0,+0.0,-0.0\rangle$} & {\scriptsize$\langle-2.9,-0.0,-0.0,-0.0\rangle$} \\
+Stable-queue-2s (blk, w/o defpreempt) & {\scriptsize$\langle+0.6,+1.5,+1.6,+1.8\rangle$} & {\scriptsize$\langle+1.3,+2.8,+2.1,+3.3\rangle$} & {\scriptsize$\langle-0.7,+4.0,+6.2,+3.5\rangle$} & {\scriptsize$\langle+0.1,+1.2,+1.2,+0.9\rangle$} & {\scriptsize$\langle+0.2,+1.8,+2.8,+2.5\rangle$} & {\scriptsize$\langle-0.7,+2.6,+4.5,+3.5\rangle$} \\
+Stable-queue-2s (non-blk) & {\scriptsize$\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-0.4,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-2.1,+0.0,+0.0,-0.0\rangle$} & {\scriptsize$\langle-0.3,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-0.8,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$\langle-3.1,-0.0,-0.0,+0.0\rangle$} \\
+Stable-queue-2s (non-blk, w/o defpreempt) & {\scriptsize$\langle+0.6,+1.4,+1.6,+1.8\rangle$} & {\scriptsize$\langle+1.3,+2.3,+2.5,+3.6\rangle$} & {\scriptsize$\langle-0.3,+3.5,+3.8,+4.1\rangle$} & {\scriptsize$\langle+0.1,+1.1,+1.1,+1.0\rangle$} & {\scriptsize$\langle+0.5,+2.1,+3.4,+2.7\rangle$} & {\scriptsize$\langle-2.2,+2.1,+3.3,+4.9\rangle$} \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,29 @@
+plans_activated (count), mean across seeds
+
+                                                        N=16                          N=32
+                                             µ_A=4s    µ_A=8s   µ_A=16s    µ_A=4s    µ_A=8s   µ_A=16s
+-------------------------------------------------------------------------------------------------------
+kmax=1 (no priorities)
+-------------------------------------------------------------------------------------------------------
+Sched.-failure                                +142      +101      +64       +95       +59       +37
+Periodic-8s (blk)                             +32       +28       +30       +33       +19       +19
+Periodic-8s (blk, w/o defpreempt)             +29       +28       +28       +33       +20       +22
+Periodic-8s (non-blk)                         +30       +30       +27       +34       +23       +18
+Periodic-8s (non-blk, w/o defpreempt)         +33       +28       +28       +34       +22       +17
+Stable-queue-2s (blk)                         +62       +50       +40       +40       +27       +20
+Stable-queue-2s (blk, w/o defpreempt)         +57       +51       +37       +42       +24       +19
+Stable-queue-2s (non-blk)                     +54       +51       +40       +38       +24       +21
+Stable-queue-2s (non-blk, w/o defpreempt)     +56       +52       +39       +42       +23       +21
+-------------------------------------------------------------------------------------------------------
+kmax=4 (with priorities)
+-------------------------------------------------------------------------------------------------------
+Sched.-failure                                +190      +127      +70       +139      +76       +49
+Periodic-8s (blk)                             +51       +47       +35       +45       +28       +26
+Periodic-8s (blk, w/o defpreempt)             +42       +44       +25       +44       +33       +22
+Periodic-8s (non-blk)                         +53       +52       +32       +49       +28       +28
+Periodic-8s (non-blk, w/o defpreempt)         +40       +39       +29       +44       +30       +24
+Stable-queue-2s (blk)                         +94       +72       +53       +58       +36       +30
+Stable-queue-2s (blk, w/o defpreempt)         +82       +64       +48       +53       +35       +29
+Stable-queue-2s (non-blk)                     +94       +69       +47       +56       +35       +28
+Stable-queue-2s (non-blk, w/o defpreempt)     +79       +64       +51       +57       +36       +31
+-------------------------------------------------------------------------------------------------------

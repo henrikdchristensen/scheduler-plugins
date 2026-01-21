@@ -3,7 +3,7 @@
 """
 scripts/kwok_trace_replayer/tables_from_sealed.py
 
-Generate tables (plaintext + LaTeX) and two plots from sealed outputs.
+Generate tables (plaintext + LaTeX) and plots from sealed outputs.
 
 Inputs (under --in-dir):
   - results_paired.csv   (produced by seal_results.py)
@@ -13,9 +13,10 @@ Outputs (under --out-dir):
     - <stem>.txt   (plaintext / easy to read)
     - <stem>.tex   (LaTeX)
 
-  Plots (under --out-dir/plots by default):
-    - delta_u_eff_run.<png|pdf>      (Δu_eff in percentage points)
-    - delta_latency_total.<png|pdf>  (Δlatency_total in seconds)
+    Plots (under --out-dir/plots by default):
+        - delta_u_eff_run_kmax<K>.<png|pdf>           (Δu_eff in percentage points)
+        - delta_latency_total_kmax<K>.<png|pdf>       (Δlatency_total in seconds)
+        - delta_deletions_with_defaultpreemption_kmax<K>.<png|pdf> (Δ deletions)
 
 Notes on plots:
   - x axis: arrival rates (μ_A = 4s, 8s, 16s)
@@ -29,7 +30,7 @@ Example:
     --in-dir  analysis/kwok_trace_replayer/sealed \
     --out-dir analysis/kwok_trace_replayer/plots_and_tables \
     --float-decimals 1 \
-    --plot-kmax 1
+        --plot-kmax 1,4
 """
 
 from __future__ import annotations
@@ -48,6 +49,68 @@ import matplotlib.pyplot as plt
 
 
 # -----------------------------
+# Plot styling
+# -----------------------------
+
+# Smaller markers improve readability when zooming.
+MARKER_SIZE = 3.0
+
+# Compact plots: reduce horizontal spacing between arrival groups and between modes.
+# These are in data-x units (not pixels).
+ARRIVAL_X_SPACING = 0.6
+MODE_X_SPACING = 0.05
+
+# Consistent plot size across all figures.
+FIGSIZE = (3.5, 3.0)
+
+# Font sizes (adjust to taste).
+TITLE_FONTSIZE = 8
+TICK_FONTSIZE = 7
+LEGEND_FONTSIZE = 5
+AXIS_LABEL_FONTSIZE = 7
+
+LEGEND_HANDLE_LENGTH = 0.6
+LEGEND_COLUMN_SPACING = 0.5
+LEGEND_BORDER_AXES_PAD = 0.4
+
+# Standard legend placement (inside plot).
+LEGEND_LOC = "lower left"
+LEGEND_NCOL = 2
+
+
+def add_standard_legend(*, ax: plt.Axes, handles: Sequence[object], labels: Sequence[str]) -> None:
+    """Add a standard legend inside the axes (lower-left)."""
+    clean: List[Tuple[object, str]] = []
+    seen = set()
+    for h, lbl in zip(handles, labels):
+        s = str(lbl)
+        if not s or s.startswith("_"):
+            continue
+        if s in seen:
+            continue
+        seen.add(s)
+        clean.append((h, s))
+
+    if not clean:
+        return
+
+    hh, ll = zip(*clean)
+
+    ax.legend(
+        hh,
+        ll,
+        loc=LEGEND_LOC,
+        ncol=min(int(LEGEND_NCOL), len(ll)),
+        frameon=True,
+        fontsize=LEGEND_FONTSIZE,
+        handlelength=LEGEND_HANDLE_LENGTH,
+        columnspacing=LEGEND_COLUMN_SPACING,
+        borderaxespad=LEGEND_BORDER_AXES_PAD,
+    )
+
+
+
+# -----------------------------
 # CLI
 # -----------------------------
 
@@ -62,7 +125,11 @@ def parse_args() -> argparse.Namespace:
 
     # plots
     p.add_argument("--plots-dir", default=None, help="Plots output dir (default: <out-dir>/plots).")
-    p.add_argument("--plot-kmax", type=int, default=1, help="Which kmax to plot (default: 1).")
+    p.add_argument(
+        "--plot-kmax",
+        default="1,4",
+        help="Comma-separated kmax values to plot (default: 1). Use 'auto' to plot all kmax values present.",
+    )
     p.add_argument(
         "--plot-include-defpreempt",
         action="store_true",
@@ -190,7 +257,7 @@ class RowKey:
 
     def _base_label(self) -> str:
         if self.mode == "scheduling-failure":
-            return "Scheduling-failure"
+            return "Sched.-failure"
 
         lbl = _MODE_BLOCK_LABEL.get((self.mode, self.blocking))
         if lbl is not None:
@@ -365,8 +432,6 @@ def latex_table(
     out_path: Path,
     title_math: str,
     subtitle: str,
-    caption: str,
-    label: str,
     nodes_order: List[int],
     arrivals_order: List[float],
     rows_by_kmax: Dict[int, List[RowKey]],
@@ -378,25 +443,18 @@ def latex_table(
 
     def mu(a: float) -> str:
         a_i = int(a) if abs(a - round(a)) < 1e-9 else a
-        return f"$\\mu_A{{=}}{a_i}$s"
+        return f"$\\mu_A{{=}}{a_i}\\,\\mathrm{{s}}$"
 
     lines: List[str] = []
     lines += [
-        r"\begin{table}[t]",
-        r"\centering",
-        r"\small",
-        r"\setlength{\tabcolsep}{3pt}",
-        r"\renewcommand{\arraystretch}{0.95}",
-        "",
-        r"\begin{adjustbox}{max width=\linewidth}",
-        "",
         r"\begin{tabular}{l c c c c c c}",
         r"\toprule",
         rf"\multicolumn{{7}}{{l}}{{$\mathbf{{{title_math}}}$ {subtitle}}} \\",
         r"\addlinespace[0.2em]",
         rf"& \multicolumn{{3}}{{c}}{{$N={nodes_order[0]}$}} & \multicolumn{{3}}{{c}}{{$N={nodes_order[1]}$}} \\",
         r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
-        rf"& {mu(arrivals_order[0])} & {mu(arrivals_order[1])} & {mu(arrivals_order[2])} & {mu(arrivals_order[0])} & {mu(arrivals_order[1])} & {mu(arrivals_order[2])} \\",
+        rf"& {mu(arrivals_order[0])} & {mu(arrivals_order[1])} & {mu(arrivals_order[2])}"
+        rf" & {mu(arrivals_order[0])} & {mu(arrivals_order[1])} & {mu(arrivals_order[2])} \\",
         r"\midrule",
     ]
 
@@ -422,13 +480,9 @@ def latex_table(
         r"\bottomrule",
         r"\end{tabular}",
         "",
-        r"\end{adjustbox}",
-        rf"\caption{{{caption}}}",
-        rf"\label{{{label}}}",
-        r"\end{table}",
-        "",
     ]
     out_path.write_text("\n".join(lines), encoding="utf-8")
+
 
 
 def ascii_table(
@@ -439,22 +493,43 @@ def ascii_table(
     arrivals_order: List[float],
     rows_by_kmax: Dict[int, List[RowKey]],
     cell_fn,  # (kmax, rowkey, nodes, arrival) -> str
-    row_w: int = 46,
-    col_w: int = 22,
+    row_w: Optional[int] = None,
+    col_w: Optional[int] = None,
     row_label_fn: Optional[RowLabelFn] = None,
 ) -> None:
     row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
 
+    def a_label(a: float) -> str:
+        a_i = int(a) if abs(a - round(a)) < 1e-9 else a
+        return f"µ_A={a_i}s"
+
+    # -------- auto width pass --------
+    # row_w: treat provided row_w as a MINIMUM (never truncate)
+    max_label = 0
+    for rks in rows_by_kmax.values():
+        for rk in rks:
+            max_label = max(max_label, len(str(row_label_fn(rk))))
+    required_row_w = max(24, max_label + 2)
+    row_w = required_row_w if row_w is None else max(int(row_w), required_row_w)
+
+    # col_w: treat provided col_w as a MINIMUM (never truncate)
+    max_cell = 0
+    for kmax, rks in rows_by_kmax.items():
+        for rk in rks:
+            for n in nodes_order:
+                for a in arrivals_order:
+                    max_cell = max(max_cell, len(str(cell_fn(kmax, rk, n, a))))
+    max_hdr = max(len(a_label(a)) for a in arrivals_order)
+    required_col_w = max(10, max(max_cell, max_hdr) + 2)
+    col_w = required_col_w if col_w is None else max(int(col_w), required_col_w)
+
+
     def center(s: str, w: int) -> str:
         s = str(s)
         if len(s) >= w:
-            return s[:w]
+            return s  # never truncate
         pad = w - len(s)
         return " " * (pad // 2) + s + " " * (pad - pad // 2)
-
-    def a_label(a: float) -> str:
-        a_i = int(a) if abs(a - round(a)) < 1e-9 else a
-        return f"ua={a_i}s"
 
     lines: List[str] = []
     lines.append(title)
@@ -478,7 +553,7 @@ def ascii_table(
         lines.append(f"kmax={kmax} ({'no priorities' if kmax == 1 else 'with priorities'})")
         lines.append(sep)
         for rk in rows_by_kmax[kmax]:
-            label = row_label_fn(rk).ljust(row_w)[:row_w]
+            label = str(row_label_fn(rk)).ljust(row_w)
             row = label
             for n in nodes_order:
                 for a in arrivals_order:
@@ -487,6 +562,7 @@ def ascii_table(
         lines.append(sep)
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 
 
 def write_both(
@@ -554,6 +630,178 @@ def cell_defpreempt_delta_deletions(
     return fmt_vec(diff, float_decimals, nan_str, latex=latex)
 
 
+def defpreempt_delta_deletions_total(
+    df: pd.DataFrame,
+    *,
+    kmax: int,
+    mode: str,
+    blocking: int,
+    nodes: int,
+    arrival_s: float,
+) -> float:
+    """(defpreempt=1) - (defpreempt=0) for TOTAL deletions; baseline cancels."""
+    d0 = subset_value(
+        df,
+        nodes=nodes,
+        kmax=kmax,
+        arrival_s=arrival_s,
+        mode=mode,
+        blocking=blocking,
+        defpreempt=0,
+        col="delta_D_total_mean",
+    )
+    d1 = subset_value(
+        df,
+        nodes=nodes,
+        kmax=kmax,
+        arrival_s=arrival_s,
+        mode=mode,
+        blocking=blocking,
+        defpreempt=1,
+        col="delta_D_total_mean",
+    )
+    return (d1 - d0) if (is_finite(d0) and is_finite(d1)) else float("nan")
+
+
+def collect_defpreempt_delta_deletions_total_ys(
+    *,
+    df: pd.DataFrame,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax: int,
+) -> List[float]:
+    """Collect y values for defpreempt deletions-delta plot (scalar total)."""
+    ys: List[float] = []
+    for mode, blocking in build_defpreempt_rows(df):
+        for a in arrivals_order:
+            y16 = defpreempt_delta_deletions_total(
+                df,
+                kmax=int(kmax),
+                mode=str(mode),
+                blocking=int(blocking),
+                nodes=int(nodes_order[0]),
+                arrival_s=float(a),
+            )
+            y32 = defpreempt_delta_deletions_total(
+                df,
+                kmax=int(kmax),
+                mode=str(mode),
+                blocking=int(blocking),
+                nodes=int(nodes_order[1]),
+                arrival_s=float(a),
+            )
+            if is_finite(y16):
+                ys.append(float(y16))
+            if is_finite(y32):
+                ys.append(float(y32))
+    return ys
+
+
+def plot_defpreempt_delta_deletions_total(
+    *,
+    df: pd.DataFrame,
+    out_dir: Path,
+    filename_stem: str,
+    title: str,
+    y_label: str,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax: int,
+    ylim: Optional[Tuple[float, float]] = None,
+) -> None:
+    """Plot (defpreempt=1) - (defpreempt=0) for TOTAL deletions; baseline cancels."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    series = [RowKey(mode=str(m), blocking=int(b), defpreempt=1) for (m, b) in build_defpreempt_rows(df)]
+    series.sort(key=lambda rk: rk.sort_key())
+
+    x_base = [i * ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
+    m = max(1, len(series))
+    mode_spacing = MODE_X_SPACING
+
+    fig, ax = plt.subplots(figsize=FIGSIZE)
+    ys_for_limits: List[float] = []
+    legend_handles: List[object] = []
+    legend_labels: List[str] = []
+
+    for i, rk in enumerate(series):
+        mode_offset = (i - (m - 1) / 2.0) * mode_spacing
+
+        color = ax.plot([], [], linestyle="None")[0].get_color()
+        (h_legend,) = ax.plot([], [], linestyle="-", linewidth=1.8, color=color, label=rk.label(include_defpreempt=False))
+        legend_handles.append(h_legend)
+        legend_labels.append(rk.label(include_defpreempt=False))
+
+        for xi, a in enumerate(arrivals_order):
+            x = x_base[xi] + mode_offset
+
+            y16 = defpreempt_delta_deletions_total(
+                df,
+                kmax=int(kmax),
+                mode=rk.mode,
+                blocking=int(rk.blocking),
+                nodes=int(nodes_order[0]),
+                arrival_s=float(a),
+            )
+            y32 = defpreempt_delta_deletions_total(
+                df,
+                kmax=int(kmax),
+                mode=rk.mode,
+                blocking=int(rk.blocking),
+                nodes=int(nodes_order[1]),
+                arrival_s=float(a),
+            )
+
+            ys_for_limits += [y16, y32]
+
+            if is_finite(y16) and is_finite(y32):
+                ax.plot([x, x], [y16, y32], linestyle="--", color=color, linewidth=1.0)
+
+            if is_finite(y16):
+                ax.plot(
+                    [x],
+                    [y16],
+                    linestyle="None",
+                    marker="o",
+                    markersize=MARKER_SIZE,
+                    color=color,
+                    label="_nolegend_",
+                )
+            if is_finite(y32):
+                ax.plot(
+                    [x],
+                    [y32],
+                    linestyle="None",
+                    marker="s",
+                    markersize=MARKER_SIZE,
+                    color=color,
+                    label="_nolegend_",
+                )
+
+    ax.axhline(0.0, linewidth=1.0)
+    ax.set_title(title, fontsize=TITLE_FONTSIZE)
+    ax.set_ylabel(y_label, fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_xticks(x_base)
+    ax.set_xticklabels([
+        rf"$\mu_A={int(a) if abs(a-round(a)) < 1e-9 else a}\,\mathrm{{s}}$"
+        for a in arrivals_order
+    ])
+
+    ax.tick_params(axis="both", labelsize=TICK_FONTSIZE)
+
+    if ylim is not None:
+        ax.set_ylim(float(ylim[0]), float(ylim[1]))
+    else:
+        _set_symmetric_ylim(ax, ys_for_limits)
+
+    add_standard_legend(ax=ax, handles=legend_handles, labels=legend_labels)
+    fig.tight_layout()
+
+    fig.savefig(out_dir / f"{filename_stem}.png", dpi=200)
+    fig.savefig(out_dir / f"{filename_stem}.pdf")
+    plt.close(fig)
+
+
 # -----------------------------
 # Plots
 # -----------------------------
@@ -571,6 +819,81 @@ def _set_symmetric_ylim(ax, ys: List[float]) -> None:
     ax.set_ylim(-(m + pad), (m + pad))
 
 
+def symmetric_ylim_from_ys(ys: List[float]) -> Tuple[float, float]:
+    """Return a symmetric (low, high) ylim with 10% padding."""
+    vals = [abs(float(y)) for y in ys if is_finite(y)]
+    if not vals:
+        return (-1.0, 1.0)
+    m = max(vals)
+    if m <= 0:
+        return (-1.0, 1.0)
+    pad = 0.10 * m
+    return (-(m + pad), (m + pad))
+
+
+def collect_plot_ys(
+    *,
+    df: pd.DataFrame,
+    col: str,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax: int,
+    scale: float = 1.0,
+    include_defpreempt: bool = False,
+) -> List[float]:
+    """Collect the y values that would be plotted (used for consistent scaling across kmax)."""
+    dff = df[df["kmax"].astype(int) == int(kmax)].copy()
+
+    if not include_defpreempt:
+        dff_main = dff[dff["defpreempt"].astype(int) == 1].copy()
+        sf = dff[dff["mode"].astype(str) == "scheduling-failure"].copy()
+        if not sf.empty:
+            dff_main = pd.concat([dff_main, sf], ignore_index=True)
+            dff_main = dff_main.drop_duplicates(
+                subset=["job_name", "plugin_config", "mode", "blocking", "defpreempt", "nodes", "kmax", "arrival_s"],
+                keep="first",
+            )
+        dff = dff_main
+
+    series = sorted(
+        {
+            RowKey(mode=str(r["mode"]), blocking=int(r["blocking"]), defpreempt=int(r["defpreempt"]))
+            for _, r in dff.iterrows()
+        },
+        key=lambda rk: rk.sort_key(),
+    )
+
+    ys: List[float] = []
+    for rk in series:
+        for a in arrivals_order:
+            y16 = subset_value(
+                df,
+                nodes=nodes_order[0],
+                kmax=kmax,
+                arrival_s=a,
+                mode=rk.mode,
+                blocking=rk.blocking,
+                defpreempt=rk.defpreempt,
+                col=col,
+            )
+            y32 = subset_value(
+                df,
+                nodes=nodes_order[1],
+                kmax=kmax,
+                arrival_s=a,
+                mode=rk.mode,
+                blocking=rk.blocking,
+                defpreempt=rk.defpreempt,
+                col=col,
+            )
+            if is_finite(y16):
+                ys.append(float(y16) * float(scale))
+            if is_finite(y32):
+                ys.append(float(y32) * float(scale))
+
+    return ys
+
+
 def plot_two_node_dots(
     *,
     df: pd.DataFrame,
@@ -585,6 +908,7 @@ def plot_two_node_dots(
     float_decimals: int,
     scale: float = 1.0,
     include_defpreempt: bool = False,
+    ylim: Optional[Tuple[float, float]] = None,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -617,13 +941,15 @@ def plot_two_node_dots(
         key=lambda rk: rk.sort_key(),
     )
 
-    x_base = list(range(len(arrivals_order)))
+    x_base = [i * ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
 
     m = max(1, len(series))
-    mode_spacing = 0.14
+    mode_spacing = MODE_X_SPACING
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=FIGSIZE)
     ys_for_limits: List[float] = []
+    legend_handles: List[object] = []
+    legend_labels: List[str] = []
 
     for i, rk in enumerate(series):
         mode_offset = (i - (m - 1) / 2.0) * mode_spacing
@@ -632,7 +958,9 @@ def plot_two_node_dots(
         color = ax.plot([], [], linestyle="None")[0].get_color()
 
         # legend: show a LINE (not dots)
-        ax.plot([], [], linestyle="--", linewidth=1.5, color=color, label=rk.label(include_defpreempt=True))
+        (h_legend,) = ax.plot([], [], linestyle="-", linewidth=1.8, color=color, label=rk.label(include_defpreempt=True))
+        legend_handles.append(h_legend)
+        legend_labels.append(rk.label(include_defpreempt=True))
 
         for xi, a in enumerate(arrivals_order):
             x = x_base[xi] + mode_offset
@@ -654,18 +982,42 @@ def plot_two_node_dots(
                 ax.plot([x, x], [y16, y32], linestyle="--", color=color, linewidth=1.0)
 
             if is_finite(y16):
-                ax.plot([x], [y16], linestyle="None", marker="o", color=color, label="_nolegend_")
+                ax.plot(
+                    [x],
+                    [y16],
+                    linestyle="None",
+                    marker="o",
+                    markersize=MARKER_SIZE,
+                    color=color,
+                    label="_nolegend_",
+                )
             if is_finite(y32):
-                ax.plot([x], [y32], linestyle="None", marker="s", color=color, label="_nolegend_")
+                ax.plot(
+                    [x],
+                    [y32],
+                    linestyle="None",
+                    marker="s",
+                    markersize=MARKER_SIZE,
+                    color=color,
+                    label="_nolegend_",
+                )
 
     ax.axhline(0.0, linewidth=1.0)
-    ax.set_title(title)
-    ax.set_ylabel(y_label)
+    ax.set_title(title, fontsize=TITLE_FONTSIZE)
+    ax.set_ylabel(y_label, fontsize=AXIS_LABEL_FONTSIZE)
     ax.set_xticks(x_base)
-    ax.set_xticklabels([f"μ_A={int(a) if abs(a-round(a)) < 1e-9 else a}s" for a in arrivals_order])
+    ax.set_xticklabels([
+        rf"$\mu_A={int(a) if abs(a-round(a)) < 1e-9 else a}\,\mathrm{{s}}$"
+        for a in arrivals_order
+    ])
 
-    _set_symmetric_ylim(ax, ys_for_limits)
-    ax.legend(loc="best", fontsize="small", frameon=True)
+    ax.tick_params(axis="both", labelsize=TICK_FONTSIZE)
+
+    if ylim is not None:
+        ax.set_ylim(float(ylim[0]), float(ylim[1]))
+    else:
+        _set_symmetric_ylim(ax, ys_for_limits)
+    add_standard_legend(ax=ax, handles=legend_handles, labels=legend_labels)
     fig.tight_layout()
 
     fig.savefig(out_dir / f"{filename_stem}.png", dpi=200)
@@ -693,9 +1045,57 @@ def main() -> None:
         raise SystemExit("This script assumes exactly 2 nodes values and 3 arrival values.")
 
     float_decimals = int(args.float_decimals)
-    plot_kmax = int(args.plot_kmax)
+    plot_kmax_arg = str(args.plot_kmax).strip().lower()
 
     df = load_results(in_dir)
+
+    available_kmax = sorted(df["kmax"].dropna().astype(int).unique().tolist())
+    if not available_kmax:
+        raise SystemExit("No kmax values found in results_paired.csv")
+
+    if plot_kmax_arg == "auto":
+        plot_kmaxs = available_kmax
+    else:
+        plot_kmaxs: List[int] = []
+        for tok in plot_kmax_arg.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                plot_kmaxs.append(int(tok))
+            except Exception:
+                raise SystemExit(f"Invalid --plot-kmax value: {args.plot_kmax}")
+        plot_kmaxs = sorted(set(plot_kmaxs))
+
+    missing = [k for k in plot_kmaxs if k not in available_kmax]
+    if missing:
+        raise SystemExit(f"Requested kmax not in results: {missing}. Available: {available_kmax}")
+
+    # Shared y-axis scaling across kmax values (per metric).
+    util_ys_all: List[float] = []
+    lat_ys_all: List[float] = []
+    for k in plot_kmaxs:
+        util_ys_all += collect_plot_ys(
+            df=df,
+            col="delta_util_eff_run_mean",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=int(k),
+            scale=100.0,
+            include_defpreempt=bool(args.plot_include_defpreempt),
+        )
+        lat_ys_all += collect_plot_ys(
+            df=df,
+            col="delta_latency_s_total_mean",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=int(k),
+            scale=1.0,
+            include_defpreempt=bool(args.plot_include_defpreempt),
+        )
+
+    util_ylim = symmetric_ylim_from_ys(util_ys_all)
+    lat_ylim = symmetric_ylim_from_ys(lat_ys_all)
 
     # Build RowKey lists per kmax from actual plugin_config rows
     rows_by_kmax: Dict[int, List[RowKey]] = {}
@@ -728,8 +1128,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\Delta u_{\mathrm{eff}}",
             subtitle=r"(pp), mean paired difference vs.\ baseline",
-            caption=r"Mean paired difference in effective running utilisation $\Delta u_{\mathrm{eff}}$ between plugin and baseline (pp).",
-            label="tab:delta-eff-util",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
@@ -769,8 +1167,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\Delta R",
             subtitle=r"(mean running pods), mean paired difference vs.\ baseline",
-            caption=r"Mean paired difference in running pods between plugin and baseline. For $k_{\max}=1$ cells report $\Delta R_{\mathrm{total}}$; for $k_{\max}>1$ cells report ${\scriptsize$\langle\Delta R_1,\ldots,\Delta R_{k_{\max}}\rangle$}$.",
-            label="tab:delta-R",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
@@ -812,8 +1208,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\Delta D(T)",
             subtitle=r"(deletions), mean paired difference vs.\ baseline",
-            caption=r"Mean paired difference in cumulative re-queue events (deletions) between plugin and baseline. For $k_{\max}=1$ cells report $\Delta D_{\mathrm{total}}(T)$; for $k_{\max}>1$ cells report ${\scriptsize$\langle\Delta D_1,\ldots,\Delta D_{k_{\max}}\rangle$}$.",
-            label="tab:delta-D",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
@@ -855,8 +1249,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\Delta \mathrm{latency}",
             subtitle=r"(s), mean paired difference vs.\ baseline",
-            caption=r"Mean paired difference in first-batch scheduling latency between plugin and baseline. For $k_{\max}=1$ cells report $\Delta \mathrm{latency}_{\mathrm{total}}$; for $k_{\max}>1$ cells report ${\scriptsize$\langle\Delta \mathrm{latency}_1,\ldots,\Delta \mathrm{latency}_{k_{\max}}\rangle$}$.",
-            label="tab:delta-latency",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
@@ -888,8 +1280,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\mathrm{solver\_attempts}",
             subtitle=r"(count), mean across seeds",
-            caption=r"Mean number of solver runs (solver attempts) across seeds for the plugin configuration.",
-            label="tab:solver-attempts",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
@@ -919,8 +1309,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\mathrm{plans\_activated}",
             subtitle=r"(count), mean across seeds",
-            caption=r"Mean number of times a solver plan was activated across seeds for the plugin configuration.",
-            label="tab:plans-activated",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
@@ -967,8 +1355,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\Delta \mathrm{latency}_{p}\ ;\ \Delta u_{\mathrm{eff}}",
             subtitle=r"(s; pp), paired difference vs.\ baseline",
-            caption=r"Combined view (defpreempt enabled): first-batch latency deltas (per priority for $k_{\max}>1$) and effective utilisation deltas (pp).",
-            label="tab:big-latency-util",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax_defpreempt_only,  # <-- filter here
@@ -1010,8 +1396,6 @@ def main() -> None:
         latex_args=dict(
             title_math=r"\Delta D_{\mathrm{defpreempt}}",
             subtitle=r"(deletions), $(\mathrm{defpreempt}=1)-(\mathrm{defpreempt}=0)$",
-            caption=r"Within-plugin difference in deletions when enabling default preemption. Positive means more deletions with default preemption enabled.",
-            label="tab:delta-defpreempt-deletions",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax_def,
@@ -1030,38 +1414,60 @@ def main() -> None:
     )
 
     # ----------------
-    # PLOTS (exactly two)
+    # PLOTS
     # ----------------
 
-    plot_two_node_dots(
-        df=df,
-        out_dir=plots_dir,
-        filename_stem="delta_u_eff_run",
-        title=f"Δu_eff (pp) vs arrival (kmax={plot_kmax})",
-        y_label="Δu_eff (pp)",
-        col="delta_util_eff_run_mean",
-        nodes_order=nodes_order,
-        arrivals_order=arrivals_order,
-        kmax=plot_kmax,
-        float_decimals=float_decimals,
-        scale=100.0,
-        include_defpreempt=bool(args.plot_include_defpreempt),
-    )
+    for plot_kmax in plot_kmaxs:
+        plot_two_node_dots(
+            df=df,
+            out_dir=plots_dir,
+            filename_stem=f"delta_u_eff_run_kmax{plot_kmax}",
+            title=rf"$\Delta u_{{\mathrm{{eff}}}}$ (pp) vs $\mu_A$  (kmax={plot_kmax})",
+            y_label=r"$\Delta u_{\mathrm{eff}}$ (pp)",
+            col="delta_util_eff_run_mean",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=plot_kmax,
+            float_decimals=float_decimals,
+            scale=100.0,
+            include_defpreempt=bool(args.plot_include_defpreempt),
+            ylim=util_ylim,
+        )
 
-    plot_two_node_dots(
-        df=df,
-        out_dir=plots_dir,
-        filename_stem="delta_latency_total",
-        title=f"Δlatency_total (s) vs arrival (kmax={plot_kmax})",
-        y_label="Δlatency_total (s)",
-        col="delta_latency_s_total_mean",
-        nodes_order=nodes_order,
-        arrivals_order=arrivals_order,
-        kmax=plot_kmax,
-        float_decimals=float_decimals,
-        scale=1.0,
-        include_defpreempt=bool(args.plot_include_defpreempt),
-    )
+        plot_two_node_dots(
+            df=df,
+            out_dir=plots_dir,
+            filename_stem=f"delta_latency_total_kmax{plot_kmax}",
+            title=rf"$\Delta \mathrm{{latency}}_\mathrm{{total}}$ (s) vs $\mu_A$  (kmax={plot_kmax})",
+            y_label=r"$\Delta \mathrm{latency}$ (s)",
+            col="delta_latency_s_total_mean",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=plot_kmax,
+            float_decimals=float_decimals,
+            scale=1.0,
+            include_defpreempt=bool(args.plot_include_defpreempt),
+            ylim=lat_ylim,
+        )
+
+        plot_defpreempt_delta_deletions_total(
+            df=df,
+            out_dir=plots_dir,
+            filename_stem=f"delta_deletions_with_defaultpreemption_kmax{plot_kmax}",
+            title=rf"$\Delta D_{{\mathrm{{defpreempt}}}}$ (count) vs $\mu_A$  (kmax={plot_kmax})",
+            y_label=r"$\Delta D_{\mathrm{defpreempt}}$ (deletions)",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=int(plot_kmax),
+            ylim=symmetric_ylim_from_ys(
+                collect_defpreempt_delta_deletions_total_ys(
+                    df=df,
+                    nodes_order=nodes_order,
+                    arrivals_order=arrivals_order,
+                    kmax=int(plot_kmax),
+                )
+            ),
+        )
 
     print(f"Wrote tables to: {out_dir}")
     print(f"Wrote plots to:  {plots_dir}")
