@@ -257,7 +257,7 @@ class RowKey:
 
     def _base_label(self) -> str:
         if self.mode == "scheduling-failure":
-            return "Sched.-failure"
+            return "Scheduling-failure"
 
         lbl = _MODE_BLOCK_LABEL.get((self.mode, self.blocking))
         if lbl is not None:
