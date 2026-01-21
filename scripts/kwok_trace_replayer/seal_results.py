@@ -21,6 +21,8 @@ Notes:
     Util columns are per-sample means across seeds.
     Latency columns are per-seed scalars (first-batch mean latency) replicated over time, then averaged.
   - results_paired: we compute per-seed metrics over the common horizon (min T_end), then mean over seeds.
+    - Latency deltas are computed as (plugin mean latency) - (default mean latency),
+      where each mean is over *all scheduled first-batch pods* for that scheduler (no pod intersection).
     - per_pod_stats: per-seed rows only (no averaging), first-batch pods keyed by (priority, rs_prefix, replica_index).
         Rows are emitted for the UNION of default+plugin keys; missing values are NaN and flags indicate which sides exist.
 """
@@ -413,26 +415,18 @@ def latency_means_from_map(lat_map: Dict[LatencyKey, float]) -> Dict[str, float]
 
 
 def latency_deltas_from_maps(def_map: Dict[LatencyKey, float], plu_map: Dict[LatencyKey, float]) -> Dict[str, float]:
-    """Return delta_latency_s_p{1..4} and delta_latency_s_total (plugin - default) over intersection keys."""
-    keys = sorted(set(def_map.keys()) & set(plu_map.keys()))
+    """
+    Return delta_latency_s_p{1..4} and delta_latency_s_total (plugin - default),
+    computed as the difference between each scheduler's *own* mean latency over
+    all scheduled first-batch pods (no pod intersection).
+    """
+    def_means = latency_means_from_map(def_map)
+    plu_means = latency_means_from_map(plu_map)
+
     out: Dict[str, float] = {}
-    if not keys:
-        out["delta_latency_s_total"] = float("nan")
-        for p in range(1, MAX_K_OUT + 1):
-            out[f"delta_latency_s_p{p}"] = float("nan")
-        return out
-
-    diffs_all = np.array([float(plu_map[k]) - float(def_map[k]) for k in keys], dtype=float)
-    out["delta_latency_s_total"] = float(np.mean(diffs_all)) if diffs_all.size else float("nan")
-
+    out["delta_latency_s_total"] = float(plu_means["latency_s_total"]) - float(def_means["latency_s_total"])
     for p in range(1, MAX_K_OUT + 1):
-        kp = [k for k in keys if int(k[0]) == p]
-        if not kp:
-            out[f"delta_latency_s_p{p}"] = float("nan")
-            continue
-        diffs_p = np.array([float(plu_map[k]) - float(def_map[k]) for k in kp], dtype=float)
-        out[f"delta_latency_s_p{p}"] = float(np.mean(diffs_p)) if diffs_p.size else float("nan")
-
+        out[f"delta_latency_s_p{p}"] = float(plu_means[f"latency_s_p{p}"]) - float(def_means[f"latency_s_p{p}"])
     return out
 
 
@@ -467,7 +461,6 @@ def per_pod_rows_from_entry_maps(
         ld = float(de.get("latency_s")) if de is not None else float("nan")
         lp = float(pe.get("latency_s")) if pe is not None else float("nan")
         # Only compute delta when BOTH schedulers have both apply+running timestamps.
-        # (This aligns with “latency exists on both sides”.)
         dlat = (lp - ld) if (both_apply == 1 and both_run == 1 and math.isfinite(ld) and math.isfinite(lp)) else float("nan")
 
         rows.append(
@@ -657,7 +650,7 @@ def write_series_files(*, default_root: Path, plugin_root: Path, out_dir: Path, 
             continue
         job_name, plugin_config = parsed
 
-        seed_series: List[pd.DataFrame] = []
+        seed_series = []
         seed_count = 0
         for _seed, seed_dir in iter_seed_dirs(run_dir):
             seed_count += 1
@@ -892,7 +885,9 @@ def main() -> None:
                 def_entries, plu_entries = {}, {}
                 def_map, plu_map = {}, {}
 
+            # NEW: delta is based on mean latency of each scheduler (no intersection)
             lat_delta = latency_deltas_from_maps(def_map, plu_map)
+
             per_pod_rows.extend(
                 per_pod_rows_from_entry_maps(
                     job_name=job_name,
