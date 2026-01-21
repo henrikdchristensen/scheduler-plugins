@@ -6,25 +6,12 @@ python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_re
 
 Outputs (under --out-dir):
   1) results_paired.csv  (mean across seeds; columns/order match PAIRED_COLS)
-  2) series/ mean time-series CSVs for plotting:
-       - series/default/<job_name>.csv
-       - series/plugin/<plugin_config>__<job_name>.csv    (flat, no nested subdirs)
-     (columns/order match SERIES_COLS)
-  3) per_pod_stats/ per-seed matched-pod latency comparisons:
-       - per_pod_stats/<plugin_config>__<job_name>.csv
-     (columns/order match PER_POD_COLS)
 
 Notes:
-  - Series: for each time_s we average values across seeds (time_s is normalized per seed).
-    R_cum_* are cumulative pod-seconds inside each seed, then averaged across seeds.
-    D_cum_* are cumulative deletion counters inside each seed, then averaged across seeds.
-    Util columns are per-sample means across seeds.
-    Latency columns are per-seed scalars (first-batch mean latency) replicated over time, then averaged.
-  - results_paired: we compute per-seed metrics over the common horizon (min T_end), then mean over seeds.
-    - Latency deltas are computed as (plugin mean latency) - (default mean latency),
-      where each mean is over *all scheduled first-batch pods* for that scheduler (no pod intersection).
-    - per_pod_stats: per-seed rows only (no averaging), first-batch pods keyed by (priority, rs_prefix, replica_index).
-        Rows are emitted for the UNION of default+plugin keys; missing values are NaN and flags indicate which sides exist.
+  - We compute per-seed metrics over the common horizon H = min(T_end_default, T_end_plugin),
+    then mean over seeds.
+  - Latency deltas are computed as (plugin mean latency) - (default mean latency),
+    where each mean is over *all scheduled first-batch pods* for that scheduler (no pod intersection).
 """
 
 from __future__ import annotations
@@ -33,6 +20,7 @@ import argparse
 import json
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -53,14 +41,12 @@ OPT_STATS_FILENAME = "optimization_stats.json"
 
 TIME_COL = "time_s"
 
-# columns in general_stats.csv (baseline naming)
 CPU_RUN_COL = "cpu_run_util"
 MEM_RUN_COL = "mem_run_util"
 
 RUNNING_PREFIX = "running_p"              # running_p1..pK (instantaneous count)
 DELETIONS_CUM_PREFIX = "deletions_cum_p"  # deletions_cum_p1..pK (cumulative counter)
 
-# columns in pod_stats.csv
 POD_EVENT_COL = "event"
 POD_NAME_COL = "pod_name"
 POD_UID_COL = "pod_uid"
@@ -69,7 +55,6 @@ POD_TIME_COL = "time_s"
 
 MAX_K_OUT = 4  # always output p1..p4 columns (even if job has fewer)
 
-# results_paired.csv exact columns/order
 PAIRED_COLS = [
     "job_name",
     "plugin_config",
@@ -101,52 +86,6 @@ PAIRED_COLS = [
     "plan_activated_mean",
 ]
 
-# series CSV exact columns/order (solver/plan columns REMOVED)
-SERIES_COLS = [
-    "scheduler",
-    "job_name",
-    "n_seed",
-    "time_s",
-    "cpu_run_util_mean",
-    "mem_run_util_mean",
-    "eff_run_util_mean",
-    "R_cum_p1_mean",
-    "R_cum_p2_mean",
-    "R_cum_p3_mean",
-    "R_cum_p4_mean",
-    "R_cum_total_mean",
-    "D_cum_p1_mean",
-    "D_cum_p2_mean",
-    "D_cum_p3_mean",
-    "D_cum_p4_mean",
-    "D_cum_total_mean",
-    "latency_s_p1_mean",
-    "latency_s_p2_mean",
-    "latency_s_p3_mean",
-    "latency_s_p4_mean",
-    "latency_s_total_mean",
-]
-
-# per_pod_stats exact columns/order
-PER_POD_COLS = [
-    "job_name",
-    "plugin_config",
-    "seed",
-    "priority",
-    "rs_prefix",
-    "replica_index",
-    "latency_default_s",
-    "latency_plugin_s",
-    "delta_latency_s",
-    "default_first_apply_time_s",
-    "default_first_running_time_s",
-    "plugin_first_apply_time_s",
-    "plugin_first_running_time_s",
-    "both_have_apply_time",
-    "both_have_running_time",
-]
-
-# optimization_stats.json (totals) -> results_paired (means across seeds)
 OPT_TOTAL_KEYS = {
     "solver_attempts_total": "solver_attempts",
     "best_solver_optimal_total": "solver_optimal",
@@ -156,17 +95,13 @@ OPT_TOTAL_KEYS = {
     "plan_activated_total": "plan_activated",
 }
 
-# latency key for matching
-LatencyKey = Tuple[int, str, int]  # (priority, rs_prefix, replica_index_in_first_batch)
-FirstBatchEntry = Dict[str, object]
-
 
 # -----------------------------
 # CLI
 # -----------------------------
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Seal KWOK trace replayer outputs into paired + series CSVs.")
+    p = argparse.ArgumentParser(description="Seal KWOK trace replayer outputs into results_paired.csv (fast path).")
     p.add_argument("--root", required=True, help="Root dir containing 'default/' and 'plugin/' subfolders.")
     p.add_argument("--out-dir", default=None, help="Output directory (default: <root>/sealed).")
     p.add_argument("--eps-s", type=float, default=1.0, help="First-batch epsilon window in seconds (default: 1.0).")
@@ -174,7 +109,7 @@ def parse_args() -> argparse.Namespace:
 
 
 # -----------------------------
-# Small helpers
+# Helpers
 # -----------------------------
 
 def round_numeric_df(df: pd.DataFrame, exclude: Optional[List[str]] = None) -> pd.DataFrame:
@@ -183,18 +118,6 @@ def round_numeric_df(df: pd.DataFrame, exclude: Optional[List[str]] = None) -> p
     if num_cols:
         df[num_cols] = df[num_cols].round(FLOAT_DECIMALS)
     return df
-
-
-def safe_stem(label: str) -> str:
-    """
-    Windows-safe filename stem:
-      - only [A-Za-z0-9._-]
-      - no trailing dots/spaces
-      - NO hash suffix
-    """
-    raw = str(label)
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip(" .")
-    return cleaned or "x"
 
 
 def parse_job_dir_name(name: str) -> Optional[str]:
@@ -220,12 +143,10 @@ def parse_job_dir_name(name: str) -> Optional[str]:
 
 def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     """
-    Expected tokens separated by underscores, e.g.:
+    Example:
       mode=periodic8s_blocking=0_defpreempt=1_nodes=16_prio=1_arrival=8s
-
-    Returns: (job_name, plugin_config_key)
-      plugin_config_key format:
-        mode=<mode>_blocking=<0/1>_defpreempt=<0/1>
+    Returns: (job_name, plugin_config)
+      plugin_config: mode=<mode>_blocking=<0/1>_defpreempt=<0/1>
     """
     tokens = str(name).split("_")
     kv: Dict[str, str] = {}
@@ -266,417 +187,6 @@ def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
             yield d.name, d
 
 
-def value_at_step(t: np.ndarray, y: np.ndarray, x: float, default: float = 0.0) -> float:
-    """Last observation carried forward at time x (stepwise)."""
-    if t.size == 0 or y.size == 0:
-        return float(default)
-    idx = np.searchsorted(t, x, side="right") - 1
-    if idx < 0:
-        return float(default)
-    idx = min(idx, y.size - 1)
-    v = y[idx]
-    return float(v) if math.isfinite(float(v)) else float(default)
-
-
-def time_weighted_mean_step(t: np.ndarray, y: np.ndarray, H: float) -> float:
-    """Time-weighted mean over [0, H] with stepwise y(t)."""
-    if H <= 0 or t.size == 0 or y.size == 0:
-        return float("nan")
-
-    t_clip = t[t <= H]
-    if t_clip.size == 0:
-        t_clip = np.array([H], dtype=float)
-    elif t_clip[-1] < H:
-        t_clip = np.concatenate([t_clip, np.array([H], dtype=float)])
-
-    dt = np.diff(t_clip, prepend=t_clip[0])
-    dt = np.clip(dt, 0.0, None)
-
-    y_clip = np.array([value_at_step(t, y, float(tt), default=0.0) for tt in t_clip], dtype=float)
-    return float(np.sum(y_clip * dt) / H)
-
-
-# -----------------------------
-# Latency helpers
-# -----------------------------
-
-def read_pod_df(pod_csv: Path) -> pd.DataFrame:
-    df = pd.read_csv(pod_csv)
-    need = [POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL]
-    missing = [c for c in need if c not in df.columns]
-    if missing:
-        raise SystemExit(f"{pod_csv} missing columns: {', '.join(missing)}")
-
-    df[POD_TIME_COL] = pd.to_numeric(df[POD_TIME_COL], errors="coerce")
-    df[POD_PRIO_COL] = pd.to_numeric(df[POD_PRIO_COL], errors="coerce").astype("Int64")
-    df[POD_EVENT_COL] = df[POD_EVENT_COL].astype(str)
-    df[POD_NAME_COL] = df[POD_NAME_COL].astype(str)
-    df[POD_UID_COL] = df[POD_UID_COL].astype(str)
-    return df
-
-
-def latency_map_first_batch(pod_df: pd.DataFrame, eps_s: float) -> Dict[LatencyKey, float]:
-    """Return (running_time - apply_time) for first-batch pods (finite latencies only)."""
-    entries = first_batch_entries_map(pod_df, eps_s=eps_s)
-    return latency_map_from_entries(entries)
-
-
-def latency_map_from_entries(entries: Dict[LatencyKey, FirstBatchEntry]) -> Dict[LatencyKey, float]:
-    out: Dict[LatencyKey, float] = {}
-    for k, e in entries.items():
-        lat = e.get("latency_s")
-        try:
-            lat_f = float(lat)  # type: ignore[arg-type]
-        except Exception:
-            continue
-        if math.isfinite(lat_f) and lat_f >= 0.0:
-            out[k] = float(lat_f)
-    return out
-
-
-def first_batch_entries_map(pod_df: pd.DataFrame, eps_s: float) -> Dict[LatencyKey, FirstBatchEntry]:
-    """
-    For each ReplicaSet prefix, take the first apply-time as t0, then consider the first-batch
-    as pods with apply_time within eps_s of t0. Return a per-key entry containing:
-      - pod_uid, pod_name, apply_time_s, running_time_s, latency_s
-    keyed by (priority, rs_prefix, replica_index_in_first_batch).
-    """
-    apply_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
-    run_df = pod_df[pod_df[POD_EVENT_COL] == "running-time"].copy()
-
-    apply_df = apply_df.sort_values(POD_TIME_COL).drop_duplicates(subset=[POD_UID_COL], keep="first")
-    run_df = run_df.sort_values(POD_TIME_COL).drop_duplicates(subset=[POD_UID_COL], keep="first")
-
-    apply_df["rs_prefix"] = apply_df[POD_NAME_COL].map(rs_prefix_from_pod_name)
-
-    joined = apply_df.merge(
-        run_df[[POD_UID_COL, POD_TIME_COL]].rename(columns={POD_TIME_COL: "running_time_s"}),
-        on=POD_UID_COL,
-        how="left",
-    ).rename(columns={POD_TIME_COL: "apply_time_s"})
-
-    out: Dict[LatencyKey, FirstBatchEntry] = {}
-
-    for rs_prefix, g in joined.groupby("rs_prefix", sort=False):
-        g = g.sort_values("apply_time_s")
-        if g.empty:
-            continue
-        t0 = float(g["apply_time_s"].iloc[0])
-        batch_mask = (g["apply_time_s"] - t0) <= float(eps_s)
-        batch_n = int(batch_mask.sum())
-        if batch_n <= 0:
-            continue
-
-        first_batch = g.iloc[:batch_n]
-        for i, (_, row) in enumerate(first_batch.iterrows()):
-            pr = row.get(POD_PRIO_COL)
-            at = row.get("apply_time_s")
-            rt = row.get("running_time_s")
-            uid = row.get(POD_UID_COL)
-            name = row.get(POD_NAME_COL)
-            if pd.isna(pr) or pd.isna(at) or pd.isna(uid) or pd.isna(name):
-                continue
-
-            apply_time_s = float(at)
-            running_time_s = float(rt) if not pd.isna(rt) else float("nan")
-            latency_s = float("nan")
-            if math.isfinite(running_time_s):
-                lat = running_time_s - apply_time_s
-                latency_s = float(lat) if math.isfinite(lat) and lat >= 0.0 else float("nan")
-
-            out[(int(pr), str(rs_prefix), int(i))] = {
-                "pod_uid": str(uid),
-                "pod_name": str(name),
-                "apply_time_s": apply_time_s,
-                "running_time_s": running_time_s,
-                "latency_s": latency_s,
-            }
-
-    return out
-
-
-def latency_means_from_map(lat_map: Dict[LatencyKey, float]) -> Dict[str, float]:
-    """Return latency_s_p{1..4} and latency_s_total from a map (means)."""
-    out: Dict[str, float] = {}
-    if not lat_map:
-        for p in range(1, MAX_K_OUT + 1):
-            out[f"latency_s_p{p}"] = float("nan")
-        out["latency_s_total"] = float("nan")
-        return out
-
-    vals_all = np.array(list(lat_map.values()), dtype=float)
-    out["latency_s_total"] = float(np.nanmean(vals_all)) if vals_all.size else float("nan")
-
-    for p in range(1, MAX_K_OUT + 1):
-        vals_p = np.array([v for (prio, _rs, _i), v in lat_map.items() if int(prio) == p], dtype=float)
-        out[f"latency_s_p{p}"] = float(np.nanmean(vals_p)) if vals_p.size else float("nan")
-
-    return out
-
-
-def latency_deltas_from_maps(def_map: Dict[LatencyKey, float], plu_map: Dict[LatencyKey, float]) -> Dict[str, float]:
-    """
-    Return delta_latency_s_p{1..4} and delta_latency_s_total (plugin - default),
-    computed as the difference between each scheduler's *own* mean latency over
-    all scheduled first-batch pods (no pod intersection).
-    """
-    def_means = latency_means_from_map(def_map)
-    plu_means = latency_means_from_map(plu_map)
-
-    out: Dict[str, float] = {}
-    out["delta_latency_s_total"] = float(plu_means["latency_s_total"]) - float(def_means["latency_s_total"])
-    for p in range(1, MAX_K_OUT + 1):
-        out[f"delta_latency_s_p{p}"] = float(plu_means[f"latency_s_p{p}"]) - float(def_means[f"latency_s_p{p}"])
-    return out
-
-
-def per_pod_rows_from_entry_maps(
-    *,
-    job_name: str,
-    plugin_config: str,
-    seed: str,
-    def_entries: Dict[LatencyKey, FirstBatchEntry],
-    plu_entries: Dict[LatencyKey, FirstBatchEntry],
-) -> List[Dict[str, object]]:
-    """Per-seed per-pod stats rows (UNION of keys; missing values are NaN)."""
-    keys = sorted(set(def_entries.keys()) | set(plu_entries.keys()))
-    rows: List[Dict[str, object]] = []
-    for (prio, rs_prefix, replica_idx) in keys:
-        de = def_entries.get((prio, rs_prefix, replica_idx))
-        pe = plu_entries.get((prio, rs_prefix, replica_idx))
-
-        def_apply = float(de.get("apply_time_s")) if de is not None else float("nan")
-        def_run = float(de.get("running_time_s")) if de is not None else float("nan")
-        plu_apply = float(pe.get("apply_time_s")) if pe is not None else float("nan")
-        plu_run = float(pe.get("running_time_s")) if pe is not None else float("nan")
-
-        has_def_apply = 1 if math.isfinite(def_apply) else 0
-        has_plu_apply = 1 if math.isfinite(plu_apply) else 0
-        has_def_run = 1 if math.isfinite(def_run) else 0
-        has_plu_run = 1 if math.isfinite(plu_run) else 0
-
-        both_apply = 1 if (has_def_apply == 1 and has_plu_apply == 1) else 0
-        both_run = 1 if (has_def_run == 1 and has_plu_run == 1) else 0
-
-        ld = float(de.get("latency_s")) if de is not None else float("nan")
-        lp = float(pe.get("latency_s")) if pe is not None else float("nan")
-        # Only compute delta when BOTH schedulers have both apply+running timestamps.
-        dlat = (lp - ld) if (both_apply == 1 and both_run == 1 and math.isfinite(ld) and math.isfinite(lp)) else float("nan")
-
-        rows.append(
-            {
-                "job_name": job_name,
-                "plugin_config": plugin_config,
-                "seed": seed,
-                "priority": int(prio),
-                "rs_prefix": str(rs_prefix),
-                "replica_index": int(replica_idx),
-                "latency_default_s": ld,
-                "latency_plugin_s": lp,
-                "delta_latency_s": dlat,
-                "default_first_apply_time_s": def_apply,
-                "default_first_running_time_s": def_run,
-                "plugin_first_apply_time_s": plu_apply,
-                "plugin_first_running_time_s": plu_run,
-                "both_have_apply_time": int(both_apply),
-                "both_have_running_time": int(both_run),
-            }
-        )
-    return rows
-
-
-# -----------------------------
-# Series building
-# -----------------------------
-
-def read_general_series(general_csv: Path) -> pd.DataFrame:
-    df = pd.read_csv(general_csv)
-    if TIME_COL not in df.columns:
-        raise SystemExit(f"{general_csv} missing column: {TIME_COL}")
-
-    df[TIME_COL] = pd.to_numeric(df[TIME_COL], errors="coerce")
-    df = df.dropna(subset=[TIME_COL]).copy()
-    if df.empty:
-        return df
-
-    df = df.sort_values(TIME_COL).copy()
-    t0 = float(df[TIME_COL].iloc[0])
-    df[TIME_COL] = (df[TIME_COL] - t0).astype(float)
-    df[TIME_COL] = df[TIME_COL].round(6)  # stabilize grouping across seeds
-    return df
-
-
-def build_seed_series(*, general_csv: Path, pod_csv: Path, eps_s: float) -> pd.DataFrame:
-    """
-    Build a per-seed time series with BASE column names (no _mean suffix).
-    Later we average across seeds at each time_s and add _mean.
-    """
-    df = read_general_series(general_csv)
-    if df.empty:
-        return df
-
-    # Util columns
-    for c in [CPU_RUN_COL, MEM_RUN_COL]:
-        df[c] = pd.to_numeric(df[c], errors="coerce") if c in df.columns else np.nan
-
-    df["eff_run_util"] = df[[CPU_RUN_COL, MEM_RUN_COL]].max(axis=1)
-
-    # dt (for cumulative running pod-seconds)
-    t = df[TIME_COL].to_numpy(dtype=float)
-    dt = np.diff(t, prepend=t[0])
-    dt = np.clip(dt, 0.0, None)
-
-    # R_cum_p*: integrate running_p* over time
-    for p in range(1, MAX_K_OUT + 1):
-        run_col = f"{RUNNING_PREFIX}{p}"
-        if run_col in df.columns:
-            y = pd.to_numeric(df[run_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-        else:
-            y = np.zeros_like(t, dtype=float)
-        df[f"R_cum_p{p}"] = np.cumsum(y * dt)
-
-    df["R_cum_total"] = df[[f"R_cum_p{p}" for p in range(1, MAX_K_OUT + 1)]].sum(axis=1)
-
-    # D_cum_p*: take deletions cumulative directly (already cumulative counter)
-    for p in range(1, MAX_K_OUT + 1):
-        del_col = f"{DELETIONS_CUM_PREFIX}{p}"
-        df[f"D_cum_p{p}"] = pd.to_numeric(df[del_col], errors="coerce") if del_col in df.columns else np.nan
-
-    df["D_cum_total"] = df[[f"D_cum_p{p}" for p in range(1, MAX_K_OUT + 1)]].sum(axis=1, min_count=1)
-
-    # Latency (scalar per seed) replicated over time
-    pod_df = read_pod_df(pod_csv)
-    lat_map = latency_map_first_batch(pod_df, eps_s=float(eps_s))
-    lat_means = latency_means_from_map(lat_map)
-
-    for p in range(1, MAX_K_OUT + 1):
-        df[f"latency_s_p{p}"] = float(lat_means[f"latency_s_p{p}"])
-    df["latency_s_total"] = float(lat_means["latency_s_total"])
-
-    keep = (
-        [TIME_COL, CPU_RUN_COL, MEM_RUN_COL, "eff_run_util"]
-        + [f"R_cum_p{p}" for p in range(1, MAX_K_OUT + 1)]
-        + ["R_cum_total"]
-        + [f"D_cum_p{p}" for p in range(1, MAX_K_OUT + 1)]
-        + ["D_cum_total"]
-        + [f"latency_s_p{p}" for p in range(1, MAX_K_OUT + 1)]
-        + ["latency_s_total"]
-    )
-    return df[keep].copy()
-
-
-def mean_series_across_seeds(seed_series: List[pd.DataFrame]) -> pd.DataFrame:
-    """Average numeric columns across seeds grouped by time_s; add _mean suffix."""
-    if not seed_series:
-        return pd.DataFrame(columns=[TIME_COL])
-
-    df_all = pd.concat(seed_series, axis=0, ignore_index=True)
-    if df_all.empty:
-        return pd.DataFrame(columns=[TIME_COL])
-
-    metric_cols = [c for c in df_all.columns if c != TIME_COL and pd.api.types.is_numeric_dtype(df_all[c])]
-    g = df_all.groupby(TIME_COL, dropna=False)[metric_cols].mean(numeric_only=True).reset_index()
-    g = g.sort_values(TIME_COL)
-
-    g = g.rename(columns={c: f"{c}_mean" for c in metric_cols})
-    g[TIME_COL] = g[TIME_COL].astype(float)
-    return g
-
-
-def write_series_files(*, default_root: Path, plugin_root: Path, out_dir: Path, eps_s: float) -> None:
-    series_root = out_dir / "series"
-    default_out = series_root / "default"
-    plugin_out = series_root / "plugin"
-    default_out.mkdir(parents=True, exist_ok=True)
-    plugin_out.mkdir(parents=True, exist_ok=True)
-
-    def _finalize_series(df_mean: pd.DataFrame, *, scheduler: str, job_name: str, n_seed: int) -> pd.DataFrame:
-        df_mean.insert(0, "n_seed", int(n_seed))
-        df_mean.insert(0, "job_name", job_name)
-        df_mean.insert(0, "scheduler", scheduler)
-
-        df_mean = df_mean.rename(
-            columns={
-                f"{CPU_RUN_COL}_mean": "cpu_run_util_mean",
-                f"{MEM_RUN_COL}_mean": "mem_run_util_mean",
-                "eff_run_util_mean": "eff_run_util_mean",
-                TIME_COL: "time_s",
-            }
-        )
-
-        for c in SERIES_COLS:
-            if c not in df_mean.columns:
-                df_mean[c] = np.nan
-        df_mean = df_mean[SERIES_COLS]
-
-        round_numeric_df(df_mean, exclude=["scheduler", "job_name"])
-        return df_mean
-
-    # ---- default: per job across all seeds ----
-    for job_dir in sorted(default_root.iterdir()):
-        if not job_dir.is_dir():
-            continue
-        job_name = parse_job_dir_name(job_dir.name)
-        if job_name is None:
-            continue
-
-        seed_series: List[pd.DataFrame] = []
-        seed_count = 0
-        for _seed, seed_dir in iter_seed_dirs(job_dir):
-            seed_count += 1
-            gen = seed_dir / GENERAL_STATS_FILENAME
-            pod = seed_dir / POD_STATS_FILENAME
-            try:
-                s = build_seed_series(general_csv=gen, pod_csv=pod, eps_s=eps_s)
-                if not s.empty:
-                    seed_series.append(s)
-            except Exception:
-                continue
-
-        df_mean = mean_series_across_seeds(seed_series)
-        if df_mean.empty:
-            continue
-
-        df_out = _finalize_series(df_mean, scheduler="default", job_name=job_name, n_seed=seed_count)
-        out_path = default_out / f"{safe_stem(job_name)}.csv"
-        df_out.to_csv(out_path, index=False)
-
-    # ---- plugin: per run-dir across all seeds ----
-    for run_dir in sorted(plugin_root.iterdir()):
-        if not run_dir.is_dir():
-            continue
-        parsed = parse_plugin_run_dir(run_dir.name)
-        if parsed is None:
-            continue
-        job_name, plugin_config = parsed
-
-        seed_series = []
-        seed_count = 0
-        for _seed, seed_dir in iter_seed_dirs(run_dir):
-            seed_count += 1
-            gen = seed_dir / GENERAL_STATS_FILENAME
-            pod = seed_dir / POD_STATS_FILENAME
-            try:
-                s = build_seed_series(general_csv=gen, pod_csv=pod, eps_s=eps_s)
-                if not s.empty:
-                    seed_series.append(s)
-            except Exception:
-                continue
-
-        df_mean = mean_series_across_seeds(seed_series)
-        if df_mean.empty:
-            continue
-
-        df_out = _finalize_series(df_mean, scheduler=plugin_config, job_name=job_name, n_seed=seed_count)
-        out_name = f"{safe_stem(plugin_config)}__{safe_stem(job_name)}.csv"
-        out_path = plugin_out / out_name
-        df_out.to_csv(out_path, index=False)
-
-
-# -----------------------------
-# results_paired + per_pod_stats
-# -----------------------------
-
 def read_opt_totals(opt_json: Path) -> Dict[str, float]:
     out = {v: float("nan") for v in OPT_TOTAL_KEYS.values()}
     if not opt_json.exists():
@@ -694,92 +204,283 @@ def read_opt_totals(opt_json: Path) -> Dict[str, float]:
     return out
 
 
-def load_time_vector(general_csv: Path) -> np.ndarray:
-    df = pd.read_csv(general_csv, usecols=[TIME_COL])
-    t = pd.to_numeric(df[TIME_COL], errors="coerce").dropna().to_numpy(dtype=float)
-    return t
+# -----------------------------
+# Fast horizon metrics (single read + O(1) per metric)
+# -----------------------------
+
+@dataclass(frozen=True)
+class GeneralData:
+    t: np.ndarray                     # normalized time (starts at 0)
+    T_end: float
+    cpu: np.ndarray
+    mem: np.ndarray
+    eff: np.ndarray
+    run: np.ndarray                   # shape (n, MAX_K_OUT) for p=1..MAX_K_OUT
+    dele: np.ndarray                  # shape (n, MAX_K_OUT), NaN where missing
+    pref_cpu: np.ndarray              # prefix integral arrays (length n)
+    pref_mem: np.ndarray
+    pref_eff: np.ndarray
+    pref_run: np.ndarray              # shape (n, MAX_K_OUT)
 
 
-def read_general_for_horizon(general_csv: Path) -> pd.DataFrame:
-    df = pd.read_csv(general_csv)
+def _prefix_integral(t: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """prefix[i] = ∫_0^{t[i]} y(s) ds, with y stepwise using y[j] on [t[j], t[j+1])."""
+    n = t.size
+    if n == 0:
+        return np.array([], dtype=float)
+    if n == 1:
+        return np.zeros(1, dtype=float)
+    dt = np.diff(t)
+    pref = np.zeros(n, dtype=float)
+    pref[1:] = np.cumsum(y[:-1] * dt)
+    return pref
+
+
+def _prefix_integral_mat(t: np.ndarray, Y: np.ndarray) -> np.ndarray:
+    """Same as _prefix_integral, but for matrix columns."""
+    n = t.size
+    if n == 0:
+        return np.zeros((0, Y.shape[1]), dtype=float)
+    if n == 1:
+        return np.zeros((1, Y.shape[1]), dtype=float)
+    dt = np.diff(t)[:, None]
+    pref = np.zeros((n, Y.shape[1]), dtype=float)
+    pref[1:, :] = np.cumsum(Y[:-1, :] * dt, axis=0)
+    return pref
+
+
+def read_general_data(general_csv: Path) -> GeneralData:
+    wanted = {TIME_COL, CPU_RUN_COL, MEM_RUN_COL}
+    for p in range(1, MAX_K_OUT + 1):
+        wanted.add(f"{RUNNING_PREFIX}{p}")
+        wanted.add(f"{DELETIONS_CUM_PREFIX}{p}")
+
+    # Single read; usecols callable ignores missing columns without failing.
+    df = pd.read_csv(
+        general_csv,
+        usecols=lambda c: c in wanted,
+        low_memory=False,
+    )
+
     if TIME_COL not in df.columns:
         raise SystemExit(f"{general_csv} missing {TIME_COL}")
-    df[TIME_COL] = pd.to_numeric(df[TIME_COL], errors="coerce")
-    df = df.dropna(subset=[TIME_COL]).copy()
-    df = df.sort_values(TIME_COL).copy()
+
+    t_raw = pd.to_numeric(df[TIME_COL], errors="coerce")
+    df = df.loc[t_raw.notna()].copy()
+    if df.empty:
+        return GeneralData(
+            t=np.array([], dtype=float),
+            T_end=float("nan"),
+            cpu=np.array([], dtype=float),
+            mem=np.array([], dtype=float),
+            eff=np.array([], dtype=float),
+            run=np.zeros((0, MAX_K_OUT), dtype=float),
+            dele=np.zeros((0, MAX_K_OUT), dtype=float),
+            pref_cpu=np.array([], dtype=float),
+            pref_mem=np.array([], dtype=float),
+            pref_eff=np.array([], dtype=float),
+            pref_run=np.zeros((0, MAX_K_OUT), dtype=float),
+        )
+
+    df[TIME_COL] = t_raw.loc[df.index].astype(float)
+    df = df.sort_values(TIME_COL, kind="mergesort")
+
     t0 = float(df[TIME_COL].iloc[0])
-    df[TIME_COL] = (df[TIME_COL] - t0).astype(float)
-    return df
+    t = (df[TIME_COL].to_numpy(dtype=float) - t0).astype(float)
+    # Drop any negative / NaN issues after normalization
+    valid = np.isfinite(t) & (t >= 0.0)
+    if not np.any(valid):
+        t = np.array([], dtype=float)
+    else:
+        df = df.loc[valid].copy()
+        t = t[valid]
 
+    if t.size == 0:
+        return GeneralData(
+            t=t,
+            T_end=float("nan"),
+            cpu=np.array([], dtype=float),
+            mem=np.array([], dtype=float),
+            eff=np.array([], dtype=float),
+            run=np.zeros((0, MAX_K_OUT), dtype=float),
+            dele=np.zeros((0, MAX_K_OUT), dtype=float),
+            pref_cpu=np.array([], dtype=float),
+            pref_mem=np.array([], dtype=float),
+            pref_eff=np.array([], dtype=float),
+            pref_run=np.zeros((0, MAX_K_OUT), dtype=float),
+        )
 
-def compute_seed_horizon_metrics(general_csv: Path, H: float) -> Dict[str, float]:
-    """
-    Compute time-weighted mean util and mean running pods (per priority) over [0,H],
-    and deletions at time H (stepwise).
-    """
-    df = read_general_for_horizon(general_csv)
-    t = df[TIME_COL].to_numpy(dtype=float)
+    T_end = float(t[-1])
 
     cpu = (
         pd.to_numeric(df[CPU_RUN_COL], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         if CPU_RUN_COL in df.columns
-        else np.zeros_like(t)
+        else np.zeros_like(t, dtype=float)
     )
     mem = (
         pd.to_numeric(df[MEM_RUN_COL], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         if MEM_RUN_COL in df.columns
-        else np.zeros_like(t)
+        else np.zeros_like(t, dtype=float)
     )
     eff = np.maximum(cpu, mem)
 
+    run = np.zeros((t.size, MAX_K_OUT), dtype=float)
+    dele = np.full((t.size, MAX_K_OUT), np.nan, dtype=float)
+
+    for i, p in enumerate(range(1, MAX_K_OUT + 1)):
+        rc = f"{RUNNING_PREFIX}{p}"
+        dc = f"{DELETIONS_CUM_PREFIX}{p}"
+        if rc in df.columns:
+            run[:, i] = pd.to_numeric(df[rc], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        if dc in df.columns:
+            dele[:, i] = pd.to_numeric(df[dc], errors="coerce").to_numpy(dtype=float)
+
+    pref_cpu = _prefix_integral(t, cpu)
+    pref_mem = _prefix_integral(t, mem)
+    pref_eff = _prefix_integral(t, eff)
+    pref_run = _prefix_integral_mat(t, run)
+
+    return GeneralData(
+        t=t,
+        T_end=T_end,
+        cpu=cpu,
+        mem=mem,
+        eff=eff,
+        run=run,
+        dele=dele,
+        pref_cpu=pref_cpu,
+        pref_mem=pref_mem,
+        pref_eff=pref_eff,
+        pref_run=pref_run,
+    )
+
+
+def _mean_over_horizon(t: np.ndarray, y: np.ndarray, pref: np.ndarray, H: float) -> float:
+    """Time-weighted mean over [0, H] for stepwise y using prefix integral pref."""
+    if not (math.isfinite(H) and H > 0.0) or t.size == 0:
+        return float("nan")
+    if H <= 0.0:
+        return float("nan")
+    # If H beyond end, clamp to end (matches previous behavior via min horizon selection anyway)
+    Hc = min(H, float(t[-1]))
+    idx = int(np.searchsorted(t, Hc, side="right") - 1)
+    if idx < 0:
+        idx = 0
+    base = float(pref[idx])
+    tail = float(y[idx]) * float(Hc - t[idx])
+    return float((base + tail) / Hc) if Hc > 0 else float("nan")
+
+
+def _value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
+    """Step value at time H (last observation carried forward)."""
+    if t.size == 0 or not math.isfinite(H):
+        return float("nan")
+    Hc = min(max(H, 0.0), float(t[-1]))
+    idx = int(np.searchsorted(t, Hc, side="right") - 1)
+    if idx < 0:
+        idx = 0
+    v = float(y[idx])
+    return v if math.isfinite(v) else float("nan")
+
+
+def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
+    t = g.t
     out: Dict[str, float] = {
-        "cpu_run_util_mean": time_weighted_mean_step(t, cpu, H),
-        "mem_run_util_mean": time_weighted_mean_step(t, mem, H),
-        "util_eff_run_mean": time_weighted_mean_step(t, eff, H),
+        "cpu_run_util_mean": _mean_over_horizon(t, g.cpu, g.pref_cpu, H),
+        "mem_run_util_mean": _mean_over_horizon(t, g.mem, g.pref_mem, H),
+        "util_eff_run_mean": _mean_over_horizon(t, g.eff, g.pref_eff, H),
     }
 
-    for p in range(1, MAX_K_OUT + 1):
-        run_col = f"{RUNNING_PREFIX}{p}"
-        y = (
-            pd.to_numeric(df[run_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-            if run_col in df.columns
-            else np.zeros_like(t)
-        )
-        out[f"R_p{p}_mean"] = time_weighted_mean_step(t, y, H)
+    for i, p in enumerate(range(1, MAX_K_OUT + 1)):
+        out[f"R_p{p}_mean"] = _mean_over_horizon(t, g.run[:, i], g.pref_run[:, i], H)
+        out[f"D_p{p}"] = _value_at_horizon(t, g.dele[:, i], H)
 
-        del_col = f"{DELETIONS_CUM_PREFIX}{p}"
-        if del_col in df.columns:
-            d = pd.to_numeric(df[del_col], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-            out[f"D_p{p}"] = value_at_step(t, d, H, default=0.0)
-        else:
-            out[f"D_p{p}"] = float("nan")
-
-    out["R_total_mean"] = float(sum(out[f"R_p{p}_mean"] for p in range(1, MAX_K_OUT + 1)))
+    out["R_total_mean"] = float(np.nansum([out[f"R_p{p}_mean"] for p in range(1, MAX_K_OUT + 1)]))
     out["D_total"] = float(np.nansum([out[f"D_p{p}"] for p in range(1, MAX_K_OUT + 1)]))
     return out
 
 
-def write_per_pod_stats(per_pod_rows: List[Dict[str, object]], out_dir: Path) -> None:
-    out_root = out_dir / "per_pod_stats"
-    out_root.mkdir(parents=True, exist_ok=True)
-    if not per_pod_rows:
-        return
+# -----------------------------
+# Latency means (vectorized first-batch)
+# -----------------------------
 
-    df = pd.DataFrame(per_pod_rows)
-    for c in PER_POD_COLS:
-        if c not in df.columns:
-            df[c] = np.nan
-
-    df = df[PER_POD_COLS].sort_values(
-        ["job_name", "plugin_config", "seed", "priority", "rs_prefix", "replica_index"],
-        kind="mergesort",
+def read_pod_minimal(pod_csv: Path) -> pd.DataFrame:
+    df = pd.read_csv(
+        pod_csv,
+        usecols=[POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL],
+        dtype={
+            POD_EVENT_COL: "category",
+            POD_NAME_COL: "string",
+            POD_UID_COL: "string",
+        },
+        low_memory=False,
     )
+    df[POD_TIME_COL] = pd.to_numeric(df[POD_TIME_COL], errors="coerce")
+    df[POD_PRIO_COL] = pd.to_numeric(df[POD_PRIO_COL], errors="coerce")
+    return df
 
-    for (job_name, plugin_config), g in df.groupby(["job_name", "plugin_config"], dropna=False):
-        out_name = f"{safe_stem(plugin_config)}__{safe_stem(job_name)}.csv"
-        path = out_root / out_name
-        round_numeric_df(g, exclude=["job_name", "plugin_config", "seed", "rs_prefix"])
-        g.to_csv(path, index=False)
+
+def latency_means_first_batch(pod_csv: Path, eps_s: float) -> Dict[str, float]:
+    """
+    Mean latency (running - apply) for first-batch pods, overall and per priority p1..p4.
+    First-batch: for each rs_prefix, take t0=min(apply), include apply times within eps_s of t0.
+    """
+    try:
+        pod_df = read_pod_minimal(pod_csv)
+    except Exception:
+        return {**{f"latency_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "latency_s_total": float("nan")}
+
+    pod_df = pod_df.dropna(subset=[POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL]).copy()
+    if pod_df.empty:
+        return {**{f"latency_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "latency_s_total": float("nan")}
+
+    apply_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
+    run_df = pod_df[pod_df[POD_EVENT_COL] == "running-time"].copy()
+    if apply_df.empty:
+        return {**{f"latency_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "latency_s_total": float("nan")}
+
+    apply_df = apply_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
+    run_df = run_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
+
+    apply_df["rs_prefix"] = apply_df[POD_NAME_COL].map(rs_prefix_from_pod_name)
+
+    joined = apply_df.merge(
+        run_df[[POD_UID_COL, POD_TIME_COL]].rename(columns={POD_TIME_COL: "running_time_s"}),
+        on=POD_UID_COL,
+        how="left",
+    ).rename(columns={POD_TIME_COL: "apply_time_s"})
+
+    joined["apply_time_s"] = pd.to_numeric(joined["apply_time_s"], errors="coerce")
+    joined["running_time_s"] = pd.to_numeric(joined["running_time_s"], errors="coerce")
+    joined[POD_PRIO_COL] = pd.to_numeric(joined[POD_PRIO_COL], errors="coerce")
+
+    joined = joined.dropna(subset=["rs_prefix", "apply_time_s", POD_PRIO_COL]).copy()
+    if joined.empty:
+        return {**{f"latency_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "latency_s_total": float("nan")}
+
+    joined = joined.sort_values(["rs_prefix", "apply_time_s"], kind="mergesort")
+    t0 = joined.groupby("rs_prefix", sort=False)["apply_time_s"].transform("min")
+    in_batch = (joined["apply_time_s"] - t0) <= float(eps_s)
+    batch = joined.loc[in_batch].copy()
+    if batch.empty:
+        return {**{f"latency_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "latency_s_total": float("nan")}
+
+    lat = batch["running_time_s"] - batch["apply_time_s"]
+    # Only keep finite, non-negative latencies (same semantics as before)
+    lat = lat.where(np.isfinite(lat) & (lat >= 0.0), np.nan)
+    batch["latency_s"] = lat
+
+    out: Dict[str, float] = {}
+    out["latency_s_total"] = float(np.nanmean(batch["latency_s"].to_numpy(dtype=float))) if batch.shape[0] else float("nan")
+
+    pr = batch[POD_PRIO_COL].to_numpy(dtype=float)
+    latv = batch["latency_s"].to_numpy(dtype=float)
+
+    for p in range(1, MAX_K_OUT + 1):
+        mask = pr == float(p)
+        out[f"latency_s_p{p}"] = float(np.nanmean(latv[mask])) if np.any(mask) else float("nan")
+
+    return out
 
 
 # -----------------------------
@@ -802,25 +503,30 @@ def main() -> None:
 
     eps_s = float(args.eps_s)
 
-    print("This may take a while...")
+    print("Sealing ...")
 
-    # 1) series files
-    write_series_files(default_root=default_root, plugin_root=plugin_root, out_dir=out_dir, eps_s=eps_s)
-
-    # Build index for default: (job_name, seed) -> (general_csv, pod_csv)
+    # Index defaults and seeds per job
     default_idx: Dict[Tuple[str, str], Tuple[Path, Path]] = {}
+    default_seeds_by_job: Dict[str, set[str]] = {}
+
     for job_dir in sorted(default_root.iterdir()):
         if not job_dir.is_dir():
             continue
         job_name = parse_job_dir_name(job_dir.name)
         if job_name is None:
             continue
+        seeds = set()
         for seed, seed_dir in iter_seed_dirs(job_dir):
+            seeds.add(seed)
             default_idx[(job_name, seed)] = (seed_dir / GENERAL_STATS_FILENAME, seed_dir / POD_STATS_FILENAME)
+        if seeds:
+            default_seeds_by_job[job_name] = seeds
 
-    # Iterate plugin runs
+    # Caches: default side reused across many plugin configs
+    default_general_cache: Dict[Tuple[str, str], GeneralData] = {}
+    default_latency_cache: Dict[Tuple[str, str], Dict[str, float]] = {}
+
     seed_rows: List[Dict[str, object]] = []
-    per_pod_rows: List[Dict[str, object]] = []
 
     for run_dir in sorted(plugin_root.iterdir()):
         if not run_dir.is_dir():
@@ -830,8 +536,12 @@ def main() -> None:
             continue
         job_name, plugin_config = parsed
 
+        default_seeds = default_seeds_by_job.get(job_name, set())
+        if not default_seeds:
+            print(f"[warn] no default seeds for job={job_name}")
+            continue
+
         plugin_seeds = {seed for seed, _ in iter_seed_dirs(run_dir)}
-        default_seeds = {seed for (jn, seed) in default_idx.keys() if jn == job_name}
         common_seeds = sorted(plugin_seeds & default_seeds)
         if not common_seeds:
             print(f"[warn] no common seeds for job={job_name} plugin={plugin_config}")
@@ -844,24 +554,33 @@ def main() -> None:
             plu_pod = plu_seed_dir / POD_STATS_FILENAME
             plu_opt = plu_seed_dir / OPT_STATS_FILENAME
 
-            # Common horizon H = min(T_end_default, T_end_plugin)
-            t_def_raw = load_time_vector(def_gen)
-            t_plu_raw = load_time_vector(plu_gen)
-            if t_def_raw.size == 0 or t_plu_raw.size == 0:
+            # ---- General data (single read per file); default cached ----
+            key = (job_name, seed)
+            if key in default_general_cache:
+                def_g = default_general_cache[key]
+            else:
+                try:
+                    def_g = read_general_data(def_gen)
+                except Exception:
+                    continue
+                default_general_cache[key] = def_g
+
+            try:
+                plu_g = read_general_data(plu_gen)
+            except Exception:
                 continue
 
-            T_def = float(np.nanmax(t_def_raw) - np.nanmin(t_def_raw))
-            T_plu = float(np.nanmax(t_plu_raw) - np.nanmin(t_plu_raw))
-            if not (math.isfinite(T_def) and math.isfinite(T_plu)) or T_def <= 0.0 or T_plu <= 0.0:
+            if not (math.isfinite(def_g.T_end) and math.isfinite(plu_g.T_end)):
+                continue
+            if def_g.T_end <= 0.0 or plu_g.T_end <= 0.0:
                 continue
 
-            H = float(min(T_def, T_plu))
+            H = float(min(def_g.T_end, plu_g.T_end))
             if H <= 0.0:
                 continue
 
-            # Horizon metrics (per scheduler)
-            def_m = compute_seed_horizon_metrics(def_gen, H)
-            plu_m = compute_seed_horizon_metrics(plu_gen, H)
+            def_m = compute_horizon_metrics(def_g, H)
+            plu_m = compute_horizon_metrics(plu_g, H)
 
             d_cpu = float(plu_m["cpu_run_util_mean"]) - float(def_m["cpu_run_util_mean"])
             d_mem = float(plu_m["mem_run_util_mean"]) - float(def_m["mem_run_util_mean"])
@@ -869,36 +588,25 @@ def main() -> None:
 
             dR = {p: float(plu_m[f"R_p{p}_mean"]) - float(def_m[f"R_p{p}_mean"]) for p in range(1, MAX_K_OUT + 1)}
             dD = {p: float(plu_m[f"D_p{p}"]) - float(def_m[f"D_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
-            # Use nansum so jobs with fewer tiers (e.g., kmax=1) don't turn totals into NaN
             dR_total = float(np.nansum(list(dR.values())))
             dD_total = float(np.nansum(list(dD.values())))
 
-            # Latency maps + deltas + per_pod rows
-            try:
-                def_pod_df = read_pod_df(def_pod)
-                plu_pod_df = read_pod_df(plu_pod)
-                def_entries = first_batch_entries_map(def_pod_df, eps_s=eps_s)
-                plu_entries = first_batch_entries_map(plu_pod_df, eps_s=eps_s)
-                def_map = latency_map_from_entries(def_entries)
-                plu_map = latency_map_from_entries(plu_entries)
-            except Exception:
-                def_entries, plu_entries = {}, {}
-                def_map, plu_map = {}, {}
+            # ---- Latency means (default cached) ----
+            if key in default_latency_cache:
+                def_lat = default_latency_cache[key]
+            else:
+                def_lat = latency_means_first_batch(def_pod, eps_s=eps_s)
+                default_latency_cache[key] = def_lat
 
-            # NEW: delta is based on mean latency of each scheduler (no intersection)
-            lat_delta = latency_deltas_from_maps(def_map, plu_map)
+            plu_lat = latency_means_first_batch(plu_pod, eps_s=eps_s)
 
-            per_pod_rows.extend(
-                per_pod_rows_from_entry_maps(
-                    job_name=job_name,
-                    plugin_config=plugin_config,
-                    seed=seed,
-                    def_entries=def_entries,
-                    plu_entries=plu_entries,
-                )
-            )
+            delta_lat_total = float(plu_lat["latency_s_total"]) - float(def_lat["latency_s_total"])
+            delta_lat_p = {
+                p: float(plu_lat[f"latency_s_p{p}"]) - float(def_lat[f"latency_s_p{p}"])
+                for p in range(1, MAX_K_OUT + 1)
+            }
 
-            # Optimization totals (plugin only)
+            # ---- Optimization totals (plugin only) ----
             opt = read_opt_totals(plu_opt)
 
             seed_rows.append(
@@ -920,11 +628,11 @@ def main() -> None:
                     "delta_D_p3": dD[3],
                     "delta_D_p4": dD[4],
                     "delta_D_total": dD_total,
-                    "delta_latency_s_p1": float(lat_delta["delta_latency_s_p1"]),
-                    "delta_latency_s_p2": float(lat_delta["delta_latency_s_p2"]),
-                    "delta_latency_s_p3": float(lat_delta["delta_latency_s_p3"]),
-                    "delta_latency_s_p4": float(lat_delta["delta_latency_s_p4"]),
-                    "delta_latency_s_total": float(lat_delta["delta_latency_s_total"]),
+                    "delta_latency_s_p1": delta_lat_p[1],
+                    "delta_latency_s_p2": delta_lat_p[2],
+                    "delta_latency_s_p3": delta_lat_p[3],
+                    "delta_latency_s_p4": delta_lat_p[4],
+                    "delta_latency_s_total": delta_lat_total,
                     "solver_attempts": float(opt["solver_attempts"]),
                     "solver_optimal": float(opt["solver_optimal"]),
                     "solver_feasible": float(opt["solver_feasible"]),
@@ -938,7 +646,6 @@ def main() -> None:
     df_seed = pd.DataFrame(seed_rows)
     if df_seed.empty:
         pd.DataFrame(columns=PAIRED_COLS).to_csv(out_dir / "results_paired.csv", index=False)
-        write_per_pod_stats(per_pod_rows, out_dir)
         print(f"Wrote outputs to: {out_dir}")
         return
 
@@ -982,9 +689,6 @@ def main() -> None:
 
     round_numeric_df(agg, exclude=["job_name", "plugin_config", "n_seed"])
     agg.to_csv(out_dir / "results_paired.csv", index=False)
-
-    # per-pod stats
-    write_per_pod_stats(per_pod_rows, out_dir)
 
     print(f"Wrote outputs to: {out_dir}")
 
