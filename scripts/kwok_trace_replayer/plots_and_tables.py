@@ -1,1510 +1,1070 @@
+# scripts/kwok_trace_replayer/plots_and_tables.py
 #!/usr/bin/env python3
-"""scripts/kwok_trace_replayer/plots_and_tables.py
+"""
+scripts/kwok_trace_replayer/tables_from_sealed.py
 
-python -m scripts.kwok_trace_replayer.plots_and_tables --in-dir analysis/kwok_trace_replayer/sealed --out-dir analysis/kwok_trace_replayer/plots_and_tables
-
-Plot + LaTeX table generation from sealed outputs produced by seal_results.py.
+Generate tables (plaintext + LaTeX) and two plots from sealed outputs.
 
 Inputs (under --in-dir):
-  - results_paired.csv   (USED for LaTeX tables; aggregated across seeds)
-  - series/default/<job_name>.csv
-  - series/plugin/<plugin_config>__<job_name>.csv
-
-Each series CSV contains:
-  scheduler, job_name, n_seed, time_s, <metric>_mean columns...
+  - results_paired.csv   (produced by seal_results.py)
 
 Outputs (under --out-dir):
-  - plots/<job_name>/<metric>.png
-  - plots/<job_name>/<metric>.pdf
-  - tables/<metric>.txt         (LaTeX table for each metric)
-  - tables/big_deltas.txt       (big table: util + latency + running pod-seconds + solver attempts)
-  - tables/latency_and_solver.txt (single table: latency(total) + solver attempts)
+  Tables (BOTH):
+    - <stem>.txt   (plaintext / easy to read)
+    - <stem>.tex   (LaTeX)
 
-Behavior changes:
-  - Plots are created only for:
-      * cpu_run_util_mean, mem_run_util_mean, util_eff_run_mean
-      * latency_s_total_mean
-      * solver_attempts_total_mean
-    (and they are filtered further by CLI if provided).
-  - Plots are saved WITHOUT std/uncertainty bands (lines only).
-  - Only plugin configs with default preemption enabled (defpreempt=1) are plotted,
-    but row/legend labels do NOT mention defpreempt.
-  - Plots are NOT saved for:
-      * unsched_p1_mean
-      * cpu_req_util_mean
-      * mem_req_util_mean
-    and we do not save per-priority latency plots (we use total only).
+  Plots (under --out-dir/plots by default):
+    - delta_u_eff_run.<png|pdf>      (Δu_eff in percentage points)
+    - delta_latency_total.<png|pdf>  (Δlatency_total in seconds)
+
+Notes on plots:
+  - x axis: arrival rates (μ_A = 4s, 8s, 16s)
+  - y axis centered around 0 (symmetric limits)
+  - for each series and each arrival: two dots (N=16 and N=32) connected with dashed line
+  - by default plots use defpreempt=1 only (main configuration)
+  - if --plot-include-defpreempt is set, include BOTH defpreempt=1 and defpreempt=0 (more dots)
+
+Example:
+  python -m scripts.kwok_trace_replayer.tables_from_sealed \
+    --in-dir  analysis/kwok_trace_replayer/sealed \
+    --out-dir analysis/kwok_trace_replayer/plots_and_tables \
+    --float-decimals 1 \
+    --plot-kmax 1
 """
+
+from __future__ import annotations
 
 import argparse
 import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+
 import matplotlib.pyplot as plt
 
-# -----------------------------
-# Constants / formatting
-# -----------------------------
-META_COLS = {"scheduler", "job_name", "n_seed", "time_s"}
-DEFAULT_TABLE_DECIMALS = 1
-
-JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s$")
-
-LATEX_SPECIALS = {
-    "\\": r"\textbackslash{}",
-    "&": r"\&",
-    "%": r"\%",
-    "$": r"\$",
-    "#": r"\#",
-    "_": r"\_",
-    "{": r"\{",
-    "}": r"\}",
-    "~": r"\textasciitilde{}",
-    "^": r"\textasciicircum{}",
-}
-
-# Only these series metrics are saved by default.
-# (CLI metric filters can still reduce further, but we won't add more.)
-DEFAULT_PLOT_METRICS = [
-    "cpu_run_util_mean",
-    "mem_run_util_mean",
-    "util_eff_run_mean",
-    "running_total_mean",
-    "deletions_cum_total_mean",
-    "latency_s_total_mean",
-]
-
-# Explicitly never save these, even if present / requested.
-NEVER_PLOT_METRICS = {
-    "unsched_p1_mean",
-    "cpu_req_util_mean",
-    "mem_req_util_mean",
-}
-
-# Only show configs with default preemption enabled in plots (defpreempt=1).
-DEFPREEMPT_ONLY_REGEX = re.compile(r"(?:^|_)defpreempt=1(?:_|$)")
 
 # -----------------------------
 # CLI
 # -----------------------------
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Plot + LaTeX tables from sealed results.")
-    p.add_argument(
-        "--in-dir",
-        required=True,
-        help="Directory produced by seal_results.py (contains results_paired.csv and series/).",
-    )
-    p.add_argument(
-        "--out-dir",
-        default=None,
-        help="Output directory (default: <in-dir>/report_out).",
-    )
+    p = argparse.ArgumentParser(description="Generate plaintext+LaTeX tables and two plots from sealed results.")
+    p.add_argument("--in-dir", required=True, help="Sealed output dir (contains results_paired.csv).")
+    p.add_argument("--out-dir", required=True, help="Output dir (tables + plots subdir).")
 
-    # Scheduler filtering
-    p.add_argument(
-        "--only-schedulers",
-        default="",
-        help="Comma-separated scheduler keys to include in plots. Empty = all discovered.",
-    )
-    p.add_argument(
-        "--include-scheduler-regex",
-        default="",
-        help="Regex: keep schedulers matching this (applied after --only-schedulers).",
-    )
-    p.add_argument(
-        "--exclude-scheduler-regex",
-        default="",
-        help="Regex: drop schedulers matching this (applied last).",
-    )
+    p.add_argument("--nodes", default="16,32", help="Comma-separated nodes values to include (default: 16,32).")
+    p.add_argument("--arrivals", default="4,8,16", help="Comma-separated arrivals (seconds) to include (default: 4,8,16).")
+    p.add_argument("--float-decimals", type=int, default=1, help="Decimals for float tables (default: 1).")
 
-    # Metric filtering
+    # plots
+    p.add_argument("--plots-dir", default=None, help="Plots output dir (default: <out-dir>/plots).")
+    p.add_argument("--plot-kmax", type=int, default=1, help="Which kmax to plot (default: 1).")
     p.add_argument(
-        "--only-metrics",
-        default="",
-        help="Comma-separated metric columns to plot from series files. Empty = defaults used by this script.",
-    )
-    p.add_argument(
-        "--include-metric-regex",
-        default="",
-        help="Regex: keep metrics matching this (applied after --only-metrics).",
-    )
-    p.add_argument(
-        "--exclude-metric-regex",
-        default="",
-        help="Regex: drop metrics matching this (applied last).",
-    )
-
-    # Plot style
-    p.add_argument("--fig-w", type=float, default=8.0, help="Figure width in inches (default: 8).")
-    p.add_argument("--fig-h", type=float, default=4.5, help="Figure height in inches (default: 4.5).")
-    p.add_argument("--dpi", type=int, default=200, help="PNG DPI (default: 200).")
-    # Smoothing
-    p.add_argument(
-        "--smooth-s",
-        type=float,
-        default=100.0,
-        help="Rolling mean window in seconds (0 = no smoothing). Applied per-series after seed-aggregation.",
-    )
-    
-    p.add_argument(
-        "--lat-hist-bin-s",
-        type=float,
-        default=1.0,
-        help="Latency histogram bin width in seconds (default: 1.0).",
-    )
-    p.add_argument(
-        "--lat-hist-max-s",
-        type=float,
-        default=0.0,
-        help="Max latency shown in histogram (0 = auto).",
-    )
-    p.add_argument(
-        "--lat-hist-density",
+        "--plot-include-defpreempt",
         action="store_true",
-        help="Normalize latency histogram to probability density instead of counts.",
+        help="If set, include BOTH defpreempt=1 and defpreempt=0 in plots. Default: defpreempt=1 only.",
     )
-
-    # Tables
-    p.add_argument(
-        "--table-decimals",
-        type=int,
-        default=DEFAULT_TABLE_DECIMALS,
-        help="Decimals for LaTeX table cell formatting (default: 1).",
-    )
-    p.add_argument("--no-tables", action="store_true", help="Skip LaTeX table generation.")
-    p.add_argument("--no-plots", action="store_true", help="Skip plot generation.")
     return p.parse_args()
 
+
 # -----------------------------
-# Helpers: parsing / formatting
+# Parsing helpers
 # -----------------------------
 
+JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
+
+def parse_job(job_name: str) -> Optional[Tuple[int, int, float]]:
+    m = JOB_RE.fullmatch(str(job_name).strip())
+    if not m:
+        return None
+    n = int(m.group(1))
+    k = int(m.group(2))
+    a = float(m.group(3))
+    return n, k, a
+
+
+def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
+    """
+    plugin_config format (from seal_results.py):
+      mode=<mode>_blocking=<0/1>_defpreempt=<0/1>
+    """
+    kv: Dict[str, str] = {}
+    for tok in str(plugin_config).split("_"):
+        if "=" in tok:
+            k, v = tok.split("=", 1)
+            kv[k.strip().lower()] = v.strip()
+    return kv
+
+def canonical_mode(mode: str) -> str:
+    s = str(mode).strip().lower()
+
+    # scheduling-failure variants
+    if s in {
+        "scheduling_failure",
+        "scheduling-failure",
+        "schedulingfailure",
+        "sched-failure",
+        "schedfailure",
+    }:
+        return "scheduling-failure"
+
+    # periodic variants: periodic8s, periodic-8s, periodic8s, etc.
+    m = re.fullmatch(r"periodic-?([0-9.]+)s", s)
+    if m:
+        return f"periodic{m.group(1)}s"
+
+    # stable-queue variants: stable-queue2s, stablequeue2s, stable-queue-2s, stablequeue-2s, ...
+    m = re.fullmatch(r"(?:stable-queue|stablequeue)-?([0-9.]+)s", s)
+    if m:
+        return f"stable-queue-{m.group(1)}s"
+
+    return s
+
+
+
+# Explicit base order + base labels (used in BOTH tables + plots)
+_MODE_BLOCK_ORDER: List[Tuple[str, Optional[int], str]] = [
+    ("scheduling-failure", None, "Scheduling-failure"),
+    ("periodic8s", 1, "Periodic-8s (blk)"),
+    ("periodic8s", 0, "Periodic-8s (non-blk)"),
+    ("stable-queue-2s", 1, "Stable-queue-2s (blk)"),
+    ("stable-queue-2s", 0, "Stable-queue-2s (non-blk)"),
+]
+_MODE_BLOCK_RANK: Dict[Tuple[str, Optional[int]], int] = {
+    (m, b): i for i, (m, b, _lbl) in enumerate(_MODE_BLOCK_ORDER)
+}
+_MODE_BLOCK_LABEL: Dict[Tuple[str, Optional[int]], str] = {
+    (m, b): lbl for (m, b, lbl) in _MODE_BLOCK_ORDER
+}
+
+
+def pretty_mode(mode: str) -> str:
+    s = canonical_mode(mode)
+
+    if s == "scheduling-failure":
+        return "Scheduling-failure"
+
+    m = re.fullmatch(r"periodic([0-9.]+)s", s)
+    if m:
+        return f"Periodic-{m.group(1)}s"
+
+    m = re.fullmatch(r"stable-queue-?([0-9.]+)s", s)
+    if m:
+        # canonical_mode() already forces "stable-queue-<x>s"
+        return f"Stable-queue-{m.group(1)}s"
+
+    # fallback: keep readable
+    if s:
+        return s[:1].upper() + s[1:]
+    return "Unknown"
 
 
 
 @dataclass(frozen=True)
-class JobKey:
-    job_name: str
-    n_nodes: int
-    k_max: int
-    arrival_s: float
+class RowKey:
+    mode: str
+    blocking: int
+    defpreempt: int
+
+    @staticmethod
+    def from_plugin_config(plugin_config: str) -> "RowKey":
+        kv = parse_plugin_config(plugin_config)
+        mode = canonical_mode(kv.get("mode", "unknown"))
+
+        # scheduling-failure has no meaningful blocking label; normalize to 0
+        if mode == "scheduling-failure":
+            blocking = 0
+        else:
+            blocking = 1 if str(kv.get("blocking", "0")).lower() in {"1", "true", "yes"} else 0
+
+        try:
+            defpreempt = int(str(kv.get("defpreempt", "0")))
+        except Exception:
+            defpreempt = 0
+
+        return RowKey(mode=mode, blocking=blocking, defpreempt=defpreempt)
+
+    def _base_label(self) -> str:
+        if self.mode == "scheduling-failure":
+            return "Scheduling-failure"
+
+        lbl = _MODE_BLOCK_LABEL.get((self.mode, self.blocking))
+        if lbl is not None:
+            return lbl
+
+        # fallback for other modes
+        base = pretty_mode(self.mode)
+        blk = "blk" if self.blocking == 1 else "non-blk"
+        return f"{base} ({blk})"
+
+    def label(self, include_defpreempt: bool = True) -> str:
+        base = self._base_label()
+
+        # User requested exact label for scheduling-failure (no suffix)
+        if self.mode == "scheduling-failure":
+            return base
+
+        # New convention:
+        #   defpreempt=1  => no suffix
+        #   defpreempt=0  => ", w/o defpreempt"
+        if include_defpreempt and self.defpreempt == 0:
+            if base.endswith(")"):
+                return base[:-1] + ", w/o defpreempt)"
+            return base + " (w/o defpreempt)"
+        return base
+
+    def sort_key(self) -> Tuple[int, int, str]:
+        # Primary: explicit base order
+        base_rank = _MODE_BLOCK_RANK.get((self.mode, self.blocking))
+        if base_rank is None:
+            base_rank = _MODE_BLOCK_RANK.get((self.mode, None))
+
+        # Secondary: defpreempt=1 before defpreempt=0
+        def_rank = 0 if self.defpreempt == 1 else 1
+
+        # Fallback modes go after the known ones, but stay deterministic
+        if base_rank is None:
+            # reuse your old grouping idea, but push after the fixed list
+            m = self.mode
+            if m.startswith("periodic"):
+                group = 10
+                num = float(re.sub(r"[^0-9.]", "", m) or "0")
+            elif m.startswith("stable-queue"):
+                group = 11
+                num = float(re.sub(r"[^0-9.]", "", m) or "0")
+            else:
+                group = 99
+                num = 0.0
+            # compress into an int-ish rank
+            base_rank = 1000 + group * 100 + int(round(num * 10))
+
+        return (base_rank, def_rank, self.mode)
 
 
-def latex_escape_text(s: str) -> str:
-    """Escape LaTeX special chars for TEXT context (caption, plain text)."""
-    out = []
-    for ch in str(s):
-        out.append(LATEX_SPECIALS.get(ch, ch))
-    return "".join(out)
 
+# -----------------------------
+# Formatting
+# -----------------------------
 
-def parse_job_name(job_name: str) -> JobKey:
-    m = JOB_RE.match(job_name.strip())
-    if not m:
-        raise ValueError(f"Unrecognized job_name format: {job_name}")
-    n = int(m.group(1))
-    k = int(m.group(2))
-    a = float(m.group(3))
-    return JobKey(job_name=job_name, n_nodes=n, k_max=k, arrival_s=a)
-
-
-def fmt_arrival(a: float) -> str:
-    if abs(a - round(a)) < 1e-9:
-        return str(int(round(a)))
-    return f"{a:g}"
-
-
-def fmt_signed(x: object, *, decimals: int) -> str:
-    """Signed numeric for LaTeX cells. NaN -> \\text{--}."""
+def is_finite(x: object) -> bool:
     try:
-        v = float(x)
+        return math.isfinite(float(x))
     except Exception:
-        return r"\text{--}"
-    if not math.isfinite(v):
-        return r"\text{--}"
-    fmt = f"{{:+.{int(decimals)}f}}"
-    s = fmt.format(v)
-    if s.startswith("-0") and abs(v) < 0.5 * (10 ** (-decimals)):
-        s = s.replace("-", "+", 1)
-    return s
-
-
-def fmt_signed_scaled(x: object, *, decimals: int, scale: float) -> str:
-    """Signed numeric for LaTeX cells, after scaling. NaN -> \\text{--}."""
-    try:
-        v = float(x) * float(scale)
-    except Exception:
-        return r"\text{--}"
-    if not math.isfinite(v):
-        return r"\text{--}"
-    fmt = f"{{:+.{int(decimals)}f}}"
-    s = fmt.format(v)
-    if s.startswith("-0") and abs(v) < 0.5 * (10 ** (-decimals)):
-        s = s.replace("-", "+", 1)
-    return s
-
-
-def sanitize_filename(s: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._=-]+", "_", s)
-
-
-def scheduler_row_label_hide_defpreempt(scheduler_key: str) -> str:
-    """Compact legend/row label; NEVER mentions defpreempt."""
-    if scheduler_key == "default":
-        return "Default"
-
-    kv: Dict[str, str] = {}
-    for part in str(scheduler_key).split("_"):
-        if "=" in part:
-            k, v = part.split("=", 1)
-            kv[k.strip().lower()] = v.strip()
-
-    mode_raw = kv.get("mode", str(scheduler_key))
-    blocking = kv.get("blocking", "0") in {"1", "true", "yes"}
-
-    mode_title = "Unknown"
-    mode_param = ""
-    mr = mode_raw.lower()
-
-    if mr.startswith("periodic"):
-        mode_title = "Periodic"
-        tail = mr[len("periodic") :]
-        if tail:
-            mode_param = tail
-    elif mr.startswith("stable-queue") or mr.startswith("stablequeue"):
-        mode_title = "Stable-queue"
-        tail = mr.replace("stable-queue", "").replace("stablequeue", "")
-        if tail:
-            mode_param = tail
-    elif mr.startswith("scheduling-failure") or mr.startswith("schedulingfailure"):
-        mode_title = "Scheduling-failure"
-    else:
-        mode_title = mode_raw
-
-    enf = "blk" if blocking else "non-blk"
-    if mode_param:
-        return f"{mode_title}-{mode_param} ({enf})"
-    return f"{mode_title} ({enf})"
-
-
-def parse_scheduler_kv(scheduler_key: str) -> Dict[str, str]:
-    kv: Dict[str, str] = {}
-    for part in str(scheduler_key).split("_"):
-        if "=" in part:
-            k, v = part.split("=", 1)
-            kv[k.strip().lower()] = v.strip()
-    return kv
-
-
-def is_target_plugin_mode(scheduler_key: str) -> bool:
-    if scheduler_key == "default":
         return False
 
-    kv = parse_scheduler_kv(scheduler_key)
-    mode = kv.get("mode", "").lower()
-    mode_norm = mode.replace("_", "-")
 
-    is_periodic = mode_norm.startswith("periodic")
-    is_stableq = ("stable" in mode_norm) and ("queue" in mode_norm)
-    if not (is_periodic or is_stableq):
-        return False
-
-    # Periodic: only keep 8s
-    if is_periodic:
-        return "8s" in mode_norm
-
-    # Stable-queue: keep regardless of interval (e.g. stablequeue2s)
-    return True
+def _normalize_neg_zero(v: float) -> float:
+    return 0.0 if abs(v) < 0.5e-12 else v
 
 
-# -----------------------------
-# Series scanning + filtering
-# -----------------------------
-def iter_series_files(series_root: Path) -> Iterable[Tuple[str, str, Path]]:
-    """
-    Yield (scheduler, job_name, path) from:
-      - series/default/<job_name>.csv              (scheduler="default")
-      - series/plugin/<scheduler>__<job_name>.csv  (scheduler parsed from filename)
-    """
-    if not series_root.exists():
-        return
-
-    ddir = series_root / "default"
-    if ddir.exists():
-        for p in sorted(ddir.glob("*.csv")):
-            job_name = p.stem
-            yield "default", job_name, p
-
-    pdir = series_root / "plugin"
-    if pdir.exists():
-        for p in sorted(pdir.glob("*.csv")):
-            stem = p.stem
-            if "__" not in stem:
-                continue
-            scheduler, job_name = stem.split("__", 1)
-            yield scheduler, job_name, p
+def fmt_signed(x: object, decimals: int, nan_str: str) -> str:
+    if not is_finite(x):
+        return nan_str
+    v = _normalize_neg_zero(float(x))
+    return f"{v:+.{decimals}f}"
 
 
-def filter_values(
-    values: Sequence[str],
-    *,
-    only_csv: str,
-    include_regex: str,
-    exclude_regex: str,
-) -> List[str]:
-    out = list(values)
-
-    if only_csv.strip():
-        allowed = {x.strip() for x in only_csv.split(",") if x.strip()}
-        out = [x for x in out if x in allowed]
-
-    if include_regex.strip():
-        rx = re.compile(include_regex)
-        out = [x for x in out if rx.search(x)]
-
-    if exclude_regex.strip():
-        rx = re.compile(exclude_regex)
-        out = [x for x in out if not rx.search(x)]
-
-    return out
+def fmt_count(x: object, nan_str: str) -> str:
+    if not is_finite(x):
+        return nan_str
+    return f"{int(round(float(x))):+d}"
 
 
-def discover_jobs_and_schedulers(series_root: Path) -> Tuple[List[str], List[str], Dict[Tuple[str, str], Path]]:
-    """Return (jobs, schedulers, (scheduler,job)->path)."""
-    paths: Dict[Tuple[str, str], Path] = {}
-    jobs = set()
-    scheds = set()
-    for scheduler, job_name, p in iter_series_files(series_root):
-        paths[(scheduler, job_name)] = p
-        jobs.add(job_name)
-        scheds.add(scheduler)
-    return sorted(jobs), sorted(scheds), paths
-
-
-def _keep_scheduler_for_plots(s: str) -> bool:
-    """Plot only: default + plugin configs with defpreempt=1."""
-    if s == "default":
-        return True
-    return bool(DEFPREEMPT_ONLY_REGEX.search(str(s)))
+def fmt_vec(values: Sequence[object], decimals: int, nan_str: str, latex: bool) -> str:
+    if any(not is_finite(v) for v in values):
+        return nan_str
+    parts = [fmt_signed(v, decimals=decimals, nan_str=nan_str) for v in values]
+    inside = ",".join(parts)
+    if latex:
+        return r"{\scriptsize$\langle" + inside + r"\rangle$}"
+    return "<" + inside + ">"
 
 
 # -----------------------------
-# Plotting
+# Data access
 # -----------------------------
-def load_series_csv(path: Path) -> pd.DataFrame:
+
+EXPECTED_COLS = [
+    "job_name",
+    "plugin_config",
+    "delta_util_eff_run_mean",
+    "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean",
+    "delta_R_total_mean",
+    "delta_D_p1_mean", "delta_D_p2_mean", "delta_D_p3_mean", "delta_D_p4_mean",
+    "delta_D_total_mean",
+    "delta_latency_s_p1_mean", "delta_latency_s_p2_mean", "delta_latency_s_p3_mean", "delta_latency_s_p4_mean",
+    "delta_latency_s_total_mean",
+    "solver_attempts_mean",
+    "plan_activated_mean",
+]
+
+
+def load_results(in_dir: Path) -> pd.DataFrame:
+    path = in_dir / "results_paired.csv"
+    if not path.exists():
+        raise SystemExit(f"Not found: {path}")
     df = pd.read_csv(path)
-    if "time_s" not in df.columns:
-        raise ValueError(f"{path} missing time_s column")
-    df["time_s"] = pd.to_numeric(df["time_s"], errors="coerce")
-    df = df.dropna(subset=["time_s"])
 
-    # numeric coercion for metric cols
-    value_cols = [c for c in df.columns if c not in META_COLS]
-    for c in value_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+    missing = [c for c in EXPECTED_COLS if c not in df.columns]
+    if missing:
+        raise SystemExit(f"{path} missing columns: {', '.join(missing)}")
 
-    # collapse multiple seeds -> mean series per time_s
-    if "n_seed" in df.columns:
-        df = df.groupby("time_s", as_index=False)[value_cols].mean(numeric_only=True)
+    parsed = df["job_name"].map(parse_job)
+    if parsed.isna().any():
+        bad = df.loc[parsed.isna(), "job_name"].head(5).tolist()
+        raise SystemExit(f"Could not parse some job_name values (examples): {bad}")
 
-    df = df.sort_values("time_s")
+    df["nodes"] = parsed.map(lambda t: t[0] if t is not None else np.nan)
+    df["kmax"] = parsed.map(lambda t: t[1] if t is not None else np.nan)
+    df["arrival_s"] = parsed.map(lambda t: t[2] if t is not None else np.nan)
+
+    rks = df["plugin_config"].map(RowKey.from_plugin_config)
+    df["mode"] = rks.map(lambda r: r.mode)
+    df["blocking"] = rks.map(lambda r: r.blocking)
+    df["defpreempt"] = rks.map(lambda r: r.defpreempt)
+
     return df
 
-def _is_cumulative_metric(metric: str) -> bool:
-    m = metric.lower()
-    return ("_cum_" in m) or m.startswith("cum_") or m.endswith("_cum") or m.startswith("deletions_cum")
 
-def smooth_series(df: pd.DataFrame, metric: str, window_s: float) -> np.ndarray:
-    """Time-based rolling mean. For cumulative metrics, smooth increments then re-cumsum."""
-    if window_s <= 0:
-        return pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float)
-
-    t = pd.to_timedelta(df["time_s"].to_numpy(dtype=float), unit="s")
-    s = pd.Series(pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float), index=t)
-
-    win = f"{float(window_s)}s"
-    if _is_cumulative_metric(metric):
-        inc = s.diff().fillna(0.0)
-        inc_sm = inc.rolling(win, min_periods=1).mean()
-        return inc_sm.cumsum().to_numpy(dtype=float)
-    else:
-        return s.rolling(win, min_periods=1).mean().to_numpy(dtype=float)
-
-def interp_on_grid(t_src: np.ndarray, y_src: np.ndarray, t_grid: np.ndarray) -> np.ndarray:
-    """Interpolate y_src(t_src) onto t_grid; outside range -> NaN."""
-    m = np.isfinite(t_src) & np.isfinite(y_src)
-    t_src = t_src[m]
-    y_src = y_src[m]
-    if t_src.size < 2:
-        return np.full_like(t_grid, np.nan, dtype=float)
-
-    y_i = np.interp(t_grid, t_src, y_src)
-    in_range = (t_grid >= t_src.min()) & (t_grid <= t_src.max())
-    return np.where(in_range, y_i, np.nan)
-
-
-def delta_series_vs_default(default_df: pd.DataFrame, plugin_df: pd.DataFrame, metric: str) -> Tuple[np.ndarray, np.ndarray]:
-    """Return (t, plugin(t)-default(t)) on default time grid."""
-    t0 = default_df["time_s"].to_numpy(dtype=float)
-    y0 = pd.to_numeric(default_df[metric], errors="coerce").to_numpy(dtype=float)
-
-    t1 = plugin_df["time_s"].to_numpy(dtype=float)
-    y1 = pd.to_numeric(plugin_df[metric], errors="coerce").to_numpy(dtype=float)
-
-    y1i = interp_on_grid(t1, y1, t0)
-    return t0, (y1i - y0)
-
-
-def cumtrapz_from_delta(t: np.ndarray, delta: np.ndarray) -> np.ndarray:
-    """Cumulative integral of delta over time using trapezoidal rule."""
-    out = np.zeros_like(delta, dtype=float)
-    for i in range(1, len(t)):
-        dt = float(t[i] - t[i - 1])
-        if not (math.isfinite(dt) and dt >= 0):
-            dt = 0.0
-        a = delta[i - 1]
-        b = delta[i]
-        if not (math.isfinite(a) and math.isfinite(b)):
-            out[i] = out[i - 1]
-        else:
-            out[i] = out[i - 1] + 0.5 * (a + b) * dt
-    return out
-
-
-def _select_plot_metrics(
+def subset_value(
+    df: pd.DataFrame,
     *,
-    series_frames: Dict[str, pd.DataFrame],
-    only_metrics_csv: str,
-    include_metric_regex: str,
-    exclude_metric_regex: str,
-) -> List[str]:
-    # Base set: defaults
-    metrics = list(DEFAULT_PLOT_METRICS)
-
-    # Optional override via CLI
-    if only_metrics_csv.strip():
-        metrics = [x.strip() for x in only_metrics_csv.split(",") if x.strip()]
-
-    # Apply include/exclude
-    metrics = filter_values(metrics, only_csv="", include_regex=include_metric_regex, exclude_regex=exclude_metric_regex)
-
-    # Enforce never-plot list and "total only" rules:
-    out = []
-    for m in metrics:
-        if m in NEVER_PLOT_METRICS:
-            continue
-        # never plot per-priority latency; enforce total only
-        if m.startswith("latency_s_p") and not m.endswith("_total_mean") and m != "latency_s_total_mean":
-            continue
-        out.append(m)
-
-    # Also only keep metrics that exist in at least one DF
-    existing = set()
-    for df in series_frames.values():
-        existing.update(df.columns.tolist())
-    out = [m for m in out if m in existing]
-
-    return out
+    nodes: int,
+    kmax: int,
+    arrival_s: float,
+    mode: str,
+    blocking: int,
+    defpreempt: int,
+    col: str,
+) -> float:
+    g = df[
+        (df["nodes"].astype(int) == int(nodes)) &
+        (df["kmax"].astype(int) == int(kmax)) &
+        (df["arrival_s"].astype(float) == float(arrival_s)) &
+        (df["mode"].astype(str) == str(mode)) &
+        (df["blocking"].astype(int) == int(blocking)) &
+        (df["defpreempt"].astype(int) == int(defpreempt))
+    ]
+    if g.empty:
+        return float("nan")
+    return float(g.iloc[0][col])
 
 
-def series_on_time(df: pd.DataFrame, metric: str) -> Tuple[np.ndarray, np.ndarray]:
-    t = df["time_s"].to_numpy(dtype=float)
-    y = pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float)
-    return t, y
+# -----------------------------
+# Table writers
+# -----------------------------
 
-def plot_job(
+RowLabelFn = Callable[[RowKey], str]
+
+def latex_table(
     *,
-    job_name: str,
-    scheduler_paths: Dict[str, Path],
+    out_path: Path,
+    title_math: str,
+    subtitle: str,
+    caption: str,
+    label: str,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    rows_by_kmax: Dict[int, List[RowKey]],
+    cell_fn,  # (kmax, rowkey, nodes, arrival) -> str
+    row_label_fn: Optional[RowLabelFn] = None,
+) -> None:
+    assert len(nodes_order) == 2 and len(arrivals_order) == 3, "Assumes 2 nodes x 3 arrivals."
+    row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
+
+    def mu(a: float) -> str:
+        a_i = int(a) if abs(a - round(a)) < 1e-9 else a
+        return f"$\\mu_A{{=}}{a_i}$s"
+
+    lines: List[str] = []
+    lines += [
+        r"\begin{table}[t]",
+        r"\centering",
+        r"\small",
+        r"\setlength{\tabcolsep}{3pt}",
+        r"\renewcommand{\arraystretch}{0.95}",
+        "",
+        r"\begin{adjustbox}{max width=\linewidth}",
+        "",
+        r"\begin{tabular}{l c c c c c c}",
+        r"\toprule",
+        rf"\multicolumn{{7}}{{l}}{{$\mathbf{{{title_math}}}$ {subtitle}}} \\",
+        r"\addlinespace[0.2em]",
+        rf"& \multicolumn{{3}}{{c}}{{$N={nodes_order[0]}$}} & \multicolumn{{3}}{{c}}{{$N={nodes_order[1]}$}} \\",
+        r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
+        rf"& {mu(arrivals_order[0])} & {mu(arrivals_order[1])} & {mu(arrivals_order[2])} & {mu(arrivals_order[0])} & {mu(arrivals_order[1])} & {mu(arrivals_order[2])} \\",
+        r"\midrule",
+    ]
+
+    for kmax in sorted(rows_by_kmax.keys()):
+        k_title = r"$k_{\max}=1$ (no priorities)" if kmax == 1 else rf"$k_{{\max}}={kmax}$ (priorities enabled)"
+        lines += [
+            rf"\multicolumn{{7}}{{l}}{{{k_title}}} \\",
+            r"\midrule",
+        ]
+        for rk in rows_by_kmax[kmax]:
+            row_label = row_label_fn(rk)
+            cells: List[str] = []
+            for n in nodes_order:
+                for a in arrivals_order:
+                    cells.append(cell_fn(kmax, rk, n, a))
+            lines.append(row_label + " & " + " & ".join(cells) + r" \\")
+        lines.append(r"\midrule")
+
+    if lines and lines[-1] == r"\midrule":
+        lines.pop()
+
+    lines += [
+        r"\bottomrule",
+        r"\end{tabular}",
+        "",
+        r"\end{adjustbox}",
+        rf"\caption{{{caption}}}",
+        rf"\label{{{label}}}",
+        r"\end{table}",
+        "",
+    ]
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def ascii_table(
+    *,
+    out_path: Path,
+    title: str,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    rows_by_kmax: Dict[int, List[RowKey]],
+    cell_fn,  # (kmax, rowkey, nodes, arrival) -> str
+    row_w: int = 46,
+    col_w: int = 22,
+    row_label_fn: Optional[RowLabelFn] = None,
+) -> None:
+    row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
+
+    def center(s: str, w: int) -> str:
+        s = str(s)
+        if len(s) >= w:
+            return s[:w]
+        pad = w - len(s)
+        return " " * (pad // 2) + s + " " * (pad - pad // 2)
+
+    def a_label(a: float) -> str:
+        a_i = int(a) if abs(a - round(a)) < 1e-9 else a
+        return f"ua={a_i}s"
+
+    lines: List[str] = []
+    lines.append(title)
+    lines.append("")
+
+    hdr1 = " " * row_w
+    for n in nodes_order:
+        hdr1 += center(f"N={n}", col_w * len(arrivals_order))
+    lines.append(hdr1.rstrip())
+
+    hdr2 = " " * row_w
+    for _n in nodes_order:
+        for a in arrivals_order:
+            hdr2 += center(a_label(a), col_w)
+    lines.append(hdr2.rstrip())
+
+    sep = "-" * (row_w + col_w * len(nodes_order) * len(arrivals_order))
+    lines.append(sep)
+
+    for kmax in sorted(rows_by_kmax.keys()):
+        lines.append(f"kmax={kmax} ({'no priorities' if kmax == 1 else 'with priorities'})")
+        lines.append(sep)
+        for rk in rows_by_kmax[kmax]:
+            label = row_label_fn(rk).ljust(row_w)[:row_w]
+            row = label
+            for n in nodes_order:
+                for a in arrivals_order:
+                    row += center(cell_fn(kmax, rk, n, a), col_w)
+            lines.append(row.rstrip())
+        lines.append(sep)
+
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_both(
+    *,
+    stem: str,
     out_dir: Path,
-    fig_w: float,
-    fig_h: float,
-    dpi: int,
-    only_metrics_csv: str,
-    include_metric_regex: str,
-    exclude_metric_regex: str,
-    smooth_s: float,
-    lat_hist_bin_s: float,
-    lat_hist_max_s: float,
-    lat_hist_density: bool,
+    latex_args: dict,
+    ascii_args: dict,
 ) -> None:
-    job_dir = out_dir / "plots" / sanitize_filename(job_name)
-    job_dir.mkdir(parents=True, exist_ok=True)
+    latex_table(out_path=out_dir / f"{stem}.tex", **latex_args)
+    ascii_table(out_path=out_dir / f"{stem}.txt", **ascii_args)
 
-    series: Dict[str, pd.DataFrame] = {}
-    for sched, p in scheduler_paths.items():
-        try:
-            series[sched] = load_series_csv(p)
-        except Exception as e:
-            print(f"[warn] could not read {p}: {e}")
-
-    if not series:
-        return
-
-    if "default" not in series:
-        print(f"[warn] no default series for {job_name}; skipping")
-        return
-
-    default_df = series["default"]
-
-    # only your plugin modes (periodic8s + stable-queue*), still already defpreempt-filtered in main()
-    plugin_series = {s: df for s, df in series.items() if is_target_plugin_mode(s)}
-    if not plugin_series:
-        return
-
-    metric_cols = _select_plot_metrics(
-        series_frames=series,
-        only_metrics_csv=only_metrics_csv,
-        include_metric_regex=include_metric_regex,
-        exclude_metric_regex=exclude_metric_regex,
-    )
-    if not metric_cols:
-        return
-
-    for metric in metric_cols:
-        plt.figure(figsize=(fig_w, fig_h))
-
-        # Reference line at 0 since we plot deltas
-        plt.axhline(0.0, linewidth=0.8)
-
-        for sched, df in plugin_series.items():
-            if metric not in df.columns or metric not in default_df.columns:
-                continue
-
-            # --- util deltas (line) ---
-            if metric in {"cpu_run_util_mean", "mem_run_util_mean", "util_eff_run_mean"}:
-                x, d = delta_series_vs_default(default_df, df, metric)
-                # smooth delta directly
-                if smooth_s > 0:
-                    t = pd.to_timedelta(x, unit="s")
-                    s = pd.Series(d, index=t)
-                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
-                plt.plot(x, d, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
-
-            # --- deletions: delta of cumulative curves (still cumulative trend) ---
-            elif metric == "deletions_cum_total_mean":
-                x, d_cum = delta_series_vs_default(default_df, df, metric)  # Δ cumulative deletions
-
-                # Optional smoothing on the *increment process*, then re-cumsum (same as before)
-                if smooth_s > 0:
-                    t = pd.to_timedelta(x, unit="s")
-                    s = pd.Series(d_cum, index=t)
-                    inc = s.diff().fillna(0.0)
-                    inc_sm = inc.rolling(f"{float(smooth_s)}s", min_periods=1).mean()
-                    d_cum = inc_sm.cumsum().to_numpy(dtype=float)
-
-                # Convert cumulative -> mean rate over elapsed time
-                elapsed = x - x[0]
-                elapsed = np.where(elapsed > 0, elapsed, np.nan)  # avoid div0 at t0
-                d_rate_avg = d_cum / elapsed
-                d_rate_avg[0] = 0.0
-
-                plt.plot(
-                    x,
-                    d_rate_avg,
-                    label=scheduler_row_label_hide_defpreempt(sched),
-                    linewidth=0.8,
-                )
-
-
-            # --- running pods: cumulative integral of delta running pods (pod-seconds) ---
-            elif metric == "running_total_mean":
-                x, d = delta_series_vs_default(default_df, df, metric)  # Δ running pods over time
-
-                if smooth_s > 0:
-                    t = pd.to_timedelta(x, unit="s")
-                    s = pd.Series(d, index=t)
-                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
-
-                # ∫ Δn(t) dt  (pod-seconds)
-                d_pod_seconds = cumtrapz_from_delta(x, d)
-
-                # Convert to pods by dividing by elapsed time (running average)
-                elapsed = x - x[0]
-                elapsed = np.where(elapsed > 0, elapsed, np.nan)  # avoid divide-by-zero at t0
-                d_avg_pods = d_pod_seconds / elapsed
-                d_avg_pods[0] = 0.0  # define at start
-
-                plt.plot(x, d_avg_pods, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
-
-            # --- latency: keep as delta vs default for time-series (optional, but consistent) ---
-            elif metric == "latency_s_total_mean":
-                # Prefer delta vs Default when possible, otherwise fall back to absolute latency
-                if metric in default_df.columns:
-                    x, y = delta_series_vs_default(default_df, df, metric)
-                    y_label = "Δ latency_total vs Default (s)"
-                    title = f"{job_name}: Δ latency_total"
-                else:
-                    x, y = series_on_time(df, metric)
-                    y_label = "latency_total (s)"
-                    title = f"{job_name}: latency_total"
-
-                if smooth_s > 0:
-                    t = pd.to_timedelta(x, unit="s")
-                    s = pd.Series(y, index=t)
-                    y = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
-
-                plt.plot(x, y, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
-
-
-            # fallback: plot delta
-            else:
-                x, d = delta_series_vs_default(default_df, df, metric)
-                if smooth_s > 0:
-                    t = pd.to_timedelta(x, unit="s")
-                    s = pd.Series(d, index=t)
-                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
-                plt.plot(x, d, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
-
-        plt.xlabel("time (s)")
-
-        if metric == "running_total_mean":
-            plt.ylabel("Δ mean running pods vs Default")
-            title = f"{job_name}: Δ mean running pods"
-        elif metric == "deletions_cum_total_mean":
-            plt.ylabel("Δ mean deletion rate vs Default (1/s)")
-            title = f"{job_name}: Δ mean deletion rate"
-        else:
-            if metric == "latency_s_total_mean" and metric not in default_df.columns:
-                plt.ylabel("latency_total (s)")
-                title = f"{job_name}: latency_total"
-            else:
-                plt.ylabel(f"Δ {metric} vs Default")
-                title = f"{job_name}: Δ {metric}"
-
-
-        plt.title(title)
-        plt.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.6)
-        plt.legend(loc="best", fontsize=8)
-
-        png_path = job_dir / f"delta__{sanitize_filename(metric)}.png"
-        pdf_path = job_dir / f"delta__{sanitize_filename(metric)}.pdf"
-        plt.tight_layout()
-        plt.savefig(png_path, dpi=dpi)
-        plt.savefig(pdf_path)
-        plt.close()
-        
-    plot_latency_histogram(
-        job_dir=job_dir,
-        job_name=job_name,
-        default_df=default_df,
-        plugin_series=plugin_series,
-        dpi=dpi,
-        bin_s=lat_hist_bin_s,
-        max_s=lat_hist_max_s,
-        density=lat_hist_density,
-    )
-
-def plot_latency_histogram(
-    *,
-    job_dir: Path,
-    job_name: str,
-    default_df: pd.DataFrame,
-    plugin_series: Dict[str, pd.DataFrame],
-    dpi: int,
-    bin_s: float,
-    max_s: float,
-    density: bool,
-) -> None:
-    col = "latency_s_total_mean"
-    if col not in default_df.columns:
-        return
-
-    # Collect series for histogram (Default + plugins)
-    series_map: List[Tuple[str, np.ndarray]] = []
-    y0 = pd.to_numeric(default_df[col], errors="coerce").to_numpy(dtype=float)
-    y0 = y0[np.isfinite(y0)]
-    series_map.append(("Default", y0))
-
-    for sched, df in plugin_series.items():
-        if col not in df.columns:
-            continue
-        y = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
-        y = y[np.isfinite(y)]
-        series_map.append((scheduler_row_label_hide_defpreempt(sched), y))
-
-    if not series_map:
-        return
-
-    # Determine histogram range
-    all_vals = np.concatenate([v for _, v in series_map if v.size > 0])
-    if all_vals.size == 0:
-        return
-
-    vmax = float(max_s) if max_s and max_s > 0 else float(np.quantile(all_vals, 0.995))
-    vmax = max(vmax, float(bin_s))
-    edges = np.arange(0.0, vmax + float(bin_s), float(bin_s))
-    centers = 0.5 * (edges[:-1] + edges[1:])
-
-    # compute hist
-    hists = []
-    for name, vals in series_map:
-        h, _ = np.histogram(vals, bins=edges, density=density)
-        hists.append((name, h))
-
-    # plot grouped bars
-    import numpy as _np
-    n = len(hists)
-    width = (edges[1] - edges[0]) * 0.9 / max(1, n)
-
-    plt.figure(figsize=(10.0, 4.5))
-    for i, (name, h) in enumerate(hists):
-        x = centers - 0.45 * (edges[1] - edges[0]) + (i + 0.5) * width
-        plt.bar(x, h, width=width, label=name, alpha=0.8)
-
-    plt.xlabel("latency_s_total_mean (s)")
-    plt.ylabel("density" if density else "count")
-    plt.title(f"{job_name}: Latency histogram (mean over time samples)")
-    plt.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.6)
-    plt.legend(loc="best", fontsize=8)
-
-    png_path = job_dir / "latency_hist.png"
-    pdf_path = job_dir / "latency_hist.pdf"
-    plt.tight_layout()
-    plt.savefig(png_path, dpi=dpi)
-    plt.savefig(pdf_path)
-    plt.close()
 
 # -----------------------------
-# LaTeX tables from results_paired.csv
+# Special table: defpreempt delta deletions (within plugin, not vs baseline)
 # -----------------------------
-def prio_cell_from_row(
-    row: pd.Series,
+
+def build_defpreempt_rows(df: pd.DataFrame) -> List[Tuple[str, int]]:
+    """Return list of (mode, blocking) pairs that have BOTH defpreempt=0 and defpreempt=1."""
+    seen: Dict[Tuple[str, int], set] = {}
+    for pc in df["plugin_config"].unique().tolist():
+        rk = RowKey.from_plugin_config(pc)
+        seen.setdefault((rk.mode, rk.blocking), set()).add(rk.defpreempt)
+
+    rows = [
+        (m, b)
+        for (m, b), defs in seen.items()
+        if (0 in defs and 1 in defs) and (m != "scheduling-failure")
+    ]
+    rows.sort(key=lambda mb: RowKey(mode=mb[0], blocking=mb[1], defpreempt=1).sort_key())
+    return rows
+
+
+def cell_defpreempt_delta_deletions(
+    df: pd.DataFrame,
     *,
-    k_max: int,
-    prefix: str,
-    decimals: int,
+    kmax: int,
+    mode: str,
+    blocking: int,
+    nodes: int,
+    arrival_s: float,
+    float_decimals: int,
+    latex: bool,
 ) -> str:
-    """
-    k_max=1 -> "+0.9"
-    k_max=4 -> "{\\scriptsize$\\langle+0.9,-0.2,+0.0,-1.1\\rangle$}"
-    """
-    if k_max <= 0:
-        return r"\text{--}"
-
-    if k_max == 1:
-        return fmt_signed(row.get(f"{prefix}1_mean", np.nan), decimals=decimals)
-
-    vals = [fmt_signed(row.get(f"{prefix}{p}_mean", np.nan), decimals=decimals) for p in range(1, k_max + 1)]
-    if all(v == r"\text{--}" for v in vals):
-        return r"\text{--}"
-    return r"{\scriptsize$\langle" + ",".join(vals) + r"\rangle$}"
-
-
-def angle_pair_cell_from_row(
-    row: pd.Series,
-    *,
-    col_a: str,
-    col_b: str,
-    decimals: int,
-    as_percentage_points: bool = False,
-) -> str:
-    r"""Emit a 2-tuple in angle brackets."""
-    if as_percentage_points:
-        a = fmt_signed_scaled(row.get(col_a, np.nan), decimals=decimals, scale=100.0)
-        b = fmt_signed_scaled(row.get(col_b, np.nan), decimals=decimals, scale=100.0)
-    else:
-        a = fmt_signed(row.get(col_a, np.nan), decimals=decimals)
-        b = fmt_signed(row.get(col_b, np.nan), decimals=decimals)
-
-    if a == r"\text{--}" and b == r"\text{--}":
-        return r"\text{--}"
-    return r"{\scriptsize$\langle" + f"{a},{b}" + r"\rangle$}"
-
-
-def latex_full_table_for_metric(
-    *,
-    df_metric_allk: pd.DataFrame,
-    title_line: str,
-    metric_name: str,
-    decimals: int,
-    caption_tex: Optional[str] = None,
-    label: Optional[str] = None,
-) -> str:
-    """
-    Emit ONE full LaTeX table (table+adjustbox+tabular) for this metric,
-    stacking k_max sections vertically inside the same tabular.
-    """
-    nodes = sorted({int(x) for x in df_metric_allk["n_nodes"].unique()})
-    arrivals = sorted({float(x) for x in df_metric_allk["mean_arrival_s"].unique()})
-    k_values = sorted({int(x) for x in pd.to_numeric(df_metric_allk["k_max"], errors="coerce").dropna().unique()})
-
-    ncols = 1 + len(nodes) * len(arrivals)
-
-    def section_header(k: int) -> str:
-        if k == 1:
-            return rf"$k_{{\max}}={k}$ (no priorities)"
-        return rf"$k_{{\max}}={k}$ (priorities enabled)"
-
-    cell_maps: Dict[int, Dict[Tuple[str, int, float], str]] = {}
-    row_keys_by_k: Dict[int, List[str]] = {}
-
-    for k in k_values:
-        dfk = df_metric_allk[df_metric_allk["k_max"].astype(int) == int(k)].copy()
-        if dfk.empty:
-            continue
-
-        row_keys = sorted(
-            dfk["plugin_config"].astype(str).unique(),
-            key=lambda s: scheduler_row_label_hide_defpreempt(str(s)),
-        )
-        row_keys_by_k[int(k)] = row_keys
-
-        cm: Dict[Tuple[str, int, float], str] = {}
-        for _, r in dfk.iterrows():
-            rk = str(r["plugin_config"])
-            n = int(r["n_nodes"])
-            a = float(r["mean_arrival_s"])
-            cm[(rk, n, a)] = dfk.attrs["value_fn"](r)
-        cell_maps[int(k)] = cm
-
-    lines: List[str] = []
-    lines.append(r"\begin{table}[t]")
-    lines.append(r"\centering")
-    lines.append(r"\small")
-    lines.append(r"\setlength{\tabcolsep}{3pt}")
-    lines.append(r"\renewcommand{\arraystretch}{0.95}")
-    lines.append("")
-    lines.append(r"\begin{adjustbox}{max width=\linewidth}")
-    lines.append("")
-    lines.append(r"\begin{tabular}{" + "l " + " ".join(["c"] * (ncols - 1)) + "}")
-    lines.append(r"\toprule")
-
-    lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + title_line + r"} \\")
-    lines.append(r"\addlinespace[0.2em]")
-
-    if len(nodes) > 1:
-        parts = ["& "]
-        for n in nodes:
-            parts.append(r"\multicolumn{" + str(len(arrivals)) + r"}{c}{$N=" + str(n) + r"$}")
-            parts.append(" & ")
-        lines.append("".join(parts).rstrip(" & ") + r" \\")
-
-        start = 2
-        cmr = []
-        for _ in nodes:
-            end = start + len(arrivals) - 1
-            cmr.append(r"\cmidrule(lr){" + f"{start}-{end}" + "}")
-            start = end + 1
-        lines.append("".join(cmr))
-    else:
-        lines.append(r"& \multicolumn{" + str(len(arrivals)) + r"}{c}{$N=" + str(nodes[0]) + r"$} \\")
-        lines.append(r"\cmidrule(lr){2-" + str(1 + len(arrivals)) + "}")
-
-    arr_hdr = ["& "]
-    for _n in nodes:
-        for a in arrivals:
-            arr_hdr.append(r"$\mu_A{=}" + fmt_arrival(a) + r"$s")
-            arr_hdr.append(" & ")
-    lines.append("".join(arr_hdr).rstrip(" & ") + r" \\")
-    lines.append(r"\midrule")
-
-    first_section = True
-    for k in k_values:
-        if k not in cell_maps:
-            continue
-
-        if not first_section:
-            lines.append(r"\midrule")
-        first_section = False
-
-        lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + section_header(int(k)) + r"} \\")
-        lines.append(r"\midrule")
-
-        cm = cell_maps[int(k)]
-        row_keys = row_keys_by_k.get(int(k), [])
-
-        for rk in row_keys:
-            label_txt = scheduler_row_label_hide_defpreempt(rk)
-            row = [label_txt]
-            for n in nodes:
-                for a in arrivals:
-                    row.append(cm.get((rk, n, a), r"\text{--}"))
-            lines.append(" & ".join(row) + r" \\")
-
-    lines.append(r"\bottomrule")
-    lines.append(r"\end{tabular}")
-    lines.append("")
-    lines.append(r"\end{adjustbox}")
-
-    if caption_tex is not None and str(caption_tex).strip():
-        lines.append(r"\caption{" + str(caption_tex) + r"}")
-    else:
-        lines.append(r"\caption{" + latex_escape_text(f"{metric_name} (mean paired difference vs. baseline).") + r"}")
-
-    if label is not None and str(label).strip():
-        lines.append(r"\label{" + str(label) + r"}")
-    else:
-        safe_label = sanitize_filename(metric_name).replace("_", "-")
-        lines.append(r"\label{tab:" + safe_label + r"}")
-
-    lines.append(r"\end{table}")
-    return "\n".join(lines)
-
-
-def _latex_big_table(*, df_all: pd.DataFrame, decimals: int) -> str:
-    """
-    One big table. For each (N, mu_A) we create 4 columns in this order:
-      1) Δutilisation = <Δcpu, Δmem> in percentage points (pp)
-      2) Δlatency     = per-priority vector (seconds)
-      3) ΔR_p(T)      = per-priority vector (pod-seconds)
-      4) solver runs  = solver_attempts_total_mean (count)
-    Rows: scheduler configs (ONLY defpreempt=1, but not stated in row label).
-    """
-    nodes = sorted({int(x) for x in df_all["n_nodes"].unique()})
-    arrivals = sorted({float(x) for x in df_all["mean_arrival_s"].unique()})
-    k_values = sorted({int(x) for x in pd.to_numeric(df_all["k_max"], errors="coerce").dropna().unique()})
-
-    ncols = 1 + len(nodes) * len(arrivals) * 4
-
-    def section_header(k: int) -> str:
-        if k == 1:
-            return rf"$k_{{\max}}={k}$ (no priorities)"
-        return rf"$k_{{\max}}={k}$ (priorities enabled)"
-
-    def util_cell(r: pd.Series) -> str:
-        return angle_pair_cell_from_row(
-            r,
-            col_a="delta_cpu_run_util_mean",
-            col_b="delta_mem_run_util_mean",
-            decimals=decimals,
-            as_percentage_points=True,
-        )
-
-    def latency_cell(r: pd.Series, k: int) -> str:
-        kk = max(1, min(int(k), 4))
-        if kk == 1:
-            return fmt_signed(r.get("delta_latency_s_p1_mean", np.nan), decimals=decimals)
-        vals = [fmt_signed(r.get(f"delta_latency_s_p{p}_mean", np.nan), decimals=decimals) for p in range(1, kk + 1)]
-        if all(v == r"\text{--}" for v in vals):
-            return r"\text{--}"
-        return r"{\scriptsize$\langle" + ",".join(vals) + r"\rangle$}"
-
-    def running_cell(r: pd.Series, k: int) -> str:
-        kk = max(1, min(int(k), 4))
-        if kk == 1:
-            return fmt_signed(r.get("delta_R_p1_mean", np.nan), decimals=decimals)
-        vals = [fmt_signed(r.get(f"delta_R_p{p}_mean", np.nan), decimals=decimals) for p in range(1, kk + 1)]
-        if all(v == r"\text{--}" for v in vals):
-            return r"\text{--}"
-        return r"{\scriptsize$\langle" + ",".join(vals) + r"\rangle$}"
-
-    def solver_cell(r: pd.Series) -> str:
-        return fmt_signed(r.get("solver_attempts_total_mean", np.nan), decimals=0)
-
-    cell_maps: Dict[int, Dict[Tuple[str, int, float], Tuple[str, str, str, str]]] = {}
-    row_keys_by_k: Dict[int, List[str]] = {}
-
-    for k in k_values:
-        dfk = df_all[df_all["k_max"].astype(int) == int(k)].copy()
-        if dfk.empty:
-            continue
-
-        row_keys = sorted(
-            dfk["plugin_config"].astype(str).unique(),
-            key=lambda s: scheduler_row_label_hide_defpreempt(str(s)),
-        )
-        row_keys_by_k[int(k)] = row_keys
-
-        cm: Dict[Tuple[str, int, float], Tuple[str, str, str, str]] = {}
-        for _, r in dfk.iterrows():
-            rk = str(r["plugin_config"])
-            n = int(r["n_nodes"])
-            a = float(r["mean_arrival_s"])
-            cm[(rk, n, a)] = (util_cell(r), latency_cell(r, int(k)), running_cell(r, int(k)), solver_cell(r))
-        cell_maps[int(k)] = cm
-
-    lines: List[str] = []
-    lines.append(r"\begin{table}[t]")
-    lines.append(r"\centering")
-    lines.append(r"\small")
-    lines.append(r"\setlength{\tabcolsep}{2.2pt}")
-    lines.append(r"\renewcommand{\arraystretch}{0.90}")
-    lines.append("")
-    lines.append(r"\begin{adjustbox}{max width=\linewidth}")
-    lines.append("")
-    lines.append(r"\begin{tabular}{" + "l " + " ".join(["c"] * (ncols - 1)) + "}")
-    lines.append(r"\toprule")
-
-    title_line = (
-        r"Mean paired deltas vs.\ baseline: "
-        r"{\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$} (pp), "
-        r"$\Delta \mathrm{latency}$ (s), $\Delta R_p(T)$ (pod-seconds), solver runs"
-    )
-    lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + title_line + r"} \\")
-    lines.append(r"\addlinespace[0.2em]")
-
-    # N header row (each N has len(arrivals)*4 cols)
-    if len(nodes) > 1:
-        parts = ["& "]
-        for n in nodes:
-            parts.append(r"\multicolumn{" + str(len(arrivals) * 4) + r"}{c}{$N=" + str(n) + r"$}")
-            parts.append(" & ")
-        lines.append("".join(parts).rstrip(" & ") + r" \\")
-        start = 2
-        cmr = []
-        for _ in nodes:
-            end = start + len(arrivals) * 4 - 1
-            cmr.append(r"\cmidrule(lr){" + f"{start}-{end}" + "}")
-            start = end + 1
-        lines.append("".join(cmr))
-    else:
-        lines.append(r"& \multicolumn{" + str(len(arrivals) * 4) + r"}{c}{$N=" + str(nodes[0]) + r"$} \\")
-        lines.append(r"\cmidrule(lr){2-" + str(1 + len(arrivals) * 4) + "}")
-
-    # Arrival header row (each arrival has 4 cols)
-    arr_hdr = ["& "]
-    for _n in nodes:
-        for a in arrivals:
-            arr_hdr.append(r"\multicolumn{4}{c}{$\mu_A{=}" + fmt_arrival(a) + r"$s}")
-            arr_hdr.append(" & ")
-    lines.append("".join(arr_hdr).rstrip(" & ") + r" \\")
-    start = 2
-    cmr2 = []
-    for _n in nodes:
-        for _a in arrivals:
-            end = start + 3
-            cmr2.append(r"\cmidrule(lr){" + f"{start}-{end}" + "}")
-            start = end + 1
-    lines.append("".join(cmr2))
-
-    # Subheader row: the 4 metric columns
-    sub = ["& "]
-    for _n in nodes:
-        for _a in arrivals:
-            sub += [r"$\Delta u$", " & ", r"$\Delta \mathrm{lat}$", " & ", r"$\Delta R_p$", " & ", r"solver", " & "]
-    lines.append("".join(sub).rstrip(" & ") + r" \\")
-    lines.append(r"\midrule")
-
-    first_section = True
-    for k in k_values:
-        if int(k) not in cell_maps:
-            continue
-        if not first_section:
-            lines.append(r"\midrule")
-        first_section = False
-
-        lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + section_header(int(k)) + r"} \\")
-        lines.append(r"\midrule")
-
-        cm = cell_maps[int(k)]
-        row_keys = row_keys_by_k.get(int(k), [])
-
-        for rk in row_keys:
-            label_txt = scheduler_row_label_hide_defpreempt(rk)
-            row_cells: List[str] = [label_txt]
-            for n in nodes:
-                for a in arrivals:
-                    util, lat, run, sol = cm.get((rk, n, a), (r"\text{--}", r"\text{--}", r"\text{--}", r"\text{--}"))
-                    row_cells.extend([util, lat, run, sol])
-            lines.append(" & ".join(row_cells) + r" \\")
-
-    lines.append(r"\bottomrule")
-    lines.append(r"\end{tabular}")
-    lines.append("")
-    lines.append(r"\end{adjustbox}")
-    lines.append(r"\caption{" + latex_escape_text("Big table of mean paired deltas vs baseline.") + r"}")
-    lines.append(r"\label{tab:big-deltas}")
-    lines.append(r"\end{table}")
-
-    return "\n".join(lines)
-
-
-def _latex_latency_and_solver_table(*, df_all: pd.DataFrame, decimals: int) -> str:
-    """
-    Single table: latency(total) + solver runs for each (N, mu_A).
-    Rows: scheduler configs (ONLY defpreempt=1, but not stated).
-    Sections: k_max as usual.
-    """
-    nodes = sorted({int(x) for x in df_all["n_nodes"].unique()})
-    arrivals = sorted({float(x) for x in df_all["mean_arrival_s"].unique()})
-    k_values = sorted({int(x) for x in pd.to_numeric(df_all["k_max"], errors="coerce").dropna().unique()})
-
-    # 2 columns per (n, a): latency_total + solver_attempts
-    ncols = 1 + len(nodes) * len(arrivals) * 2
-
-    def section_header(k: int) -> str:
-        if k == 1:
-            return rf"$k_{{\max}}={k}$ (no priorities)"
-        return rf"$k_{{\max}}={k}$ (priorities enabled)"
-
-    def lat_total_cell(r: pd.Series) -> str:
-        return fmt_signed(r.get("delta_latency_s_total_mean", np.nan), decimals=decimals)
-
-    def solver_cell(r: pd.Series) -> str:
-        return fmt_signed(r.get("solver_attempts_total_mean", np.nan), decimals=0)
-
-    cell_maps: Dict[int, Dict[Tuple[str, int, float], Tuple[str, str]]] = {}
-    row_keys_by_k: Dict[int, List[str]] = {}
-
-    for k in k_values:
-        dfk = df_all[df_all["k_max"].astype(int) == int(k)].copy()
-        if dfk.empty:
-            continue
-
-        row_keys = sorted(
-            dfk["plugin_config"].astype(str).unique(),
-            key=lambda s: scheduler_row_label_hide_defpreempt(str(s)),
-        )
-        row_keys_by_k[int(k)] = row_keys
-
-        cm: Dict[Tuple[str, int, float], Tuple[str, str]] = {}
-        for _, r in dfk.iterrows():
-            rk = str(r["plugin_config"])
-            n = int(r["n_nodes"])
-            a = float(r["mean_arrival_s"])
-            cm[(rk, n, a)] = (lat_total_cell(r), solver_cell(r))
-        cell_maps[int(k)] = cm
-
-    lines: List[str] = []
-    lines.append(r"\begin{table}[t]")
-    lines.append(r"\centering")
-    lines.append(r"\small")
-    lines.append(r"\setlength{\tabcolsep}{2.5pt}")
-    lines.append(r"\renewcommand{\arraystretch}{0.92}")
-    lines.append("")
-    lines.append(r"\begin{adjustbox}{max width=\linewidth}")
-    lines.append("")
-    lines.append(r"\begin{tabular}{" + "l " + " ".join(["c"] * (ncols - 1)) + "}")
-    lines.append(r"\toprule")
-
-    title_line = r"Mean paired deltas vs.\ baseline: $\Delta \mathrm{latency}_{\mathrm{total}}$ (s) and solver runs"
-    lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + title_line + r"} \\")
-    lines.append(r"\addlinespace[0.2em]")
-
-    if len(nodes) > 1:
-        parts = ["& "]
-        for n in nodes:
-            parts.append(r"\multicolumn{" + str(len(arrivals) * 2) + r"}{c}{$N=" + str(n) + r"$}")
-            parts.append(" & ")
-        lines.append("".join(parts).rstrip(" & ") + r" \\")
-        start = 2
-        cmr = []
-        for _ in nodes:
-            end = start + len(arrivals) * 2 - 1
-            cmr.append(r"\cmidrule(lr){" + f"{start}-{end}" + "}")
-            start = end + 1
-        lines.append("".join(cmr))
-    else:
-        lines.append(r"& \multicolumn{" + str(len(arrivals) * 2) + r"}{c}{$N=" + str(nodes[0]) + r"$} \\")
-        lines.append(r"\cmidrule(lr){2-" + str(1 + len(arrivals) * 2) + "}")
-
-    arr_hdr = ["& "]
-    for _n in nodes:
-        for a in arrivals:
-            arr_hdr.append(r"\multicolumn{2}{c}{$\mu_A{=}" + fmt_arrival(a) + r"$s}")
-            arr_hdr.append(" & ")
-    lines.append("".join(arr_hdr).rstrip(" & ") + r" \\")
-    start = 2
-    cmr2 = []
-    for _n in nodes:
-        for _a in arrivals:
-            end = start + 1
-            cmr2.append(r"\cmidrule(lr){" + f"{start}-{end}" + "}")
-            start = end + 1
-    lines.append("".join(cmr2))
-
-    sub = ["& "]
-    for _n in nodes:
-        for _a in arrivals:
-            sub += [r"$\Delta \mathrm{lat}_{\mathrm{tot}}$", " & ", r"solver", " & "]
-    lines.append("".join(sub).rstrip(" & ") + r" \\")
-    lines.append(r"\midrule")
-
-    first_section = True
-    for k in k_values:
-        if int(k) not in cell_maps:
-            continue
-        if not first_section:
-            lines.append(r"\midrule")
-        first_section = False
-
-        lines.append(r"\multicolumn{" + str(ncols) + r"}{l}{" + section_header(int(k)) + r"} \\")
-        lines.append(r"\midrule")
-
-        cm = cell_maps[int(k)]
-        row_keys = row_keys_by_k.get(int(k), [])
-
-        for rk in row_keys:
-            label_txt = scheduler_row_label_hide_defpreempt(rk)
-            row_cells: List[str] = [label_txt]
-            for n in nodes:
-                for a in arrivals:
-                    lat, sol = cm.get((rk, n, a), (r"\text{--}", r"\text{--}"))
-                    row_cells.extend([lat, sol])
-            lines.append(" & ".join(row_cells) + r" \\")
-
-    lines.append(r"\bottomrule")
-    lines.append(r"\end{tabular}")
-    lines.append("")
-    lines.append(r"\end{adjustbox}")
-    lines.append(r"\caption{" + latex_escape_text("Latency(total) and solver runs (mean across seeds), reported as paired deltas vs baseline.") + r"}")
-    lines.append(r"\label{tab:latency-solver}")
-    lines.append(r"\end{table}")
-
-    return "\n".join(lines)
-
-
-def write_latex_tables(*, in_dir: Path, out_dir: Path, decimals: int) -> None:
-    paired_path = in_dir / "results_paired.csv"
-    if not paired_path.exists():
-        print(f"[warn] not found: {paired_path} (skipping tables)")
+    # (defpreempt=1) - (defpreempt=0), baseline cancels
+    nan_str = (r"\text{--}" if latex else "--")
+
+    if kmax == 1:
+        d0 = subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col="delta_D_total_mean")
+        d1 = subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=1, col="delta_D_total_mean")
+        dd = (d1 - d0) if (is_finite(d0) and is_finite(d1)) else float("nan")
+        return fmt_signed(dd, float_decimals, nan_str)
+
+    vals0 = [
+        subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col=f"delta_D_p{p}_mean")
+        for p in range(1, 5)
+    ]
+    vals1 = [
+        subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=1, col=f"delta_D_p{p}_mean")
+        for p in range(1, 5)
+    ]
+    if any(not is_finite(v) for v in vals0) or any(not is_finite(v) for v in vals1):
+        return nan_str
+    diff = [float(v1) - float(v0) for v0, v1 in zip(vals0, vals1)]
+    return fmt_vec(diff, float_decimals, nan_str, latex=latex)
+
+
+# -----------------------------
+# Plots
+# -----------------------------
+
+def _set_symmetric_ylim(ax, ys: List[float]) -> None:
+    vals = [abs(float(y)) for y in ys if is_finite(y)]
+    if not vals:
+        ax.set_ylim(-1.0, 1.0)
         return
+    m = max(vals)
+    if m <= 0:
+        ax.set_ylim(-1.0, 1.0)
+        return
+    pad = 0.10 * m
+    ax.set_ylim(-(m + pad), (m + pad))
 
-    df = pd.read_csv(paired_path, skipinitialspace=True)
-    df.columns = [c.strip() for c in df.columns]
-    for c in df.columns:
-        if df[c].dtype == object:
-            df[c] = df[c].astype(str).str.strip()
 
-    if "plugin_config" not in df.columns:
-        raise SystemExit("results_paired.csv missing 'plugin_config' column")
+def plot_two_node_dots(
+    *,
+    df: pd.DataFrame,
+    out_dir: Path,
+    filename_stem: str,
+    title: str,
+    y_label: str,
+    col: str,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax: int,
+    float_decimals: int,
+    scale: float = 1.0,
+    include_defpreempt: bool = False,
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # derive n_nodes, k_max, mean_arrival_s if not present
-    if not {"n_nodes", "k_max", "mean_arrival_s"}.issubset(df.columns):
-        rows = []
-        for jn in df["job_name"].astype(str).tolist():
-            jk = parse_job_name(jn)
-            rows.append((jk.n_nodes, jk.k_max, jk.arrival_s))
-        df[["n_nodes", "k_max", "mean_arrival_s"]] = pd.DataFrame(rows, index=df.index)
+    dff = df[df["kmax"].astype(int) == int(kmax)].copy()
 
-    tables_dir = out_dir / "tables"
-    tables_dir.mkdir(parents=True, exist_ok=True)
+    if not include_defpreempt:
+        # main config is defpreempt=1
+        dff_main = dff[dff["defpreempt"].astype(int) == 1].copy()
 
-    def scalar_value_fn(col: str):
-        def _fn(r: pd.Series) -> str:
-            return fmt_signed(r.get(col, np.nan), decimals=decimals)
-        return _fn
+        # BUT: keep scheduling-failure even if it only exists for defpreempt=0
+        sf = dff[dff["mode"].astype(str) == "scheduling-failure"].copy()
+        if not sf.empty:
+            dff_main = pd.concat([dff_main, sf], ignore_index=True)
 
-    metric_defs = [
+            # de-dup on the identifying cols we care about
+            dff_main = dff_main.drop_duplicates(
+                subset=["job_name", "plugin_config", "mode", "blocking", "defpreempt", "nodes", "kmax", "arrival_s"],
+                keep="first",
+            )
+
+        dff = dff_main
+
+
+    # series are full RowKey (so include_defpreempt=True doubles dots by adding defpreempt=0 rows too)
+    series = sorted(
         {
-            "name": "delta_R_p",
-            "title": r"$\mathbf{\Delta \bar{n}_{p}}$ (mean running pods), mean paired difference vs.\ baseline",
-            "kind": "prio_vector",
-            "prefix": "delta_R_p",
-            "caption_tex": (
-                r"Mean paired difference in mean running pods per priority tier "
-                r"$\Delta \bar{n}_p$ between plugin and baseline. For $k_{\max}>1$, cells report "
-                r"${\scriptsize$\langle\Delta \bar{n}_1,\ldots,\Delta \bar{n}_{k_{\max}}\rangle$}$."
-            ),
-            "label": "tab:delta-mean-running-pods",
+            RowKey(mode=str(r["mode"]), blocking=int(r["blocking"]), defpreempt=int(r["defpreempt"]))
+            for _, r in dff.iterrows()
         },
-        {
-            "name": "delta_D_p",
-            "title": r"$\mathbf{\Delta \textit{D}_{p}\textit{(T)}}$ (deletions), mean paired difference vs.\ baseline",
-            "kind": "prio_vector",
-            "prefix": "delta_D_p",
-            "caption_tex": (
-                r"Mean paired difference in cumulative re-queue events (deletions) "
-                r"$\Delta D_p(T)$ between plugin and baseline. For $k_{\max}>1$, cells report "
-                r"${\scriptsize$\langle\Delta D_1,\ldots,\Delta D_{k_{\max}}\rangle$}$."
-            ),
-            "label": "tab:delta-deletions",
-        },
-        {
-            "name": "delta_run_util_mean",
-            "title": r"$\mathbf{\Delta u_{\mathrm{run}}}$ (running utilisation, pp), mean paired difference vs.\ baseline",
-            "kind": "angle_pair",
-            "col_a": "delta_cpu_run_util_mean",
-            "col_b": "delta_mem_run_util_mean",
-            "caption_tex": (
-                r"Mean paired difference in running utilisation between plugin and baseline. "
-                r"Each cell reports {\scriptsize$\langle\Delta u_{\mathrm{cpu}},\Delta u_{\mathrm{mem}}\rangle$} "
-                r"in percentage points (pp)."
-            ),
-            "label": "tab:delta-run-util",
-        },
-        {
-            "name": "delta_R_total",
-            "title": r"$\mathbf{\Delta \bar{n}_{\mathrm{total}}}$ (mean running pods), mean paired difference vs.\ baseline",
-            "kind": "scalar",
-            "col": "delta_R_total_mean",
-            "caption_tex": (
-                r"Mean paired difference in total mean running pods "
-                r"$\Delta \bar{n}_{\mathrm{total}}$ between plugin and baseline."
-            ),
-            "label": "tab:delta-n-total",
-        },
-        {
-            "name": "delta_D_total",
-            "title": r"$\mathbf{\Delta \textit{D}_{\mathrm{total}}\textit{(T)}}$ (deletions), mean paired difference vs.\ baseline",
-            "kind": "scalar",
-            "col": "delta_D_total_mean",
-            "caption_tex": (
-                r"Mean paired difference in total cumulative re-queue events "
-                r"$\Delta D_{\mathrm{total}}(T)$ between plugin and baseline."
-            ),
-            "label": "tab:delta-D-total",
-        },
-        {
-            "name": "delta_latency_total",
-            "title": r"$\mathbf{\Delta \mathrm{latency}_{\mathrm{total}}}$ (s), mean paired difference vs.\ baseline",
-            "kind": "scalar",
-            "col": "delta_latency_s_total_mean",
-            "caption_tex": (
-                r"Mean paired difference in total latency $\Delta \mathrm{latency}_{\mathrm{total}}$ (seconds) "
-                r"between plugin and baseline."
-            ),
-            "label": "tab:delta-latency-total",
-        },
-        {
-            "name": "solver_attempts_total",
-            "title": r"$\mathbf{\mathrm{solver\_attempts}}$ (count), mean across seeds",
-            "kind": "scalar_int",
-            "col": "solver_attempts_total_mean",
-            "caption_tex": (
-                r"Mean number of solver runs (solver attempts) across seeds for the plugin configuration. "
-                r"(Baseline has no solver attempts.)"
-            ),
-            "label": "tab:solver-attempts",
-        },
-    ]
+        key=lambda rk: rk.sort_key(),
+    )
 
-    for md in metric_defs:
-        out_txt = tables_dir / f"{md['name']}.txt"
-        df_metric = df.copy()
+    x_base = list(range(len(arrivals_order)))
 
-        if md["kind"] == "prio_vector":
-            prefix = str(md["prefix"])
+    m = max(1, len(series))
+    mode_spacing = 0.14
 
-            def _dispatch(r: pd.Series) -> str:
-                k = int(r["k_max"])
-                return prio_cell_from_row(r, k_max=int(k), prefix=prefix, decimals=decimals)
+    fig, ax = plt.subplots()
+    ys_for_limits: List[float] = []
 
-            df_metric.attrs["value_fn"] = _dispatch
+    for i, rk in enumerate(series):
+        mode_offset = (i - (m - 1) / 2.0) * mode_spacing
 
-        elif md["kind"] == "angle_pair":
-            col_a = str(md["col_a"])
-            col_b = str(md["col_b"])
-            if col_a not in df_metric.columns or col_b not in df_metric.columns:
-                continue
+        # consume a fresh cycle color for this series
+        color = ax.plot([], [], linestyle="None")[0].get_color()
 
-            def _pair(r: pd.Series) -> str:
-                return angle_pair_cell_from_row(
-                    r,
-                    col_a=col_a,
-                    col_b=col_b,
-                    decimals=decimals,
-                    as_percentage_points=True,
-                )
+        # legend: show a LINE (not dots)
+        ax.plot([], [], linestyle="--", linewidth=1.5, color=color, label=rk.label(include_defpreempt=True))
 
-            df_metric.attrs["value_fn"] = _pair
+        for xi, a in enumerate(arrivals_order):
+            x = x_base[xi] + mode_offset
 
-        elif md["kind"] == "scalar_int":
-            col = str(md["col"])
-            if col not in df_metric.columns:
-                continue
+            y16 = subset_value(
+                df, nodes=nodes_order[0], kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt, col=col
+            )
+            y32 = subset_value(
+                df, nodes=nodes_order[1], kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt, col=col
+            )
 
-            def _int_cell(r: pd.Series) -> str:
-                return fmt_signed(r.get(col, np.nan), decimals=0)
+            y16 = y16 * scale if is_finite(y16) else float("nan")
+            y32 = y32 * scale if is_finite(y32) else float("nan")
+            ys_for_limits += [y16, y32]
 
-            df_metric.attrs["value_fn"] = _int_cell
+            if is_finite(y16) and is_finite(y32):
+                ax.plot([x, x], [y16, y32], linestyle="--", color=color, linewidth=1.0)
 
-        else:
-            col = str(md["col"])
-            if col not in df_metric.columns:
-                continue
-            df_metric.attrs["value_fn"] = scalar_value_fn(col)
+            if is_finite(y16):
+                ax.plot([x], [y16], linestyle="None", marker="o", color=color, label="_nolegend_")
+            if is_finite(y32):
+                ax.plot([x], [y32], linestyle="None", marker="s", color=color, label="_nolegend_")
 
-        table_tex = latex_full_table_for_metric(
-            df_metric_allk=df_metric,
-            title_line=md["title"],
-            metric_name=md["name"],
-            decimals=decimals,
-            caption_tex=md.get("caption_tex"),
-            label=md.get("label"),
-        )
-        out_txt.write_text(table_tex + "\n", encoding="utf-8")
+    ax.axhline(0.0, linewidth=1.0)
+    ax.set_title(title)
+    ax.set_ylabel(y_label)
+    ax.set_xticks(x_base)
+    ax.set_xticklabels([f"μ_A={int(a) if abs(a-round(a)) < 1e-9 else a}s" for a in arrivals_order])
 
-    # ---- Big table + latency/solver table: ONLY defpreempt=1 ----
-    df_big = df.copy()
-    df_big["plugin_config"] = df_big["plugin_config"].astype(str)
-    df_big = df_big[df_big["plugin_config"].str.contains(DEFPREEMPT_ONLY_REGEX.pattern, regex=True)].copy()
+    _set_symmetric_ylim(ax, ys_for_limits)
+    ax.legend(loc="best", fontsize="small", frameon=True)
+    fig.tight_layout()
 
-    required_big_cols = [
-        "delta_cpu_run_util_mean",
-        "delta_mem_run_util_mean",
-        "delta_R_p1_mean",
-        "delta_latency_s_p1_mean",
-        "solver_attempts_total_mean",
-    ]
+    fig.savefig(out_dir / f"{filename_stem}.png", dpi=200)
+    fig.savefig(out_dir / f"{filename_stem}.pdf")
+    plt.close(fig)
 
-    if not df_big.empty and all(c in df_big.columns for c in required_big_cols):
-        (tables_dir / "big_deltas.txt").write_text(_latex_big_table(df_all=df_big, decimals=decimals) + "\n", encoding="utf-8")
-        (tables_dir / "latency_and_solver.txt").write_text(
-            _latex_latency_and_solver_table(df_all=df_big, decimals=decimals) + "\n",
-            encoding="utf-8",
-        )
-    else:
-        if df_big.empty:
-            print("[warn] big tables: no rows after filtering defpreempt=1")
-        else:
-            missing = [c for c in required_big_cols if c not in df_big.columns]
-            print(f"[warn] big tables: missing columns in results_paired.csv: {missing}")
 
 
 # -----------------------------
 # Main
 # -----------------------------
+
 def main() -> None:
     args = parse_args()
     in_dir = Path(args.in_dir)
-    series_root = in_dir / "series"
-    if not series_root.exists():
-        raise SystemExit(f"Missing series dir: {series_root}")
-
-    out_dir = Path(args.out_dir) if args.out_dir else (in_dir / "report_out")
+    out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    
-    print("This may take a while...")
 
-    jobs, schedulers_all, paths = discover_jobs_and_schedulers(series_root)
+    plots_dir = Path(args.plots_dir) if args.plots_dir else (out_dir / "plots")
+    plots_dir.mkdir(parents=True, exist_ok=True)
 
-    # Apply CLI scheduler filters first...
-    schedulers_plot = filter_values(
-        schedulers_all,
-        only_csv=args.only_schedulers,
-        include_regex=args.include_scheduler_regex,
-        exclude_regex=args.exclude_scheduler_regex,
+    nodes_order = [int(x.strip()) for x in str(args.nodes).split(",") if x.strip()]
+    arrivals_order = [float(x.strip()) for x in str(args.arrivals).split(",") if x.strip()]
+    if len(nodes_order) != 2 or len(arrivals_order) != 3:
+        raise SystemExit("This script assumes exactly 2 nodes values and 3 arrival values.")
+
+    float_decimals = int(args.float_decimals)
+    plot_kmax = int(args.plot_kmax)
+
+    df = load_results(in_dir)
+
+    # Build RowKey lists per kmax from actual plugin_config rows
+    rows_by_kmax: Dict[int, List[RowKey]] = {}
+    for kmax in sorted(df["kmax"].dropna().astype(int).unique().tolist()):
+        pcs = sorted(df.loc[df["kmax"].astype(int) == kmax, "plugin_config"].unique().tolist())
+        rks = [RowKey.from_plugin_config(pc) for pc in pcs]
+        rks.sort(key=lambda rk: rk.sort_key())
+        rows_by_kmax[kmax] = rks
+
+    # Filtered rows for "main" tables where we only want defpreempt=1
+    rows_by_kmax_defpreempt_only: Dict[int, List[RowKey]] = {
+        k: [rk for rk in rks if rk.defpreempt == 1]
+        for k, rks in rows_by_kmax.items()
+    }
+
+    # ----------------
+    # TABLES
+    # ----------------
+
+    def cell_ueff(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        nan_str = (r"\text{--}" if latex else "--")
+        v = subset_value(df, nodes=n, kmax=kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                         col="delta_util_eff_run_mean")
+        v = v * 100.0 if is_finite(v) else float("nan")
+        return fmt_signed(v, float_decimals, nan_str)
+
+    write_both(
+        stem="delta_u_eff_run",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\Delta u_{\mathrm{eff}}",
+            subtitle=r"(pp), mean paired difference vs.\ baseline",
+            caption=r"Mean paired difference in effective running utilisation $\Delta u_{\mathrm{eff}}$ between plugin and baseline (pp).",
+            label="tab:delta-eff-util",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_ueff(k, rk, n, a, True),
+        ),
+        ascii_args=dict(
+            title="Delta u_eff (pp), mean paired difference vs baseline",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_ueff(k, rk, n, a, False),
+        ),
     )
-    # ...then enforce "defpreempt only" for plots (but keep default)
-    schedulers_plot = [s for s in schedulers_plot if _keep_scheduler_for_plots(s)]
 
-    if not args.no_plots:
-        for job_name in jobs:
-            sched_paths: Dict[str, Path] = {}
-            for sched in schedulers_plot:
-                p = paths.get((sched, job_name))
-                if p is not None:
-                    sched_paths[sched] = p
-            if not sched_paths:
-                continue
-
-            plot_job(
-                job_name=job_name,
-                scheduler_paths=sched_paths,
-                out_dir=out_dir,
-                fig_w=float(args.fig_w),
-                fig_h=float(args.fig_h),
-                dpi=int(args.dpi),
-                only_metrics_csv=args.only_metrics,
-                include_metric_regex=args.include_metric_regex,
-                exclude_metric_regex=args.exclude_metric_regex,
-                smooth_s=float(args.smooth_s),
-                lat_hist_bin_s=float(args.lat_hist_bin_s),
-                lat_hist_max_s=float(args.lat_hist_max_s),
-                lat_hist_density=bool(args.lat_hist_density),
+    def cell_delta_R(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        nan_str = (r"\text{--}" if latex else "--")
+        if kmax == 1:
+            v = subset_value(
+                df, nodes=n, kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                col="delta_R_total_mean",
             )
+            return fmt_signed(v, float_decimals, nan_str)
+        vals = [
+            subset_value(
+                df, nodes=n, kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                col=f"delta_R_p{p}_mean",
+            )
+            for p in range(1, 5)
+        ]
+        return fmt_vec(vals, float_decimals, nan_str, latex=latex)
 
-    if not args.no_tables:
-        write_latex_tables(in_dir=in_dir, out_dir=out_dir, decimals=int(args.table_decimals))
+    write_both(
+        stem="delta_R",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\Delta R",
+            subtitle=r"(mean running pods), mean paired difference vs.\ baseline",
+            caption=r"Mean paired difference in running pods between plugin and baseline. For $k_{\max}=1$ cells report $\Delta R_{\mathrm{total}}$; for $k_{\max}>1$ cells report ${\scriptsize$\langle\Delta R_1,\ldots,\Delta R_{k_{\max}}\rangle$}$.",
+            label="tab:delta-R",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_delta_R(k, rk, n, a, True),
+        ),
+        ascii_args=dict(
+            title="Delta R (mean running pods), mean paired difference vs baseline",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_delta_R(k, rk, n, a, False),
+            col_w=28,
+        ),
+    )
 
-    print(f"Wrote outputs to: {out_dir}")
+
+    def cell_delta_D(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        nan_str = (r"\text{--}" if latex else "--")
+        if kmax == 1:
+            v = subset_value(
+                df, nodes=n, kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                col="delta_D_total_mean",
+            )
+            return fmt_signed(v, float_decimals, nan_str)
+        vals = [
+            subset_value(
+                df, nodes=n, kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                col=f"delta_D_p{p}_mean",
+            )
+            for p in range(1, 5)
+        ]
+        return fmt_vec(vals, float_decimals, nan_str, latex=latex)
+
+    write_both(
+        stem="delta_D",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\Delta D(T)",
+            subtitle=r"(deletions), mean paired difference vs.\ baseline",
+            caption=r"Mean paired difference in cumulative re-queue events (deletions) between plugin and baseline. For $k_{\max}=1$ cells report $\Delta D_{\mathrm{total}}(T)$; for $k_{\max}>1$ cells report ${\scriptsize$\langle\Delta D_1,\ldots,\Delta D_{k_{\max}}\rangle$}$.",
+            label="tab:delta-D",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_delta_D(k, rk, n, a, True),
+        ),
+        ascii_args=dict(
+            title="Delta D(T) (deletions), mean paired difference vs baseline",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_delta_D(k, rk, n, a, False),
+            col_w=28,
+        ),
+    )
+
+
+    def cell_delta_latency(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        nan_str = (r"\text{--}" if latex else "--")
+        if kmax == 1:
+            v = subset_value(
+                df, nodes=n, kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                col="delta_latency_s_total_mean",
+            )
+            return fmt_signed(v, float_decimals, nan_str)
+        vals = [
+            subset_value(
+                df, nodes=n, kmax=kmax, arrival_s=a,
+                mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                col=f"delta_latency_s_p{p}_mean",
+            )
+            for p in range(1, 5)
+        ]
+        return fmt_vec(vals, float_decimals, nan_str, latex=latex)
+
+    write_both(
+        stem="delta_latency",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\Delta \mathrm{latency}",
+            subtitle=r"(s), mean paired difference vs.\ baseline",
+            caption=r"Mean paired difference in first-batch scheduling latency between plugin and baseline. For $k_{\max}=1$ cells report $\Delta \mathrm{latency}_{\mathrm{total}}$; for $k_{\max}>1$ cells report ${\scriptsize$\langle\Delta \mathrm{latency}_1,\ldots,\Delta \mathrm{latency}_{k_{\max}}\rangle$}$.",
+            label="tab:delta-latency",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_delta_latency(k, rk, n, a, True),
+        ),
+        ascii_args=dict(
+            title="Delta latency (s), mean paired difference vs baseline",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_delta_latency(k, rk, n, a, False),
+            col_w=28,
+        ),
+    )
+
+
+    def cell_solver_attempts(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        nan_str = (r"\text{--}" if latex else "--")
+        v = subset_value(
+            df, nodes=n, kmax=kmax, arrival_s=a,
+            mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+            col="solver_attempts_mean",
+        )
+        return fmt_count(v, nan_str)
+
+    write_both(
+        stem="solver_attempts",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\mathrm{solver\_attempts}",
+            subtitle=r"(count), mean across seeds",
+            caption=r"Mean number of solver runs (solver attempts) across seeds for the plugin configuration.",
+            label="tab:solver-attempts",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_solver_attempts(k, rk, n, a, True),
+        ),
+        ascii_args=dict(
+            title="solver_attempts (count), mean across seeds",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_solver_attempts(k, rk, n, a, False),
+        ),
+    )
+
+    def cell_plans_activated(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        nan_str = (r"\text{--}" if latex else "--")
+        v = subset_value(
+            df, nodes=n, kmax=kmax, arrival_s=a,
+            mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+            col="plan_activated_mean",
+        )
+        return fmt_count(v, nan_str)
+
+    write_both(
+        stem="plans_activated",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\mathrm{plans\_activated}",
+            subtitle=r"(count), mean across seeds",
+            caption=r"Mean number of times a solver plan was activated across seeds for the plugin configuration.",
+            label="tab:plans-activated",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_plans_activated(k, rk, n, a, True),
+        ),
+        ascii_args=dict(
+            title="plans_activated (count), mean across seeds",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax,
+            cell_fn=lambda k, rk, n, a: cell_plans_activated(k, rk, n, a, False),
+        ),
+    )
+
+
+
+    # Big combined table: latency + util
+    # IMPORTANT: show ONLY defpreempt=1 rows here
+    def cell_big_latency_util(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        nan_str = (r"\text{--}" if latex else "--")
+
+        u = subset_value(df, nodes=n, kmax=kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                         col="delta_util_eff_run_mean")
+        u = u * 100.0 if is_finite(u) else float("nan")
+        u_s = fmt_signed(u, float_decimals, nan_str)
+
+        if kmax == 1:
+            lat = subset_value(df, nodes=n, kmax=kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                               col="delta_latency_s_total_mean")
+            lat_s = fmt_signed(lat, float_decimals, nan_str)
+        else:
+            vals = [
+                subset_value(df, nodes=n, kmax=kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
+                             col=f"delta_latency_s_p{p}_mean")
+                for p in range(1, 5)
+            ]
+            lat_s = fmt_vec(vals, float_decimals, nan_str, latex=latex)
+
+        return f"{lat_s}; {u_s}"
+
+    write_both(
+        stem="big_table_latency_util",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\Delta \mathrm{latency}_{p}\ ;\ \Delta u_{\mathrm{eff}}",
+            subtitle=r"(s; pp), paired difference vs.\ baseline",
+            caption=r"Combined view (defpreempt enabled): first-batch latency deltas (per priority for $k_{\max}>1$) and effective utilisation deltas (pp).",
+            label="tab:big-latency-util",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_defpreempt_only,  # <-- filter here
+            cell_fn=lambda k, rk, n, a: cell_big_latency_util(k, rk, n, a, True),
+        ),
+        ascii_args=dict(
+            title="Combined (defpreempt enabled): Delta latency_p (or total if kmax=1) ; Delta u_eff (pp)",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_defpreempt_only,  # <-- filter here
+            cell_fn=lambda k, rk, n, a: cell_big_latency_util(k, rk, n, a, False),
+            col_w=30,
+        ),
+    )
+
+    # defpreempt table: (defpreempt=1) - (defpreempt=0) for deletions
+    def_rows = build_defpreempt_rows(df)
+    rows_by_kmax_def: Dict[int, List[RowKey]] = {}
+    for kmax in sorted(rows_by_kmax.keys()):
+        tmp = [RowKey(mode=m, blocking=b, defpreempt=1) for (m, b) in def_rows]  # defpreempt value irrelevant for label
+        tmp.sort(key=lambda rk: rk.sort_key())
+        rows_by_kmax_def[kmax] = tmp
+
+    def cell_def(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        return cell_defpreempt_delta_deletions(
+            df,
+            kmax=kmax,
+            mode=rk.mode,
+            blocking=rk.blocking,
+            nodes=n,
+            arrival_s=a,
+            float_decimals=float_decimals,
+            latex=latex,
+        )
+
+    write_both(
+        stem="delta_deletions_with_defaultpreemption",
+        out_dir=out_dir,
+        latex_args=dict(
+            title_math=r"\Delta D_{\mathrm{defpreempt}}",
+            subtitle=r"(deletions), $(\mathrm{defpreempt}=1)-(\mathrm{defpreempt}=0)$",
+            caption=r"Within-plugin difference in deletions when enabling default preemption. Positive means more deletions with default preemption enabled.",
+            label="tab:delta-defpreempt-deletions",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_def,
+            cell_fn=lambda k, rk, n, a: cell_def(k, rk, n, a, True),
+            row_label_fn=lambda rk: rk.label(include_defpreempt=False),  # <-- no suffix here
+        ),
+        ascii_args=dict(
+            title="Delta deletions: (defpreempt=1) - (defpreempt=0)  [within plugin, baseline cancels]",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_def,
+            cell_fn=lambda k, rk, n, a: cell_def(k, rk, n, a, False),
+            col_w=28,
+            row_label_fn=lambda rk: rk.label(include_defpreempt=False),  # <-- no suffix here
+        ),
+    )
+
+    # ----------------
+    # PLOTS (exactly two)
+    # ----------------
+
+    plot_two_node_dots(
+        df=df,
+        out_dir=plots_dir,
+        filename_stem="delta_u_eff_run",
+        title=f"Δu_eff (pp) vs arrival (kmax={plot_kmax})",
+        y_label="Δu_eff (pp)",
+        col="delta_util_eff_run_mean",
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        kmax=plot_kmax,
+        float_decimals=float_decimals,
+        scale=100.0,
+        include_defpreempt=bool(args.plot_include_defpreempt),
+    )
+
+    plot_two_node_dots(
+        df=df,
+        out_dir=plots_dir,
+        filename_stem="delta_latency_total",
+        title=f"Δlatency_total (s) vs arrival (kmax={plot_kmax})",
+        y_label="Δlatency_total (s)",
+        col="delta_latency_s_total_mean",
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        kmax=plot_kmax,
+        float_decimals=float_decimals,
+        scale=1.0,
+        include_defpreempt=bool(args.plot_include_defpreempt),
+    )
+
+    print(f"Wrote tables to: {out_dir}")
+    print(f"Wrote plots to:  {plots_dir}")
 
 
 if __name__ == "__main__":

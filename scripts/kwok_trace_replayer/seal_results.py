@@ -21,7 +21,8 @@ Notes:
     Util columns are per-sample means across seeds.
     Latency columns are per-seed scalars (first-batch mean latency) replicated over time, then averaged.
   - results_paired: we compute per-seed metrics over the common horizon (min T_end), then mean over seeds.
-  - per_pod_stats: per-seed rows only (no averaging), only for pods where both schedulers have a latency value.
+    - per_pod_stats: per-seed rows only (no averaging), first-batch pods keyed by (priority, rs_prefix, replica_index).
+        Rows are emitted for the UNION of default+plugin keys; missing values are NaN and flags indicate which sides exist.
 """
 
 from __future__ import annotations
@@ -135,6 +136,12 @@ PER_POD_COLS = [
     "latency_default_s",
     "latency_plugin_s",
     "delta_latency_s",
+    "default_first_apply_time_s",
+    "default_first_running_time_s",
+    "plugin_first_apply_time_s",
+    "plugin_first_running_time_s",
+    "both_have_apply_time",
+    "both_have_running_time",
 ]
 
 # optimization_stats.json (totals) -> results_paired (means across seeds)
@@ -149,6 +156,7 @@ OPT_TOTAL_KEYS = {
 
 # latency key for matching
 LatencyKey = Tuple[int, str, int]  # (priority, rs_prefix, replica_index_in_first_batch)
+FirstBatchEntry = Dict[str, object]
 
 
 # -----------------------------
@@ -306,9 +314,29 @@ def read_pod_df(pod_csv: Path) -> pd.DataFrame:
 
 
 def latency_map_first_batch(pod_df: pd.DataFrame, eps_s: float) -> Dict[LatencyKey, float]:
+    """Return (running_time - apply_time) for first-batch pods (finite latencies only)."""
+    entries = first_batch_entries_map(pod_df, eps_s=eps_s)
+    return latency_map_from_entries(entries)
+
+
+def latency_map_from_entries(entries: Dict[LatencyKey, FirstBatchEntry]) -> Dict[LatencyKey, float]:
+    out: Dict[LatencyKey, float] = {}
+    for k, e in entries.items():
+        lat = e.get("latency_s")
+        try:
+            lat_f = float(lat)  # type: ignore[arg-type]
+        except Exception:
+            continue
+        if math.isfinite(lat_f) and lat_f >= 0.0:
+            out[k] = float(lat_f)
+    return out
+
+
+def first_batch_entries_map(pod_df: pd.DataFrame, eps_s: float) -> Dict[LatencyKey, FirstBatchEntry]:
     """
     For each ReplicaSet prefix, take the first apply-time as t0, then consider the first-batch
-    as pods with apply_time within eps_s of t0. Return latency (running_time - apply_time)
+    as pods with apply_time within eps_s of t0. Return a per-key entry containing:
+      - pod_uid, pod_name, apply_time_s, running_time_s, latency_s
     keyed by (priority, rs_prefix, replica_index_in_first_batch).
     """
     apply_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
@@ -325,7 +353,7 @@ def latency_map_first_batch(pod_df: pd.DataFrame, eps_s: float) -> Dict[LatencyK
         how="left",
     ).rename(columns={POD_TIME_COL: "apply_time_s"})
 
-    out: Dict[LatencyKey, float] = {}
+    out: Dict[LatencyKey, FirstBatchEntry] = {}
 
     for rs_prefix, g in joined.groupby("rs_prefix", sort=False):
         g = g.sort_values("apply_time_s")
@@ -342,11 +370,25 @@ def latency_map_first_batch(pod_df: pd.DataFrame, eps_s: float) -> Dict[LatencyK
             pr = row.get(POD_PRIO_COL)
             at = row.get("apply_time_s")
             rt = row.get("running_time_s")
-            if pd.isna(pr) or pd.isna(at) or pd.isna(rt):
+            uid = row.get(POD_UID_COL)
+            name = row.get(POD_NAME_COL)
+            if pd.isna(pr) or pd.isna(at) or pd.isna(uid) or pd.isna(name):
                 continue
-            lat = float(rt) - float(at)
-            if math.isfinite(lat) and lat >= 0.0:
-                out[(int(pr), str(rs_prefix), int(i))] = float(lat)
+
+            apply_time_s = float(at)
+            running_time_s = float(rt) if not pd.isna(rt) else float("nan")
+            latency_s = float("nan")
+            if math.isfinite(running_time_s):
+                lat = running_time_s - apply_time_s
+                latency_s = float(lat) if math.isfinite(lat) and lat >= 0.0 else float("nan")
+
+            out[(int(pr), str(rs_prefix), int(i))] = {
+                "pod_uid": str(uid),
+                "pod_name": str(name),
+                "apply_time_s": apply_time_s,
+                "running_time_s": running_time_s,
+                "latency_s": latency_s,
+            }
 
     return out
 
@@ -394,20 +436,40 @@ def latency_deltas_from_maps(def_map: Dict[LatencyKey, float], plu_map: Dict[Lat
     return out
 
 
-def per_pod_rows_from_maps(
+def per_pod_rows_from_entry_maps(
     *,
     job_name: str,
     plugin_config: str,
     seed: str,
-    def_map: Dict[LatencyKey, float],
-    plu_map: Dict[LatencyKey, float],
+    def_entries: Dict[LatencyKey, FirstBatchEntry],
+    plu_entries: Dict[LatencyKey, FirstBatchEntry],
 ) -> List[Dict[str, object]]:
-    """Per-seed per-pod stats rows (intersection keys only)."""
-    keys = sorted(set(def_map.keys()) & set(plu_map.keys()))
+    """Per-seed per-pod stats rows (UNION of keys; missing values are NaN)."""
+    keys = sorted(set(def_entries.keys()) | set(plu_entries.keys()))
     rows: List[Dict[str, object]] = []
     for (prio, rs_prefix, replica_idx) in keys:
-        ld = float(def_map[(prio, rs_prefix, replica_idx)])
-        lp = float(plu_map[(prio, rs_prefix, replica_idx)])
+        de = def_entries.get((prio, rs_prefix, replica_idx))
+        pe = plu_entries.get((prio, rs_prefix, replica_idx))
+
+        def_apply = float(de.get("apply_time_s")) if de is not None else float("nan")
+        def_run = float(de.get("running_time_s")) if de is not None else float("nan")
+        plu_apply = float(pe.get("apply_time_s")) if pe is not None else float("nan")
+        plu_run = float(pe.get("running_time_s")) if pe is not None else float("nan")
+
+        has_def_apply = 1 if math.isfinite(def_apply) else 0
+        has_plu_apply = 1 if math.isfinite(plu_apply) else 0
+        has_def_run = 1 if math.isfinite(def_run) else 0
+        has_plu_run = 1 if math.isfinite(plu_run) else 0
+
+        both_apply = 1 if (has_def_apply == 1 and has_plu_apply == 1) else 0
+        both_run = 1 if (has_def_run == 1 and has_plu_run == 1) else 0
+
+        ld = float(de.get("latency_s")) if de is not None else float("nan")
+        lp = float(pe.get("latency_s")) if pe is not None else float("nan")
+        # Only compute delta when BOTH schedulers have both apply+running timestamps.
+        # (This aligns with “latency exists on both sides”.)
+        dlat = (lp - ld) if (both_apply == 1 and both_run == 1 and math.isfinite(ld) and math.isfinite(lp)) else float("nan")
+
         rows.append(
             {
                 "job_name": job_name,
@@ -418,7 +480,13 @@ def per_pod_rows_from_maps(
                 "replica_index": int(replica_idx),
                 "latency_default_s": ld,
                 "latency_plugin_s": lp,
-                "delta_latency_s": lp - ld,
+                "delta_latency_s": dlat,
+                "default_first_apply_time_s": def_apply,
+                "default_first_running_time_s": def_run,
+                "plugin_first_apply_time_s": plu_apply,
+                "plugin_first_running_time_s": plu_run,
+                "both_have_apply_time": int(both_apply),
+                "both_have_running_time": int(both_run),
             }
         )
     return rows
@@ -808,26 +876,30 @@ def main() -> None:
 
             dR = {p: float(plu_m[f"R_p{p}_mean"]) - float(def_m[f"R_p{p}_mean"]) for p in range(1, MAX_K_OUT + 1)}
             dD = {p: float(plu_m[f"D_p{p}"]) - float(def_m[f"D_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
-            dR_total = float(sum(dR.values()))
-            dD_total = float(sum(dD.values()))
+            # Use nansum so jobs with fewer tiers (e.g., kmax=1) don't turn totals into NaN
+            dR_total = float(np.nansum(list(dR.values())))
+            dD_total = float(np.nansum(list(dD.values())))
 
             # Latency maps + deltas + per_pod rows
             try:
                 def_pod_df = read_pod_df(def_pod)
                 plu_pod_df = read_pod_df(plu_pod)
-                def_map = latency_map_first_batch(def_pod_df, eps_s=eps_s)
-                plu_map = latency_map_first_batch(plu_pod_df, eps_s=eps_s)
+                def_entries = first_batch_entries_map(def_pod_df, eps_s=eps_s)
+                plu_entries = first_batch_entries_map(plu_pod_df, eps_s=eps_s)
+                def_map = latency_map_from_entries(def_entries)
+                plu_map = latency_map_from_entries(plu_entries)
             except Exception:
+                def_entries, plu_entries = {}, {}
                 def_map, plu_map = {}, {}
 
             lat_delta = latency_deltas_from_maps(def_map, plu_map)
             per_pod_rows.extend(
-                per_pod_rows_from_maps(
+                per_pod_rows_from_entry_maps(
                     job_name=job_name,
                     plugin_config=plugin_config,
                     seed=seed,
-                    def_map=def_map,
-                    plu_map=plu_map,
+                    def_entries=def_entries,
+                    plu_entries=plu_entries,
                 )
             )
 
