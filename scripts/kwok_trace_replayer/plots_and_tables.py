@@ -3,17 +3,19 @@
 """
 scripts/kwok_trace_replayer/tables_from_sealed.py
 
+python -m scripts.kwok_trace_replayer.plots_and_tables --in-results analysis/kwok_trace_replayer/results_paired.csv --out-dir analysis/kwok_trace_replayer/
+
 Generate tables (plaintext + LaTeX) and plots from sealed outputs.
 
-Inputs (under --in-dir):
-  - results_paired.csv   (produced by seal_results.py)
+Inputs:
+    - --in-results: path to results_paired.csv (produced by seal_results.py)
 
 Outputs (under --out-dir):
-  Tables (BOTH):
-    - <stem>.txt   (plaintext / easy to read)
-    - <stem>.tex   (LaTeX)
+    Tables (BOTH, under --out-dir/tables):
+        - <stem>.txt   (plaintext / easy to read)
+        - <stem>.tex   (LaTeX)
 
-    Plots (under --out-dir/plots by default):
+        Plots (under --out-dir/figures):
         - delta_u_eff_run_kmax<K>.<png|pdf>           (Δu_eff in percentage points)
         - delta_latency_total_kmax<K>.<png|pdf>       (Δlatency_total in seconds)
         - delta_deletions_with_defaultpreemption_kmax<K>.<png|pdf> (Δ deletions)
@@ -27,7 +29,7 @@ Notes on plots:
 
 Example:
   python -m scripts.kwok_trace_replayer.tables_from_sealed \
-    --in-dir  analysis/kwok_trace_replayer/sealed \
+        --in-results  analysis/kwok_trace_replayer/sealed/results_paired.csv \
     --out-dir analysis/kwok_trace_replayer/plots_and_tables \
     --float-decimals 1 \
         --plot-kmax 1,4
@@ -61,7 +63,7 @@ ARRIVAL_X_SPACING = 0.6
 MODE_X_SPACING = 0.05
 
 # Consistent plot size across all figures.
-FIGSIZE = (3.5, 3.0)
+FIGSIZE = (3.1, 2.2)
 
 # Font sizes (adjust to taste).
 TITLE_FONTSIZE = 8
@@ -116,15 +118,14 @@ def add_standard_legend(*, ax: plt.Axes, handles: Sequence[object], labels: Sequ
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate plaintext+LaTeX tables and two plots from sealed results.")
-    p.add_argument("--in-dir", required=True, help="Sealed output dir (contains results_paired.csv).")
-    p.add_argument("--out-dir", required=True, help="Output dir (tables + plots subdir).")
+    p.add_argument("--in-results", required=True, help="Path to results_paired.csv (sealed output).")
+    p.add_argument("--out-dir", required=True, help="Output dir (tables + figures subdirs).")
 
     p.add_argument("--nodes", default="16,32", help="Comma-separated nodes values to include (default: 16,32).")
     p.add_argument("--arrivals", default="4,8,16", help="Comma-separated arrivals (seconds) to include (default: 4,8,16).")
     p.add_argument("--float-decimals", type=int, default=1, help="Decimals for float tables (default: 1).")
 
     # plots
-    p.add_argument("--plots-dir", default=None, help="Plots output dir (default: <out-dir>/plots).")
     p.add_argument(
         "--plot-kmax",
         default="1,4",
@@ -370,15 +371,14 @@ EXPECTED_COLS = [
 ]
 
 
-def load_results(in_dir: Path) -> pd.DataFrame:
-    path = in_dir / "results_paired.csv"
-    if not path.exists():
-        raise SystemExit(f"Not found: {path}")
-    df = pd.read_csv(path)
+def load_results(results_csv: Path) -> pd.DataFrame:
+    if not results_csv.exists():
+        raise SystemExit(f"Not found: {results_csv}")
+    df = pd.read_csv(results_csv)
 
     missing = [c for c in EXPECTED_COLS if c not in df.columns]
     if missing:
-        raise SystemExit(f"{path} missing columns: {', '.join(missing)}")
+        raise SystemExit(f"{results_csv} missing columns: {', '.join(missing)}")
 
     parsed = df["job_name"].map(parse_job)
     if parsed.isna().any():
@@ -1032,12 +1032,14 @@ def plot_two_node_dots(
 
 def main() -> None:
     args = parse_args()
-    in_dir = Path(args.in_dir)
+    in_results = Path(args.in_results)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    plots_dir = Path(args.plots_dir) if args.plots_dir else (out_dir / "plots")
-    plots_dir.mkdir(parents=True, exist_ok=True)
+    tables_dir = out_dir / "tables"
+    figures_dir = out_dir / "figures"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
     nodes_order = [int(x.strip()) for x in str(args.nodes).split(",") if x.strip()]
     arrivals_order = [float(x.strip()) for x in str(args.arrivals).split(",") if x.strip()]
@@ -1047,7 +1049,7 @@ def main() -> None:
     float_decimals = int(args.float_decimals)
     plot_kmax_arg = str(args.plot_kmax).strip().lower()
 
-    df = load_results(in_dir)
+    df = load_results(in_results)
 
     available_kmax = sorted(df["kmax"].dropna().astype(int).unique().tolist())
     if not available_kmax:
@@ -1124,7 +1126,7 @@ def main() -> None:
 
     write_both(
         stem="delta_u_eff_run",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\Delta u_{\mathrm{eff}}",
             subtitle=r"(pp), mean paired difference vs.\ baseline",
@@ -1163,7 +1165,7 @@ def main() -> None:
 
     write_both(
         stem="delta_R",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\Delta R",
             subtitle=r"(mean running pods), mean paired difference vs.\ baseline",
@@ -1204,7 +1206,7 @@ def main() -> None:
 
     write_both(
         stem="delta_D",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\Delta D(T)",
             subtitle=r"(deletions), mean paired difference vs.\ baseline",
@@ -1245,7 +1247,7 @@ def main() -> None:
 
     write_both(
         stem="delta_latency",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\Delta \mathrm{latency}",
             subtitle=r"(s), mean paired difference vs.\ baseline",
@@ -1276,7 +1278,7 @@ def main() -> None:
 
     write_both(
         stem="solver_attempts",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\mathrm{solver\_attempts}",
             subtitle=r"(count), mean across seeds",
@@ -1305,7 +1307,7 @@ def main() -> None:
 
     write_both(
         stem="plans_activated",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\mathrm{plans\_activated}",
             subtitle=r"(count), mean across seeds",
@@ -1351,7 +1353,7 @@ def main() -> None:
 
     write_both(
         stem="big_table_latency_util",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\Delta \mathrm{latency}_{p}\ ;\ \Delta u_{\mathrm{eff}}",
             subtitle=r"(s; pp), paired difference vs.\ baseline",
@@ -1392,7 +1394,7 @@ def main() -> None:
 
     write_both(
         stem="delta_deletions_with_defaultpreemption",
-        out_dir=out_dir,
+        out_dir=tables_dir,
         latex_args=dict(
             title_math=r"\Delta D_{\mathrm{defpreempt}}",
             subtitle=r"(deletions), $(\mathrm{defpreempt}=1)-(\mathrm{defpreempt}=0)$",
@@ -1420,7 +1422,7 @@ def main() -> None:
     for plot_kmax in plot_kmaxs:
         plot_two_node_dots(
             df=df,
-            out_dir=plots_dir,
+            out_dir=figures_dir,
             filename_stem=f"delta_u_eff_run_kmax{plot_kmax}",
             title=rf"$\Delta u_{{\mathrm{{eff}}}}$ (pp) vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta u_{\mathrm{eff}}$ (pp)",
@@ -1436,7 +1438,7 @@ def main() -> None:
 
         plot_two_node_dots(
             df=df,
-            out_dir=plots_dir,
+            out_dir=figures_dir,
             filename_stem=f"delta_latency_total_kmax{plot_kmax}",
             title=rf"$\Delta \mathrm{{latency}}_\mathrm{{total}}$ (s) vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta \mathrm{latency}$ (s)",
@@ -1452,7 +1454,7 @@ def main() -> None:
 
         plot_defpreempt_delta_deletions_total(
             df=df,
-            out_dir=plots_dir,
+            out_dir=figures_dir,
             filename_stem=f"delta_deletions_with_defaultpreemption_kmax{plot_kmax}",
             title=rf"$\Delta D_{{\mathrm{{defpreempt}}}}$ (count) vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta D_{\mathrm{defpreempt}}$ (deletions)",
@@ -1469,8 +1471,8 @@ def main() -> None:
             ),
         )
 
-    print(f"Wrote tables to: {out_dir}")
-    print(f"Wrote plots to:  {plots_dir}")
+    print(f"Wrote tables to: {tables_dir}")
+    print(f"Wrote figures to: {figures_dir}")
 
 
 if __name__ == "__main__":
