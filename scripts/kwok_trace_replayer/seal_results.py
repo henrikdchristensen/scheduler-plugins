@@ -1,25 +1,12 @@
 #!/usr/bin/env python3
+# scripts/kwok_trace_replayer/seal_results.py
 """
-scripts/kwok_trace_replayer/seal_results.py
-
 python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer/sealed
 
-Outputs (under --out-dir):
-  1) results_paired.csv  (mean across seeds; columns/order match PAIRED_COLS)
-
-Notes:
-  - We compute per-seed metrics over the common horizon H = min(T_end_default, T_end_plugin),
-    then mean over seeds.
-  - Latency deltas are computed as (plugin mean latency) - (default mean latency),
-    where each mean is over *all scheduled first-batch pods* for that scheduler (no pod intersection).
+We compute per-seed metrics over the common horizon H = min(T_end_default, T_end_plugin), then mean over seeds.
 """
 
-from __future__ import annotations
-
-import argparse
-import json
-import math
-import re
+import argparse, json, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -43,7 +30,6 @@ TIME_COL = "time_s"
 
 CPU_RUN_COL = "cpu_run_util"
 MEM_RUN_COL = "mem_run_util"
-
 RUNNING_PREFIX = "running_p"              # running_p1..pK (instantaneous count)
 DELETIONS_CUM_PREFIX = "deletions_cum_p"  # deletions_cum_p1..pK (cumulative counter)
 
@@ -53,7 +39,7 @@ POD_UID_COL = "pod_uid"
 POD_PRIO_COL = "priority"
 POD_TIME_COL = "time_s"
 
-MAX_K_OUT = 4  # always output p1..p4 columns (even if job has fewer)
+MAX_K_OUT = 4
 
 PAIRED_COLS = [
     "job_name",
@@ -95,7 +81,6 @@ OPT_TOTAL_KEYS = {
     "plan_activated_total": "plan_activated",
 }
 
-
 # -----------------------------
 # CLI
 # -----------------------------
@@ -107,7 +92,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eps-s", type=float, default=1.0, help="First-batch epsilon window in seconds (default: 1.0).")
     return p.parse_args()
 
-
 # -----------------------------
 # Helpers
 # -----------------------------
@@ -118,7 +102,6 @@ def round_numeric_df(df: pd.DataFrame, exclude: Optional[List[str]] = None) -> p
     if num_cols:
         df[num_cols] = df[num_cols].round(FLOAT_DECIMALS)
     return df
-
 
 def parse_job_dir_name(name: str) -> Optional[str]:
     """
@@ -140,7 +123,6 @@ def parse_job_dir_name(name: str) -> Optional[str]:
     a_str = str(int(a)) if abs(a - round(a)) < 1e-9 else f"{a:g}"
     return f"nodes={n}_prio={k}_arrival={a_str}s"
 
-
 def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     """
     Example:
@@ -154,7 +136,6 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
         if "=" in tok:
             k, v = tok.split("=", 1)
             kv[k.strip().lower()] = v.strip()
-
     try:
         n = int(kv["nodes"])
         kmax = int(kv["prio"])
@@ -162,20 +143,16 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
         arr = float(arr_raw[:-1] if arr_raw.endswith("s") else arr_raw)
     except Exception:
         return None
-
     a_str = str(int(arr)) if abs(arr - round(arr)) < 1e-9 else f"{arr:g}"
     job_name = f"nodes={n}_prio={kmax}_arrival={a_str}s"
-
     mode = kv.get("mode", "unknown")
     blocking = 1 if kv.get("blocking", "0").strip().lower() in {"1", "true", "yes"} else 0
     try:
         defpreempt = int(str(kv.get("defpreempt", "0")).strip())
     except Exception:
         defpreempt = 0
-
     plugin_config = f"mode={mode}_blocking={blocking}_defpreempt={defpreempt}"
     return job_name, plugin_config
-
 
 def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
     if not parent.exists() or not parent.is_dir():
@@ -185,7 +162,6 @@ def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
             continue
         if (d / GENERAL_STATS_FILENAME).exists() and (d / POD_STATS_FILENAME).exists():
             yield d.name, d
-
 
 def read_opt_totals(opt_json: Path) -> Dict[str, float]:
     out = {v: float("nan") for v in OPT_TOTAL_KEYS.values()}
@@ -203,25 +179,23 @@ def read_opt_totals(opt_json: Path) -> Dict[str, float]:
         return out
     return out
 
-
 # -----------------------------
-# Fast horizon metrics (single read + O(1) per metric)
+# Horizon metrics
 # -----------------------------
 
 @dataclass(frozen=True)
 class GeneralData:
     t: np.ndarray                     # normalized time (starts at 0)
     T_end: float
-    cpu: np.ndarray
-    mem: np.ndarray
-    eff: np.ndarray
-    run: np.ndarray                   # shape (n, MAX_K_OUT) for p=1..MAX_K_OUT
-    dele: np.ndarray                  # shape (n, MAX_K_OUT), NaN where missing
-    pref_cpu: np.ndarray              # prefix integral arrays (length n)
-    pref_mem: np.ndarray
-    pref_eff: np.ndarray
-    pref_run: np.ndarray              # shape (n, MAX_K_OUT)
-
+    cpu_util: np.ndarray
+    mem_util: np.ndarray
+    eff_util: np.ndarray
+    pods_running: np.ndarray                   # shape (n, MAX_K_OUT) for p=1..MAX_K_OUT
+    pods_deleted: np.ndarray                  # shape (n, MAX_K_OUT), NaN where missing
+    pref_cpu_util: np.ndarray              # prefix integral arrays (length n)
+    pref_mem_util: np.ndarray
+    pref_eff_util: np.ndarray
+    pref_pods_running: np.ndarray              # shape (n, MAX_K_OUT)
 
 def _prefix_integral(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     """prefix[i] = ∫_0^{t[i]} y(s) ds, with y stepwise using y[j] on [t[j], t[j+1])."""
@@ -235,7 +209,6 @@ def _prefix_integral(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     pref[1:] = np.cumsum(y[:-1] * dt)
     return pref
 
-
 def _prefix_integral_mat(t: np.ndarray, Y: np.ndarray) -> np.ndarray:
     """Same as _prefix_integral, but for matrix columns."""
     n = t.size
@@ -247,7 +220,6 @@ def _prefix_integral_mat(t: np.ndarray, Y: np.ndarray) -> np.ndarray:
     pref = np.zeros((n, Y.shape[1]), dtype=float)
     pref[1:, :] = np.cumsum(Y[:-1, :] * dt, axis=0)
     return pref
-
 
 def read_general_data(general_csv: Path) -> GeneralData:
     wanted = {TIME_COL, CPU_RUN_COL, MEM_RUN_COL}
@@ -271,15 +243,15 @@ def read_general_data(general_csv: Path) -> GeneralData:
         return GeneralData(
             t=np.array([], dtype=float),
             T_end=float("nan"),
-            cpu=np.array([], dtype=float),
-            mem=np.array([], dtype=float),
-            eff=np.array([], dtype=float),
-            run=np.zeros((0, MAX_K_OUT), dtype=float),
-            dele=np.zeros((0, MAX_K_OUT), dtype=float),
-            pref_cpu=np.array([], dtype=float),
-            pref_mem=np.array([], dtype=float),
-            pref_eff=np.array([], dtype=float),
-            pref_run=np.zeros((0, MAX_K_OUT), dtype=float),
+            cpu_util=np.array([], dtype=float),
+            mem_util=np.array([], dtype=float),
+            eff_util=np.array([], dtype=float),
+            pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
+            pods_deleted=np.zeros((0, MAX_K_OUT), dtype=float),
+            pref_cpu_util=np.array([], dtype=float),
+            pref_mem_util=np.array([], dtype=float),
+            pref_eff_util=np.array([], dtype=float),
+            pref_pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
         )
 
     df[TIME_COL] = t_raw.loc[df.index].astype(float)
@@ -299,61 +271,60 @@ def read_general_data(general_csv: Path) -> GeneralData:
         return GeneralData(
             t=t,
             T_end=float("nan"),
-            cpu=np.array([], dtype=float),
-            mem=np.array([], dtype=float),
-            eff=np.array([], dtype=float),
-            run=np.zeros((0, MAX_K_OUT), dtype=float),
-            dele=np.zeros((0, MAX_K_OUT), dtype=float),
-            pref_cpu=np.array([], dtype=float),
-            pref_mem=np.array([], dtype=float),
-            pref_eff=np.array([], dtype=float),
-            pref_run=np.zeros((0, MAX_K_OUT), dtype=float),
+            cpu_util=np.array([], dtype=float),
+            mem_util=np.array([], dtype=float),
+            eff_util=np.array([], dtype=float),
+            pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
+            pods_deleted=np.zeros((0, MAX_K_OUT), dtype=float),
+            pref_cpu_util=np.array([], dtype=float),
+            pref_mem_util=np.array([], dtype=float),
+            pref_eff_util=np.array([], dtype=float),
+            pref_pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
         )
 
     T_end = float(t[-1])
 
-    cpu = (
+    util_cpu_run = (
         pd.to_numeric(df[CPU_RUN_COL], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         if CPU_RUN_COL in df.columns
         else np.zeros_like(t, dtype=float)
     )
-    mem = (
+    mem_util_run = (
         pd.to_numeric(df[MEM_RUN_COL], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         if MEM_RUN_COL in df.columns
         else np.zeros_like(t, dtype=float)
     )
-    eff = np.maximum(cpu, mem)
+    eff_util_run = np.maximum(util_cpu_run, mem_util_run)
 
-    run = np.zeros((t.size, MAX_K_OUT), dtype=float)
-    dele = np.full((t.size, MAX_K_OUT), np.nan, dtype=float)
+    pods_running = np.zeros((t.size, MAX_K_OUT), dtype=float)
+    pods_deleted = np.full((t.size, MAX_K_OUT), np.nan, dtype=float)
 
     for i, p in enumerate(range(1, MAX_K_OUT + 1)):
         rc = f"{RUNNING_PREFIX}{p}"
         dc = f"{DELETIONS_CUM_PREFIX}{p}"
         if rc in df.columns:
-            run[:, i] = pd.to_numeric(df[rc], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            pods_running[:, i] = pd.to_numeric(df[rc], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         if dc in df.columns:
-            dele[:, i] = pd.to_numeric(df[dc], errors="coerce").to_numpy(dtype=float)
+            pods_deleted[:, i] = pd.to_numeric(df[dc], errors="coerce").to_numpy(dtype=float)
 
-    pref_cpu = _prefix_integral(t, cpu)
-    pref_mem = _prefix_integral(t, mem)
-    pref_eff = _prefix_integral(t, eff)
-    pref_run = _prefix_integral_mat(t, run)
+    pref_cpu_util_run = _prefix_integral(t, util_cpu_run)
+    pref_mem_util_run = _prefix_integral(t, mem_util_run)
+    pref_eff_util_run = _prefix_integral(t, eff_util_run)
+    pref_pods_running = _prefix_integral_mat(t, pods_running)
 
     return GeneralData(
         t=t,
         T_end=T_end,
-        cpu=cpu,
-        mem=mem,
-        eff=eff,
-        run=run,
-        dele=dele,
-        pref_cpu=pref_cpu,
-        pref_mem=pref_mem,
-        pref_eff=pref_eff,
-        pref_run=pref_run,
+        cpu_util=util_cpu_run,
+        mem_util=mem_util_run,
+        eff_util=eff_util_run,
+        pods_running=pods_running,
+        pods_deleted=pods_deleted,
+        pref_cpu_util=pref_cpu_util_run,
+        pref_mem_util=pref_mem_util_run,
+        pref_eff_util=pref_eff_util_run,
+        pref_pods_running=pref_pods_running,
     )
-
 
 def _mean_over_horizon(t: np.ndarray, y: np.ndarray, pref: np.ndarray, H: float) -> float:
     """Time-weighted mean over [0, H] for stepwise y using prefix integral pref."""
@@ -370,7 +341,6 @@ def _mean_over_horizon(t: np.ndarray, y: np.ndarray, pref: np.ndarray, H: float)
     tail = float(y[idx]) * float(Hc - t[idx])
     return float((base + tail) / Hc) if Hc > 0 else float("nan")
 
-
 def _value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
     """Step value at time H (last observation carried forward)."""
     if t.size == 0 or not math.isfinite(H):
@@ -382,18 +352,17 @@ def _value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
     v = float(y[idx])
     return v if math.isfinite(v) else float("nan")
 
-
 def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
     t = g.t
     out: Dict[str, float] = {
-        "cpu_run_util_mean": _mean_over_horizon(t, g.cpu, g.pref_cpu, H),
-        "mem_run_util_mean": _mean_over_horizon(t, g.mem, g.pref_mem, H),
-        "util_eff_run_mean": _mean_over_horizon(t, g.eff, g.pref_eff, H),
+        "cpu_run_util_mean": _mean_over_horizon(t, g.cpu_util, g.pref_cpu_util, H),
+        "mem_run_util_mean": _mean_over_horizon(t, g.mem_util, g.pref_mem_util, H),
+        "util_eff_run_mean": _mean_over_horizon(t, g.eff_util, g.pref_eff_util, H),
     }
 
     for i, p in enumerate(range(1, MAX_K_OUT + 1)):
-        out[f"R_p{p}_mean"] = _mean_over_horizon(t, g.run[:, i], g.pref_run[:, i], H)
-        out[f"D_p{p}"] = _value_at_horizon(t, g.dele[:, i], H)
+        out[f"R_p{p}_mean"] = _mean_over_horizon(t, g.pods_running[:, i], g.pref_pods_running[:, i], H)
+        out[f"D_p{p}"] = _value_at_horizon(t, g.pods_deleted[:, i], H)
 
     out["R_total_mean"] = float(np.nansum([out[f"R_p{p}_mean"] for p in range(1, MAX_K_OUT + 1)]))
     out["D_total"] = float(np.nansum([out[f"D_p{p}"] for p in range(1, MAX_K_OUT + 1)]))
