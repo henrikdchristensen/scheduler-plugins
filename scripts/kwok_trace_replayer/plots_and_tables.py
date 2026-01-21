@@ -185,6 +185,8 @@ def parse_args() -> argparse.Namespace:
 # -----------------------------
 
 
+
+
 @dataclass(frozen=True)
 class JobKey:
     job_name: str
@@ -510,6 +512,11 @@ def _select_plot_metrics(
     return out
 
 
+def series_on_time(df: pd.DataFrame, metric: str) -> Tuple[np.ndarray, np.ndarray]:
+    t = df["time_s"].to_numpy(dtype=float)
+    y = pd.to_numeric(df[metric], errors="coerce").to_numpy(dtype=float)
+    return t, y
+
 def plot_job(
     *,
     job_name: str,
@@ -581,15 +588,29 @@ def plot_job(
 
             # --- deletions: delta of cumulative curves (still cumulative trend) ---
             elif metric == "deletions_cum_total_mean":
-                x, d_cum = delta_series_vs_default(default_df, df, metric)
-                # (optional) smoothing: smooth increments then re-cumsum (reuse your idea)
+                x, d_cum = delta_series_vs_default(default_df, df, metric)  # Δ cumulative deletions
+
+                # Optional smoothing on the *increment process*, then re-cumsum (same as before)
                 if smooth_s > 0:
                     t = pd.to_timedelta(x, unit="s")
                     s = pd.Series(d_cum, index=t)
                     inc = s.diff().fillna(0.0)
                     inc_sm = inc.rolling(f"{float(smooth_s)}s", min_periods=1).mean()
                     d_cum = inc_sm.cumsum().to_numpy(dtype=float)
-                plt.plot(x, d_cum, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
+
+                # Convert cumulative -> mean rate over elapsed time
+                elapsed = x - x[0]
+                elapsed = np.where(elapsed > 0, elapsed, np.nan)  # avoid div0 at t0
+                d_rate_avg = d_cum / elapsed
+                d_rate_avg[0] = 0.0
+
+                plt.plot(
+                    x,
+                    d_rate_avg,
+                    label=scheduler_row_label_hide_defpreempt(sched),
+                    linewidth=0.8,
+                )
+
 
             # --- running pods: cumulative integral of delta running pods (pod-seconds) ---
             elif metric == "running_total_mean":
@@ -613,12 +634,23 @@ def plot_job(
 
             # --- latency: keep as delta vs default for time-series (optional, but consistent) ---
             elif metric == "latency_s_total_mean":
-                x, d = delta_series_vs_default(default_df, df, metric)
+                # Prefer delta vs Default when possible, otherwise fall back to absolute latency
+                if metric in default_df.columns:
+                    x, y = delta_series_vs_default(default_df, df, metric)
+                    y_label = "Δ latency_total vs Default (s)"
+                    title = f"{job_name}: Δ latency_total"
+                else:
+                    x, y = series_on_time(df, metric)
+                    y_label = "latency_total (s)"
+                    title = f"{job_name}: latency_total"
+
                 if smooth_s > 0:
                     t = pd.to_timedelta(x, unit="s")
-                    s = pd.Series(d, index=t)
-                    d = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
-                plt.plot(x, d, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
+                    s = pd.Series(y, index=t)
+                    y = s.rolling(f"{float(smooth_s)}s", min_periods=1).mean().to_numpy(dtype=float)
+
+                plt.plot(x, y, label=scheduler_row_label_hide_defpreempt(sched), linewidth=0.8)
+
 
             # fallback: plot delta
             else:
@@ -635,11 +667,16 @@ def plot_job(
             plt.ylabel("Δ mean running pods vs Default")
             title = f"{job_name}: Δ mean running pods"
         elif metric == "deletions_cum_total_mean":
-            plt.ylabel("Δ deletions (cum) vs Default")
-            title = f"{job_name}: Δ deletions (cum)"
+            plt.ylabel("Δ mean deletion rate vs Default (1/s)")
+            title = f"{job_name}: Δ mean deletion rate"
         else:
-            plt.ylabel(f"Δ {metric} vs Default")
-            title = f"{job_name}: Δ {metric}"
+            if metric == "latency_s_total_mean" and metric not in default_df.columns:
+                plt.ylabel("latency_total (s)")
+                title = f"{job_name}: latency_total"
+            else:
+                plt.ylabel(f"Δ {metric} vs Default")
+                title = f"{job_name}: Δ {metric}"
+
 
         plt.title(title)
         plt.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.6)
