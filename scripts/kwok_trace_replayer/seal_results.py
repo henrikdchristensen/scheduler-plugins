@@ -491,10 +491,6 @@ def main() -> None:
         if seeds:
             default_seeds_by_job[job_name] = seeds
 
-    # Caches: default side reused across many plugin configs
-    default_general_cache: Dict[Tuple[str, str], GeneralData] = {}
-    default_latency_cache: Dict[Tuple[str, str], Dict[str, float]] = {}
-
     seed_rows: List[Dict[str, object]] = []
 
     for run_dir in sorted(plugin_root.iterdir()):
@@ -523,16 +519,11 @@ def main() -> None:
             plu_pod = plu_seed_dir / POD_STATS_FILENAME
             plu_opt = plu_seed_dir / OPT_STATS_FILENAME
 
-            # ---- General data (single read per file); default cached ----
-            key = (job_name, seed)
-            if key in default_general_cache:
-                def_g = default_general_cache[key]
-            else:
-                try:
-                    def_g = read_general_data(def_gen)
-                except Exception:
-                    continue
-                default_general_cache[key] = def_g
+            # ---- General data (single read per file) ----
+            try:
+                def_g = read_general_data(def_gen)
+            except Exception:
+                continue
 
             try:
                 plu_g = read_general_data(plu_gen)
@@ -560,12 +551,8 @@ def main() -> None:
             dR_total = float(np.nansum(list(dR.values())))
             dD_total = float(np.nansum(list(dD.values())))
 
-            # ---- Latency means (default cached) ----
-            if key in default_latency_cache:
-                def_lat = default_latency_cache[key]
-            else:
-                def_lat = latency_means_first_batch(def_pod, eps_s=eps_s)
-                default_latency_cache[key] = def_lat
+            # ---- Latency means ----
+            def_lat = latency_means_first_batch(def_pod, eps_s=eps_s)
 
             plu_lat = latency_means_first_batch(plu_pod, eps_s=eps_s)
 
