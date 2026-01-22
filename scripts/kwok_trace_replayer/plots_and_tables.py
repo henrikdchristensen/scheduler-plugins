@@ -18,7 +18,8 @@ Outputs (under --out-dir):
         Plots (under --out-dir/figures):
         - delta_u_eff_run_kmax<K>.<png|pdf>           (Δu_eff in percentage points)
         - delta_latency_total_kmax<K>.<png|pdf>       (Δlatency_total in seconds)
-        - delta_deletions_with_defaultpreemption_kmax<K>.<png|pdf> (Δ deletions)
+        - delta_D_without_defaultpreemption_kmax<K>.<png|pdf>      (Δ deletions without defpreempt)
+        - delta_L_without_defaultpreemption_kmax<K>.<png|pdf>      (Δ latency without defpreempt)
 
 Notes on plots:
   - x axis: arrival rates (μ_A = 4s, 8s, 16s)
@@ -35,11 +36,7 @@ Example:
         --plot-kmax 1,4
 """
 
-from __future__ import annotations
-
-import argparse
-import math
-import re
+import argparse, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -49,12 +46,10 @@ import pandas as pd
 
 import matplotlib.pyplot as plt
 
-
 # -----------------------------
 # Plot styling
 # -----------------------------
 
-# Smaller markers improve readability when zooming.
 MARKER_SIZE = 3.0
 
 # Compact plots: reduce horizontal spacing between arrival groups and between modes.
@@ -360,14 +355,10 @@ EXPECTED_COLS = [
     "job_name",
     "plugin_config",
     "delta_util_eff_run_mean",
-    "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean",
-    "delta_R_total_mean",
-    "delta_D_p1_mean", "delta_D_p2_mean", "delta_D_p3_mean", "delta_D_p4_mean",
-    "delta_D_total_mean",
-    "delta_latency_s_p1_mean", "delta_latency_s_p2_mean", "delta_latency_s_p3_mean", "delta_latency_s_p4_mean",
-    "delta_latency_s_total_mean",
-    "solver_attempts_mean",
-    "plan_activated_mean",
+    "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean", "delta_R_total_mean",
+    "delta_D_p1_mean", "delta_D_p2_mean", "delta_D_p3_mean", "delta_D_p4_mean", "delta_D_total_mean",
+    "delta_L_s_p1_mean", "delta_L_s_p2_mean", "delta_L_s_p3_mean", "delta_L_s_p4_mean", "delta_L_s_total_mean",
+    "solver_attempts_mean", "plan_activated_mean",
 ]
 
 
@@ -607,13 +598,13 @@ def cell_defpreempt_delta_deletions(
     float_decimals: int,
     latex: bool,
 ) -> str:
-    # (defpreempt=1) - (defpreempt=0), baseline cancels
+    # (defpreempt=0) - (defpreempt=1), baseline cancels
     nan_str = (r"\text{--}" if latex else "--")
 
     if kmax == 1:
         d0 = subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col="delta_D_total_mean")
         d1 = subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=1, col="delta_D_total_mean")
-        dd = (d1 - d0) if (is_finite(d0) and is_finite(d1)) else float("nan")
+        dd = (d0 - d1) if (is_finite(d0) and is_finite(d1)) else float("nan")
         return fmt_signed(dd, float_decimals, nan_str)
 
     vals0 = [
@@ -626,7 +617,7 @@ def cell_defpreempt_delta_deletions(
     ]
     if any(not is_finite(v) for v in vals0) or any(not is_finite(v) for v in vals1):
         return nan_str
-    diff = [float(v1) - float(v0) for v0, v1 in zip(vals0, vals1)]
+    diff = [float(v0) - float(v1) for v0, v1 in zip(vals0, vals1)]
     return fmt_vec(diff, float_decimals, nan_str, latex=latex)
 
 
@@ -639,7 +630,7 @@ def defpreempt_delta_deletions_total(
     nodes: int,
     arrival_s: float,
 ) -> float:
-    """(defpreempt=1) - (defpreempt=0) for TOTAL deletions; baseline cancels."""
+    """(defpreempt=0) - (defpreempt=1) for TOTAL deletions; baseline cancels."""
     d0 = subset_value(
         df,
         nodes=nodes,
@@ -660,7 +651,7 @@ def defpreempt_delta_deletions_total(
         defpreempt=1,
         col="delta_D_total_mean",
     )
-    return (d1 - d0) if (is_finite(d0) and is_finite(d1)) else float("nan")
+    return (d0 - d1) if (is_finite(d0) and is_finite(d1)) else float("nan")
 
 
 def collect_defpreempt_delta_deletions_total_ys(
@@ -709,7 +700,7 @@ def plot_defpreempt_delta_deletions_total(
     kmax: int,
     ylim: Optional[Tuple[float, float]] = None,
 ) -> None:
-    """Plot (defpreempt=1) - (defpreempt=0) for TOTAL deletions; baseline cancels."""
+    """Plot (defpreempt=0) - (defpreempt=1) for TOTAL deletions; baseline cancels."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
     series = [RowKey(mode=str(m), blocking=int(b), defpreempt=1) for (m, b) in build_defpreempt_rows(df)]
@@ -787,6 +778,199 @@ def plot_defpreempt_delta_deletions_total(
         for a in arrivals_order
     ])
 
+    ax.tick_params(axis="both", labelsize=TICK_FONTSIZE)
+
+    if ylim is not None:
+        ax.set_ylim(float(ylim[0]), float(ylim[1]))
+    else:
+        _set_symmetric_ylim(ax, ys_for_limits)
+
+    add_standard_legend(ax=ax, handles=legend_handles, labels=legend_labels)
+    fig.tight_layout()
+
+    fig.savefig(out_dir / f"{filename_stem}.png", dpi=200)
+    fig.savefig(out_dir / f"{filename_stem}.pdf")
+    plt.close(fig)
+
+
+# -----------------------------
+# Special table/plot: defpreempt delta latency (within plugin, not vs baseline)
+# -----------------------------
+
+def cell_defpreempt_delta_latency(
+    df: pd.DataFrame,
+    *,
+    kmax: int,
+    mode: str,
+    blocking: int,
+    nodes: int,
+    arrival_s: float,
+    float_decimals: int,
+    latex: bool,
+) -> str:
+    # (defpreempt=0) - (defpreempt=1), baseline cancels
+    nan_str = (r"\text{--}" if latex else "--")
+
+    if kmax == 1:
+        l0 = subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col="delta_L_s_total_mean")
+        l1 = subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=1, col="delta_L_s_total_mean")
+        dl = (l0 - l1) if (is_finite(l0) and is_finite(l1)) else float("nan")
+        return fmt_signed(dl, float_decimals, nan_str)
+
+    vals0 = [
+        subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col=f"delta_L_s_p{p}_mean")
+        for p in range(1, 5)
+    ]
+    vals1 = [
+        subset_value(df, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=1, col=f"delta_L_s_p{p}_mean")
+        for p in range(1, 5)
+    ]
+    if any(not is_finite(v) for v in vals0) or any(not is_finite(v) for v in vals1):
+        return nan_str
+    diff = [float(v0) - float(v1) for v0, v1 in zip(vals0, vals1)]
+    return fmt_vec(diff, float_decimals, nan_str, latex=latex)
+
+
+def defpreempt_delta_latency_total(
+    df: pd.DataFrame,
+    *,
+    kmax: int,
+    mode: str,
+    blocking: int,
+    nodes: int,
+    arrival_s: float,
+) -> float:
+    """(defpreempt=0) - (defpreempt=1) for TOTAL latency; baseline cancels."""
+    l0 = subset_value(
+        df,
+        nodes=nodes,
+        kmax=kmax,
+        arrival_s=arrival_s,
+        mode=mode,
+        blocking=blocking,
+        defpreempt=0,
+        col="delta_L_s_total_mean",
+    )
+    l1 = subset_value(
+        df,
+        nodes=nodes,
+        kmax=kmax,
+        arrival_s=arrival_s,
+        mode=mode,
+        blocking=blocking,
+        defpreempt=1,
+        col="delta_L_s_total_mean",
+    )
+    return (l0 - l1) if (is_finite(l0) and is_finite(l1)) else float("nan")
+
+
+def collect_defpreempt_delta_latency_total_ys(
+    *,
+    df: pd.DataFrame,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax: int,
+) -> List[float]:
+    """Collect y values for defpreempt latency-delta plot (scalar total)."""
+    ys: List[float] = []
+    for mode, blocking in build_defpreempt_rows(df):
+        for a in arrivals_order:
+            y16 = defpreempt_delta_latency_total(
+                df,
+                kmax=int(kmax),
+                mode=str(mode),
+                blocking=int(blocking),
+                nodes=int(nodes_order[0]),
+                arrival_s=float(a),
+            )
+            y32 = defpreempt_delta_latency_total(
+                df,
+                kmax=int(kmax),
+                mode=str(mode),
+                blocking=int(blocking),
+                nodes=int(nodes_order[1]),
+                arrival_s=float(a),
+            )
+            if is_finite(y16):
+                ys.append(float(y16))
+            if is_finite(y32):
+                ys.append(float(y32))
+    return ys
+
+
+def plot_defpreempt_delta_latency_total(
+    *,
+    df: pd.DataFrame,
+    out_dir: Path,
+    filename_stem: str,
+    title: str,
+    y_label: str,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax: int,
+    ylim: Optional[Tuple[float, float]] = None,
+) -> None:
+    """Plot (defpreempt=0) - (defpreempt=1) for TOTAL latency; baseline cancels."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    series = [RowKey(mode=str(m), blocking=int(b), defpreempt=1) for (m, b) in build_defpreempt_rows(df)]
+    series.sort(key=lambda rk: rk.sort_key())
+
+    x_base = [i * ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
+    m = max(1, len(series))
+    mode_spacing = MODE_X_SPACING
+
+    fig, ax = plt.subplots(figsize=FIGSIZE)
+    ys_for_limits: List[float] = []
+    legend_handles: List[object] = []
+    legend_labels: List[str] = []
+
+    for i, rk in enumerate(series):
+        mode_offset = (i - (m - 1) / 2.0) * mode_spacing
+
+        color = ax.plot([], [], linestyle="None")[0].get_color()
+        (h_legend,) = ax.plot([], [], linestyle="-", linewidth=1.8, color=color, label=rk.label(include_defpreempt=False))
+        legend_handles.append(h_legend)
+        legend_labels.append(rk.label(include_defpreempt=False))
+
+        for xi, a in enumerate(arrivals_order):
+            x = x_base[xi] + mode_offset
+
+            y16 = defpreempt_delta_latency_total(
+                df,
+                kmax=int(kmax),
+                mode=rk.mode,
+                blocking=int(rk.blocking),
+                nodes=int(nodes_order[0]),
+                arrival_s=float(a),
+            )
+            y32 = defpreempt_delta_latency_total(
+                df,
+                kmax=int(kmax),
+                mode=rk.mode,
+                blocking=int(rk.blocking),
+                nodes=int(nodes_order[1]),
+                arrival_s=float(a),
+            )
+
+            ys_for_limits += [y16, y32]
+
+            if is_finite(y16) and is_finite(y32):
+                ax.plot([x, x], [y16, y32], linestyle="--", color=color, linewidth=1.0)
+
+            if is_finite(y16):
+                ax.plot([x], [y16], linestyle="None", marker="o", markersize=MARKER_SIZE, color=color, label="_nolegend_")
+            if is_finite(y32):
+                ax.plot([x], [y32], linestyle="None", marker="s", markersize=MARKER_SIZE, color=color, label="_nolegend_")
+
+    ax.axhline(0.0, linewidth=1.0)
+    ax.set_title(title, fontsize=TITLE_FONTSIZE)
+    ax.set_ylabel(y_label, fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_xticks(x_base)
+    ax.set_xticklabels([
+        rf"$\mu_A={int(a) if abs(a-round(a)) < 1e-9 else a}\,\mathrm{{s}}$"
+        for a in arrivals_order
+    ])
     ax.tick_params(axis="both", labelsize=TICK_FONTSIZE)
 
     if ylim is not None:
@@ -1088,7 +1272,7 @@ def main() -> None:
         )
         lat_ys_all += collect_plot_ys(
             df=df,
-            col="delta_latency_s_total_mean",
+            col="delta_L_s_total_mean",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=int(k),
@@ -1232,32 +1416,32 @@ def main() -> None:
             v = subset_value(
                 df, nodes=n, kmax=kmax, arrival_s=a,
                 mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
-                col="delta_latency_s_total_mean",
+                col="delta_L_s_total_mean",
             )
             return fmt_signed(v, float_decimals, nan_str)
         vals = [
             subset_value(
                 df, nodes=n, kmax=kmax, arrival_s=a,
                 mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
-                col=f"delta_latency_s_p{p}_mean",
+                col=f"delta_L_s_p{p}_mean",
             )
             for p in range(1, 5)
         ]
         return fmt_vec(vals, float_decimals, nan_str, latex=latex)
 
     write_both(
-        stem="delta_latency",
+        stem="delta_L",
         out_dir=tables_dir,
         latex_args=dict(
-            title_math=r"\Delta \mathrm{latency}",
-            subtitle=r"(s), mean paired difference vs.\ baseline",
+            title_math=r"\Delta L",
+            subtitle=r"(latency), mean paired difference vs.\ baseline",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
             cell_fn=lambda k, rk, n, a: cell_delta_latency(k, rk, n, a, True),
         ),
         ascii_args=dict(
-            title="Delta latency (s), mean paired difference vs baseline",
+            title="Delta L (latency), mean paired difference vs baseline",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax,
@@ -1339,12 +1523,12 @@ def main() -> None:
 
         if kmax == 1:
             lat = subset_value(df, nodes=n, kmax=kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
-                               col="delta_latency_s_total_mean")
+                               col="delta_L_s_total_mean")
             lat_s = fmt_signed(lat, float_decimals, nan_str)
         else:
             vals = [
                 subset_value(df, nodes=n, kmax=kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, defpreempt=rk.defpreempt,
-                             col=f"delta_latency_s_p{p}_mean")
+                             col=f"delta_L_s_p{p}_mean")
                 for p in range(1, 5)
             ]
             lat_s = fmt_vec(vals, float_decimals, nan_str, latex=latex)
@@ -1355,7 +1539,7 @@ def main() -> None:
         stem="big_table_latency_util",
         out_dir=tables_dir,
         latex_args=dict(
-            title_math=r"\Delta \mathrm{latency}_{p}\ ;\ \Delta u_{\mathrm{eff}}",
+            title_math=r"\Delta L_{p}\ ;\ \Delta u_{\mathrm{eff}}",
             subtitle=r"(s; pp), paired difference vs.\ baseline",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
@@ -1363,7 +1547,7 @@ def main() -> None:
             cell_fn=lambda k, rk, n, a: cell_big_latency_util(k, rk, n, a, True),
         ),
         ascii_args=dict(
-            title="Combined (defpreempt enabled): Delta latency_p (or total if kmax=1) ; Delta u_eff (pp)",
+            title="Combined (defpreempt enabled): Delta L_p (or total if kmax=1) ; Delta u_eff (pp)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax_defpreempt_only,  # <-- filter here
@@ -1372,7 +1556,7 @@ def main() -> None:
         ),
     )
 
-    # defpreempt table: (defpreempt=1) - (defpreempt=0) for deletions
+    # defpreempt table: (defpreempt=0) - (defpreempt=1) for deletions
     def_rows = build_defpreempt_rows(df)
     rows_by_kmax_def: Dict[int, List[RowKey]] = {}
     for kmax in sorted(rows_by_kmax.keys()):
@@ -1393,11 +1577,11 @@ def main() -> None:
         )
 
     write_both(
-        stem="delta_deletions_with_defaultpreemption",
+        stem="delta_D_without_defaultpreemption",
         out_dir=tables_dir,
         latex_args=dict(
-            title_math=r"\Delta D_{\mathrm{defpreempt}}",
-            subtitle=r"(deletions), $(\mathrm{defpreempt}=1)-(\mathrm{defpreempt}=0)$",
+            title_math=r"\Delta D_{\mathrm{w/o\ defpreempt}}",
+            subtitle=r"(deletions), $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax_def,
@@ -1405,13 +1589,96 @@ def main() -> None:
             row_label_fn=lambda rk: rk.label(include_defpreempt=False),  # <-- no suffix here
         ),
         ascii_args=dict(
-            title="Delta deletions: (defpreempt=1) - (defpreempt=0)  [within plugin, baseline cancels]",
+            title="Delta deletions: (defpreempt=0) - (defpreempt=1)  [within plugin, baseline cancels]",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             rows_by_kmax=rows_by_kmax_def,
             cell_fn=lambda k, rk, n, a: cell_def(k, rk, n, a, False),
             col_w=28,
             row_label_fn=lambda rk: rk.label(include_defpreempt=False),  # <-- no suffix here
+        ),
+    )
+
+    # defpreempt table: (defpreempt=0) - (defpreempt=1) for latency
+    def cell_def_L(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        return cell_defpreempt_delta_latency(
+            df,
+            kmax=kmax,
+            mode=rk.mode,
+            blocking=rk.blocking,
+            nodes=n,
+            arrival_s=a,
+            float_decimals=float_decimals,
+            latex=latex,
+        )
+
+    write_both(
+        stem="delta_L_without_defaultpreemption",
+        out_dir=tables_dir,
+        latex_args=dict(
+            title_math=r"\Delta L_{\mathrm{w/o\ defpreempt}}",
+            subtitle=r"(latency), $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_def,
+            cell_fn=lambda k, rk, n, a: cell_def_L(k, rk, n, a, True),
+            row_label_fn=lambda rk: rk.label(include_defpreempt=False),
+        ),
+        ascii_args=dict(
+            title="Delta latency: (defpreempt=0) - (defpreempt=1)  [within plugin, baseline cancels]",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_def,
+            cell_fn=lambda k, rk, n, a: cell_def_L(k, rk, n, a, False),
+            col_w=28,
+            row_label_fn=lambda rk: rk.label(include_defpreempt=False),
+        ),
+    )
+
+    # Big combined table: defpreempt deltas (deletions + latency), (defpreempt=0)-(defpreempt=1)
+    def cell_big_defpreempt_D_L(kmax: int, rk: RowKey, n: int, a: float, latex: bool) -> str:
+        d_s = cell_defpreempt_delta_deletions(
+            df,
+            kmax=kmax,
+            mode=rk.mode,
+            blocking=rk.blocking,
+            nodes=n,
+            arrival_s=a,
+            float_decimals=float_decimals,
+            latex=latex,
+        )
+        l_s = cell_defpreempt_delta_latency(
+            df,
+            kmax=kmax,
+            mode=rk.mode,
+            blocking=rk.blocking,
+            nodes=n,
+            arrival_s=a,
+            float_decimals=float_decimals,
+            latex=latex,
+        )
+        return f"{d_s}; {l_s}"
+
+    write_both(
+        stem="big_table_without_defaultpreemption_deletions_latency",
+        out_dir=tables_dir,
+        latex_args=dict(
+            title_math=r"\Delta D_{\mathrm{w/o\ defpreempt}}\ ;\ \Delta L_{\mathrm{w/o\ defpreempt}}",
+            subtitle=r"(count; s), $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_def,
+            cell_fn=lambda k, rk, n, a: cell_big_defpreempt_D_L(k, rk, n, a, True),
+            row_label_fn=lambda rk: rk.label(include_defpreempt=False),
+        ),
+        ascii_args=dict(
+            title="Combined: Delta deletions ; Delta latency  (defpreempt=0) - (defpreempt=1)",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            rows_by_kmax=rows_by_kmax_def,
+            cell_fn=lambda k, rk, n, a: cell_big_defpreempt_D_L(k, rk, n, a, False),
+            col_w=44,
+            row_label_fn=lambda rk: rk.label(include_defpreempt=False),
         ),
     )
 
@@ -1439,10 +1706,10 @@ def main() -> None:
         plot_two_node_dots(
             df=df,
             out_dir=figures_dir,
-            filename_stem=f"delta_latency_total_kmax{plot_kmax}",
-            title=rf"$\Delta \mathrm{{latency}}_\mathrm{{total}}$ (s) vs $\mu_A$  (kmax={plot_kmax})",
-            y_label=r"$\Delta \mathrm{latency}$ (s)",
-            col="delta_latency_s_total_mean",
+            filename_stem=f"delta_L_total_kmax{plot_kmax}",
+            title=rf"$\Delta L_\mathrm{{total}}$ (s) vs $\mu_A$  (kmax={plot_kmax})",
+            y_label=r"$\Delta L$ (s)",
+            col="delta_L_s_total_mean",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=plot_kmax,
@@ -1455,14 +1722,33 @@ def main() -> None:
         plot_defpreempt_delta_deletions_total(
             df=df,
             out_dir=figures_dir,
-            filename_stem=f"delta_deletions_with_defaultpreemption_kmax{plot_kmax}",
-            title=rf"$\Delta D_{{\mathrm{{defpreempt}}}}$ (count) vs $\mu_A$  (kmax={plot_kmax})",
-            y_label=r"$\Delta D_{\mathrm{defpreempt}}$ (deletions)",
+            filename_stem=f"delta_D_without_defaultpreemption_kmax{plot_kmax}",
+            title=rf"$\Delta D_{{\mathrm{{w/o\ defpreempt}}}}$ (count) vs $\mu_A$  (kmax={plot_kmax})",
+            y_label=r"$\Delta D_{\mathrm{w/o\ defpreempt}}$ (deletions)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=int(plot_kmax),
             ylim=symmetric_ylim_from_ys(
                 collect_defpreempt_delta_deletions_total_ys(
+                    df=df,
+                    nodes_order=nodes_order,
+                    arrivals_order=arrivals_order,
+                    kmax=int(plot_kmax),
+                )
+            ),
+        )
+
+        plot_defpreempt_delta_latency_total(
+            df=df,
+            out_dir=figures_dir,
+            filename_stem=f"delta_L_without_defaultpreemption_kmax{plot_kmax}",
+            title=rf"$\Delta L_{{\mathrm{{w/o\ defpreempt}}}}$ (s) vs $\mu_A$  (kmax={plot_kmax})",
+            y_label=r"$\Delta L_{\mathrm{w/o\ defpreempt}}$ (s)",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=int(plot_kmax),
+            ylim=symmetric_ylim_from_ys(
+                collect_defpreempt_delta_latency_total_ys(
                     df=df,
                     nodes_order=nodes_order,
                     arrivals_order=arrivals_order,
