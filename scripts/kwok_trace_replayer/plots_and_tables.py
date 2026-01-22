@@ -319,6 +319,14 @@ def arrival_label(a: float, *, latex: bool) -> str:
         return rf"$\mu_A{{=}}{a_i}\,\mathrm{{s}}$"
     return f"µ_A={a_i}s"
 
+
+def arrival_label_big(a: float, *, latex: bool) -> str:
+    """Arrival label used in the big tables (row blocks)."""
+    a_i = int(a) if abs(a - round(a)) < 1e-9 else a
+    if latex:
+        return rf"$\mu_A = {a_i}\,\mathrm{{s}}$"
+    return f"µ_A = {a_i}s"
+
 # =============================================================================
 # Data access
 # =============================================================================
@@ -448,6 +456,44 @@ def cell_defpreempt_delta_total_or_vec(
     latex: bool,
 ) -> str:
     """Return (defpreempt=0) - (defpreempt=1) for total or per-priority vector depending on kmax."""
+    ns = nan_str(latex)
+    if kmax == 1:
+        dd = defpreempt_delta_total(
+            lookup,
+            kmax=kmax, mode=mode, blocking=blocking,
+            nodes=nodes, arrival_s=arrival_s,
+            total_col=total_col,
+        )
+        return fmt_signed(dd, decimals, ns)
+
+    vals0 = [
+        lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col=part_col_tpl.format(p=p))
+        for p in range(1, 5)
+    ]
+    vals1 = [
+        lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=1, col=part_col_tpl.format(p=p))
+        for p in range(1, 5)
+    ]
+    if any(not is_finite(v) for v in vals0) or any(not is_finite(v) for v in vals1):
+        return ns
+    diff = [float(v0) - float(v1) for v0, v1 in zip(vals0, vals1)]
+    return fmt_vec(diff, decimals, ns, latex=latex)
+
+
+def cell_defpreempt_delta_total_or_vec_big(
+    lookup: pd.DataFrame,
+    *,
+    kmax: int,
+    mode: str,
+    blocking: int,
+    nodes: int,
+    arrival_s: float,
+    total_col: str,
+    part_col_tpl: str,
+    decimals: int,
+    latex: bool,
+) -> str:
+    """Big-table variant of cell_defpreempt_delta_total_or_vec (no custom LaTeX macro)."""
     ns = nan_str(latex)
     if kmax == 1:
         dd = defpreempt_delta_total(
@@ -738,7 +784,7 @@ def latex_table(
     ]
 
     for kmax in sorted(rows_by_kmax.keys()):
-        k_title = r"$k_{\max}=1$ (no priorities)" if kmax == 1 else rf"$k_{{\max}}={kmax}$ (priorities enabled)"
+        k_title = r"$k_{\max}=1$ (w/o priorities)" if kmax == 1 else rf"$k_{{\max}}={kmax}$ (w/ priorities)"
         lines += [
             rf"\multicolumn{{{total_cols}}}{{l}}{{{k_title}}} \\",
             r"\midrule",
@@ -825,7 +871,7 @@ def ascii_table(
     lines.append(sep)
 
     for kmax in sorted(rows_by_kmax.keys()):
-        lines.append(f"kmax={kmax} ({'no priorities' if kmax == 1 else 'with priorities'})")
+        lines.append(f"kmax={kmax} ({'w/o priorities' if kmax == 1 else 'w/ priorities'})")
         lines.append(sep)
         for rk in rows_by_kmax[kmax]:
             label = str(row_label_fn(rk)).ljust(row_w)
@@ -835,6 +881,164 @@ def ascii_table(
                     row += center(cell_fn(kmax, rk, n, a), col_w)
             lines.append(row.rstrip())
         lines.append(sep)
+
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def latex_big_table_by_arrival(
+    *,
+    out_path: Path,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    rows_by_kmax: Dict[int, List[RowKey]],
+    metric_headers: List[str],
+    cell_fns_by_metric: Callable[[bool], List[Callable[[int, RowKey, int, float], str]]],
+    row_label_fn: Optional[RowLabelFn] = None,
+) -> None:
+    """Write a LaTeX big table: arrivals are row blocks; columns are 4 metrics per node."""
+    row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
+
+    if not nodes_order or not arrivals_order:
+        raise SystemExit("Need at least 1 node value and 1 arrival value to write big tables.")
+    if len(metric_headers) != 4:
+        raise SystemExit(f"Big tables require exactly 4 metric headers; got {len(metric_headers)}")
+
+    num_nodes = len(nodes_order)
+    total_cols = 1 + 4 * num_nodes
+    tab_spec = "l" + (" cccc" * num_nodes)
+
+    cmid = []
+    for i in range(num_nodes):
+        start = 2 + i * 4
+        end = start + 3
+        cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
+
+    node_header_parts = [rf"\multicolumn{{4}}{{c}}{{${{N={n}}}$}}" for n in nodes_order]
+    node_header = "& " + " & ".join(node_header_parts) + r" \\" 
+
+    metric_fns = cell_fns_by_metric(True)
+
+    lines: List[str] = []
+    for kmax in sorted(rows_by_kmax.keys()):
+        k_label = r"$k_{\max}=1$ (w/o priorities)" if kmax == 1 else rf"$k_{{\max}}={kmax}$ (w/ priorities)"
+        metric_header = [h for _n in nodes_order for h in metric_headers]
+        header_row = k_label + " & " + " & ".join(metric_header) + r" \\" 
+
+        lines += [
+            rf"\begin{{tabular}}{{{tab_spec}}}",
+            r"\toprule",
+            node_header,
+            "".join(cmid),
+            header_row,
+            r"\midrule",
+        ]
+
+        for ai, a in enumerate(arrivals_order):
+            if ai > 0:
+                lines.append(r"\midrule")
+            lines += [
+                rf"\multicolumn{{{total_cols}}}{{l}}{{{arrival_label_big(a, latex=True)}}} \\",
+                r"\midrule",
+            ]
+            for rk in rows_by_kmax[kmax]:
+                row_label = str(row_label_fn(rk))
+                cells: List[str] = []
+                for n in nodes_order:
+                    for fn in metric_fns:
+                        cells.append(fn(kmax, rk, n, a))
+                lines.append(row_label + " & " + " & ".join(cells) + r" \\ ")
+
+        lines += [
+            r"\bottomrule",
+            r"\end{tabular}",
+            "",
+        ]
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def ascii_big_table_by_arrival(
+    *,
+    out_path: Path,
+    title: str,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    rows_by_kmax: Dict[int, List[RowKey]],
+    metric_headers: List[str],
+    cell_fns_by_metric: Callable[[bool], List[Callable[[int, RowKey, int, float], str]]],
+    row_label_fn: Optional[RowLabelFn] = None,
+    row_w: Optional[int] = None,
+    col_w: Optional[int] = None,
+) -> None:
+    """Write an ASCII big table: arrivals are row blocks; columns are 4 metrics per node."""
+    row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
+
+    if not nodes_order or not arrivals_order:
+        raise SystemExit("Need at least 1 node value and 1 arrival value to write big tables.")
+    if len(metric_headers) != 4:
+        raise SystemExit(f"Big tables require exactly 4 metric headers; got {len(metric_headers)}")
+
+    metric_fns = cell_fns_by_metric(False)
+
+    # Width pass
+    max_label = 0
+    max_cell = 0
+    for kmax, rks in rows_by_kmax.items():
+        for rk in rks:
+            max_label = max(max_label, len(str(row_label_fn(rk))))
+            for a in arrivals_order:
+                for n in nodes_order:
+                    for fn in metric_fns:
+                        max_cell = max(max_cell, len(str(fn(kmax, rk, n, a))))
+
+    required_row_w = max(24, max_label + 2)
+    row_w = required_row_w if row_w is None else max(int(row_w), required_row_w)
+    required_col_w = max(10, max(max_cell, max(len(h) for h in metric_headers)) + 2)
+    col_w = required_col_w if col_w is None else max(int(col_w), required_col_w)
+
+    def center(s: str, w: int) -> str:
+        s = str(s)
+        if len(s) >= w:
+            return s
+        pad = w - len(s)
+        return " " * (pad // 2) + s + " " * (pad - pad // 2)
+
+    num_nodes = len(nodes_order)
+    total_width = row_w + col_w * (4 * num_nodes)
+    sep = "-" * total_width
+
+    lines: List[str] = []
+    lines.append(title)
+    lines.append("")
+
+    for kmax in sorted(rows_by_kmax.keys()):
+        lines.append(f"kmax={kmax} ({'w/o priorities' if kmax == 1 else 'w/ priorities'})")
+        lines.append("")
+
+        hdr1 = " " * row_w
+        for n in nodes_order:
+            hdr1 += center(f"N={n}", col_w * 4)
+        lines.append(hdr1.rstrip())
+
+        hdr2 = " " * row_w
+        for _n in nodes_order:
+            for h in metric_headers:
+                hdr2 += center(h, col_w)
+        lines.append(hdr2.rstrip())
+        lines.append(sep)
+
+        for a in arrivals_order:
+            lines.append(f"{arrival_label_big(a, latex=False)}")
+            lines.append(sep)
+            for rk in rows_by_kmax[kmax]:
+                label = str(row_label_fn(rk)).ljust(row_w)
+                row = label
+                for n in nodes_order:
+                    for fn in metric_fns:
+                        row += center(fn(kmax, rk, n, a), col_w)
+                lines.append(row.rstrip())
+            lines.append(sep)
+        lines.append("")
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -899,6 +1103,30 @@ def cell_total_or_vec_prio(
     latex: bool,
 ) -> str:
     """Return total or vector cell value depending on kmax."""
+    if kmax == 1:
+        v = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=total_col)
+        return fmt_signed(v, decimals, nan_str(latex))
+
+    vals = [
+        value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=part_col_tpl.format(p=p))
+        for p in range(1, 5)
+    ]
+    return fmt_vec(vals, decimals, nan_str(latex), latex=latex)
+
+
+def cell_total_or_vec_prio_big(
+    lookup: pd.DataFrame,
+    *,
+    kmax: int,
+    rk: RowKey,
+    nodes: int,
+    arrival_s: float,
+    total_col: str,
+    part_col_tpl: str,  # e.g. "delta_D_p{p}_mean"
+    decimals: int,
+    latex: bool,
+) -> str:
+    """Big-table variant of cell_total_or_vec_prio (no custom LaTeX macro)."""
     if kmax == 1:
         v = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=total_col)
         return fmt_signed(v, decimals, nan_str(latex))
@@ -1003,10 +1231,34 @@ def mk_cell_total_or_vec(*, lookup: pd.DataFrame, total_col: str, part_tpl: str,
     return _mk
 
 
+def mk_cell_total_or_vec_big(*, lookup: pd.DataFrame, total_col: str, part_tpl: str, decimals: int = TABLE_DECIMALS):
+    """Like mk_cell_total_or_vec (kept for big-table wiring)."""
+    def _mk(latex: bool):
+        return lambda k, rk, n, a: cell_total_or_vec_prio_big(
+            lookup,
+            kmax=k, rk=rk, nodes=n, arrival_s=a,
+            total_col=total_col, part_col_tpl=part_tpl,
+            decimals=decimals, latex=latex,
+        )
+    return _mk
+
+
 def mk_cell_def_delta(*, lookup: pd.DataFrame, total_col: str, part_tpl: str, decimals: int = TABLE_DECIMALS):
     """Make cell function for defpreempt delta total or vector depending on kmax."""
     def _mk(latex: bool):
         return lambda k, rk, n, a: cell_defpreempt_delta_total_or_vec(
+            lookup,
+            kmax=k, mode=rk.mode, blocking=rk.blocking, nodes=n, arrival_s=a,
+            total_col=total_col, part_col_tpl=part_tpl,
+            decimals=decimals, latex=latex,
+        )
+    return _mk
+
+
+def mk_cell_def_delta_big(*, lookup: pd.DataFrame, total_col: str, part_tpl: str, decimals: int = TABLE_DECIMALS):
+    """Like mk_cell_def_delta (kept for big-table wiring)."""
+    def _mk(latex: bool):
+        return lambda k, rk, n, a: cell_defpreempt_delta_total_or_vec_big(
             lookup,
             kmax=k, mode=rk.mode, blocking=rk.blocking, nodes=n, arrival_s=a,
             total_col=total_col, part_col_tpl=part_tpl,
@@ -1136,6 +1388,12 @@ def main() -> None:
     mk_cell_def_delta_L = mk_cell_def_delta(lookup=lookup, total_col="delta_L_s_total_mean", part_tpl="delta_L_s_p{p}_mean")
     mk_cell_def_delta_O = mk_cell_def_delta_count(lookup=lookup, col="plan_activated_mean")
 
+    # Big table (new layout) variants.
+    mk_cell_L_big = mk_cell_total_or_vec_big(lookup=lookup, total_col="delta_L_s_total_mean", part_tpl="delta_L_s_p{p}_mean")
+    mk_cell_D_big = mk_cell_total_or_vec_big(lookup=lookup, total_col="delta_D_total_mean", part_tpl="delta_D_p{p}_mean")
+    mk_cell_def_delta_L_big = mk_cell_def_delta_big(lookup=lookup, total_col="delta_L_s_total_mean", part_tpl="delta_L_s_p{p}_mean")
+    mk_cell_def_delta_D_big = mk_cell_def_delta_big(lookup=lookup, total_col="delta_D_total_mean", part_tpl="delta_D_p{p}_mean")
+
     # Big tables:
     # 1) vs baseline (defpreempt=1 + scheduling-failure): ΔU_eff ; ΔL ; ΔD ; #O(mean)
     mk_cell_big_vs_baseline = mk_cell_big_metrics(mk_cell_U_eff, mk_cell_L, mk_cell_D, mk_cell_plans_activated)
@@ -1240,6 +1498,69 @@ def main() -> None:
     ]
 
     for spec in TABLE_SPECS:
+        # Big tables use a different layout (arrivals as row blocks; per-node metric columns)
+        if spec.stem == "big_table_util_latency_deletions_optimizations":
+            latex_big_table_by_arrival(
+                out_path=tables_dir / f"{spec.stem}.tex",
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                rows_by_kmax=spec.rows_by_kmax,
+                metric_headers=[r"$\Delta U$", r"$\Delta L$", r"$\Delta D$", r"$\#O$"],
+                cell_fns_by_metric=lambda latex: [
+                    mk_cell_U_eff(latex),
+                    mk_cell_L_big(latex),
+                    mk_cell_D_big(latex),
+                    mk_cell_plans_activated(latex),
+                ],
+            )
+            ascii_big_table_by_arrival(
+                out_path=tables_dir / f"{spec.stem}.txt",
+                title=spec.ascii_title,
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                rows_by_kmax=spec.rows_by_kmax,
+                metric_headers=["ΔU", "ΔL", "ΔD", "#O"],
+                cell_fns_by_metric=lambda latex: [
+                    mk_cell_U_eff(latex),
+                    mk_cell_L_big(latex),
+                    mk_cell_D_big(latex),
+                    mk_cell_plans_activated(latex),
+                ],
+            )
+            continue
+
+        if spec.stem == "big_table_without_defaultpreemption_util_latency_deletions_optimizations":
+            latex_big_table_by_arrival(
+                out_path=tables_dir / f"{spec.stem}.tex",
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                rows_by_kmax=spec.rows_by_kmax,
+                metric_headers=[r"$\Delta U$", r"$\Delta L$", r"$\Delta D$", r"$\Delta O$"],
+                cell_fns_by_metric=lambda latex: [
+                    mk_cell_def_delta_U_eff(latex),
+                    mk_cell_def_delta_L_big(latex),
+                    mk_cell_def_delta_D_big(latex),
+                    mk_cell_def_delta_O(latex),
+                ],
+                row_label_fn=spec.row_label_fn,
+            )
+            ascii_big_table_by_arrival(
+                out_path=tables_dir / f"{spec.stem}.txt",
+                title=spec.ascii_title,
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                rows_by_kmax=spec.rows_by_kmax,
+                metric_headers=["ΔU", "ΔL", "ΔD", "ΔO"],
+                cell_fns_by_metric=lambda latex: [
+                    mk_cell_def_delta_U_eff(latex),
+                    mk_cell_def_delta_L_big(latex),
+                    mk_cell_def_delta_D_big(latex),
+                    mk_cell_def_delta_O(latex),
+                ],
+                row_label_fn=spec.row_label_fn,
+            )
+            continue
+
         write_table_spec(spec=spec, out_dir=tables_dir, nodes_order=nodes_order, arrivals_order=arrivals_order)
 
     # -------------------------------------------------------------------------
