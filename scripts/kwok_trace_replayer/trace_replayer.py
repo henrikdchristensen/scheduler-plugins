@@ -803,11 +803,25 @@ class TraceReplayer:
         """
         Dump optimization stats ConfigMap to a local JSON file.
         """
+        # IMPORTANT: Don't call get_json_ctx() here.
+        # In environments without a live cluster (e.g. unit tests), kubectl can
+        # block indefinitely. Use a small timeout for this best-effort dump.
+        cmd = ["kubectl"]
+        if self.ctx:
+            cmd += ["--context", str(self.ctx)]
+        cmd += ["-n", OPT_STATS_NS, "get", "configmap", OPT_STATS_CM, "-o", "json"]
+
         try:
-            cm = get_json_ctx(
-                self.ctx,
-                ["-n", OPT_STATS_NS, "get", "configmap", OPT_STATS_CM, "-o", "json"],
-            )
+            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=1.0)
+            cm = json.loads(out)
+        except subprocess.TimeoutExpired as e:
+            LOG.debug("opt-stats: kubectl timed out: %s", e)
+            return False, None
+        except subprocess.CalledProcessError as e:
+            raw = getattr(e, "output", None) or getattr(e, "stdout", None) or b""
+            tail = raw.decode("utf-8", "replace")[-1200:]
+            LOG.debug("opt-stats: kubectl failed: rc=%s output_tail=%r", getattr(e, "returncode", None), tail)
+            return False, None
         except Exception as e:
             LOG.debug("opt-stats: CM not readable: %s", e)
             return False, None
@@ -957,8 +971,9 @@ class TraceReplayer:
 
             # pod_stats.csv header
             pod_stats_writer.writerow(["timestamp", "event", "pod_name", "pod_uid", "priority", "time_s"])
-            
-            last_opt_dump_s = -1e18
+
+            # Don't force an immediate opt-stats dump on startup.
+            last_opt_dump_s = float(self.time_s())
 
             # monitoring loop
             while not stop_event.is_set():
