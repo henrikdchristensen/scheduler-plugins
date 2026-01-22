@@ -1,4 +1,4 @@
-Delta u_eff (pp), mean paired difference vs baseline
+Delta u_eff (pp), plugin vs baseline
 
                                                         N=16                          N=32
                                              µ_A=4s    µ_A=8s   µ_A=16s    µ_A=4s    µ_A=8s   µ_A=16s

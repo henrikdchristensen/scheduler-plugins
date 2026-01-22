@@ -1,4 +1,4 @@
-solver_attempts (count), mean across seeds
+Solver attempts (mean)
 
                                                         N=16                          N=32
                                              µ_A=4s    µ_A=8s   µ_A=16s    µ_A=4s    µ_A=8s   µ_A=16s
