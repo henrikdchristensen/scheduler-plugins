@@ -69,7 +69,6 @@ PLOT_ARRIVAL_X_SPACING = 0.6
 PLOT_MODE_X_SPACING = 0.05
 
 PLOT_FIGSIZE = (3.1, 2.2)
-PLOT_TITLE_FONTSIZE = 8
 PLOT_TICK_FONTSIZE = 7
 PLOT_LEGEND_FONTSIZE = 5
 PLOT_AXIS_LABEL_FONTSIZE = 7
@@ -635,7 +634,6 @@ def plot_dumbbell(
     *,
     out_dir: Path,
     filename_stem: str,
-    title: str,
     y_label: str,
     nodes_order: List[int],
     arrivals_order: List[float],
@@ -685,7 +683,6 @@ def plot_dumbbell(
                 ax.plot([x], [y1], linestyle="None", marker="s", markersize=PLOT_MARKER_SIZE, color=color, label="_nolegend_")
 
     ax.axhline(0.0, linewidth=1.0)
-    ax.set_title(title, fontsize=PLOT_TITLE_FONTSIZE)
     ax.set_ylabel(y_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
     ax.set_xticks(x_base)
     ax.set_xticklabels([arrival_label(a, latex=True) for a in arrivals_order])
@@ -1629,7 +1626,6 @@ def main() -> None:
         plot_dumbbell(
             out_dir=figures_dir,
             filename_stem=f"delta_U_eff_run_kmax{plot_kmax}",
-            title=rf"$\Delta U_{{\mathrm{{eff}}}}$ vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta U_{\mathrm{eff}}$ (pp)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
@@ -1643,7 +1639,6 @@ def main() -> None:
         plot_dumbbell(
             out_dir=figures_dir,
             filename_stem=f"delta_L_kmax{plot_kmax}",
-            title=rf"$\Delta L$ vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta L$ (seconds)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
@@ -1657,7 +1652,6 @@ def main() -> None:
         plot_dumbbell(
             out_dir=figures_dir,
             filename_stem=f"delta_D_kmax{plot_kmax}_without_defaultpreemption",
-            title=rf"$\Delta D_{{\mathrm{{w/o\ defpreempt}}}}$ vs $\mu_A$ (kmax={plot_kmax})",
             y_label=r"$\Delta D_{\mathrm{w/o\ defpreempt}}$ (#deletions)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
@@ -1672,7 +1666,6 @@ def main() -> None:
         plot_dumbbell(
             out_dir=figures_dir,
             filename_stem=f"delta_L_kmax{plot_kmax}_without_defaultpreemption",
-            title=rf"$\Delta L_{{\mathrm{{w/o\ defpreempt}}}}$ vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta L_{\mathrm{w/o\ defpreempt}}$ (seconds)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
