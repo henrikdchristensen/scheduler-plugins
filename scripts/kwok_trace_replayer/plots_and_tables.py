@@ -5,19 +5,19 @@ python -m scripts.kwok_trace_replayer.plots_and_tables --in-results analysis/kwo
 
 Produces:
   Tables (under <out-dir>/tables):
-        - delta_U_eff_run.{txt,tex}
+    - delta_U_eff_run.{txt,tex}
     - delta_R.{txt,tex}
     - delta_D.{txt,tex}
     - delta_L.{txt,tex}
     - solver_attempts.{txt,tex}
     - plans_activated.{txt,tex}
-        - big_table_util_latency_deletions_optimizations.{txt,tex}
+    - big_table_util_latency_deletions_optimizations.{txt,tex}
     - delta_D_without_defaultpreemption.{txt,tex}
     - delta_L_without_defaultpreemption.{txt,tex}
-        - big_table_without_defaultpreemption_util_latency_deletions_optimizations.{txt,tex}
+    - big_table_without_defaultpreemption_util_latency_deletions_optimizations.{txt,tex}
 
   Figures (under <out-dir>/figures):
-        - delta_U_eff_run_kmax<K>.<png|pdf>
+    - delta_U_eff_run_kmax<K>.<png|pdf>
     - delta_L_kmax<K>.<png|pdf>
     - delta_D_kmax<K>_without_defaultpreemption.<png|pdf>
     - delta_L_kmax<K>_without_defaultpreemption.<png|pdf>
@@ -910,11 +910,6 @@ def cell_total_or_vec_prio(
     return fmt_vec(vals, decimals, nan_str(latex), latex=latex)
 
 
-def join_cells(a_cell, b_cell, *, sep: str = "; "):
-    """Join two cell functions with sep."""
-    return lambda k, rk, n, a: f"{a_cell(k, rk, n, a)}{sep}{b_cell(k, rk, n, a)}"
-
-
 def join_many_cells(cell_fns: Sequence[Callable[[int, RowKey, int, float], str]], *, sep: str = "; "):
     """Join N cell functions with sep."""
     return lambda k, rk, n, a: sep.join(fn(k, rk, n, a) for fn in cell_fns)
@@ -1107,9 +1102,10 @@ def main() -> None:
     # Build RowKey lists per kmax (from plugin_config rows)
     rows_by_kmax = build_rows_by_kmax(df)
 
-    # defpreempt-only (used by big_table_latency_util_optimizations): keep defpreempt=1 configs only
+    # defpreempt-only (used by the "vs baseline" big table):
+    # Keep defpreempt=1 configs, BUT ALSO keep scheduling-failure rows (even though defpreempt=0 there).
     rows_by_kmax_defpreempt_only: Dict[int, List[RowKey]] = {
-        k: [rk for rk in rks if rk.defpreempt == 1]
+        k: [rk for rk in rks if (rk.defpreempt == 1) or (rk.mode == "scheduling-failure")]
         for k, rks in rows_by_kmax.items()
     }
 
@@ -1141,7 +1137,7 @@ def main() -> None:
     mk_cell_def_delta_O = mk_cell_def_delta_count(lookup=lookup, col="plan_activated_mean")
 
     # Big tables:
-    # 1) vs baseline (defpreempt=1 only): ΔU_eff ; ΔL ; ΔD ; #O(mean)
+    # 1) vs baseline (defpreempt=1 + scheduling-failure): ΔU_eff ; ΔL ; ΔD ; #O(mean)
     mk_cell_big_vs_baseline = mk_cell_big_metrics(mk_cell_U_eff, mk_cell_L, mk_cell_D, mk_cell_plans_activated)
 
     # 2) within plugin: (def0)-(def1): ΔU_eff ; ΔL ; ΔD ; ΔO
@@ -1200,13 +1196,13 @@ def main() -> None:
             make_cell_fn=mk_cell_plans_activated,
         ),
         TableSpec(
-            stem="big_table_U_L_D_O",
+            stem="big_table_util_latency_deletions_optimizations",
             latex_title_math=r"\Delta U_{\mathrm{eff}}\ ;\ \Delta L\ ;\ \Delta D\ ;\ \#O",
             latex_subtitle=(
                 r"(pp; s; count; count), plugin vs.\ baseline for $\Delta U_{\mathrm{eff}}, \Delta L, \Delta D$; "
-                r"$\#O$ is mean optimizations (baseline has none); defpreempt=1 only"
+                r"$\#O$ is mean optimizations (baseline has none)"
             ),
-            ascii_title="Combined (defpreempt enabled): ΔU_eff (pp) ; ΔL (s) ; ΔD ; #O (mean)",
+            ascii_title="Combined: ΔU_eff (pp) ; ΔL (s) ; ΔD ; #O (mean)   [vs baseline]",
             rows_by_kmax=rows_by_kmax_defpreempt_only,
             make_cell_fn=mk_cell_big_vs_baseline,
             ascii_col_w=68,
@@ -1223,7 +1219,7 @@ def main() -> None:
         ),
         TableSpec(
             stem="delta_L_without_defaultpreemption",
-            latex_title_math=r"\Delta L_{p,\mathrm{w/o\ defpreempt}}",
+            latex_title_math=r"\Delta L_{\mathrm{w/o\ defpreempt}}",
             latex_subtitle=r"(mean latency), $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$",
             ascii_title="Delta latency (per-priority if kmax>1): (defpreempt=0) - (defpreempt=1)  [within plugin, baseline cancels]",
             rows_by_kmax=rows_by_kmax_def,
@@ -1232,10 +1228,10 @@ def main() -> None:
             row_label_fn=lambda rk: rk.label(include_defpreempt=False),
         ),
         TableSpec(
-            stem="big_table_without_defaultpreemption_U_L_D_O",
-            latex_title_math=r"\Delta U_{\mathrm{eff}}\ ;\ \Delta L_p\ ;\ \Delta D_p\ ;\ \Delta O",
-            latex_subtitle=r"(pp; s; count; count), all are $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$",
-            ascii_title="Combined: ΔU_eff (pp) ; ΔL (s) ; ΔD ; ΔO   (all are (defpreempt=0)-(defpreempt=1))",
+            stem="big_table_without_defaultpreemption_util_latency_deletions_optimizations",
+            latex_title_math=r"\Delta U_{\mathrm{eff}}\ ;\ \Delta L\ ;\ \Delta D\ ;\ \Delta O",
+            latex_subtitle=r"(pp; s; count; count), all are $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$ (Scheduling-failure excluded)",
+            ascii_title="Combined: ΔU_eff (pp) ; ΔL (s) ; ΔD ; ΔO   (all are (defpreempt=0)-(defpreempt=1); scheduling-failure excluded)",
             rows_by_kmax=rows_by_kmax_def,
             make_cell_fn=mk_cell_big_def_delta,
             ascii_col_w=68,
