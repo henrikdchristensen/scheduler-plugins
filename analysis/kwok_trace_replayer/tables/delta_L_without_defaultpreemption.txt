@@ -1,4 +1,4 @@
-Delta latency: (defpreempt=0) - (defpreempt=1)  [within plugin, baseline cancels]
+Delta latency (per-priority if kmax>1): (defpreempt=0) - (defpreempt=1)  [within plugin, baseline cancels]
 
                                                                    N=16                                                                                N=32
                                       µ_A=4s                      µ_A=8s                     µ_A=16s                      µ_A=4s                      µ_A=8s                     µ_A=16s

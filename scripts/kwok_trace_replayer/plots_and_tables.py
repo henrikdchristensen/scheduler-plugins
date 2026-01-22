@@ -5,22 +5,22 @@ python -m scripts.kwok_trace_replayer.plots_and_tables --in-results analysis/kwo
 
 Produces:
   Tables (under <out-dir>/tables):
-    - delta_u_eff_run.{txt,tex}
+        - delta_U_eff_run.{txt,tex}
     - delta_R.{txt,tex}
     - delta_D.{txt,tex}
     - delta_L.{txt,tex}
     - solver_attempts.{txt,tex}
     - plans_activated.{txt,tex}
-    - big_table_latency_util.{txt,tex}
+        - big_table_util_latency_deletions_optimizations.{txt,tex}
     - delta_D_without_defaultpreemption.{txt,tex}
     - delta_L_without_defaultpreemption.{txt,tex}
-    - big_table_without_defaultpreemption_deletions_latency.{txt,tex}
+        - big_table_without_defaultpreemption_util_latency_deletions_optimizations.{txt,tex}
 
   Figures (under <out-dir>/figures):
-    - delta_u_eff_run_kmax<K>.<png|pdf>
-    - delta_L_total_kmax<K>.<png|pdf>
-    - delta_D_without_defaultpreemption_kmax<K>.<png|pdf>
-    - delta_L_without_defaultpreemption_kmax<K>.<png|pdf>
+        - delta_U_eff_run_kmax<K>.<png|pdf>
+    - delta_L_kmax<K>.<png|pdf>
+    - delta_D_kmax<K>_without_defaultpreemption.<png|pdf>
+    - delta_L_kmax<K>_without_defaultpreemption.<png|pdf>
 """
 
 import argparse, math, re
@@ -36,7 +36,7 @@ import pandas as pd
 # Constants
 # =============================================================================
 
-TABLE_DECIMALS: int = 1 # for table formatting
+TABLE_DECIMALS: int = 1  # for table formatting
 JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
 
 MODE_ORDER: List[Tuple[str, Optional[int], str]] = [
@@ -52,7 +52,7 @@ MODE_LABEL: Dict[Tuple[str, Optional[int]], str] = {(m, b): lbl for (m, b, lbl) 
 EXPECTED_COLS = [
     "job_name",
     "plugin_config",
-    "delta_util_eff_run_mean",
+    "delta_U_eff_run_mean",
     "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean", "delta_R_total_mean",
     "delta_D_p1_mean", "delta_D_p2_mean", "delta_D_p3_mean", "delta_D_p4_mean", "delta_D_total_mean",
     "delta_L_s_p1_mean", "delta_L_s_p2_mean", "delta_L_s_p3_mean", "delta_L_s_p4_mean", "delta_L_s_total_mean",
@@ -81,6 +81,7 @@ PLOT_LEGEND_BORDER_AXES_PAD = 0.4
 PLOT_LEGEND_LOC = "lower left"
 PLOT_LEGEND_NCOL = 2
 
+
 def add_standard_legend(
     *,
     ax: plt.Axes,
@@ -91,14 +92,14 @@ def add_standard_legend(
     """Standard legend inside the axes, deduped and compact."""
     clean: List[Tuple[object, str]] = []
     seen = set()
-    for handle, label in zip(handles, labels):
-        s = str(label)
+    for h, lbl in zip(handles, labels):
+        s = str(lbl)
         if not s or s.startswith("_"):
             continue
         if s in seen:
             continue
         seen.add(s)
-        clean.append((handle, s))
+        clean.append((h, s))
 
     if not clean:
         return
@@ -120,6 +121,7 @@ def add_standard_legend(
 # Parsing helpers
 # =============================================================================
 
+
 def parse_job(job_name: str) -> Optional[Tuple[int, int, float]]:
     """
     Parse job_name format:
@@ -133,6 +135,7 @@ def parse_job(job_name: str) -> Optional[Tuple[int, int, float]]:
     a = float(m.group(3))
     return n, k, a
 
+
 def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
     """
     plugin_config format (from seal_results.py):
@@ -144,6 +147,7 @@ def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
             k, v = tok.split("=", 1)
             kv[k.strip().lower()] = v.strip()
     return kv
+
 
 def canonical_mode(mode: str) -> str:
     """
@@ -160,6 +164,7 @@ def canonical_mode(mode: str) -> str:
         return f"stable-queue-{m.group(1)}s"
 
     return s
+
 
 def display_mode(mode: str) -> str:
     """
@@ -192,7 +197,7 @@ class RowKey:
         """
         kv = parse_plugin_config(plugin_config)
         mode = canonical_mode(kv.get("mode", "unknown"))
-        if mode == "scheduling-failure": # scheduling-failure has no blocking label; normalize to 0
+        if mode == "scheduling-failure":  # scheduling-failure has no blocking label; normalize to 0
             blocking = 0
         else:
             blocking = 1 if str(kv.get("blocking", "0")).lower() in {"1", "true", "yes"} else 0
@@ -259,48 +264,45 @@ class RowKey:
 # Formatting
 # =============================================================================
 
+
 def is_finite(x: object) -> bool:
-    """
-    Return True if x is a finite number.
-    """
+    """Return True if x is a finite number."""
     try:
         return math.isfinite(float(x))
     except Exception:
         return False
 
+
 def normalize_neg_zero(v: float) -> float:
-    """
-    Normalize -0.0 to 0.0 for display purposes.
-    """
+    """Normalize -0.0 to 0.0 for display purposes."""
     return 0.0 if abs(v) < 0.5e-12 else v
 
+
 def nan_str(latex: bool) -> str:
-    """
-    Return NaN string for tables.
-    """
+    """Return NaN string for tables."""
     return (r"\text{--}" if latex else "--")
 
+
 def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
-    """
-    Format signed float with given decimals, normalizing -0.0 to 0.0.
-    """
+    """Format signed float with given decimals, normalizing -0.0 to 0.0."""
     if not is_finite(x):
         return nan_s
     v = normalize_neg_zero(float(x))
     return f"{v:+.{decimals}f}"
 
+
 def fmt_count(x: object, nan_s: str) -> str:
     """
     Format count as signed integer, handling NaN.
+    (Note: underlying data may be mean counts; we round for display consistency.)
     """
     if not is_finite(x):
         return nan_s
     return f"{int(round(float(x))):+d}"
 
+
 def fmt_vec(values: Sequence[object], decimals: int, nan_s: str, latex: bool) -> str:
-    """
-    Format a vector of signed floats.
-    """
+    """Format a vector of signed floats."""
     if any(not is_finite(v) for v in values):
         return nan_s
     parts = [fmt_signed(v, decimals=decimals, nan_s=nan_s) for v in values]
@@ -309,10 +311,9 @@ def fmt_vec(values: Sequence[object], decimals: int, nan_s: str, latex: bool) ->
         return r"{\scriptsize$\langle" + inside + r"\rangle$}"
     return "<" + inside + ">"
 
+
 def arrival_label(a: float, *, latex: bool) -> str:
-    """
-    Return µ_A label for arrival s.
-    """
+    """Return µ_A label for arrival s."""
     a_i = int(a) if abs(a - round(a)) < 1e-9 else a
     if latex:
         return rf"$\mu_A{{=}}{a_i}\,\mathrm{{s}}$"
@@ -322,10 +323,9 @@ def arrival_label(a: float, *, latex: bool) -> str:
 # Data access
 # =============================================================================
 
+
 def load_results(results_csv: Path) -> pd.DataFrame:
-    """
-    Load and parse results CSV into DataFrame with extra parsed columns.
-    """
+    """Load and parse results CSV into DataFrame with extra parsed columns."""
     if not results_csv.exists():
         raise SystemExit(f"Not found: {results_csv}")
 
@@ -351,13 +351,13 @@ def load_results(results_csv: Path) -> pd.DataFrame:
 
     return df
 
+
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Build a MultiIndex lookup table for O(1) cell access.
-    """
+    """Build a MultiIndex lookup table for O(1) cell access."""
     d = df.copy()
     d = d.drop_duplicates(subset=KEY_COLS, keep="first")
     return d.set_index(KEY_COLS).sort_index()
+
 
 def lookup_value(
     lookup: pd.DataFrame,
@@ -370,14 +370,13 @@ def lookup_value(
     defpreempt: int,
     col: str,
 ) -> float:
-    """
-    Lookup value from the DataFrame by key.
-    """
+    """Lookup value from the DataFrame by key."""
     key = (int(nodes), int(kmax), float(arrival_s), str(mode), int(blocking), int(defpreempt))
     try:
         return float(lookup.at[key, col])
     except KeyError:
         return float("nan")
+
 
 def value_at(
     lookup: pd.DataFrame,
@@ -388,10 +387,7 @@ def value_at(
     arrival_s: float,
     col: str,
 ) -> float:
-    """
-    Return value at given parameters.
-    It uses rk to extract mode, blocking, defpreempt.
-    """
+    """Return value at given parameters."""
     return lookup_value(
         lookup,
         nodes=nodes, kmax=kmax, arrival_s=arrival_s,
@@ -402,6 +398,7 @@ def value_at(
 # =============================================================================
 # Special: defpreempt delta within plugin configs
 # =============================================================================
+
 
 def build_defpreempt_rows(df: pd.DataFrame) -> List[Tuple[str, int]]:
     """
@@ -420,6 +417,7 @@ def build_defpreempt_rows(df: pd.DataFrame) -> List[Tuple[str, int]]:
     rows.sort(key=lambda mb: RowKey(mode=mb[0], blocking=mb[1], defpreempt=1).sort_key())
     return rows
 
+
 def defpreempt_delta_total(
     lookup: pd.DataFrame,
     *,
@@ -430,12 +428,11 @@ def defpreempt_delta_total(
     arrival_s: float,
     total_col: str,
 ) -> float:
-    """
-    Return (defpreempt=0) - (defpreempt=1) for total_col.
-    """
+    """Return (defpreempt=0) - (defpreempt=1) for total_col (works for scalar cols too)."""
     v0 = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col=total_col)
     v1 = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=1, col=total_col)
     return (v0 - v1) if (is_finite(v0) and is_finite(v1)) else float("nan")
+
 
 def cell_defpreempt_delta_total_or_vec(
     lookup: pd.DataFrame,
@@ -450,9 +447,7 @@ def cell_defpreempt_delta_total_or_vec(
     decimals: int,
     latex: bool,
 ) -> str:
-    """
-    Return (defpreempt=0) - (defpreempt=1) for total or vector cell value depending on kmax.
-    """
+    """Return (defpreempt=0) - (defpreempt=1) for total or per-priority vector depending on kmax."""
     ns = nan_str(latex)
     if kmax == 1:
         dd = defpreempt_delta_total(
@@ -462,6 +457,7 @@ def cell_defpreempt_delta_total_or_vec(
             total_col=total_col,
         )
         return fmt_signed(dd, decimals, ns)
+
     vals0 = [
         lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col=part_col_tpl.format(p=p))
         for p in range(1, 5)
@@ -475,6 +471,57 @@ def cell_defpreempt_delta_total_or_vec(
     diff = [float(v0) - float(v1) for v0, v1 in zip(vals0, vals1)]
     return fmt_vec(diff, decimals, ns, latex=latex)
 
+
+def cell_defpreempt_delta_count(
+    lookup: pd.DataFrame,
+    *,
+    kmax: int,
+    mode: str,
+    blocking: int,
+    nodes: int,
+    arrival_s: float,
+    col: str,
+    latex: bool,
+) -> str:
+    """
+    Return (defpreempt=0) - (defpreempt=1) for a scalar "count-like" column (e.g., plan_activated_mean).
+    Displayed as signed integer (rounded) to match other count tables.
+    """
+    ns = nan_str(latex)
+    dd = defpreempt_delta_total(
+        lookup,
+        kmax=kmax, mode=mode, blocking=blocking,
+        nodes=nodes, arrival_s=arrival_s,
+        total_col=col,
+    )
+    return fmt_count(dd, ns)
+
+
+def cell_defpreempt_delta_signed_scalar(
+    lookup: pd.DataFrame,
+    *,
+    kmax: int,
+    mode: str,
+    blocking: int,
+    nodes: int,
+    arrival_s: float,
+    col: str,
+    decimals: int,
+    latex: bool,
+    scale: float = 1.0,
+) -> str:
+    """Return (defpreempt=0) - (defpreempt=1) for a scalar float column, optionally scaled."""
+    ns = nan_str(latex)
+    dd = defpreempt_delta_total(
+        lookup,
+        kmax=kmax, mode=mode, blocking=blocking,
+        nodes=nodes, arrival_s=arrival_s,
+        total_col=col,
+    )
+    if is_finite(dd):
+        dd = float(dd) * float(scale)
+    return fmt_signed(dd, decimals, ns)
+
 # =============================================================================
 # Plot helpers
 # =============================================================================
@@ -482,11 +529,9 @@ def cell_defpreempt_delta_total_or_vec(
 YOfFn = Callable[[RowKey, int, float, int], float]          # (rk, nodes, arrival_s, kmax) -> y
 LabelOfFn = Callable[[RowKey], str]                         # (rk) -> legend label
 
+
 def symmetric_ylim_from_y_values(y_vals: List[float]) -> Tuple[float, float]:
-    """
-    Return symmetric ylim (min, max) given y values.
-    Adds 10% padding.
-    """
+    """Return symmetric ylim (min, max) given y values. Adds padding."""
     vals = [abs(float(y)) for y in y_vals if is_finite(y)]
     if not vals:
         return (-1.0, 1.0)
@@ -495,6 +540,7 @@ def symmetric_ylim_from_y_values(y_vals: List[float]) -> Tuple[float, float]:
         return (-1.0, 1.0)
     pad = PLOT_Y_PADDING * m
     return (-(m + pad), (m + pad))
+
 
 def plot_series(df: pd.DataFrame, *, kmax: int) -> List[RowKey]:
     """
@@ -516,6 +562,7 @@ def plot_series(df: pd.DataFrame, *, kmax: int) -> List[RowKey]:
     )
     return series
 
+
 def collect_plot_y_vals(
     *,
     lookup: pd.DataFrame,
@@ -526,13 +573,7 @@ def collect_plot_y_vals(
     kmax: int,
     scale: float = 1.0,
 ) -> List[float]:
-    """
-    Collect y values for all series, nodes, arrivals for plotting.
-    1) series ordered by plot_series()
-    2) for each series, nodes in nodes_order
-         for each nodes, arrivals in arrivals_order
-    3) scale each y by scale factor
-    """
+    """Collect y values for all series, nodes, arrivals for plotting."""
     series = plot_series(df, kmax=kmax)
     y_vals: List[float] = []
     for rk in series:
@@ -542,6 +583,7 @@ def collect_plot_y_vals(
                 if is_finite(y):
                     y_vals.append(float(y) * float(scale))
     return y_vals
+
 
 def plot_dumbbell(
     *,
@@ -579,7 +621,7 @@ def plot_dumbbell(
 
     for i, rk in enumerate(series):
         mode_offset = (i - (m - 1) / 2.0) * PLOT_MODE_X_SPACING
-        color = ax.plot([], [], linestyle="None")[0].get_color() # advance the color cycle exactly once per series
+        color = ax.plot([], [], linestyle="None")[0].get_color()  # advance the color cycle exactly once per series
         label = label_of(rk)
         (h_legend,) = ax.plot([], [], linestyle="-", linewidth=1.8, color=color, label=label)
         legend_handles.append(h_legend)
@@ -615,6 +657,7 @@ def plot_dumbbell(
     fig.savefig(out_dir / f"{filename_stem}.pdf")
     plt.close(fig)
 
+
 def collect_defpreempt_delta_total_y_vals(
     *,
     lookup: pd.DataFrame,
@@ -624,9 +667,7 @@ def collect_defpreempt_delta_total_y_vals(
     total_col: str,
     default_rows: List[Tuple[str, int]],
 ) -> List[float]:
-    """
-    Collect y values for defpreempt delta total for plotting.
-    """
+    """Collect y values for defpreempt delta total for plotting."""
     y_vals: List[float] = []
     for mode, blocking in default_rows:
         for a in arrivals_order:
@@ -646,6 +687,7 @@ def collect_defpreempt_delta_total_y_vals(
 
 RowLabelFn = Callable[[RowKey], str]
 
+
 def latex_table(
     *,
     out_path: Path,
@@ -657,9 +699,7 @@ def latex_table(
     cell_fn,  # (kmax, rowkey, nodes, arrival) -> str
     row_label_fn: Optional[RowLabelFn] = None,
 ) -> None:
-    """
-    Write a LaTeX table to the specified output path.
-    """
+    """Write a LaTeX table to the specified output path."""
     row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
 
     num_nodes = len(nodes_order)
@@ -722,6 +762,7 @@ def latex_table(
     ]
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
+
 def ascii_table(
     *,
     out_path: Path,
@@ -734,9 +775,7 @@ def ascii_table(
     col_w: Optional[int] = None,
     row_label_fn: Optional[RowLabelFn] = None,
 ) -> None:
-    """
-    Write an ASCII table to the specified output path.
-    """
+    """Write an ASCII table to the specified output path."""
     row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
 
     if not nodes_order or not arrivals_order:
@@ -799,10 +838,9 @@ def ascii_table(
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+
 def write_both(*, stem: str, out_dir: Path, latex_args: dict, ascii_args: dict) -> None:
-    """
-    Write both LaTeX and ASCII tables to out_dir with given stem.
-    """
+    """Write both LaTeX and ASCII tables to out_dir with given stem."""
     out_dir.mkdir(parents=True, exist_ok=True)
     latex_table(out_path=out_dir / f"{stem}.tex", **latex_args)
     ascii_table(out_path=out_dir / f"{stem}.txt", **ascii_args)
@@ -810,6 +848,7 @@ def write_both(*, stem: str, out_dir: Path, latex_args: dict, ascii_args: dict) 
 # =============================================================================
 # Cell builders for tables to get cell values.
 # =============================================================================
+
 
 def cell_signed(
     lookup: pd.DataFrame,
@@ -823,15 +862,14 @@ def cell_signed(
     latex: bool,
     scale: float = 1.0,
 ) -> str:
-    """
-    Return signed float cell value.
-    """
+    """Return signed float cell value."""
     v = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=col)
     if is_finite(v):
         v = float(v) * float(scale)
     else:
         v = float("nan")
     return fmt_signed(v, decimals, nan_str(latex))
+
 
 def cell_count(
     lookup: pd.DataFrame,
@@ -843,11 +881,10 @@ def cell_count(
     col: str,
     latex: bool,
 ) -> str:
-    """
-    Return signed count cell value.
-    """
+    """Return signed count cell value."""
     v = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=col)
     return fmt_count(v, nan_str(latex))
+
 
 def cell_total_or_vec_prio(
     lookup: pd.DataFrame,
@@ -861,9 +898,7 @@ def cell_total_or_vec_prio(
     decimals: int,
     latex: bool,
 ) -> str:
-    """
-    Return total or vector cell value depending on kmax.
-    """
+    """Return total or vector cell value depending on kmax."""
     if kmax == 1:
         v = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=total_col)
         return fmt_signed(v, decimals, nan_str(latex))
@@ -874,15 +909,20 @@ def cell_total_or_vec_prio(
     ]
     return fmt_vec(vals, decimals, nan_str(latex), latex=latex)
 
+
 def join_cells(a_cell, b_cell, *, sep: str = "; "):
-    """
-    Return a cell function that joins two cell functions with sep.
-    """
+    """Join two cell functions with sep."""
     return lambda k, rk, n, a: f"{a_cell(k, rk, n, a)}{sep}{b_cell(k, rk, n, a)}"
+
+
+def join_many_cells(cell_fns: Sequence[Callable[[int, RowKey, int, float], str]], *, sep: str = "; "):
+    """Join N cell functions with sep."""
+    return lambda k, rk, n, a: sep.join(fn(k, rk, n, a) for fn in cell_fns)
 
 # =============================================================================
 # Table Construction Helpers
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class TableSpec:
@@ -895,10 +935,9 @@ class TableSpec:
     ascii_col_w: Optional[int] = None
     row_label_fn: Optional[RowLabelFn] = None
 
+
 def write_table_spec(*, spec: TableSpec, out_dir: Path, nodes_order: List[int], arrivals_order: List[float]) -> None:
-    """
-    Write both LaTeX and ASCII tables for the given TableSpec.
-    """
+    """Write both LaTeX and ASCII tables for the given TableSpec."""
     latex_cell = spec.make_cell_fn(True)
     ascii_cell = spec.make_cell_fn(False)
     latex_args = dict(
@@ -923,10 +962,9 @@ def write_table_spec(*, spec: TableSpec, out_dir: Path, nodes_order: List[int], 
         ascii_args["row_label_fn"] = spec.row_label_fn
     write_both(stem=spec.stem, out_dir=out_dir, latex_args=latex_args, ascii_args=ascii_args)
 
+
 def build_rows_by_kmax(df: pd.DataFrame) -> Dict[int, List[RowKey]]:
-    """
-    Build RowKey lists per kmax from DataFrame.
-    """
+    """Build RowKey lists per kmax from DataFrame."""
     out: Dict[int, List[RowKey]] = {}
     for kmax in sorted(df["kmax"].dropna().astype(int).unique().tolist()):
         pcs = df.loc[df["kmax"].astype(int) == kmax, "plugin_config"].unique().tolist()
@@ -935,10 +973,9 @@ def build_rows_by_kmax(df: pd.DataFrame) -> Dict[int, List[RowKey]]:
         out[kmax] = rks
     return out
 
+
 def mk_cell_signed_col(*, lookup: pd.DataFrame, col: str, scale: float = 1.0, decimals: int = TABLE_DECIMALS):
-    """
-    Make cell function for signed float column.
-    """
+    """Make cell function for signed float column."""
     def _mk(latex: bool):
         return lambda k, rk, n, a: cell_signed(
             lookup,
@@ -947,10 +984,9 @@ def mk_cell_signed_col(*, lookup: pd.DataFrame, col: str, scale: float = 1.0, de
         )
     return _mk
 
+
 def mk_cell_count_col(*, lookup: pd.DataFrame, col: str):
-    """
-    Make cell function for signed count column.
-    """
+    """Make cell function for signed count column."""
     def _mk(latex: bool):
         return lambda k, rk, n, a: cell_count(
             lookup,
@@ -959,10 +995,9 @@ def mk_cell_count_col(*, lookup: pd.DataFrame, col: str):
         )
     return _mk
 
+
 def mk_cell_total_or_vec(*, lookup: pd.DataFrame, total_col: str, part_tpl: str, decimals: int = TABLE_DECIMALS):
-    """
-    Make cell function for total or vector column depending on kmax.
-    """
+    """Make cell function for total or vector column depending on kmax."""
     def _mk(latex: bool):
         return lambda k, rk, n, a: cell_total_or_vec_prio(
             lookup,
@@ -972,10 +1007,9 @@ def mk_cell_total_or_vec(*, lookup: pd.DataFrame, total_col: str, part_tpl: str,
         )
     return _mk
 
+
 def mk_cell_def_delta(*, lookup: pd.DataFrame, total_col: str, part_tpl: str, decimals: int = TABLE_DECIMALS):
-    """
-    Make cell function for defpreempt delta total or vector depending on kmax.
-    """
+    """Make cell function for defpreempt delta total or vector depending on kmax."""
     def _mk(latex: bool):
         return lambda k, rk, n, a: cell_defpreempt_delta_total_or_vec(
             lookup,
@@ -985,15 +1019,58 @@ def mk_cell_def_delta(*, lookup: pd.DataFrame, total_col: str, part_tpl: str, de
         )
     return _mk
 
+
+def mk_cell_def_delta_count(*, lookup: pd.DataFrame, col: str):
+    """Make cell function for defpreempt delta of a scalar count-like column: (def0)-(def1)."""
+    def _mk(latex: bool):
+        return lambda k, rk, n, a: cell_defpreempt_delta_count(
+            lookup,
+            kmax=k, mode=rk.mode, blocking=rk.blocking,
+            nodes=n, arrival_s=a,
+            col=col, latex=latex,
+        )
+    return _mk
+
+
+def mk_cell_def_delta_signed_scalar_col(
+    *,
+    lookup: pd.DataFrame,
+    col: str,
+    scale: float = 1.0,
+    decimals: int = TABLE_DECIMALS,
+):
+    """Make cell function for defpreempt delta on a scalar float column: (def0)-(def1), optionally scaled."""
+    def _mk(latex: bool):
+        return lambda k, rk, n, a: cell_defpreempt_delta_signed_scalar(
+            lookup,
+            kmax=k, mode=rk.mode, blocking=rk.blocking,
+            nodes=n, arrival_s=a,
+            col=col, decimals=decimals, latex=latex, scale=scale,
+        )
+    return _mk
+
+
+def mk_cell_big_metrics(*mk_cells, sep: str = "; "):
+    """
+    Combine multiple mk_cell_* builders into a single mk_cell that prints:
+        c1 ; c2 ; ... ; cN
+    """
+    def _mk(latex: bool):
+        fns = [mk(latex) for mk in mk_cells]
+        return join_many_cells(fns, sep=sep)
+    return _mk
+
 # =============================================================================
 # Main + CLI
 # =============================================================================
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate ASCII+LaTeX tables and figures from sealed results.")
     p.add_argument("--in-results", type=Path, required=True, help="Path to sealed results_paired.csv.")
     p.add_argument("--out-dir", type=Path, required=True, help="Output directory (tables + figures subdirs).")
     return p.parse_args()
+
 
 def main() -> None:
     args = parse_args()
@@ -1008,7 +1085,7 @@ def main() -> None:
     df = load_results(Path(args.in_results))
     lookup = build_lookup(df)
 
-    # Infer nodes + arrivals from the CSV (replaces NODES and ARRIVALS_ORDER).
+    # Infer nodes + arrivals from the CSV.
     nodes_order = sorted(df["nodes"].dropna().astype(int).unique().tolist())
     arrivals_order = sorted(df["arrival_s"].dropna().astype(float).unique().tolist())
 
@@ -1030,7 +1107,7 @@ def main() -> None:
     # Build RowKey lists per kmax (from plugin_config rows)
     rows_by_kmax = build_rows_by_kmax(df)
 
-    # defpreempt-only (used by big_table_latency_util)
+    # defpreempt-only (used by big_table_latency_util_optimizations): keep defpreempt=1 configs only
     rows_by_kmax_defpreempt_only: Dict[int, List[RowKey]] = {
         k: [rk for rk in rks if rk.defpreempt == 1]
         for k, rks in rows_by_kmax.items()
@@ -1049,7 +1126,7 @@ def main() -> None:
     # TABLES
     # -------------------------------------------------------------------------
 
-    mk_cell_u_eff = mk_cell_signed_col(lookup=lookup, col="delta_util_eff_run_mean", scale=100.0)
+    mk_cell_U_eff = mk_cell_signed_col(lookup=lookup, col="delta_U_eff_run_mean", scale=100.0)
     mk_cell_R = mk_cell_total_or_vec(lookup=lookup, total_col="delta_R_total_mean", part_tpl="delta_R_p{p}_mean")
     mk_cell_D = mk_cell_total_or_vec(lookup=lookup, total_col="delta_D_total_mean", part_tpl="delta_D_p{p}_mean")
     mk_cell_L = mk_cell_total_or_vec(lookup=lookup, total_col="delta_L_s_total_mean", part_tpl="delta_L_s_p{p}_mean")
@@ -1057,35 +1134,27 @@ def main() -> None:
     mk_cell_solver_attempts = mk_cell_count_col(lookup=lookup, col="solver_attempts_mean")
     mk_cell_plans_activated = mk_cell_count_col(lookup=lookup, col="plan_activated_mean")
 
-    # Combined: latency ; util  (IMPORTANT: defpreempt=1 only)
-    mk_cell_latency_vec_or_total = mk_cell_total_or_vec(lookup=lookup, total_col="delta_L_s_total_mean", part_tpl="delta_L_s_p{p}_mean")
-    mk_cell_u_eff_signed = mk_cell_signed_col(lookup=lookup, col="delta_util_eff_run_mean", scale=100.0)
-
-    def mk_cell_big_latency_util_opt(latex: bool):
-        lat = mk_cell_latency_vec_or_total(latex)  # ΔL (vec or total)
-        u = mk_cell_u_eff_signed(latex)            # Δu_eff (pp)
-        opt = mk_cell_plans_activated(latex)       # #optimizations (count)
-        return join_cells(join_cells(lat, u, sep="; "), opt, sep="; ")
-
     # defpreempt delta tables (within-plugin): (defpreempt=0)-(defpreempt=1)
+    mk_cell_def_delta_U_eff = mk_cell_def_delta_signed_scalar_col(lookup=lookup, col="delta_U_eff_run_mean", scale=100.0)
     mk_cell_def_delta_D = mk_cell_def_delta(lookup=lookup, total_col="delta_D_total_mean", part_tpl="delta_D_p{p}_mean")
     mk_cell_def_delta_L = mk_cell_def_delta(lookup=lookup, total_col="delta_L_s_total_mean", part_tpl="delta_L_s_p{p}_mean")
-    mk_cell_opt_mean = mk_cell_count_col(lookup=lookup, col="plan_activated_mean")
+    mk_cell_def_delta_O = mk_cell_def_delta_count(lookup=lookup, col="plan_activated_mean")
 
-    def mk_cell_big_def_delta_D_L_opt(latex: bool):
-        d = mk_cell_def_delta_D(latex)
-        l = mk_cell_def_delta_L(latex)
-        opt = mk_cell_opt_mean(latex)  # mean #optimizations (plans_activated)
-        return join_cells(join_cells(d, l, sep="; "), opt, sep="; ")
+    # Big tables:
+    # 1) vs baseline (defpreempt=1 only): ΔU_eff ; ΔL ; ΔD ; #O(mean)
+    mk_cell_big_vs_baseline = mk_cell_big_metrics(mk_cell_U_eff, mk_cell_L, mk_cell_D, mk_cell_plans_activated)
+
+    # 2) within plugin: (def0)-(def1): ΔU_eff ; ΔL ; ΔD ; ΔO
+    mk_cell_big_def_delta = mk_cell_big_metrics(mk_cell_def_delta_U_eff, mk_cell_def_delta_L, mk_cell_def_delta_D, mk_cell_def_delta_O)
 
     TABLE_SPECS: List[TableSpec] = [
         TableSpec(
-            stem="delta_u_eff_run",
-            latex_title_math=r"\Delta u_{\mathrm{eff}}(pp)",
+            stem="delta_U_eff_run",
+            latex_title_math=r"\Delta U_{\mathrm{eff}}(pp)",
             latex_subtitle=r"(mean effective utilization, max(cpu-util, mem-util)), plugin vs.\ baseline",
-            ascii_title="Delta u_eff (pp), plugin vs baseline",
+            ascii_title="Delta U_eff (pp), plugin vs baseline",
             rows_by_kmax=rows_by_kmax,
-            make_cell_fn=mk_cell_u_eff,
+            make_cell_fn=mk_cell_U_eff,
         ),
         TableSpec(
             stem="delta_R",
@@ -1131,13 +1200,16 @@ def main() -> None:
             make_cell_fn=mk_cell_plans_activated,
         ),
         TableSpec(
-            stem="big_table_latency_util_optimizations",
-            latex_title_math=r"\Delta L\ ;\ \Delta u_{\mathrm{eff}}\ ;\ \#\mathrm{optimizations}",
-            latex_subtitle=r"(s; pp; count), plugin vs.\ baseline ($\Delta L$, $\Delta u_{\mathrm{eff}}$); \#optimizations mean",
-            ascii_title="Combined (defpreempt enabled): ΔL (s) ; Δu_eff (pp) ; #optimizations",
+            stem="big_table_U_L_D_O",
+            latex_title_math=r"\Delta U_{\mathrm{eff}}\ ;\ \Delta L\ ;\ \Delta D\ ;\ \#O",
+            latex_subtitle=(
+                r"(pp; s; count; count), plugin vs.\ baseline for $\Delta U_{\mathrm{eff}}, \Delta L, \Delta D$; "
+                r"$\#O$ is mean optimizations (baseline has none); defpreempt=1 only"
+            ),
+            ascii_title="Combined (defpreempt enabled): ΔU_eff (pp) ; ΔL (s) ; ΔD ; #O (mean)",
             rows_by_kmax=rows_by_kmax_defpreempt_only,
-            make_cell_fn=mk_cell_big_latency_util_opt,
-            ascii_col_w=40,  # bump a bit since cells are longer now
+            make_cell_fn=mk_cell_big_vs_baseline,
+            ascii_col_w=68,
         ),
         TableSpec(
             stem="delta_D_without_defaultpreemption",
@@ -1151,22 +1223,22 @@ def main() -> None:
         ),
         TableSpec(
             stem="delta_L_without_defaultpreemption",
-            latex_title_math=r"\Delta L_{\mathrm{w/o\ defpreempt}}",
+            latex_title_math=r"\Delta L_{p,\mathrm{w/o\ defpreempt}}",
             latex_subtitle=r"(mean latency), $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$",
-            ascii_title="Delta latency: (defpreempt=0) - (defpreempt=1)  [within plugin, baseline cancels]",
+            ascii_title="Delta latency (per-priority if kmax>1): (defpreempt=0) - (defpreempt=1)  [within plugin, baseline cancels]",
             rows_by_kmax=rows_by_kmax_def,
             make_cell_fn=mk_cell_def_delta_L,
             ascii_col_w=28,
             row_label_fn=lambda rk: rk.label(include_defpreempt=False),
         ),
         TableSpec(
-            stem="big_table_without_defaultpreemption_deletions_latency_optimizations",
-            latex_title_math=r"\Delta D_{\mathrm{w/o\ defpreempt}}\ ;\ \Delta L_{\mathrm{w/o\ defpreempt}}\ ;\ \#\mathrm{optimizations}",
-            latex_subtitle=r"(count; s; count), $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$ for $\Delta D,\Delta L$; \#optimizations mean",
-            ascii_title="Combined: Delta deletions ; Delta latency ; #optimizations  (ΔD,ΔL are (defpreempt=0)-(defpreempt=1))",
+            stem="big_table_without_defaultpreemption_U_L_D_O",
+            latex_title_math=r"\Delta U_{\mathrm{eff}}\ ;\ \Delta L_p\ ;\ \Delta D_p\ ;\ \Delta O",
+            latex_subtitle=r"(pp; s; count; count), all are $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$",
+            ascii_title="Combined: ΔU_eff (pp) ; ΔL (s) ; ΔD ; ΔO   (all are (defpreempt=0)-(defpreempt=1))",
             rows_by_kmax=rows_by_kmax_def,
-            make_cell_fn=mk_cell_big_def_delta_D_L_opt,
-            ascii_col_w=52,
+            make_cell_fn=mk_cell_big_def_delta,
+            ascii_col_w=68,
             row_label_fn=lambda rk: rk.label(include_defpreempt=False),
         ),
     ]
@@ -1184,7 +1256,7 @@ def main() -> None:
         util_y_vals_all += collect_plot_y_vals(
             lookup=lookup,
             df=df,
-            col="delta_util_eff_run_mean",
+            col="delta_U_eff_run_mean",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=int(k),
@@ -1239,14 +1311,14 @@ def main() -> None:
 
         plot_dumbbell(
             out_dir=figures_dir,
-            filename_stem=f"delta_u_eff_run_kmax{plot_kmax}",
-            title=rf"$\Delta u_{{\mathrm{{eff}}}}$ vs $\mu_A$  (kmax={plot_kmax})",
-            y_label=r"$\Delta u_{\mathrm{eff}}$ (pp)",
+            filename_stem=f"delta_U_eff_run_kmax{plot_kmax}",
+            title=rf"$\Delta U_{{\mathrm{{eff}}}}$ vs $\mu_A$  (kmax={plot_kmax})",
+            y_label=r"$\Delta U_{\mathrm{eff}}$ (pp)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=int(plot_kmax),
             series=series,
-            y_of=y_from_col(col="delta_util_eff_run_mean", scale=100.0),
+            y_of=y_from_col(col="delta_U_eff_run_mean", scale=100.0),
             label_of=lambda rk: rk.label(include_defpreempt=True),
             ylim=util_ylim,
         )

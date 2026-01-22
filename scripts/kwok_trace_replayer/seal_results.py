@@ -46,7 +46,7 @@ PAIRED_COLS = [
     "plugin_config",
     "n_seed",
     "T_end_s_mean",
-    "delta_cpu_run_util_mean", "delta_mem_run_util_mean", "delta_util_eff_run_mean",
+    "delta_U_cpu_run_mean", "delta_U_mem_run_mean", "delta_U_eff_run_mean",
     "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean", "delta_R_total_mean",
     "delta_D_p1_mean", "delta_D_p2_mean", "delta_D_p3_mean", "delta_D_p4_mean", "delta_D_total_mean",
     "delta_L_s_p1_mean", "delta_L_s_p2_mean", "delta_L_s_p3_mean", "delta_L_s_p4_mean", "delta_L_s_total_mean",
@@ -165,9 +165,9 @@ def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
     """
     t = g.t
     out: Dict[str, float] = {
-        "cpu_run_util_mean": mean_over_horizon(t, g.cpu_util, g.cum_cpu_util, H),
-        "mem_run_util_mean": mean_over_horizon(t, g.mem_util, g.cum_mem_util, H),
-        "util_eff_run_mean": mean_over_horizon(t, g.eff_util, g.cum_eff_util, H),
+        "U_cpu_run_mean": mean_over_horizon(t, g.cpu_util, g.cum_cpu_util, H),
+        "U_mem_run_mean": mean_over_horizon(t, g.mem_util, g.cum_mem_util, H),
+        "U_eff_run_mean": mean_over_horizon(t, g.eff_util, g.cum_eff_util, H),
     }
     # Per-priority running pods and deletions
     for i, p in enumerate(range(1, MAX_K_OUT + 1)):
@@ -564,9 +564,9 @@ def main() -> None:
             plugin_metrics = compute_horizon_metrics(plugin_general_stats, H)
 
             # Deltas
-            d_run_cpu_util = float(plugin_metrics["cpu_run_util_mean"]) - float(default_metrics["cpu_run_util_mean"])
-            d_run_mem_util = float(plugin_metrics["mem_run_util_mean"]) - float(default_metrics["mem_run_util_mean"])
-            d_run_eff_util = float(plugin_metrics["util_eff_run_mean"]) - float(default_metrics["util_eff_run_mean"])
+            d_run_cpu_util = float(plugin_metrics["U_cpu_run_mean"]) - float(default_metrics["U_cpu_run_mean"])
+            d_run_mem_util = float(plugin_metrics["U_mem_run_mean"]) - float(default_metrics["U_mem_run_mean"])
+            d_run_eff_util = float(plugin_metrics["U_eff_run_mean"]) - float(default_metrics["U_eff_run_mean"])
             dR = {p: float(plugin_metrics[f"R_p{p}_mean"]) - float(default_metrics[f"R_p{p}_mean"]) for p in range(1, MAX_K_OUT + 1)}
             dD = {p: float(plugin_metrics[f"D_p{p}"]) - float(default_metrics[f"D_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
             dR_total = float(np.nansum(list(dR.values())))
@@ -591,9 +591,9 @@ def main() -> None:
                     "plugin_config": plugin_config,
                     "seed": seed,
                     "T_end_s": H,
-                    "delta_cpu_run_util": d_run_cpu_util,
-                    "delta_mem_run_util": d_run_mem_util,
-                    "delta_util_eff_run": d_run_eff_util,
+                    "delta_U_cpu_run": d_run_cpu_util,
+                    "delta_U_mem_run": d_run_mem_util,
+                    "delta_U_eff_run": d_run_eff_util,
                     "delta_R_p1": dR[1],
                     "delta_R_p2": dR[2],
                     "delta_R_p3": dR[3],
@@ -633,9 +633,9 @@ def main() -> None:
     # Rename columns
     rename = {
         "T_end_s": "T_end_s_mean",
-        "delta_cpu_run_util": "delta_cpu_run_util_mean",
-        "delta_mem_run_util": "delta_mem_run_util_mean",
-        "delta_util_eff_run": "delta_util_eff_run_mean",
+        "delta_U_cpu_run": "delta_U_cpu_run_mean",
+        "delta_U_mem_run": "delta_U_mem_run_mean",
+        "delta_U_eff_run": "delta_U_eff_run_mean",
         "delta_R_p1": "delta_R_p1_mean",
         "delta_R_p2": "delta_R_p2_mean",
         "delta_R_p3": "delta_R_p3_mean",
