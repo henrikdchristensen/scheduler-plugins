@@ -1,14 +1,9 @@
-# scripts/kwok_trace_replayer/plots_and_tables.py
 #!/usr/bin/env python3
+# scripts/kwok_trace_replayer/plots_and_tables.py
 """
-scripts/kwok_trace_replayer/plots_and_tables.py
+python -m scripts.kwok_trace_replayer.plots_and_tables --in-results analysis/kwok_trace_replayer/results_paired.csv --out-dir analysis/kwok_trace_replayer
 
-Examples:
-  python -m scripts.kwok_trace_replayer.plots_and_tables \
-    --in-results analysis/kwok_trace_replayer/sealed/results_paired.csv \
-    --out-dir    analysis/kwok_trace_replayer/plots_and_tables
-
-Produces (same as the old script):
+Produces:
   Tables (under <out-dir>/tables):
     - delta_u_eff_run.{txt,tex}
     - delta_R.{txt,tex}
@@ -27,24 +22,14 @@ Produces (same as the old script):
     - delta_D_without_defaultpreemption_kmax<K>.<png|pdf>
     - delta_L_without_defaultpreemption_kmax<K>.<png|pdf>
 
-Refactor goals:
-  - Keep outputs identical (tables + plots + filenames + styling).
-  - Reduce code duplication; improve readability.
-  - Speed up cell lookups via a pre-built MultiIndex.
-
-Changes in this refactor:
-  (3) add value_at() to reduce lookup boilerplate
-  (4) add mk_cell_* factories to remove repeated mk_cell_* definitions
-  (5) replace combine_cells() with join_cells() (simpler, no latex threading)
-  (6) build def_series + def_y_lims once (not per-kmax loop)
-  (7) rename parse_mode->canonical_mode, pretty_mode->display_mode (clarity)
+Behavior:
+  - Tables/plots infer available node counts and arrival means directly from the CSV.
+  - Plots are generated for ALL kmax values present in the CSV.
+  - Plot series always use defpreempt=1 only, but still include Scheduling-failure rows even if they only exist with defpreempt=0.
+  - Dumbbell plots require exactly TWO distinct node counts (inferred from data).
 """
 
-from __future__ import annotations
-
-import argparse
-import math
-import re
+import argparse, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -57,18 +42,8 @@ import pandas as pd
 # Constants
 # =============================================================================
 
-# This script assumes exactly 2 nodes and 3 arrivals (same as the old script).
-NODES_ORDER: List[int] = [16, 32]
-ARRIVALS_ORDER: List[float] = [4.0, 8.0, 16.0]
-
 # Table formatting
 FLOAT_DECIMALS: int = 1
-
-# Which kmax to plot (old default was "1,4")
-PLOT_KMAXS: List[int] = [1, 4]
-
-# Old script default: plots show defpreempt=1 only (plus scheduling-failure even if only exists with defpreempt=0)
-INCLUDE_DEFPREEMPT_IN_PLOTS: bool = False
 
 # -----------------------------
 # Plot styling (unchanged)
@@ -374,7 +349,7 @@ def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
 
     Important for output stability:
       - If KEY_COLS collide (e.g., multiple plugin_config strings canonicalize to same RowKey),
-        we keep the FIRST occurrence in the original CSV order (matching prior subset_value().iloc[0]).
+        we keep the FIRST occurrence in the original CSV order.
     """
     d = df.copy()
     d = d.drop_duplicates(subset=KEY_COLS, keep="first")
@@ -399,7 +374,6 @@ def lookup_value(
         return float("nan")
 
 
-# (3) One accessor that binds RowKey
 def value_at(
     lookup: pd.DataFrame,
     *,
@@ -435,26 +409,47 @@ def latex_table(
     cell_fn,  # (kmax, rowkey, nodes, arrival) -> str
     row_label_fn: Optional[RowLabelFn] = None,
 ) -> None:
-    assert len(nodes_order) == 2 and len(arrivals_order) == 3, "Assumes 2 nodes x 3 arrivals."
     row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
+
+    num_nodes = len(nodes_order)
+    num_arrs = len(arrivals_order)
+    if num_nodes < 1 or num_arrs < 1:
+        raise SystemExit("Need at least 1 node value and 1 arrival value to write tables.")
+
+    total_cols = 1 + num_nodes * num_arrs  # row label + data cells
+    tab_spec = "l" + " c" * (total_cols - 1)
+
+    # cmidrule spans for each node group (data columns start at 2)
+    cmid = []
+    for i in range(num_nodes):
+        start = 2 + i * num_arrs
+        end = start + num_arrs - 1
+        cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
+
+    # node header row
+    node_hdr_parts = [rf"\multicolumn{{{num_arrs}}}{{c}}{{${{N={n}}}$}}" for n in nodes_order]
+    node_hdr = "& " + " & ".join(node_hdr_parts) + r" \\"
+
+    # arrival header row
+    arr_hdr_cells = [mu_label(a, latex=True) for _n in nodes_order for a in arrivals_order]
+    arr_hdr = "& " + " & ".join(arr_hdr_cells) + r" \\"
 
     lines: List[str] = []
     lines += [
-        r"\begin{tabular}{l c c c c c c}",
+        rf"\begin{{tabular}}{{{tab_spec}}}",
         r"\toprule",
-        rf"\multicolumn{{7}}{{l}}{{$\mathbf{{{title_math}}}$ {subtitle}}} \\",
+        rf"\multicolumn{{{total_cols}}}{{l}}{{$\mathbf{{{title_math}}}$ {subtitle}}} \\",
         r"\addlinespace[0.2em]",
-        rf"& \multicolumn{{3}}{{c}}{{$N={nodes_order[0]}$}} & \multicolumn{{3}}{{c}}{{$N={nodes_order[1]}$}} \\",
-        r"\cmidrule(lr){2-4}\cmidrule(lr){5-7}",
-        rf"& {mu_label(arrivals_order[0], latex=True)} & {mu_label(arrivals_order[1], latex=True)} & {mu_label(arrivals_order[2], latex=True)}"
-        rf" & {mu_label(arrivals_order[0], latex=True)} & {mu_label(arrivals_order[1], latex=True)} & {mu_label(arrivals_order[2], latex=True)} \\",
+        node_hdr,
+        "".join(cmid),
+        arr_hdr,
         r"\midrule",
     ]
 
     for kmax in sorted(rows_by_kmax.keys()):
         k_title = r"$k_{\max}=1$ (no priorities)" if kmax == 1 else rf"$k_{{\max}}={kmax}$ (priorities enabled)"
         lines += [
-            rf"\multicolumn{{7}}{{l}}{{{k_title}}} \\",
+            rf"\multicolumn{{{total_cols}}}{{l}}{{{k_title}}} \\",
             r"\midrule",
         ]
         for rk in rows_by_kmax[kmax]:
@@ -490,6 +485,9 @@ def ascii_table(
     row_label_fn: Optional[RowLabelFn] = None,
 ) -> None:
     row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
+
+    if not nodes_order or not arrivals_order:
+        raise SystemExit("Need at least 1 node value and 1 arrival value to write tables.")
 
     # --- width pass (never truncate) ---
     max_label = 0
@@ -616,7 +614,6 @@ def cell_total_or_vec_p1p4(
     return fmt_vec(vals, decimals, nan_str(latex), latex=latex)
 
 
-# (5) simpler joiner (latex already bound by closures)
 def join_cells(a_cell, b_cell, *, sep: str = "; "):
     return lambda k, rk, n, a: f"{a_cell(k, rk, n, a)}{sep}{b_cell(k, rk, n, a)}"
 
@@ -715,21 +712,26 @@ def symmetric_ylim_from_ys(ys: List[float]) -> Tuple[float, float]:
     return (-(m + pad), (m + pad))
 
 
-def plot_df_and_series(df: pd.DataFrame, *, kmax: int, include_defpreempt: bool) -> Tuple[pd.DataFrame, List[RowKey]]:
+def plot_df_and_series(df: pd.DataFrame, *, kmax: int) -> Tuple[pd.DataFrame, List[RowKey]]:
+    """
+    Always:
+      - plot defpreempt=1 only
+      - but keep Scheduling-failure even if it only exists for defpreempt=0
+    """
     dff = df[df["kmax"].astype(int) == int(kmax)].copy()
 
-    if not include_defpreempt:
-        dff_main = dff[dff["defpreempt"].astype(int) == 1].copy()
+    dff_main = dff[dff["defpreempt"].astype(int) == 1].copy()
 
-        # keep scheduling-failure even if only exists for defpreempt=0
-        sf = dff[dff["mode"].astype(str) == "scheduling-failure"].copy()
-        if not sf.empty:
-            dff_main = pd.concat([dff_main, sf], ignore_index=True)
-            dff_main = dff_main.drop_duplicates(
-                subset=["job_name", "plugin_config", "mode", "blocking", "defpreempt", "nodes", "kmax", "arrival_s"],
-                keep="first",
-            )
-        dff = dff_main
+    # keep scheduling-failure even if only exists for defpreempt=0
+    sf = dff[dff["mode"].astype(str) == "scheduling-failure"].copy()
+    if not sf.empty:
+        dff_main = pd.concat([dff_main, sf], ignore_index=True)
+        dff_main = dff_main.drop_duplicates(
+            subset=["job_name", "plugin_config", "mode", "blocking", "defpreempt", "nodes", "kmax", "arrival_s"],
+            keep="first",
+        )
+
+    dff = dff_main
 
     series = sorted(
         {
@@ -750,9 +752,8 @@ def collect_plot_ys(
     arrivals_order: List[float],
     kmax: int,
     scale: float = 1.0,
-    include_defpreempt: bool = False,
 ) -> List[float]:
-    _dff, series = plot_df_and_series(df, kmax=kmax, include_defpreempt=include_defpreempt)
+    _dff, series = plot_df_and_series(df, kmax=kmax)
 
     ys: List[float] = []
     for rk in series:
@@ -781,9 +782,12 @@ def plot_dumbbell(
     """
     Dumbbell plot:
       - x-axis: arrivals
-      - per series: two markers per x (N=nodes_order[0] as circle, N=nodes_order[1] as square)
+      - per series: two markers per x (nodes_order[0] as circle, nodes_order[1] as square)
       - optional dashed connector between the two markers.
     """
+    if len(nodes_order) != 2:
+        raise SystemExit(f"Dumbbell plots require exactly 2 distinct node values; found: {nodes_order}")
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     x_base = [i * ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
@@ -808,17 +812,17 @@ def plot_dumbbell(
         for xi, a in enumerate(arrivals_order):
             x = x_base[xi] + mode_offset
 
-            y16 = y_of(rk, nodes_order[0], a, kmax)
-            y32 = y_of(rk, nodes_order[1], a, kmax)
-            ys_for_limits += [y16, y32]
+            y0 = y_of(rk, nodes_order[0], a, kmax)
+            y1 = y_of(rk, nodes_order[1], a, kmax)
+            ys_for_limits += [y0, y1]
 
-            if is_finite(y16) and is_finite(y32):
-                ax.plot([x, x], [y16, y32], linestyle="--", color=color, linewidth=1.0)
+            if is_finite(y0) and is_finite(y1):
+                ax.plot([x, x], [y0, y1], linestyle="--", color=color, linewidth=1.0)
 
-            if is_finite(y16):
-                ax.plot([x], [y16], linestyle="None", marker="o", markersize=MARKER_SIZE, color=color, label="_nolegend_")
-            if is_finite(y32):
-                ax.plot([x], [y32], linestyle="None", marker="s", markersize=MARKER_SIZE, color=color, label="_nolegend_")
+            if is_finite(y0):
+                ax.plot([x], [y0], linestyle="None", marker="o", markersize=MARKER_SIZE, color=color, label="_nolegend_")
+            if is_finite(y1):
+                ax.plot([x], [y1], linestyle="None", marker="s", markersize=MARKER_SIZE, color=color, label="_nolegend_")
 
     ax.axhline(0.0, linewidth=1.0)
     ax.set_title(title, fontsize=TITLE_FONTSIZE)
@@ -843,17 +847,14 @@ def plot_dumbbell(
 def collect_defpreempt_delta_total_ys(
     *,
     lookup: pd.DataFrame,
-    df: pd.DataFrame,
     nodes_order: List[int],
     arrivals_order: List[float],
     kmax: int,
     total_col: str,
-    def_rows: Optional[List[Tuple[str, int]]] = None,
+    def_rows: List[Tuple[str, int]],
 ) -> List[float]:
-    rows = def_rows if def_rows is not None else build_defpreempt_rows(df)
-
     ys: List[float] = []
-    for mode, blocking in rows:
+    for mode, blocking in def_rows:
         for a in arrivals_order:
             for n in nodes_order:
                 y = _defpreempt_delta_total(
@@ -882,22 +883,22 @@ class TableSpec:
     row_label_fn: Optional[RowLabelFn] = None
 
 
-def write_table_spec(*, spec: TableSpec, out_dir: Path) -> None:
+def write_table_spec(*, spec: TableSpec, out_dir: Path, nodes_order: List[int], arrivals_order: List[float]) -> None:
     latex_cell = spec.make_cell_fn(True)
     ascii_cell = spec.make_cell_fn(False)
 
     latex_args = dict(
         title_math=spec.latex_title_math,
         subtitle=spec.latex_subtitle,
-        nodes_order=NODES_ORDER,
-        arrivals_order=ARRIVALS_ORDER,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
         rows_by_kmax=spec.rows_by_kmax,
         cell_fn=lambda k, rk, n, a: latex_cell(k, rk, n, a),
     )
     ascii_args = dict(
         title=spec.ascii_title,
-        nodes_order=NODES_ORDER,
-        arrivals_order=ARRIVALS_ORDER,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
         rows_by_kmax=spec.rows_by_kmax,
         cell_fn=lambda k, rk, n, a: ascii_cell(k, rk, n, a),
     )
@@ -909,10 +910,10 @@ def write_table_spec(*, spec: TableSpec, out_dir: Path) -> None:
 
     write_both(stem=spec.stem, out_dir=out_dir, latex_args=latex_args, ascii_args=ascii_args)
 
+
 # =============================================================================
 # Helpers
 # =============================================================================
-
 
 def build_rows_by_kmax(df: pd.DataFrame) -> Dict[int, List[RowKey]]:
     out: Dict[int, List[RowKey]] = {}
@@ -924,7 +925,6 @@ def build_rows_by_kmax(df: pd.DataFrame) -> Dict[int, List[RowKey]]:
     return out
 
 
-# (4) mk_cell factories to remove repetitive definitions
 def mk_cell_signed_col(*, lookup: pd.DataFrame, col: str, scale: float = 1.0, decimals: int = FLOAT_DECIMALS):
     def _mk(latex: bool):
         return lambda k, rk, n, a: cell_signed(
@@ -966,6 +966,7 @@ def mk_cell_def_delta(*, lookup: pd.DataFrame, total_col: str, part_tpl: str, de
         )
     return _mk
 
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -990,13 +991,24 @@ def main() -> None:
     df = load_results(Path(args.in_results))
     lookup = build_lookup(df)
 
-    available_kmax = sorted(df["kmax"].dropna().astype(int).unique().tolist())
-    if not available_kmax:
-        raise SystemExit("No kmax values found in results_paired.csv")
+    # Infer nodes + arrivals from the CSV (replaces NODES and ARRIVALS_ORDER).
+    nodes_order = sorted(df["nodes"].dropna().astype(int).unique().tolist())
+    arrivals_order = sorted(df["arrival_s"].dropna().astype(float).unique().tolist())
 
-    missing = [k for k in PLOT_KMAXS if k not in available_kmax]
-    if missing:
-        raise SystemExit(f"Requested PLOT_KMAXS not in results: {missing}. Available: {available_kmax}")
+    if not nodes_order:
+        raise SystemExit("No node values inferred from results_paired.csv")
+    if not arrivals_order:
+        raise SystemExit("No arrival values inferred from results_paired.csv")
+
+    # We only support dumbbell plots for exactly two node counts.
+    if len(nodes_order) != 2:
+        raise SystemExit(
+            f"Expected exactly 2 distinct node values for dumbbell plots; found {len(nodes_order)}: {nodes_order}"
+        )
+
+    plot_kmaxs = sorted(df["kmax"].dropna().astype(int).unique().tolist())
+    if not plot_kmaxs:
+        raise SystemExit("No kmax values found in results_paired.csv")
 
     # Build RowKey lists per kmax (from plugin_config rows)
     rows_by_kmax = build_rows_by_kmax(df)
@@ -1140,7 +1152,7 @@ def main() -> None:
     ]
 
     for spec in TABLE_SPECS:
-        write_table_spec(spec=spec, out_dir=tables_dir)
+        write_table_spec(spec=spec, out_dir=tables_dir, nodes_order=nodes_order, arrivals_order=arrivals_order)
 
     # -------------------------------------------------------------------------
     # FIGURES
@@ -1148,26 +1160,24 @@ def main() -> None:
 
     util_ys_all: List[float] = []
     lat_ys_all: List[float] = []
-    for k in PLOT_KMAXS:
+    for k in plot_kmaxs:
         util_ys_all += collect_plot_ys(
             lookup=lookup,
             df=df,
             col="delta_util_eff_run_mean",
-            nodes_order=NODES_ORDER,
-            arrivals_order=ARRIVALS_ORDER,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
             kmax=int(k),
             scale=100.0,
-            include_defpreempt=INCLUDE_DEFPREEMPT_IN_PLOTS,
         )
         lat_ys_all += collect_plot_ys(
             lookup=lookup,
             df=df,
             col="delta_L_s_total_mean",
-            nodes_order=NODES_ORDER,
-            arrivals_order=ARRIVALS_ORDER,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
             kmax=int(k),
             scale=1.0,
-            include_defpreempt=INCLUDE_DEFPREEMPT_IN_PLOTS,
         )
 
     util_ylim = symmetric_ylim_from_ys(util_ys_all)
@@ -1188,34 +1198,32 @@ def main() -> None:
             )
         return _y
 
-    # (6) defpreempt series + y-lims computed once
     def_series = [RowKey(mode=m, blocking=b, defpreempt=1) for (m, b) in def_rows]
     def_series.sort(key=lambda rk: rk.sort_key())
 
     def_ylim_by_kmax_col: Dict[Tuple[int, str], Tuple[float, float]] = {}
-    for k in PLOT_KMAXS:
+    for k in plot_kmaxs:
         for total_col in ("delta_D_total_mean", "delta_L_s_total_mean"):
             ys = collect_defpreempt_delta_total_ys(
                 lookup=lookup,
-                df=df,
-                nodes_order=NODES_ORDER,
-                arrivals_order=ARRIVALS_ORDER,
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
                 kmax=int(k),
                 total_col=total_col,
                 def_rows=def_rows,
             )
             def_ylim_by_kmax_col[(int(k), total_col)] = symmetric_ylim_from_ys(ys)
 
-    for plot_kmax in PLOT_KMAXS:
-        _dff, series = plot_df_and_series(df, kmax=int(plot_kmax), include_defpreempt=INCLUDE_DEFPREEMPT_IN_PLOTS)
+    for plot_kmax in plot_kmaxs:
+        _dff, series = plot_df_and_series(df, kmax=int(plot_kmax))
 
         plot_dumbbell(
             out_dir=figures_dir,
             filename_stem=f"delta_u_eff_run_kmax{plot_kmax}",
             title=rf"$\Delta u_{{\mathrm{{eff}}}}$ (pp) vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta u_{\mathrm{eff}}$ (pp)",
-            nodes_order=NODES_ORDER,
-            arrivals_order=ARRIVALS_ORDER,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
             kmax=int(plot_kmax),
             series=series,
             y_of=y_from_col(col="delta_util_eff_run_mean", scale=100.0),
@@ -1228,8 +1236,8 @@ def main() -> None:
             filename_stem=f"delta_L_total_kmax{plot_kmax}",
             title=rf"$\Delta L_\mathrm{{total}}$ (s) vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta L$ (s)",
-            nodes_order=NODES_ORDER,
-            arrivals_order=ARRIVALS_ORDER,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
             kmax=int(plot_kmax),
             series=series,
             y_of=y_from_col(col="delta_L_s_total_mean", scale=1.0),
@@ -1242,8 +1250,8 @@ def main() -> None:
             filename_stem=f"delta_D_without_defaultpreemption_kmax{plot_kmax}",
             title=rf"$\Delta D_{{\mathrm{{w/o\ defpreempt}}}}$ (count) vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta D_{\mathrm{w/o\ defpreempt}}$ (deletions)",
-            nodes_order=NODES_ORDER,
-            arrivals_order=ARRIVALS_ORDER,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
             kmax=int(plot_kmax),
             series=def_series,
             y_of=y_defpreempt_delta(total_col="delta_D_total_mean"),
@@ -1256,8 +1264,8 @@ def main() -> None:
             filename_stem=f"delta_L_without_defaultpreemption_kmax{plot_kmax}",
             title=rf"$\Delta L_{{\mathrm{{w/o\ defpreempt}}}}$ (s) vs $\mu_A$  (kmax={plot_kmax})",
             y_label=r"$\Delta L_{\mathrm{w/o\ defpreempt}}$ (s)",
-            nodes_order=NODES_ORDER,
-            arrivals_order=ARRIVALS_ORDER,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
             kmax=int(plot_kmax),
             series=def_series,
             y_of=y_defpreempt_delta(total_col="delta_L_s_total_mean"),
@@ -1267,6 +1275,7 @@ def main() -> None:
 
     print(f"Wrote tables to:  {tables_dir}")
     print(f"Wrote figures to: {figures_dir}")
+
 
 if __name__ == "__main__":
     main()
