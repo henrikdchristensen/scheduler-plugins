@@ -91,14 +91,14 @@ def add_standard_legend(
     """Standard legend inside the axes, deduped and compact."""
     clean: List[Tuple[object, str]] = []
     seen = set()
-    for h, lbl in zip(handles, labels):
-        s = str(lbl)
+    for handle, label in zip(handles, labels):
+        s = str(label)
         if not s or s.startswith("_"):
             continue
         if s in seen:
             continue
         seen.add(s)
-        clean.append((h, s))
+        clean.append((handle, s))
 
     if not clean:
         return
