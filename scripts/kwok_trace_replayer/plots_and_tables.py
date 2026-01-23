@@ -287,7 +287,12 @@ def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
     """Format signed float with given decimals, normalizing -0.0 to 0.0."""
     if not is_finite(x):
         return nan_s
-    v = normalize_neg_zero(float(x))
+    v = float(x)
+    # Avoid mixed +0.00 / -0.00 output by normalizing *after* rounding
+    # to the requested display precision.
+    v = round(v, int(decimals))
+    if v == 0.0:
+        v = 0.0
     return f"{v:+.{decimals}f}"
 
 def fmt_count(x: object, nan_s: str) -> str:
@@ -298,6 +303,13 @@ def fmt_count(x: object, nan_s: str) -> str:
     if not is_finite(x):
         return nan_s
     return f"{int(round(float(x))):+d}"
+
+
+def fmt_unsigned_count(x: object, nan_s: str) -> str:
+    """Format a non-negative count as integer (no sign), handling NaN."""
+    if not is_finite(x):
+        return nan_s
+    return f"{int(round(float(x))):d}"
 
 def fmt_total_then_vec(total: object, values: Sequence[object], decimals: int, nan_s: str, latex: bool) -> str:
     """Format as `total <p1,p2,p3,p4>` (or LaTeX equivalent) when priorities are present."""
@@ -904,26 +916,28 @@ def latex_big_table_by_arrival(
     metric_headers: List[str],
     cell_fns_by_metric: Callable[[bool], List[Callable[[int, RowKey, int, float], str]]],
     row_label_fn: Optional[RowLabelFn] = None,
+    arrival_header_fn: Optional[Callable[[int, float, bool], str]] = None,
 ) -> None:
-    """Write a LaTeX big table: arrivals are row blocks; columns are 4 metrics per node."""
+    """Write a LaTeX big table: arrivals are row blocks; columns are M metrics per node."""
     row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
 
     if not nodes_order or not arrivals_order:
         raise SystemExit("Need at least 1 node value and 1 arrival value to write big tables.")
-    if len(metric_headers) != 4:
-        raise SystemExit(f"Big tables require exactly 4 metric headers; got {len(metric_headers)}")
+    m = len(metric_headers)
+    if m < 1:
+        raise SystemExit("Big tables require at least 1 metric header")
 
     num_nodes = len(nodes_order)
-    total_cols = 1 + 4 * num_nodes
-    tab_spec = "l" + (" cccc" * num_nodes)
+    total_cols = 1 + m * num_nodes
+    tab_spec = "l" + "".join([" " + ("c" * m) for _ in range(num_nodes)])
 
     cmid = []
     for i in range(num_nodes):
-        start = 2 + i * 4
-        end = start + 3
+        start = 2 + i * m
+        end = start + (m - 1)
         cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
 
-    node_header_parts = [rf"\multicolumn{{4}}{{c}}{{${{N={n}}}$}}" for n in nodes_order]
+    node_header_parts = [rf"\multicolumn{{{m}}}{{c}}{{${{N={n}}}$}}" for n in nodes_order]
     node_header = "& " + " & ".join(node_header_parts) + r" \\" 
 
     metric_fns = cell_fns_by_metric(True)
@@ -946,8 +960,14 @@ def latex_big_table_by_arrival(
         for ai, a in enumerate(arrivals_order):
             if ai > 0:
                 lines.append(r"\midrule")
+
+            arrival_header = (
+                arrival_header_fn(kmax, float(a), True)
+                if arrival_header_fn is not None
+                else arrival_label_big(a, latex=True)
+            )
             lines += [
-                rf"\multicolumn{{{total_cols}}}{{l}}{{{arrival_label_big(a, latex=True)}}} \\",
+                rf"\multicolumn{{{total_cols}}}{{l}}{{{arrival_header}}} \\",
                 r"\midrule",
             ]
             for rk in rows_by_kmax[kmax]:
@@ -979,14 +999,16 @@ def ascii_big_table_by_arrival(
     row_label_fn: Optional[RowLabelFn] = None,
     row_w: Optional[int] = None,
     col_w: Optional[int] = None,
+    arrival_header_fn: Optional[Callable[[int, float, bool], str]] = None,
 ) -> None:
-    """Write an ASCII big table: arrivals are row blocks; columns are 4 metrics per node."""
+    """Write an ASCII big table: arrivals are row blocks; columns are M metrics per node."""
     row_label_fn = row_label_fn or (lambda rk: rk.label(include_defpreempt=True))
 
     if not nodes_order or not arrivals_order:
         raise SystemExit("Need at least 1 node value and 1 arrival value to write big tables.")
-    if len(metric_headers) != 4:
-        raise SystemExit(f"Big tables require exactly 4 metric headers; got {len(metric_headers)}")
+    m = len(metric_headers)
+    if m < 1:
+        raise SystemExit("Big tables require at least 1 metric header")
 
     metric_fns = cell_fns_by_metric(False)
 
@@ -1014,7 +1036,7 @@ def ascii_big_table_by_arrival(
         return " " * (pad // 2) + s + " " * (pad - pad // 2)
 
     num_nodes = len(nodes_order)
-    total_width = row_w + col_w * (4 * num_nodes)
+    total_width = row_w + col_w * (m * num_nodes)
     sep = "-" * total_width
 
     lines: List[str] = []
@@ -1027,7 +1049,7 @@ def ascii_big_table_by_arrival(
 
         hdr1 = " " * row_w
         for n in nodes_order:
-            hdr1 += center(f"N={n}", col_w * 4)
+            hdr1 += center(f"N={n}", col_w * m)
         lines.append(hdr1.rstrip())
 
         hdr2 = " " * row_w
@@ -1038,7 +1060,12 @@ def ascii_big_table_by_arrival(
         lines.append(sep)
 
         for a in arrivals_order:
-            lines.append(f"{arrival_label_big(a, latex=False)}")
+            hdr = (
+                arrival_header_fn(kmax, float(a), False)
+                if arrival_header_fn is not None
+                else arrival_label_big(a, latex=False)
+            )
+            lines.append(f"{hdr}")
             lines.append(sep)
             for rk in rows_by_kmax[kmax]:
                 label = str(row_label_fn(rk)).ljust(row_w)
@@ -1375,6 +1402,13 @@ def main() -> None:
         for k, rks in rows_by_kmax.items()
     }
 
+    # defpreempt-disabled-only (used by the "w/o defaultpreemption" vs-baseline big table):
+    # Keep defpreempt=0 configs, and keep scheduling-failure rows (already defpreempt=0 there).
+    rows_by_kmax_without_defaultpreemption_only: Dict[int, List[RowKey]] = {
+        k: [rk for rk in rks if (rk.defpreempt == 0) or (rk.mode == "scheduling-failure")]
+        for k, rks in rows_by_kmax.items()
+    }
+
     # Rows for defpreempt delta tables + plots (computed once)
     def_rows = build_defpreempt_rows(df)
 
@@ -1501,13 +1535,16 @@ def main() -> None:
         ),
         TableSpec(
             stem="big_table_without_defaultpreemption_util_latency_deletions_optimizations",
-            latex_title_math=r"\Delta U_{\mathrm{eff}}\ ;\ \Delta L\ ;\ \Delta D\ ;\ \Delta O",
-            latex_subtitle=r"(pp; s; count; count), all are $(\mathrm{defpreempt}=0)-(\mathrm{defpreempt}=1)$ (Scheduling-failure excluded)",
-            ascii_title="Combined: ΔU_eff (pp) ; ΔL (s) ; ΔD ; ΔO   (all are (defpreempt=0)-(defpreempt=1); scheduling-failure excluded)",
-            rows_by_kmax=rows_by_kmax_def,
-            make_cell_fn=mk_cell_big_def_delta,
+            latex_title_math=r"\Delta U_{\mathrm{eff}}\ ;\ \Delta L\ ;\ \Delta D\ ;\ \#O",
+            latex_subtitle=(
+                r"(pp; s; count; count), plugin w/o default preemption ($\mathrm{defpreempt}=0$) vs.\ baseline for "
+                r"$\Delta U_{\mathrm{eff}}, \Delta L, \Delta D$; $\#O$ is mean optimizations (baseline has none)"
+            ),
+            ascii_title="Combined: ΔU_eff (pp) ; ΔL (s) ; ΔD ; #O (mean)   [defpreempt=0 vs baseline]",
+            rows_by_kmax=rows_by_kmax_without_defaultpreemption_only,
+            make_cell_fn=mk_cell_big_vs_baseline,
             ascii_col_w=68,
-            row_label_fn=lambda rk: rk.label(include_defpreempt=False),
+            row_label_fn=lambda rk: rk.label(include_defpreempt=True),
         ),
     ]
 
@@ -1549,12 +1586,12 @@ def main() -> None:
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
                 rows_by_kmax=spec.rows_by_kmax,
-                metric_headers=[r"$\Delta U$", r"$\Delta L$", r"$\Delta D$", r"$\Delta O$"],
+                metric_headers=[r"$\Delta U$", r"$\Delta L$", r"$\Delta D$", r"$\#O$"],
                 cell_fns_by_metric=lambda latex: [
-                    mk_cell_def_delta_U_eff(latex),
-                    mk_cell_def_delta_L_big(latex),
-                    mk_cell_def_delta_D_big(latex),
-                    mk_cell_def_delta_O(latex),
+                    mk_cell_U_eff(latex),
+                    mk_cell_L_big(latex),
+                    mk_cell_D_big(latex),
+                    mk_cell_plans_activated(latex),
                 ],
                 row_label_fn=spec.row_label_fn,
             )
@@ -1564,12 +1601,12 @@ def main() -> None:
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
                 rows_by_kmax=spec.rows_by_kmax,
-                metric_headers=["ΔU", "ΔL", "ΔD", "ΔO"],
+                metric_headers=["ΔU", "ΔL", "ΔD", "#O"],
                 cell_fns_by_metric=lambda latex: [
-                    mk_cell_def_delta_U_eff(latex),
-                    mk_cell_def_delta_L_big(latex),
-                    mk_cell_def_delta_D_big(latex),
-                    mk_cell_def_delta_O(latex),
+                    mk_cell_U_eff(latex),
+                    mk_cell_L_big(latex),
+                    mk_cell_D_big(latex),
+                    mk_cell_plans_activated(latex),
                 ],
                 row_label_fn=spec.row_label_fn,
             )
