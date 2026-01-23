@@ -18,6 +18,7 @@ Produces:
 
   Figures (under <out-dir>/figures):
     - delta_U_eff_run_kmax<K>.<png|pdf>
+        - delta_D_kmax<K>.<png|pdf>
     - delta_L_kmax<K>.<png|pdf>
     - delta_D_kmax<K>_without_defaultpreemption.<png|pdf>
     - delta_L_kmax<K>_without_defaultpreemption.<png|pdf>
@@ -289,7 +290,6 @@ def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
     v = normalize_neg_zero(float(x))
     return f"{v:+.{decimals}f}"
 
-
 def fmt_count(x: object, nan_s: str) -> str:
     """
     Format count as signed integer, handling NaN.
@@ -299,17 +299,16 @@ def fmt_count(x: object, nan_s: str) -> str:
         return nan_s
     return f"{int(round(float(x))):+d}"
 
-
-def fmt_vec(values: Sequence[object], decimals: int, nan_s: str, latex: bool) -> str:
-    """Format a vector of signed floats."""
-    if any(not is_finite(v) for v in values):
+def fmt_total_then_vec(total: object, values: Sequence[object], decimals: int, nan_s: str, latex: bool) -> str:
+    """Format as `total <p1,p2,p3,p4>` (or LaTeX equivalent) when priorities are present."""
+    if (not is_finite(total)) or any(not is_finite(v) for v in values):
         return nan_s
+    total_s = fmt_signed(total, decimals=decimals, nan_s=nan_s)
     parts = [fmt_signed(v, decimals=decimals, nan_s=nan_s) for v in values]
     inside = ",".join(parts)
     if latex:
-        return r"{\scriptsize$\langle" + inside + r"\rangle$}"
-    return "<" + inside + ">"
-
+        return r"{\scriptsize$" + total_s + r"\;\langle" + inside + r"\rangle$}"
+    return total_s + " <" + inside + ">"
 
 def arrival_label(a: float, *, latex: bool) -> str:
     """Return µ_A label for arrival s."""
@@ -465,6 +464,13 @@ def cell_defpreempt_delta_total_or_vec(
         )
         return fmt_signed(dd, decimals, ns)
 
+    dd_total = defpreempt_delta_total(
+        lookup,
+        kmax=kmax, mode=mode, blocking=blocking,
+        nodes=nodes, arrival_s=arrival_s,
+        total_col=total_col,
+    )
+
     vals0 = [
         lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col=part_col_tpl.format(p=p))
         for p in range(1, 5)
@@ -476,7 +482,7 @@ def cell_defpreempt_delta_total_or_vec(
     if any(not is_finite(v) for v in vals0) or any(not is_finite(v) for v in vals1):
         return ns
     diff = [float(v0) - float(v1) for v0, v1 in zip(vals0, vals1)]
-    return fmt_vec(diff, decimals, ns, latex=latex)
+    return fmt_total_then_vec(dd_total, diff, decimals, ns, latex=latex)
 
 
 def cell_defpreempt_delta_total_or_vec_big(
@@ -503,6 +509,13 @@ def cell_defpreempt_delta_total_or_vec_big(
         )
         return fmt_signed(dd, decimals, ns)
 
+    dd_total = defpreempt_delta_total(
+        lookup,
+        kmax=kmax, mode=mode, blocking=blocking,
+        nodes=nodes, arrival_s=arrival_s,
+        total_col=total_col,
+    )
+
     vals0 = [
         lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, mode=mode, blocking=blocking, defpreempt=0, col=part_col_tpl.format(p=p))
         for p in range(1, 5)
@@ -514,7 +527,7 @@ def cell_defpreempt_delta_total_or_vec_big(
     if any(not is_finite(v) for v in vals0) or any(not is_finite(v) for v in vals1):
         return ns
     diff = [float(v0) - float(v1) for v0, v1 in zip(vals0, vals1)]
-    return fmt_vec(diff, decimals, ns, latex=latex)
+    return fmt_total_then_vec(dd_total, diff, decimals, ns, latex=latex)
 
 
 def cell_defpreempt_delta_count(
@@ -1104,11 +1117,13 @@ def cell_total_or_vec_prio(
         v = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=total_col)
         return fmt_signed(v, decimals, nan_str(latex))
 
+    v_total = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=total_col)
+
     vals = [
         value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=part_col_tpl.format(p=p))
         for p in range(1, 5)
     ]
-    return fmt_vec(vals, decimals, nan_str(latex), latex=latex)
+    return fmt_total_then_vec(v_total, vals, decimals, nan_str(latex), latex=latex)
 
 
 def cell_total_or_vec_prio_big(
@@ -1128,11 +1143,13 @@ def cell_total_or_vec_prio_big(
         v = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=total_col)
         return fmt_signed(v, decimals, nan_str(latex))
 
+    v_total = value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=total_col)
+
     vals = [
         value_at(lookup, rk=rk, nodes=nodes, kmax=kmax, arrival_s=arrival_s, col=part_col_tpl.format(p=p))
         for p in range(1, 5)
     ]
-    return fmt_vec(vals, decimals, nan_str(latex), latex=latex)
+    return fmt_total_then_vec(v_total, vals, decimals, nan_str(latex), latex=latex)
 
 
 def join_many_cells(cell_fns: Sequence[Callable[[int, RowKey, int, float], str]], *, sep: str = "; "):
@@ -1565,6 +1582,7 @@ def main() -> None:
     # -------------------------------------------------------------------------
 
     util_y_vals_all: List[float] = []
+    deletions_y_vals_all: List[float] = []
     latency_y_vals_all: List[float] = []
     for k in plot_kmaxs:
         util_y_vals_all += collect_plot_y_vals(
@@ -1575,6 +1593,15 @@ def main() -> None:
             arrivals_order=arrivals_order,
             kmax=int(k),
             scale=100.0,
+        )
+        deletions_y_vals_all += collect_plot_y_vals(
+            lookup=lookup,
+            df=df,
+            col="delta_D_total_mean",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=int(k),
+            scale=1.0,
         )
         latency_y_vals_all += collect_plot_y_vals(
             lookup=lookup,
@@ -1587,6 +1614,7 @@ def main() -> None:
         )
 
     util_ylim = symmetric_ylim_from_y_values(util_y_vals_all)
+    deletions_ylim = symmetric_ylim_from_y_values(deletions_y_vals_all)
     latency_ylim = symmetric_ylim_from_y_values(latency_y_vals_all)
 
     def y_from_col(*, col: str, scale: float) -> YOfFn:
@@ -1634,6 +1662,20 @@ def main() -> None:
             y_of=y_from_col(col="delta_U_eff_run_mean", scale=100.0),
             label_of=lambda rk: rk.label(include_defpreempt=True),
             ylim=util_ylim,
+        )
+
+        plot_dumbbell(
+            out_dir=figures_dir,
+            filename_stem=f"delta_D_kmax{plot_kmax}",
+            y_label=r"$\Delta D$ (#deletions)",
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=int(plot_kmax),
+            series=series,
+            y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
+            label_of=lambda rk: rk.label(include_defpreempt=True),
+            ylim=deletions_ylim,
+            legend_loc="upper right",
         )
 
         plot_dumbbell(
