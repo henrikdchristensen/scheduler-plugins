@@ -28,10 +28,12 @@ Produces:
 Key behavior:
   - Mode labels are abbreviations: SF, PR-8-B, PR-8-NB, SQ-2-B, SQ-2-NB.
   - NO "-NDF" suffix is ever added.
-  - Tables/plots are generated for:
-      * defpreempt=1 ("with default preemption")  + always SF
-      * defpreempt=0 ("w/o default preemption") + always SF
+  - Tables:
+      * defpreempt=1 ("with default preemption"): EXCLUDES SF
+      * defpreempt=0 ("w/o default preemption"): includes SF
     and the difference is indicated in the per-kmax header line (not in mode labels).
+  - Plots:
+      * defpreempt=1 and defpreempt=0 plots ALWAYS include SF.
   - All LaTeX/ASCII tables use "arrivals at top; modes under arrivals; metrics as rows".
   - Each .tex file writes one tabular per kmax (kmax=1 and kmax=4), not mixed.
   - Only tabular environments are emitted (no table/table* wrapper).
@@ -411,7 +413,9 @@ def latex_metric_matrix_tables(
 
         lines.append(rf"\begin{{tabular}}{{{tab_spec}}}")
         lines.append(r"\toprule")
-        lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{{kmax_caption(kmax, latex=True, without_default_preemption=without_default_preemption)}}} \\")
+        lines.append(
+            rf"\multicolumn{{{total_cols}}}{{l}}{{{kmax_caption(kmax, latex=True, without_default_preemption=without_default_preemption)}}} \\"
+        )
         lines.append(r"\addlinespace[0.2em]")
         lines.append(arrival_hdr)
         lines.append("".join(cmid))
@@ -677,9 +681,9 @@ def main() -> None:
         return sorted(rks, key=lambda rk: rk.sort_key())
 
     # Build mode columns per variant:
-    #  - defpreempt=1 vs baseline (+SF always)
+    #  - defpreempt=1 vs baseline (+SF always in the raw list)
     #  - defpreempt=0 vs baseline (+SF always)
-    modes_def1: Dict[int, List[RowKey]] = {}
+    modes_def1_all: Dict[int, List[RowKey]] = {}
     modes_def0: Dict[int, List[RowKey]] = {}
 
     for k in kmaxs:
@@ -695,8 +699,13 @@ def main() -> None:
             if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 0)
         ]
 
-        modes_def1[k] = _sorted_modes(keep_def1)
+        modes_def1_all[k] = _sorted_modes(keep_def1)
         modes_def0[k] = _sorted_modes(keep_def0)
+
+    modes_def1_tables: Dict[int, List[RowKey]] = {
+        k: [rk for rk in rks if rk.mode != "scheduling-failure"]
+        for k, rks in modes_def1_all.items()
+    }
 
     # -----------------------------
     # Metric getters
@@ -761,14 +770,14 @@ def main() -> None:
     # Write tables (LaTeX + ASCII)
     # -----------------------------
     TABLE_JOBS = [
-        # defpreempt=1 (+SF): "with default preemption"
-        ("delta_U_eff_run", modes_def1, build_metrics_map(metrics_U_only), False),
-        ("delta_R", modes_def1, build_metrics_map(metrics_R), False),
-        ("delta_D", modes_def1, build_metrics_map(metrics_D_only), False),
-        ("delta_L", modes_def1, build_metrics_map(metrics_L_only), False),
-        ("solver_attempts", modes_def1, build_metrics_map(metrics_solver_attempts), False),
-        ("plans_activated", modes_def1, build_metrics_map(metrics_plans_activated), False),
-        ("big_table_util_latency_deletions_optimizations", modes_def1, {k: metrics_big(k) for k in kmaxs}, False),
+        # defpreempt=1: "with default preemption" (SF EXCLUDED here)
+        ("delta_U_eff_run", modes_def1_tables, build_metrics_map(metrics_U_only), False),
+        ("delta_R", modes_def1_tables, build_metrics_map(metrics_R), False),
+        ("delta_D", modes_def1_tables, build_metrics_map(metrics_D_only), False),
+        ("delta_L", modes_def1_tables, build_metrics_map(metrics_L_only), False),
+        ("solver_attempts", modes_def1_tables, build_metrics_map(metrics_solver_attempts), False),
+        ("plans_activated", modes_def1_tables, build_metrics_map(metrics_plans_activated), False),
+        ("big_table_util_latency_deletions_optimizations", modes_def1_tables, {k: metrics_big(k) for k in kmaxs}, False),
 
         # defpreempt=0 (+SF): "w/o default preemption"
         ("delta_D_without_defaultpreemption", modes_def0, build_metrics_map(metrics_D_only), True),
