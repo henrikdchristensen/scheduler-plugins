@@ -1,33 +1,43 @@
-\begin{tabular}{l c c c c c c}
+\begin{tabular}{l c c c c c c c c c c c c c c c}
 \toprule
-\multicolumn{7}{l}{$\mathbf{\Delta D(count)}$ (mean deletions), plugin vs.\ baseline} \\
+\multicolumn{16}{l}{$k_{\max}=1$ (w/o priorities)} \\
 \addlinespace[0.2em]
-& \multicolumn{3}{c}{${N=16}$} & \multicolumn{3}{c}{${N=32}$} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-& $\mu_A{=}4\,\mathrm{s}$ & $\mu_A{=}8\,\mathrm{s}$ & $\mu_A{=}16\,\mathrm{s}$ & $\mu_A{=}4\,\mathrm{s}$ & $\mu_A{=}8\,\mathrm{s}$ & $\mu_A{=}16\,\mathrm{s}$ \\
+ & \multicolumn{5}{c}{$\mu_A=4\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=8\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=16\,\mathrm{s}$} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-11}\cmidrule(lr){12-16}
+ & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB \\
 \midrule
-\multicolumn{7}{l}{$k_{\max}=1$ (w/o priorities)} \\
+\multicolumn{16}{l}{${N=16}$} \\
 \midrule
-Scheduling-failure & -571.0 & -83.7 & -11.7 & -539.0 & -202.0 & -85.7 \\
-Periodic-8s (blk) & -59.3 & +32.7 & +35.0 & +63.7 & +55.7 & +1.0 \\
-Periodic-8s (blk, w/o defpreempt) & -62.7 & +6.7 & +19.7 & +87.7 & +46.0 & +11.3 \\
-Periodic-8s (non-blk) & -9.0 & +23.0 & +27.3 & +75.7 & +66.3 & +23.0 \\
-Periodic-8s (non-blk, w/o defpreempt) & -29.7 & +17.0 & +20.0 & +86.0 & +46.3 & -6.3 \\
-Stable-queue-2s (blk) & +75.7 & +106.7 & +50.3 & +89.7 & +71.3 & +23.7 \\
-Stable-queue-2s (blk, w/o defpreempt) & +46.3 & +99.0 & +65.0 & +97.0 & +66.7 & +19.7 \\
-Stable-queue-2s (non-blk) & +68.7 & +83.0 & +52.7 & +101.3 & +67.7 & +23.3 \\
-Stable-queue-2s (non-blk, w/o defpreempt) & +79.3 & +102.3 & +69.7 & +98.7 & +77.7 & +25.0 \\
+$\Delta D_{\mathrm{tot}}$ & -571.0 & -59.3 & -9.0 & +75.7 & +68.7 & -83.7 & +32.7 & +23.0 & +106.7 & +83.0 & -11.7 & +35.0 & +27.3 & +50.3 & +52.7 \\
 \midrule
-\multicolumn{7}{l}{$k_{\max}=4$ (w/ priorities)} \\
+\multicolumn{16}{l}{${N=32}$} \\
 \midrule
-Scheduling-failure & {\scriptsize$-1220.7\;\langle-422.3,-353.0,-253.0,-192.3\rangle$} & {\scriptsize$-391.7\;\langle-60.3,-135.7,-114.3,-81.3\rangle$} & {\scriptsize$-197.0\;\langle-33.7,-68.0,-62.0,-33.3\rangle$} & {\scriptsize$-990.7\;\langle-337.7,-297.0,-212.7,-143.3\rangle$} & {\scriptsize$-394.0\;\langle-139.7,-103.7,-89.0,-61.7\rangle$} & {\scriptsize$-171.0\;\langle-50.3,-45.7,-48.7,-26.3\rangle$} \\
-Periodic-8s (blk) & {\scriptsize$+177.7\;\langle+190.3,-4.3,-1.7,-6.7\rangle$} & {\scriptsize$+183.0\;\langle+189.3,-1.0,-3.7,-1.7\rangle$} & {\scriptsize$+117.7\;\langle+119.7,-1.3,-0.7,+0.0\rangle$} & {\scriptsize$+161.0\;\langle+173.3,-3.3,-4.0,-5.0\rangle$} & {\scriptsize$+86.0\;\langle+90.0,+0.7,-1.7,-3.0\rangle$} & {\scriptsize$+83.7\;\langle+87.0,-1.3,-1.7,-0.3\rangle$} \\
-Periodic-8s (blk, w/o defpreempt) & {\scriptsize$-1116.3\;\langle-611.3,-214.7,-159.7,-130.7\rangle$} & {\scriptsize$-502.7\;\langle-250.0,-97.0,-91.3,-64.3\rangle$} & {\scriptsize$-250.7\;\langle-128.0,-48.7,-48.0,-26.0\rangle$} & {\scriptsize$-639.0\;\langle-334.0,-141.3,-87.0,-76.7\rangle$} & {\scriptsize$-303.7\;\langle-157.7,-55.3,-51.0,-39.7\rangle$} & {\scriptsize$-143.0\;\langle-67.3,-30.3,-26.3,-19.0\rangle$} \\
-Periodic-8s (non-blk) & {\scriptsize$+201.3\;\langle+216.7,-7.0,-4.0,-4.3\rangle$} & {\scriptsize$+193.7\;\langle+199.3,-1.0,-2.7,-2.0\rangle$} & {\scriptsize$+109.3\;\langle+113.0,-2.7,-0.7,-0.3\rangle$} & {\scriptsize$+173.3\;\langle+184.7,-7.0,+0.0,-4.3\rangle$} & {\scriptsize$+92.3\;\langle+96.0,+0.3,-2.0,-2.0\rangle$} & {\scriptsize$+82.0\;\langle+85.7,-1.0,-2.7,+0.0\rangle$} \\
-Periodic-8s (non-blk, w/o defpreempt) & {\scriptsize$-1087.3\;\langle-600.3,-208.7,-147.0,-131.3\rangle$} & {\scriptsize$-512.3\;\langle-262.7,-96.0,-88.0,-65.7\rangle$} & {\scriptsize$-265.3\;\langle-127.7,-59.7,-48.3,-29.7\rangle$} & {\scriptsize$-627.3\;\langle-324.0,-139.7,-88.7,-75.0\rangle$} & {\scriptsize$-321.7\;\langle-173.7,-53.7,-55.7,-38.7\rangle$} & {\scriptsize$-125.7\;\langle-59.0,-22.0,-25.7,-19.0\rangle$} \\
-Stable-queue-2s (blk) & {\scriptsize$+353.3\;\langle+355.0,+1.3,+0.0,-3.0\rangle$} & {\scriptsize$+261.7\;\langle+264.0,-0.3,-1.3,-0.7\rangle$} & {\scriptsize$+176.0\;\langle+179.3,-2.0,-1.0,-0.3\rangle$} & {\scriptsize$+207.7\;\langle+213.0,-3.7,+0.3,-2.0\rangle$} & {\scriptsize$+123.3\;\langle+126.0,-1.0,-1.0,-0.7\rangle$} & {\scriptsize$+91.7\;\langle+91.0,+0.7,+0.3,-0.3\rangle$} \\
-Stable-queue-2s (blk, w/o defpreempt) & {\scriptsize$-916.7\;\langle-461.0,-195.3,-144.7,-115.7\rangle$} & {\scriptsize$-431.0\;\langle-193.3,-97.7,-81.3,-58.7\rangle$} & {\scriptsize$-166.0\;\langle-60.0,-44.7,-39.7,-21.7\rangle$} & {\scriptsize$-592.3\;\langle-303.0,-130.7,-89.3,-69.3\rangle$} & {\scriptsize$-279.3\;\langle-140.0,-50.3,-50.3,-38.7\rangle$} & {\scriptsize$-106.3\;\langle-46.3,-22.7,-20.7,-16.7\rangle$} \\
-Stable-queue-2s (non-blk) & {\scriptsize$+386.0\;\langle+389.7,-0.3,-0.7,-2.7\rangle$} & {\scriptsize$+274.0\;\langle+273.3,+1.3,-0.7,+0.0\rangle$} & {\scriptsize$+169.0\;\langle+173.7,-2.3,-1.7,-0.7\rangle$} & {\scriptsize$+203.7\;\langle+208.7,-2.7,-2.0,-0.3\rangle$} & {\scriptsize$+120.0\;\langle+118.0,+1.3,+0.7,+0.0\rangle$} & {\scriptsize$+90.0\;\langle+89.7,+0.7,+0.0,-0.3\rangle$} \\
-Stable-queue-2s (non-blk, w/o defpreempt) & {\scriptsize$-910.7\;\langle-472.7,-189.7,-134.7,-113.7\rangle$} & {\scriptsize$-407.7\;\langle-181.0,-86.3,-84.0,-56.3\rangle$} & {\scriptsize$-172.0\;\langle-65.7,-43.3,-39.3,-23.7\rangle$} & {\scriptsize$-603.0\;\langle-301.0,-132.7,-88.7,-80.7\rangle$} & {\scriptsize$-286.0\;\langle-150.3,-51.0,-47.3,-37.3\rangle$} & {\scriptsize$-107.7\;\langle-45.0,-22.3,-23.0,-17.3\rangle$} \\
+$\Delta D_{\mathrm{tot}}$ & -539.0 & +63.7 & +75.7 & +89.7 & +101.3 & -202.0 & +55.7 & +66.3 & +71.3 & +67.7 & -85.7 & +1.0 & +23.0 & +23.7 & +23.3 \\
+\bottomrule
+\end{tabular}
+
+\begin{tabular}{l c c c c c c c c c c c c c c c}
+\toprule
+\multicolumn{16}{l}{$k_{\max}=4$ (w/ priorities)} \\
+\addlinespace[0.2em]
+ & \multicolumn{5}{c}{$\mu_A=4\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=8\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=16\,\mathrm{s}$} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-11}\cmidrule(lr){12-16}
+ & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB \\
+\midrule
+\multicolumn{16}{l}{${N=16}$} \\
+\midrule
+$\Delta D_{\mathrm{tot}}$ & -1220.7 & +177.7 & +201.3 & +353.3 & +386.0 & -391.7 & +183.0 & +193.7 & +261.7 & +274.0 & -197.0 & +117.7 & +109.3 & +176.0 & +169.0 \\
+$\Delta D_{p_1}$ & -422.3 & +190.3 & +216.7 & +355.0 & +389.7 & -60.3 & +189.3 & +199.3 & +264.0 & +273.3 & -33.7 & +119.7 & +113.0 & +179.3 & +173.7 \\
+$\Delta D_{p_2}$ & -353.0 & -4.3 & -7.0 & +1.3 & -0.3 & -135.7 & -1.0 & -1.0 & -0.3 & +1.3 & -68.0 & -1.3 & -2.7 & -2.0 & -2.3 \\
+$\Delta D_{p_3}$ & -253.0 & -1.7 & -4.0 & +0.0 & -0.7 & -114.3 & -3.7 & -2.7 & -1.3 & -0.7 & -62.0 & -0.7 & -0.7 & -1.0 & -1.7 \\
+$\Delta D_{p_4}$ & -192.3 & -6.7 & -4.3 & -3.0 & -2.7 & -81.3 & -1.7 & -2.0 & -0.7 & +0.0 & -33.3 & +0.0 & -0.3 & -0.3 & -0.7 \\
+\midrule
+\multicolumn{16}{l}{${N=32}$} \\
+\midrule
+$\Delta D_{\mathrm{tot}}$ & -990.7 & +161.0 & +173.3 & +207.7 & +203.7 & -394.0 & +86.0 & +92.3 & +123.3 & +120.0 & -171.0 & +83.7 & +82.0 & +91.7 & +90.0 \\
+$\Delta D_{p_1}$ & -337.7 & +173.3 & +184.7 & +213.0 & +208.7 & -139.7 & +90.0 & +96.0 & +126.0 & +118.0 & -50.3 & +87.0 & +85.7 & +91.0 & +89.7 \\
+$\Delta D_{p_2}$ & -297.0 & -3.3 & -7.0 & -3.7 & -2.7 & -103.7 & +0.7 & +0.3 & -1.0 & +1.3 & -45.7 & -1.3 & -1.0 & +0.7 & +0.7 \\
+$\Delta D_{p_3}$ & -212.7 & -4.0 & +0.0 & +0.3 & -2.0 & -89.0 & -1.7 & -2.0 & -1.0 & +0.7 & -48.7 & -1.7 & -2.7 & +0.3 & +0.0 \\
+$\Delta D_{p_4}$ & -143.3 & -5.0 & -4.3 & -2.0 & -0.3 & -61.7 & -3.0 & -2.0 & -0.7 & +0.0 & -26.3 & -0.3 & +0.0 & -0.3 & -0.3 \\
 \bottomrule
 \end{tabular}

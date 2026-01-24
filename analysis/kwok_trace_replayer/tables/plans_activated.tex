@@ -1,33 +1,35 @@
-\begin{tabular}{l c c c c c c}
+\begin{tabular}{l c c c c c c c c c c c c c c c}
 \toprule
-\multicolumn{7}{l}{$\mathbf{\mathrm{plans\_activated}}$ (mean plans activated)} \\
+\multicolumn{16}{l}{$k_{\max}=1$ (w/o priorities)} \\
 \addlinespace[0.2em]
-& \multicolumn{3}{c}{${N=16}$} & \multicolumn{3}{c}{${N=32}$} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-& $\mu_A{=}4\,\mathrm{s}$ & $\mu_A{=}8\,\mathrm{s}$ & $\mu_A{=}16\,\mathrm{s}$ & $\mu_A{=}4\,\mathrm{s}$ & $\mu_A{=}8\,\mathrm{s}$ & $\mu_A{=}16\,\mathrm{s}$ \\
+ & \multicolumn{5}{c}{$\mu_A=4\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=8\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=16\,\mathrm{s}$} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-11}\cmidrule(lr){12-16}
+ & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB \\
 \midrule
-\multicolumn{7}{l}{$k_{\max}=1$ (w/o priorities)} \\
+\multicolumn{16}{l}{${N=16}$} \\
 \midrule
-Scheduling-failure & +142 & +101 & +64 & +95 & +59 & +37 \\
-Periodic-8s (blk) & +32 & +28 & +30 & +33 & +19 & +19 \\
-Periodic-8s (blk, w/o defpreempt) & +29 & +28 & +28 & +33 & +20 & +22 \\
-Periodic-8s (non-blk) & +30 & +30 & +27 & +34 & +23 & +18 \\
-Periodic-8s (non-blk, w/o defpreempt) & +33 & +28 & +28 & +34 & +22 & +17 \\
-Stable-queue-2s (blk) & +62 & +50 & +40 & +40 & +27 & +20 \\
-Stable-queue-2s (blk, w/o defpreempt) & +57 & +51 & +37 & +42 & +24 & +19 \\
-Stable-queue-2s (non-blk) & +54 & +51 & +40 & +38 & +24 & +21 \\
-Stable-queue-2s (non-blk, w/o defpreempt) & +56 & +52 & +39 & +42 & +23 & +21 \\
+$\#O$ & 142 & 32 & 30 & 62 & 54 & 101 & 28 & 30 & 50 & 51 & 64 & 30 & 27 & 40 & 40 \\
 \midrule
-\multicolumn{7}{l}{$k_{\max}=4$ (w/ priorities)} \\
+\multicolumn{16}{l}{${N=32}$} \\
 \midrule
-Scheduling-failure & +190 & +127 & +70 & +139 & +76 & +49 \\
-Periodic-8s (blk) & +51 & +47 & +35 & +45 & +28 & +26 \\
-Periodic-8s (blk, w/o defpreempt) & +42 & +44 & +25 & +44 & +33 & +22 \\
-Periodic-8s (non-blk) & +53 & +52 & +32 & +49 & +28 & +28 \\
-Periodic-8s (non-blk, w/o defpreempt) & +40 & +39 & +29 & +44 & +30 & +24 \\
-Stable-queue-2s (blk) & +94 & +72 & +53 & +58 & +36 & +30 \\
-Stable-queue-2s (blk, w/o defpreempt) & +82 & +64 & +48 & +53 & +35 & +29 \\
-Stable-queue-2s (non-blk) & +94 & +69 & +47 & +56 & +35 & +28 \\
-Stable-queue-2s (non-blk, w/o defpreempt) & +79 & +64 & +51 & +57 & +36 & +31 \\
+$\#O$ & 95 & 33 & 34 & 40 & 38 & 59 & 19 & 23 & 27 & 24 & 37 & 19 & 18 & 20 & 21 \\
+\bottomrule
+\end{tabular}
+
+\begin{tabular}{l c c c c c c c c c c c c c c c}
+\toprule
+\multicolumn{16}{l}{$k_{\max}=4$ (w/ priorities)} \\
+\addlinespace[0.2em]
+ & \multicolumn{5}{c}{$\mu_A=4\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=8\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=16\,\mathrm{s}$} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-11}\cmidrule(lr){12-16}
+ & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB \\
+\midrule
+\multicolumn{16}{l}{${N=16}$} \\
+\midrule
+$\#O$ & 190 & 51 & 53 & 94 & 94 & 127 & 47 & 52 & 72 & 69 & 70 & 35 & 32 & 53 & 47 \\
+\midrule
+\multicolumn{16}{l}{${N=32}$} \\
+\midrule
+$\#O$ & 139 & 45 & 49 & 58 & 56 & 76 & 28 & 28 & 36 & 35 & 49 & 26 & 28 & 30 & 28 \\
 \bottomrule
 \end{tabular}

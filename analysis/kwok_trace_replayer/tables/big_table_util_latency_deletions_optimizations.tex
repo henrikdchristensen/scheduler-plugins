@@ -1,63 +1,63 @@
-\begin{tabular}{l cccc cccc}
+\begin{tabular}{l c c c c c c c c c c c c c c c}
 \toprule
-& \multicolumn{4}{c}{${N=16}$} & \multicolumn{4}{c}{${N=32}$} \\
-\cmidrule(lr){2-5}\cmidrule(lr){6-9}
-$k_{\max}=1$ (w/o priorities) & $\Delta U$ & $\Delta L$ & $\Delta D$ & $\#O$ & $\Delta U$ & $\Delta L$ & $\Delta D$ & $\#O$ \\
+\multicolumn{16}{l}{$k_{\max}=1$ (w/o priorities)} \\
+\addlinespace[0.2em]
+ & \multicolumn{5}{c}{$\mu_A=4\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=8\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=16\,\mathrm{s}$} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-11}\cmidrule(lr){12-16}
+ & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB \\
 \midrule
-\multicolumn{9}{l}{$\mu_A = 4\,\mathrm{s}$} \\
+\multicolumn{16}{l}{${N=16}$} \\
 \midrule
-Scheduling-failure & +1.9 & +3.2 & -571.0 & +142 & +1.1 & +2.5 & -539.0 & +95 \\ 
-Periodic-8s (blk) & +1.7 & +0.2 & -59.3 & +32 & +1.4 & -1.2 & +63.7 & +33 \\ 
-Periodic-8s (non-blk) & +1.8 & +0.0 & -9.0 & +30 & +1.5 & -1.5 & +75.7 & +34 \\ 
-Stable-queue-2s (blk) & +2.1 & +0.0 & +75.7 & +62 & +1.5 & -1.3 & +89.7 & +40 \\ 
-Stable-queue-2s (non-blk) & +2.0 & +0.0 & +68.7 & +54 & +1.5 & -1.4 & +101.3 & +38 \\ 
+$\Delta U$ & +1.9 & +1.7 & +1.8 & +2.1 & +2.0 & +2.0 & +2.1 & +2.2 & +2.4 & +2.4 & +3.4 & +3.4 & +3.3 & +3.5 & +3.4 \\
+$\Delta L_{\mathrm{tot}}$ & +3.2 & +0.2 & +0.0 & +0.0 & +0.0 & +2.6 & +0.4 & +0.0 & -0.3 & +0.0 & -0.2 & -2.8 & -2.1 & -2.6 & -2.5 \\
+$\Delta D_{\mathrm{tot}}$ & -571.0 & -59.3 & -9.0 & +75.7 & +68.7 & -83.7 & +32.7 & +23.0 & +106.7 & +83.0 & -11.7 & +35.0 & +27.3 & +50.3 & +52.7 \\
+$\#O$ & 142 & 32 & 30 & 62 & 54 & 101 & 28 & 30 & 50 & 51 & 64 & 30 & 27 & 40 & 40 \\
 \midrule
-\multicolumn{9}{l}{$\mu_A = 8\,\mathrm{s}$} \\
+\multicolumn{16}{l}{${N=32}$} \\
 \midrule
-Scheduling-failure & +2.0 & +2.6 & -83.7 & +101 & +0.9 & +7.1 & -202.0 & +59 \\ 
-Periodic-8s (blk) & +2.1 & +0.4 & +32.7 & +28 & +1.3 & -0.3 & +55.7 & +19 \\ 
-Periodic-8s (non-blk) & +2.2 & +0.0 & +23.0 & +30 & +1.2 & +0.1 & +66.3 & +23 \\ 
-Stable-queue-2s (blk) & +2.4 & -0.3 & +106.7 & +50 & +1.5 & -1.1 & +71.3 & +27 \\ 
-Stable-queue-2s (non-blk) & +2.4 & +0.0 & +83.0 & +51 & +1.4 & -0.4 & +67.7 & +24 \\ 
-\midrule
-\multicolumn{9}{l}{$\mu_A = 16\,\mathrm{s}$} \\
-\midrule
-Scheduling-failure & +3.4 & -0.2 & -11.7 & +64 & +2.7 & +3.5 & -85.7 & +37 \\ 
-Periodic-8s (blk) & +3.4 & -2.8 & +35.0 & +30 & +2.8 & -4.0 & +1.0 & +19 \\ 
-Periodic-8s (non-blk) & +3.3 & -2.1 & +27.3 & +27 & +2.5 & -2.4 & +23.0 & +18 \\ 
-Stable-queue-2s (blk) & +3.5 & -2.6 & +50.3 & +40 & +2.9 & -4.8 & +23.7 & +20 \\ 
-Stable-queue-2s (non-blk) & +3.4 & -2.5 & +52.7 & +40 & +2.8 & -4.7 & +23.3 & +21 \\ 
+$\Delta U$ & +1.1 & +1.4 & +1.5 & +1.5 & +1.5 & +0.9 & +1.3 & +1.2 & +1.5 & +1.4 & +2.7 & +2.8 & +2.5 & +2.9 & +2.8 \\
+$\Delta L_{\mathrm{tot}}$ & +2.5 & -1.2 & -1.5 & -1.3 & -1.4 & +7.1 & -0.3 & +0.1 & -1.1 & -0.4 & +3.5 & -4.0 & -2.4 & -4.8 & -4.7 \\
+$\Delta D_{\mathrm{tot}}$ & -539.0 & +63.7 & +75.7 & +89.7 & +101.3 & -202.0 & +55.7 & +66.3 & +71.3 & +67.7 & -85.7 & +1.0 & +23.0 & +23.7 & +23.3 \\
+$\#O$ & 95 & 33 & 34 & 40 & 38 & 59 & 19 & 23 & 27 & 24 & 37 & 19 & 18 & 20 & 21 \\
 \bottomrule
 \end{tabular}
 
-\begin{tabular}{l cccc cccc}
+\begin{tabular}{l c c c c c c c c c c c c c c c}
 \toprule
-& \multicolumn{4}{c}{${N=16}$} & \multicolumn{4}{c}{${N=32}$} \\
-\cmidrule(lr){2-5}\cmidrule(lr){6-9}
-$k_{\max}=4$ (w/ priorities) & $\Delta U$ & $\Delta L$ & $\Delta D$ & $\#O$ & $\Delta U$ & $\Delta L$ & $\Delta D$ & $\#O$ \\
+\multicolumn{16}{l}{$k_{\max}=4$ (w/ priorities)} \\
+\addlinespace[0.2em]
+ & \multicolumn{5}{c}{$\mu_A=4\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=8\,\mathrm{s}$} & \multicolumn{5}{c}{$\mu_A=16\,\mathrm{s}$} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-11}\cmidrule(lr){12-16}
+ & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB & SF & PR-8-B & PR-8-NB & SQ-2-B & SQ-2-NB \\
 \midrule
-\multicolumn{9}{l}{$\mu_A = 4\,\mathrm{s}$} \\
+\multicolumn{16}{l}{${N=16}$} \\
 \midrule
-Scheduling-failure & +0.9 & {\scriptsize$+3.3\;\langle+2.8,+3.7,+3.6,+3.1\rangle$} & {\scriptsize$-1220.7\;\langle-422.3,-353.0,-253.0,-192.3\rangle$} & +190 & +1.0 & {\scriptsize$+3.5\;\langle+3.5,+4.3,+3.1,+2.8\rangle$} & {\scriptsize$-990.7\;\langle-337.7,-297.0,-212.7,-143.3\rangle$} & +139 \\ 
-Periodic-8s (blk) & +1.1 & {\scriptsize$+0.0\;\langle-0.1,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+177.7\;\langle+190.3,-4.3,-1.7,-6.7\rangle$} & +51 & +1.1 & {\scriptsize$+0.0\;\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+161.0\;\langle+173.3,-3.3,-4.0,-5.0\rangle$} & +45 \\ 
-Periodic-8s (non-blk) & +1.0 & {\scriptsize$+0.0\;\langle-0.1,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+201.3\;\langle+216.7,-7.0,-4.0,-4.3\rangle$} & +53 & +1.3 & {\scriptsize$-0.1\;\langle-0.3,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+173.3\;\langle+184.7,-7.0,+0.0,-4.3\rangle$} & +49 \\ 
-Stable-queue-2s (blk) & +1.4 & {\scriptsize$-0.1\;\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+353.3\;\langle+355.0,+1.3,+0.0,-3.0\rangle$} & +94 & +1.2 & {\scriptsize$-0.1\;\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+207.7\;\langle+213.0,-3.7,+0.3,-2.0\rangle$} & +58 \\ 
-Stable-queue-2s (non-blk) & +1.2 & {\scriptsize$+0.0\;\langle+0.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+386.0\;\langle+389.7,-0.3,-0.7,-2.7\rangle$} & +94 & +1.2 & {\scriptsize$+0.0\;\langle-0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+203.7\;\langle+208.7,-2.7,-2.0,-0.3\rangle$} & +56 \\ 
+$\Delta U$ & +0.9 & +1.1 & +1.0 & +1.4 & +1.2 & +1.8 & +1.7 & +1.7 & +1.9 & +2.0 & +1.8 & +1.8 & +1.5 & +1.7 & +1.9 \\
+$\Delta L_{\mathrm{tot}}$ & +3.3 & +0.0 & +0.0 & -0.1 & +0.0 & +4.1 & +0.2 & +0.1 & +0.1 & +0.0 & +6.2 & -0.4 & +0.0 & -0.3 & -0.2 \\
+$\Delta L_{p_1}$ & +2.8 & -0.1 & -0.1 & -0.2 & +0.0 & +4.4 & +0.6 & +0.2 & +0.2 & -0.1 & +6.3 & -1.5 & -0.3 & -1.0 & -0.9 \\
+$\Delta L_{p_2}$ & +3.7 & +0.0 & +0.0 & +0.0 & +0.0 & +3.9 & +0.0 & +0.0 & +0.0 & +0.0 & +6.0 & +0.0 & +0.1 & +0.0 & +0.0 \\
+$\Delta L_{p_3}$ & +3.6 & +0.0 & +0.0 & +0.0 & +0.0 & +3.1 & +0.0 & +0.1 & +0.0 & +0.0 & +5.3 & +0.0 & +0.1 & +0.0 & +0.0 \\
+$\Delta L_{p_4}$ & +3.1 & +0.0 & +0.0 & +0.0 & +0.0 & +4.5 & +0.0 & +0.0 & +0.0 & +0.0 & +6.5 & +0.0 & +0.1 & +0.0 & +0.0 \\
+$\Delta D_{\mathrm{tot}}$ & -1220.7 & +177.7 & +201.3 & +353.3 & +386.0 & -391.7 & +183.0 & +193.7 & +261.7 & +274.0 & -197.0 & +117.7 & +109.3 & +176.0 & +169.0 \\
+$\Delta D_{p_1}$ & -422.3 & +190.3 & +216.7 & +355.0 & +389.7 & -60.3 & +189.3 & +199.3 & +264.0 & +273.3 & -33.7 & +119.7 & +113.0 & +179.3 & +173.7 \\
+$\Delta D_{p_2}$ & -353.0 & -4.3 & -7.0 & +1.3 & -0.3 & -135.7 & -1.0 & -1.0 & -0.3 & +1.3 & -68.0 & -1.3 & -2.7 & -2.0 & -2.3 \\
+$\Delta D_{p_3}$ & -253.0 & -1.7 & -4.0 & +0.0 & -0.7 & -114.3 & -3.7 & -2.7 & -1.3 & -0.7 & -62.0 & -0.7 & -0.7 & -1.0 & -1.7 \\
+$\Delta D_{p_4}$ & -192.3 & -6.7 & -4.3 & -3.0 & -2.7 & -81.3 & -1.7 & -2.0 & -0.7 & +0.0 & -33.3 & +0.0 & -0.3 & -0.3 & -0.7 \\
+$\#O$ & 190 & 51 & 53 & 94 & 94 & 127 & 47 & 52 & 72 & 69 & 70 & 35 & 32 & 53 & 47 \\
 \midrule
-\multicolumn{9}{l}{$\mu_A = 8\,\mathrm{s}$} \\
+\multicolumn{16}{l}{${N=32}$} \\
 \midrule
-Scheduling-failure & +1.8 & {\scriptsize$+4.1\;\langle+4.4,+3.9,+3.1,+4.5\rangle$} & {\scriptsize$-391.7\;\langle-60.3,-135.7,-114.3,-81.3\rangle$} & +127 & +0.9 & {\scriptsize$+4.3\;\langle+3.5,+5.2,+4.1,+4.2\rangle$} & {\scriptsize$-394.0\;\langle-139.7,-103.7,-89.0,-61.7\rangle$} & +76 \\ 
-Periodic-8s (blk) & +1.7 & {\scriptsize$+0.2\;\langle+0.6,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+183.0\;\langle+189.3,-1.0,-3.7,-1.7\rangle$} & +47 & +0.8 & {\scriptsize$-0.2\;\langle-0.6,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+86.0\;\langle+90.0,+0.7,-1.7,-3.0\rangle$} & +28 \\ 
-Periodic-8s (non-blk) & +1.7 & {\scriptsize$+0.1\;\langle+0.2,+0.0,+0.1,+0.0\rangle$} & {\scriptsize$+193.7\;\langle+199.3,-1.0,-2.7,-2.0\rangle$} & +52 & +0.6 & {\scriptsize$-0.2\;\langle-0.7,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+92.3\;\langle+96.0,+0.3,-2.0,-2.0\rangle$} & +28 \\ 
-Stable-queue-2s (blk) & +1.9 & {\scriptsize$+0.1\;\langle+0.2,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+261.7\;\langle+264.0,-0.3,-1.3,-0.7\rangle$} & +72 & +0.8 & {\scriptsize$-0.3\;\langle-0.8,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+123.3\;\langle+126.0,-1.0,-1.0,-0.7\rangle$} & +36 \\ 
-Stable-queue-2s (non-blk) & +2.0 & {\scriptsize$+0.0\;\langle-0.1,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+274.0\;\langle+273.3,+1.3,-0.7,+0.0\rangle$} & +69 & +0.8 & {\scriptsize$-0.2\;\langle-0.6,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+120.0\;\langle+118.0,+1.3,+0.7,+0.0\rangle$} & +35 \\ 
-\midrule
-\multicolumn{9}{l}{$\mu_A = 16\,\mathrm{s}$} \\
-\midrule
-Scheduling-failure & +1.8 & {\scriptsize$+6.2\;\langle+6.3,+6.0,+5.3,+6.5\rangle$} & {\scriptsize$-197.0\;\langle-33.7,-68.0,-62.0,-33.3\rangle$} & +70 & +1.0 & {\scriptsize$+7.5\;\langle+5.9,+7.4,+4.9,+14.0\rangle$} & {\scriptsize$-171.0\;\langle-50.3,-45.7,-48.7,-26.3\rangle$} & +49 \\ 
-Periodic-8s (blk) & +1.8 & {\scriptsize$-0.4\;\langle-1.5,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+117.7\;\langle+119.7,-1.3,-0.7,+0.0\rangle$} & +35 & +1.1 & {\scriptsize$-0.4\;\langle-1.2,+0.0,+0.0,+0.1\rangle$} & {\scriptsize$+83.7\;\langle+87.0,-1.3,-1.7,-0.3\rangle$} & +26 \\ 
-Periodic-8s (non-blk) & +1.5 & {\scriptsize$+0.0\;\langle-0.3,+0.1,+0.1,+0.1\rangle$} & {\scriptsize$+109.3\;\langle+113.0,-2.7,-0.7,-0.3\rangle$} & +32 & +1.2 & {\scriptsize$-0.3\;\langle-0.8,+0.0,+0.0,+0.1\rangle$} & {\scriptsize$+82.0\;\langle+85.7,-1.0,-2.7,+0.0\rangle$} & +28 \\ 
-Stable-queue-2s (blk) & +1.7 & {\scriptsize$-0.3\;\langle-1.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+176.0\;\langle+179.3,-2.0,-1.0,-0.3\rangle$} & +53 & +1.3 & {\scriptsize$-0.7\;\langle-2.0,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+91.7\;\langle+91.0,+0.7,+0.3,-0.3\rangle$} & +30 \\ 
-Stable-queue-2s (non-blk) & +1.9 & {\scriptsize$-0.2\;\langle-0.9,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+169.0\;\langle+173.7,-2.3,-1.7,-0.7\rangle$} & +47 & +1.2 & {\scriptsize$-0.6\;\langle-1.9,+0.0,+0.0,+0.0\rangle$} & {\scriptsize$+90.0\;\langle+89.7,+0.7,+0.0,-0.3\rangle$} & +28 \\ 
+$\Delta U$ & +1.0 & +1.1 & +1.3 & +1.2 & +1.2 & +0.9 & +0.8 & +0.6 & +0.8 & +0.8 & +1.0 & +1.1 & +1.2 & +1.3 & +1.2 \\
+$\Delta L_{\mathrm{tot}}$ & +3.5 & +0.0 & -0.1 & -0.1 & +0.0 & +4.3 & -0.2 & -0.2 & -0.3 & -0.2 & +7.5 & -0.4 & -0.3 & -0.7 & -0.6 \\
+$\Delta L_{p_1}$ & +3.5 & -0.2 & -0.3 & -0.2 & -0.2 & +3.5 & -0.6 & -0.7 & -0.8 & -0.6 & +5.9 & -1.2 & -0.8 & -2.0 & -1.9 \\
+$\Delta L_{p_2}$ & +4.3 & +0.0 & +0.0 & +0.0 & +0.0 & +5.2 & +0.0 & +0.0 & +0.0 & +0.0 & +7.4 & +0.0 & +0.0 & +0.0 & +0.0 \\
+$\Delta L_{p_3}$ & +3.1 & +0.0 & +0.0 & +0.0 & +0.0 & +4.1 & +0.0 & +0.0 & +0.0 & +0.0 & +4.9 & +0.0 & +0.0 & +0.0 & +0.0 \\
+$\Delta L_{p_4}$ & +2.8 & +0.0 & +0.0 & +0.0 & +0.0 & +4.2 & +0.0 & +0.0 & +0.0 & +0.0 & +14.0 & +0.1 & +0.1 & +0.0 & +0.0 \\
+$\Delta D_{\mathrm{tot}}$ & -990.7 & +161.0 & +173.3 & +207.7 & +203.7 & -394.0 & +86.0 & +92.3 & +123.3 & +120.0 & -171.0 & +83.7 & +82.0 & +91.7 & +90.0 \\
+$\Delta D_{p_1}$ & -337.7 & +173.3 & +184.7 & +213.0 & +208.7 & -139.7 & +90.0 & +96.0 & +126.0 & +118.0 & -50.3 & +87.0 & +85.7 & +91.0 & +89.7 \\
+$\Delta D_{p_2}$ & -297.0 & -3.3 & -7.0 & -3.7 & -2.7 & -103.7 & +0.7 & +0.3 & -1.0 & +1.3 & -45.7 & -1.3 & -1.0 & +0.7 & +0.7 \\
+$\Delta D_{p_3}$ & -212.7 & -4.0 & +0.0 & +0.3 & -2.0 & -89.0 & -1.7 & -2.0 & -1.0 & +0.7 & -48.7 & -1.7 & -2.7 & +0.3 & +0.0 \\
+$\Delta D_{p_4}$ & -143.3 & -5.0 & -4.3 & -2.0 & -0.3 & -61.7 & -3.0 & -2.0 & -0.7 & +0.0 & -26.3 & -0.3 & +0.0 & -0.3 & -0.3 \\
+$\#O$ & 139 & 45 & 49 & 58 & 56 & 76 & 28 & 28 & 36 & 35 & 49 & 26 & 28 & 30 & 28 \\
 \bottomrule
 \end{tabular}
