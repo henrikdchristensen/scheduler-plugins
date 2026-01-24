@@ -19,11 +19,8 @@ Produces:
     - big_table_without_defaultpreemption_util_latency_deletions_optimizations.{txt,tex}
 
   Figures (under <out-dir>/figures):
-    - delta_U_eff_run_kmax<K>.<png|pdf>
-    - delta_D_kmax<K>.<png|pdf>
-    - delta_L_kmax<K>.<png|pdf>
-    - delta_D_kmax<K>_without_defaultpreemption.<png|pdf>
-    - delta_L_kmax<K>_without_defaultpreemption.<png|pdf>
+    - grid_util_latency_deletions_defaultpreemption.{png,pdf}
+    - grid_util_latency_deletions_without_defaultpreemption.{png,pdf}
 
 Key behavior:
   - Mode labels are abbreviations: SF, PR-8-B, PR-8-NB, SQ-2-B, SQ-2-NB.
@@ -33,10 +30,13 @@ Key behavior:
       * defpreempt=0 ("w/o default preemption"): includes SF
     and the difference is indicated in the per-kmax header line (not in mode labels).
   - Plots:
-      * defpreempt=1 and defpreempt=0 plots ALWAYS include SF.
-  - All LaTeX/ASCII tables use "arrivals at top; modes under arrivals; metrics as rows".
-  - Each .tex file writes one tabular per kmax (kmax=1 and kmax=4), not mixed.
-  - Only tabular environments are emitted (no table/table* wrapper).
+      * We generate two 3x2 grid figures:
+          rows: Utilisation, Latency, Deletions
+          cols: kmax=1, kmax=4
+        One grid for defpreempt=1 and one for defpreempt=0.
+      * Tick *labels* are shown only in the FIRST column.
+      * Only the bottom-left panel shows mu_A tick labels.
+      * Row y-labels are figure-level (not axes-level) so they align perfectly with the grid.
 """
 
 import argparse
@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 
@@ -69,65 +70,44 @@ EXPECTED_COLS = [
 KEY_COLS = ["nodes", "kmax", "arrival_s", "mode", "blocking", "defpreempt"]
 
 # =============================================================================
-# Plot styling
+# Plot styling (only what we use)
 # =============================================================================
 
-PLOT_MARKER_SIZE = 3.0
-PLOT_ARRIVAL_X_SPACING = 0.6
+PLOT_MARKER_SIZE = 3.5
+PLOT_ARRIVAL_X_SPACING = 0.35
 PLOT_MODE_X_SPACING = 0.05
 
-PLOT_FIGSIZE = (2.7, 1.8)
-PLOT_TICK_FONTSIZE = 5
-PLOT_LEGEND_FONTSIZE = 5
-PLOT_AXIS_LABEL_FONTSIZE = 5.5
+PLOT_TICK_FONTSIZE = 7
+PLOT_TICK_PAD = 2.0
+PLOT_TICK_LENGTH = 4.0
+
+PLOT_AXIS_LABEL_FONTSIZE = 7
 PLOT_Y_PADDING = 0.15
 
-PLOT_LEGEND_HANDLE_LENGTH = 0.6
+PLOT_LEGEND_FONTSIZE = 7
+PLOT_LEGEND_HANDLE_LENGTH = 0.4
 PLOT_LEGEND_COLUMN_SPACING = 0.5
-PLOT_LEGEND_BORDER_AXES_PAD = 0.4
-PLOT_LEGEND_LOC = "lower center"
+PLOT_LEGEND_HANDLE_TEXT_PAD = 0.46
+PLOT_LEGEND_FRAME_LINEWIDTH = 1.0
 PLOT_LEGEND_NCOL = 5
 
+# Big grid figure (3 rows x 2 cols)
+GRID_FIGSIZE = (4.5, 5)
+GRID_LEFT   = 0.125   # room for figure-level ylabels
+GRID_RIGHT  = 0.99
+GRID_BOTTOM = 0.04
+GRID_TOP    = 0.92    # top of subplot area (not legend)
+GRID_WSPACE = 0.1
+GRID_HSPACE = 0.1
 
-def add_standard_legend(
-    *,
-    ax: plt.Axes,
-    handles: Sequence[object],
-    labels: Sequence[str],
-    loc: str = PLOT_LEGEND_LOC,
-) -> None:
-    """Standard legend inside the axes, deduped and compact."""
-    clean: List[Tuple[object, str]] = []
-    seen = set()
-    for h, lbl in zip(handles, labels):
-        s = str(lbl)
-        if not s or s.startswith("_"):
-            continue
-        if s in seen:
-            continue
-        seen.add(s)
-        clean.append((h, s))
+GRID_LEGEND_PAD = 0.04
 
-    if not clean:
-        return
-
-    hh, ll = zip(*clean)
-    ax.legend(
-        hh,
-        ll,
-        loc=loc,
-        ncol=min(int(PLOT_LEGEND_NCOL), len(ll)),
-        frameon=True,
-        fontsize=PLOT_LEGEND_FONTSIZE,
-        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
-        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
-        borderaxespad=PLOT_LEGEND_BORDER_AXES_PAD,
-    )
+GRID_TITLE_FONTSIZE = 7
+GRID_YLABEL_PAD_FIG = 0.095  # distance left of axes bbox for fig-level ylabels
 
 # =============================================================================
 # Parsing helpers
 # =============================================================================
-
 
 def parse_job(job_name: str) -> Optional[Tuple[int, int, float]]:
     """
@@ -509,11 +489,23 @@ def ascii_metric_matrix_tables(
 
 
 # =============================================================================
-# Plot helpers
+# Plot helpers (grid only)
 # =============================================================================
 
-YOfFn = Callable[[RowKey, int, float, int], float]      # (rk, nodes, arrival_s, kmax) -> y
-LabelOfFn = Callable[[RowKey], str]                      # (rk) -> label
+YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, kmax) -> y
+
+
+def _default_color_cycle() -> List[str]:
+    return list(plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3", "C4"]))
+
+
+def _build_color_map(labels: List[str]) -> Dict[str, str]:
+    cycle = _default_color_cycle()
+    return {lbl: cycle[i % len(cycle)] for i, lbl in enumerate(labels)}
+
+
+def _make_mode_legend_handles(labels: List[str], color_map: Dict[str, str]) -> List[Line2D]:
+    return [Line2D([0], [0], color=color_map[lbl], linewidth=1.8) for lbl in labels]
 
 
 def symmetric_ylim_from_y_values(y_vals: List[float]) -> Tuple[float, float]:
@@ -571,75 +563,69 @@ def collect_plot_y_vals(
     return y_vals
 
 
-def plot_dumbbell(
+def draw_dumbbell_on_ax(
     *,
-    out_dir: Path,
-    filename_stem: str,
-    y_label: str,
+    ax: plt.Axes,
     nodes_order: List[int],
     arrivals_order: List[float],
     kmax: int,
     series: List[RowKey],
     y_of: YOfFn,
-    label_of: LabelOfFn,
-    ylim: Optional[Tuple[float, float]] = None,
-    legend_loc: str = PLOT_LEGEND_LOC,
+    color_map: Dict[str, str],
+    ylim: Tuple[float, float],
+    show_xticklabels: bool,
+    show_yticklabels: bool,
 ) -> None:
-    if len(nodes_order) != 2:
-        raise SystemExit(f"Dumbbell plots require exactly 2 distinct node values; found: {nodes_order}")
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     x_base = [i * PLOT_ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
     m = max(1, len(series))
 
-    fig, ax = plt.subplots(figsize=PLOT_FIGSIZE)
-    y_vals_for_limits: List[float] = []
-    legend_handles: List[object] = []
-    legend_labels: List[str] = []
-
     for i, rk in enumerate(series):
+        label = rk.abbr()
+        color = color_map[label]
         mode_offset = (i - (m - 1) / 2.0) * PLOT_MODE_X_SPACING
-        color = ax.plot([], [], linestyle="None")[0].get_color()  # advance cycle once per series
-        label = label_of(rk)
-        (h_legend,) = ax.plot([], [], linestyle="-", linewidth=1.8, color=color, label=label)
-        legend_handles.append(h_legend)
-        legend_labels.append(label)
 
         for xi, a in enumerate(arrivals_order):
             x = x_base[xi] + mode_offset
             y0 = y_of(rk, nodes_order[0], a, kmax)
             y1 = y_of(rk, nodes_order[1], a, kmax)
-            y_vals_for_limits += [y0, y1]
+
             if is_finite(y0) and is_finite(y1):
                 ax.plot([x, x], [y0, y1], linestyle="--", color=color, linewidth=1.0)
             if is_finite(y0):
-                ax.plot([x], [y0], linestyle="None", marker="o", markersize=PLOT_MARKER_SIZE, color=color, label="_nolegend_")
+                ax.plot([x], [y0], linestyle="None", marker="o", markersize=PLOT_MARKER_SIZE, color=color)
             if is_finite(y1):
-                ax.plot([x], [y1], linestyle="None", marker="s", markersize=PLOT_MARKER_SIZE, color=color, label="_nolegend_")
+                ax.plot([x], [y1], linestyle="None", marker="s", markersize=PLOT_MARKER_SIZE, color=color)
 
     ax.axhline(0.0, linewidth=0.8, color="black", linestyle="--", alpha=0.7)
-    ax.set_ylabel(y_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+    ax.set_ylim(float(ylim[0]), float(ylim[1]))
+
+    # consistent x-lims so plotting area aligns across ALL subplots
+    pad = max(0.10, PLOT_MODE_X_SPACING * (m / 2.0 + 1.0))
+    ax.set_xlim(min(x_base) - pad, max(x_base) + pad)
+
     ax.set_xticks(x_base)
-    ax.set_xticklabels([arrival_group_label(a, latex=True) for a in arrivals_order])
-    ax.tick_params(axis="both", labelsize=PLOT_TICK_FONTSIZE)
 
-    if ylim is not None:
-        ax.set_ylim(float(ylim[0]), float(ylim[1]))
+    ax.tick_params(
+        axis="both",
+        which="major",
+        labelsize=PLOT_TICK_FONTSIZE,
+        pad=PLOT_TICK_PAD,
+        length=PLOT_TICK_LENGTH,
+    )
+
+    if show_xticklabels:
+        ax.set_xticklabels([arrival_group_label(a, latex=True) for a in arrivals_order])
     else:
-        ax.set_ylim(*symmetric_ylim_from_y_values([y for y in y_vals_for_limits if is_finite(y)]))
+        ax.tick_params(labelbottom=False)
 
-    yticks = ax.get_yticks()
-    for y in yticks:
+    if not show_yticklabels:
+        ax.tick_params(labelleft=False)
+
+    # subtle horizontal guide lines (exclude y=0)
+    for y in ax.get_yticks():
         if abs(y) < 1e-8:
             continue
-        ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.25, zorder=0)
-
-    add_standard_legend(ax=ax, handles=legend_handles, labels=legend_labels, loc=legend_loc)
-    fig.tight_layout()
-    fig.savefig(out_dir / f"{filename_stem}.png", dpi=200)
-    fig.savefig(out_dir / f"{filename_stem}.pdf")
-    plt.close(fig)
+        ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
 
 
 # =============================================================================
@@ -681,7 +667,7 @@ def main() -> None:
         return sorted(rks, key=lambda rk: rk.sort_key())
 
     # Build mode columns per variant:
-    #  - defpreempt=1 vs baseline (+SF always in the raw list)
+    #  - defpreempt=1 vs baseline (+SF always in raw list)
     #  - defpreempt=0 vs baseline (+SF always)
     modes_def1_all: Dict[int, List[RowKey]] = {}
     modes_def0: Dict[int, List[RowKey]] = {}
@@ -723,12 +709,28 @@ def main() -> None:
         ]
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta L_{{p_{p}}}$", f"ΔL_p{p}", g(f"delta_L_s_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(
+                    MetricRow(
+                        rf"$\Delta L_{{p_{p}}}$",
+                        f"ΔL_p{p}",
+                        g(f"delta_L_s_p{p}_mean"),
+                        "signed_float",
+                        decimals=1,
+                    )
+                )
 
         rows.append(MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", g("delta_D_total_mean"), "signed_float", decimals=1))
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta D_{{p_{p}}}$", f"ΔD_p{p}", g(f"delta_D_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(
+                    MetricRow(
+                        rf"$\Delta D_{{p_{p}}}$",
+                        f"ΔD_p{p}",
+                        g(f"delta_D_p{p}_mean"),
+                        "signed_float",
+                        decimals=1,
+                    )
+                )
 
         rows.append(MetricRow(r"$\#O$", "#O", g("plan_activated_mean"), "unsigned_int"))
         return rows
@@ -737,14 +739,30 @@ def main() -> None:
         rows = [MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", g("delta_L_s_total_mean"), "signed_float", decimals=1)]
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta L_{{p_{p}}}$", f"ΔL_p{p}", g(f"delta_L_s_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(
+                    MetricRow(
+                        rf"$\Delta L_{{p_{p}}}$",
+                        f"ΔL_p{p}",
+                        g(f"delta_L_s_p{p}_mean"),
+                        "signed_float",
+                        decimals=1,
+                    )
+                )
         return rows
 
     def metrics_D_only(kmax: int) -> List[MetricRow]:
         rows = [MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", g("delta_D_total_mean"), "signed_float", decimals=1)]
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta D_{{p_{p}}}$", f"ΔD_p{p}", g(f"delta_D_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(
+                    MetricRow(
+                        rf"$\Delta D_{{p_{p}}}$",
+                        f"ΔD_p{p}",
+                        g(f"delta_D_p{p}_mean"),
+                        "signed_float",
+                        decimals=1,
+                    )
+                )
         return rows
 
     def metrics_U_only(_kmax: int) -> List[MetricRow]:
@@ -754,7 +772,15 @@ def main() -> None:
         rows = [MetricRow(r"$\Delta R_{\mathrm{tot}}$", "ΔR_tot", g("delta_R_total_mean"), "signed_float", decimals=1)]
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta R_{{p_{p}}}$", f"ΔR_p{p}", g(f"delta_R_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(
+                    MetricRow(
+                        rf"$\Delta R_{{p_{p}}}$",
+                        f"ΔR_p{p}",
+                        g(f"delta_R_p{p}_mean"),
+                        "signed_float",
+                        decimals=1,
+                    )
+                )
         return rows
 
     def metrics_solver_attempts(_kmax: int) -> List[MetricRow]:
@@ -804,35 +830,28 @@ def main() -> None:
         )
 
     # -----------------------------
-    # Figures
+    # Figures (two big 3x2 grids)
     # -----------------------------
+
+    # We want consistent y-lims across BOTH big figures, so include both defpreempt values.
     util_y_vals_all: List[float] = []
     deletions_y_vals_all: List[float] = []
     latency_y_vals_all: List[float] = []
 
     for k in kmaxs:
-        # util plots exist only for defpreempt=1 in this script
-        util_y_vals_all += collect_plot_y_vals(
-            lookup=lookup, df=df, col="delta_U_eff_run_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=1, scale=100.0,
-        )
-        # for D/L, include both defpreempt variants so y-lims don't clip
-        deletions_y_vals_all += collect_plot_y_vals(
-            lookup=lookup, df=df, col="delta_D_total_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=1, scale=1.0,
-        )
-        deletions_y_vals_all += collect_plot_y_vals(
-            lookup=lookup, df=df, col="delta_D_total_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=0, scale=1.0,
-        )
-        latency_y_vals_all += collect_plot_y_vals(
-            lookup=lookup, df=df, col="delta_L_s_total_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=1, scale=1.0,
-        )
-        latency_y_vals_all += collect_plot_y_vals(
-            lookup=lookup, df=df, col="delta_L_s_total_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=0, scale=1.0,
-        )
+        for dp in (0, 1):
+            util_y_vals_all += collect_plot_y_vals(
+                lookup=lookup, df=df, col="delta_U_eff_run_mean",
+                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=100.0,
+            )
+            deletions_y_vals_all += collect_plot_y_vals(
+                lookup=lookup, df=df, col="delta_D_total_mean",
+                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=1.0,
+            )
+            latency_y_vals_all += collect_plot_y_vals(
+                lookup=lookup, df=df, col="delta_L_s_total_mean",
+                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=1.0,
+            )
 
     util_ylim = symmetric_ylim_from_y_values(util_y_vals_all)
     deletions_ylim = symmetric_ylim_from_y_values(deletions_y_vals_all)
@@ -844,77 +863,135 @@ def main() -> None:
             return float(v) * float(scale) if is_finite(v) else float("nan")
         return _y
 
-    for plot_kmax in kmaxs:
-        # defpreempt=1 (+SF) plots
-        series_def1 = plot_series(df, kmax=plot_kmax, defpreempt_value=1)
+    # Exactly two columns: kmax=1 and kmax=4
+    kmax_cols = [k for k in (1, 4) if k in kmaxs]
+    if len(kmax_cols) != 2:
+        raise SystemExit(f"Expected kmax values [1,4] for the 2 columns; found kmaxs={kmaxs}")
 
-        plot_dumbbell(
-            out_dir=figures_dir,
-            filename_stem=f"delta_U_eff_run_kmax{plot_kmax}",
-            y_label=r"$\Delta U_{\mathrm{eff}}$ (pp)",
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            kmax=plot_kmax,
-            series=series_def1,
-            y_of=y_from_col(col="delta_U_eff_run_mean", scale=100.0),
-            label_of=lambda rk: rk.abbr(),
-            ylim=util_ylim,
+    def plot_grid_figure(*, defpreempt_value: int, filename_stem: str) -> None:
+        # union series across both columns so legend/colors are identical
+        series_union = sorted(
+            set(plot_series(df, kmax=kmax_cols[0], defpreempt_value=defpreempt_value))
+            | set(plot_series(df, kmax=kmax_cols[1], defpreempt_value=defpreempt_value)),
+            key=lambda rk: rk.sort_key(),
+        )
+        labels = [rk.abbr() for rk in series_union]
+        color_map = _build_color_map(labels)
+
+        fig, axes = plt.subplots(
+            nrows=3, ncols=2,
+            figsize=GRID_FIGSIZE,
+            sharex=True,
         )
 
-        plot_dumbbell(
-            out_dir=figures_dir,
-            filename_stem=f"delta_D_kmax{plot_kmax}",
-            y_label=r"$\Delta D$ (#deletions)",
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            kmax=plot_kmax,
-            series=series_def1,
-            y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
-            label_of=lambda rk: rk.abbr(),
-            ylim=deletions_ylim,
+        # column titles only (2 total)
+        axes[0, 0].set_title(rf"$k_{{\max}}={kmax_cols[0]}$", fontsize=GRID_TITLE_FONTSIZE)
+        axes[0, 1].set_title(rf"$k_{{\max}}={kmax_cols[1]}$", fontsize=GRID_TITLE_FONTSIZE)
+
+        # Row 0: Utilisation
+        for col_i, k in enumerate(kmax_cols):
+            draw_dumbbell_on_ax(
+                ax=axes[0, col_i],
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                kmax=k,
+                series=series_union,
+                y_of=y_from_col(col="delta_U_eff_run_mean", scale=100.0),
+                color_map=color_map,
+                ylim=util_ylim,
+                show_xticklabels=False,
+                show_yticklabels=(col_i == 0),
+            )
+
+        # Row 1: Latency
+        for col_i, k in enumerate(kmax_cols):
+            draw_dumbbell_on_ax(
+                ax=axes[1, col_i],
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                kmax=k,
+                series=series_union,
+                y_of=y_from_col(col="delta_L_s_total_mean", scale=1.0),
+                color_map=color_map,
+                ylim=latency_ylim,
+                show_xticklabels=False,
+                show_yticklabels=(col_i == 0),
+            )
+
+        # Row 2: Deletions
+        # Only bottom-left shows mu_A labels (because tick labels only in first column).
+        for col_i, k in enumerate(kmax_cols):
+            draw_dumbbell_on_ax(
+                ax=axes[2, col_i],
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                kmax=k,
+                series=series_union,
+                y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
+                color_map=color_map,
+                ylim=deletions_ylim,
+                show_xticklabels=True,
+                show_yticklabels=(col_i == 0),
+            )
+
+        # Layout first (so axes positions are final)
+        fig.subplots_adjust(
+            left=GRID_LEFT, right=GRID_RIGHT, bottom=GRID_BOTTOM, top=GRID_TOP,
+            wspace=GRID_WSPACE, hspace=GRID_HSPACE,
         )
 
-        plot_dumbbell(
-            out_dir=figures_dir,
-            filename_stem=f"delta_L_kmax{plot_kmax}",
-            y_label=r"$\Delta L$ (seconds)",
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            kmax=plot_kmax,
-            series=series_def1,
-            y_of=y_from_col(col="delta_L_s_total_mean", scale=1.0),
-            label_of=lambda rk: rk.abbr(),
-            ylim=latency_ylim,
-        )
+        # Legend aligned to the two plot columns (axes grid), not the full figure
+        handles = _make_mode_legend_handles(labels, color_map)
 
-        # defpreempt=0 (+SF) plots (these are "w/o default preemption vs baseline")
-        series_def0 = plot_series(df, kmax=plot_kmax, defpreempt_value=0)
+        bbox_l = axes[0, 0].get_position()
+        bbox_r = axes[0, 1].get_position()
+        x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)             # center over the two columns
+        y_top_grid = max(bbox_l.y1, bbox_r.y1)                    # top of subplot area
+        legend_y = y_top_grid + GRID_LEGEND_PAD                   # just above the grid
 
-        plot_dumbbell(
-            out_dir=figures_dir,
-            filename_stem=f"delta_D_kmax{plot_kmax}_without_defaultpreemption",
-            y_label=r"$\Delta D$ (#deletions)",
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            kmax=plot_kmax,
-            series=series_def0,
-            y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
-            label_of=lambda rk: rk.abbr(),
-            ylim=deletions_ylim,
+        leg = fig.legend(
+            handles, labels,
+            loc="lower center",
+            bbox_to_anchor=(x_center_grid, legend_y),
+            ncol=min(int(PLOT_LEGEND_NCOL), len(labels)),
+            frameon=True,
+            fontsize=PLOT_LEGEND_FONTSIZE,
+            handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+            handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+            columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+            borderaxespad=0.0,
         )
+        leg.get_frame().set_linewidth(PLOT_LEGEND_FRAME_LINEWIDTH)
 
-        plot_dumbbell(
-            out_dir=figures_dir,
-            filename_stem=f"delta_L_kmax{plot_kmax}_without_defaultpreemption",
-            y_label=r"$\Delta L$ (seconds)",
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            kmax=plot_kmax,
-            series=series_def0,
-            y_of=y_from_col(col="delta_L_s_total_mean", scale=1.0),
-            label_of=lambda rk: rk.abbr(),
-            ylim=latency_ylim,
-        )
+        # Figure-level ylabels aligned to the grid (perfect vertical alignment)
+        left_bbox = axes[0, 0].get_position()
+        x_text = max(0.0, left_bbox.x0 - GRID_YLABEL_PAD_FIG)
+
+        row_labels = [
+            r"$\Delta U_{\mathrm{eff}}$ (pp)",
+            r"$\Delta L$ (s)",
+            r"$\Delta D$ (#deletions)",
+        ]
+        for r, text in enumerate(row_labels):
+            bbox = axes[r, 0].get_position()
+            y_center = 0.5 * (bbox.y0 + bbox.y1)
+            fig.text(
+                x_text,
+                y_center,
+                text,
+                rotation=90,
+                va="center",
+                ha="right",
+                fontsize=PLOT_AXIS_LABEL_FONTSIZE,
+            )
+
+        fig.savefig(figures_dir / f"{filename_stem}.png", dpi=200)
+        fig.savefig(figures_dir / f"{filename_stem}.pdf")
+        plt.close(fig)
+
+    # two big figures: with default preemption (defpreempt=1) and without (defpreempt=0)
+    plot_grid_figure(defpreempt_value=1, filename_stem="grid_util_latency_deletions")
+    plot_grid_figure(defpreempt_value=0, filename_stem="grid_util_latency_deletions_without_defaultpreemption")
 
     print(f"Wrote tables to:  {tables_dir}")
     print(f"Wrote figures to: {figures_dir}")
