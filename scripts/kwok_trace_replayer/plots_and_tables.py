@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/plots_and_tables.py
 """
-python -m scripts.kwok_trace_replayer.plots_and_tables --in-results analysis/kwok_trace_replayer/results_paired.csv --out-dir analysis/kwok_trace_replayer
+python -m scripts.kwok_trace_replayer.plots_and_tables \
+  --in-results analysis/kwok_trace_replayer/results_paired.csv \
+  --out-dir analysis/kwok_trace_replayer
 
 Produces:
   Tables (under <out-dir>/tables):
@@ -23,9 +25,13 @@ Produces:
     - delta_D_kmax<K>_without_defaultpreemption.<png|pdf>
     - delta_L_kmax<K>_without_defaultpreemption.<png|pdf>
 
-Key changes vs prior version:
-  - Mode labels are now abbreviations: SF, PR-8-B, PR-8-NB, SQ-2-B, SQ-2-NB.
-  - If defpreempt=0, add suffix "-NDF" (except SF, which stays "SF").
+Key behavior:
+  - Mode labels are abbreviations: SF, PR-8-B, PR-8-NB, SQ-2-B, SQ-2-NB.
+  - NO "-NDF" suffix is ever added.
+  - Tables/plots are generated for:
+      * defpreempt=1 ("with default preemption")  + always SF
+      * defpreempt=0 ("w/o default preemption") + always SF
+    and the difference is indicated in the per-kmax header line (not in mode labels).
   - All LaTeX/ASCII tables use "arrivals at top; modes under arrivals; metrics as rows".
   - Each .tex file writes one tabular per kmax (kmax=1 and kmax=4), not mixed.
   - Only tabular environments are emitted (no table/table* wrapper).
@@ -68,17 +74,17 @@ PLOT_MARKER_SIZE = 3.0
 PLOT_ARRIVAL_X_SPACING = 0.6
 PLOT_MODE_X_SPACING = 0.05
 
-PLOT_FIGSIZE = (3.1, 2.2)
-PLOT_TICK_FONTSIZE = 7
+PLOT_FIGSIZE = (2.7, 1.8)
+PLOT_TICK_FONTSIZE = 5
 PLOT_LEGEND_FONTSIZE = 5
-PLOT_AXIS_LABEL_FONTSIZE = 7
+PLOT_AXIS_LABEL_FONTSIZE = 5.5
 PLOT_Y_PADDING = 0.15
 
 PLOT_LEGEND_HANDLE_LENGTH = 0.6
 PLOT_LEGEND_COLUMN_SPACING = 0.5
 PLOT_LEGEND_BORDER_AXES_PAD = 0.4
-PLOT_LEGEND_LOC = "lower left"
-PLOT_LEGEND_NCOL = 2
+PLOT_LEGEND_LOC = "lower center"
+PLOT_LEGEND_NCOL = 5
 
 
 def add_standard_legend(
@@ -149,9 +155,7 @@ def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
 
 
 def canonical_mode(mode: str) -> str:
-    """
-    Canonicalize mode strings so ordering/labels are stable across inputs.
-    """
+    """Canonicalize mode strings so ordering/labels are stable across inputs."""
     s = str(mode).strip().lower()
     if s in {"scheduling_failure", "scheduling-failure", "schedulingfailure", "sched-failure", "schedfailure"}:
         return "scheduling-failure"
@@ -164,8 +168,7 @@ def canonical_mode(mode: str) -> str:
     return s
 
 
-# Abbreviations (base, without -NDF suffix)
-# Keyed by (canonical_mode, blocking) where blocking is 1/0
+# Abbreviations (NO "-NDF" suffix anywhere)
 MODE_ABBR: Dict[Tuple[str, Optional[int]], str] = {
     ("scheduling-failure", None): "SF",
     ("periodic8s", 1): "PR-8-B",
@@ -211,14 +214,11 @@ class RowKey:
         def_rank = 0 if self.defpreempt == 1 else 1
         return (base_rank, def_rank, self.mode)
 
-    def abbr(self, include_defpreempt_suffix: bool = True) -> str:
+    def abbr(self) -> str:
         if self.mode == "scheduling-failure":
             return "SF"
         key = (self.mode, int(self.blocking))
-        base = MODE_ABBR.get(key, f"{self.mode}:{self.blocking}")
-        if include_defpreempt_suffix and self.defpreempt == 0:
-            return f"{base}-NDF"
-        return base
+        return MODE_ABBR.get(key, f"{self.mode}:{self.blocking}")
 
 
 # =============================================================================
@@ -265,14 +265,23 @@ def arrival_group_label(a: float, *, latex: bool) -> str:
     return f"muA={a_i}s"
 
 
-def kmax_caption(kmax: int, *, latex: bool) -> str:
+def kmax_caption(kmax: int, *, latex: bool, without_default_preemption: bool) -> str:
     if latex:
         if kmax == 1:
-            return r"$k_{\max}=1$ (w/o priorities)"
-        return rf"$k_{{\max}}={kmax}$ (w/ priorities)"
+            base = r"$k_{\max}=1$ (w/o priorities)"
+        else:
+            base = rf"$k_{{\max}}={kmax}$ (w/ priorities)"
+        if without_default_preemption:
+            return base + r" (w/o default preemption)"
+        return base
+
     if kmax == 1:
-        return "kmax=1 (w/o priorities)"
-    return f"kmax={kmax} (w/ priorities)"
+        base = "kmax=1 (w/o priorities)"
+    else:
+        base = f"kmax={kmax} (w/ priorities)"
+    if without_default_preemption:
+        return base + " (w/o default preemption)"
+    return base
 
 
 # =============================================================================
@@ -328,45 +337,6 @@ def lookup_value(
 
 
 # =============================================================================
-# defpreempt delta helpers (within-plugin)
-# =============================================================================
-
-def build_defpreempt_rows(df: pd.DataFrame) -> List[Tuple[str, int]]:
-    """
-    Return (mode, blocking) pairs that have BOTH defpreempt=0 and defpreempt=1.
-    Excludes scheduling-failure (no both variants).
-    """
-    seen: Dict[Tuple[str, int], set] = {}
-    for pc in df["plugin_config"].unique().tolist():
-        rk = RowKey.from_plugin_config(pc)
-        if rk.mode == "scheduling-failure":
-            continue
-        seen.setdefault((rk.mode, rk.blocking), set()).add(rk.defpreempt)
-    rows = [(m, b) for (m, b), defs in seen.items() if (0 in defs and 1 in defs)]
-    rows.sort(key=lambda mb: RowKey(mode=mb[0], blocking=mb[1], defpreempt=1).sort_key())
-    return rows
-
-
-def defpreempt_delta(
-    lookup: pd.DataFrame,
-    *,
-    nodes: int,
-    kmax: int,
-    arrival_s: float,
-    mode: str,
-    blocking: int,
-    col: str,
-) -> float:
-    rk0 = RowKey(mode=mode, blocking=blocking, defpreempt=0)
-    rk1 = RowKey(mode=mode, blocking=blocking, defpreempt=1)
-    v0 = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, rk=rk0, col=col)
-    v1 = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, rk=rk1, col=col)
-    if not (is_finite(v0) and is_finite(v1)):
-        return float("nan")
-    return float(v0) - float(v1)
-
-
-# =============================================================================
 # Table model (metrics-as-rows; arrivals top; modes under arrivals)
 # =============================================================================
 
@@ -394,7 +364,6 @@ def _fmt_metric_value(v: float, *, row: MetricRow, latex: bool) -> str:
         return fmt_unsigned_int(vv, ns)
     if row.fmt_kind == "signed_int":
         return fmt_signed_int(vv, ns)
-    # fallback
     return fmt_signed(vv, row.decimals, ns)
 
 
@@ -405,7 +374,7 @@ def latex_metric_matrix_tables(
     arrivals_order: List[float],
     modes_by_kmax: Dict[int, List[RowKey]],
     metrics_by_kmax: Dict[int, List[MetricRow]],
-    include_defpreempt_suffix_in_header: bool,
+    without_default_preemption: bool,
 ) -> None:
     """
     Write one tabular per kmax, with:
@@ -428,21 +397,21 @@ def latex_metric_matrix_tables(
         total_cols = 1 + n_modes * n_arr
         tab_spec = "l" + " c" * (total_cols - 1)
 
-        # cmidrules per arrival group
         cmid = []
         for i in range(n_arr):
             start = 2 + i * n_modes
             end = start + n_modes - 1
             cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
 
-        # header rows
-        arrival_hdr = " & " + " & ".join([rf"\multicolumn{{{n_modes}}}{{c}}{{{arrival_group_label(a, latex=True)}}}" for a in arrivals_order]) + r" \\"
-        mode_labels = [rk.abbr(include_defpreempt_suffix_in_header) for _a in arrivals_order for rk in modes]
+        arrival_hdr = " & " + " & ".join(
+            [rf"\multicolumn{{{n_modes}}}{{c}}{{{arrival_group_label(a, latex=True)}}}" for a in arrivals_order]
+        ) + r" \\"
+        mode_labels = [rk.abbr() for _a in arrivals_order for rk in modes]
         mode_hdr = " & " + " & ".join(mode_labels) + r" \\"
 
         lines.append(rf"\begin{{tabular}}{{{tab_spec}}}")
         lines.append(r"\toprule")
-        lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{{kmax_caption(kmax, latex=True)}}} \\")
+        lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{{kmax_caption(kmax, latex=True, without_default_preemption=without_default_preemption)}}} \\")
         lines.append(r"\addlinespace[0.2em]")
         lines.append(arrival_hdr)
         lines.append("".join(cmid))
@@ -464,7 +433,7 @@ def latex_metric_matrix_tables(
 
         lines.append(r"\bottomrule")
         lines.append(r"\end{tabular}")
-        lines.append("")  # spacing between tabulars
+        lines.append("")
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -476,7 +445,7 @@ def ascii_metric_matrix_tables(
     arrivals_order: List[float],
     modes_by_kmax: Dict[int, List[RowKey]],
     metrics_by_kmax: Dict[int, List[MetricRow]],
-    include_defpreempt_suffix_in_header: bool,
+    without_default_preemption: bool,
 ) -> None:
     def center(s: str, w: int) -> str:
         s = str(s)
@@ -494,26 +463,23 @@ def ascii_metric_matrix_tables(
         if not modes or not metrics:
             continue
 
-        mode_labels = [rk.abbr(include_defpreempt_suffix_in_header) for _a in arrivals_order for rk in modes]
+        mode_labels = [rk.abbr() for _a in arrivals_order for rk in modes]
         arr_labels = [arrival_group_label(a, latex=False) for a in arrivals_order]
 
-        # width calc
         row_w = max(12, max(len(m.ascii_label) for m in metrics) + 2)
         cell_w = 10
         total_cols = len(mode_labels)
         total_w = row_w + cell_w * total_cols
         sep = "-" * total_w
 
-        lines.append(kmax_caption(kmax, latex=False))
+        lines.append(kmax_caption(kmax, latex=False, without_default_preemption=without_default_preemption))
         lines.append("")
 
-        # arrival group header (approx centered over each group)
         hdr1 = " " * row_w
         for al in arr_labels:
             hdr1 += center(al, cell_w * len(modes))
         lines.append(hdr1.rstrip())
 
-        # mode header
         hdr2 = " " * row_w
         for ml in mode_labels:
             hdr2 += center(ml, cell_w)
@@ -557,14 +523,14 @@ def symmetric_ylim_from_y_values(y_vals: List[float]) -> Tuple[float, float]:
     return (-(m + pad), (m + pad))
 
 
-def plot_series(df: pd.DataFrame, *, kmax: int) -> List[RowKey]:
+def plot_series(df: pd.DataFrame, *, kmax: int, defpreempt_value: int) -> List[RowKey]:
     """
     For plotting we keep:
-      - defpreempt=1 configs
-      - plus scheduling-failure (always defpreempt=0)
+      - the requested defpreempt_value configs (0 or 1)
+      - plus scheduling-failure (SF) always
     """
     dff = df[df["kmax"].astype(int) == int(kmax)].copy()
-    keep = (dff["defpreempt"].astype(int) == 1) | (dff["mode"].astype(str) == "scheduling-failure")
+    keep = (dff["defpreempt"].astype(int) == int(defpreempt_value)) | (dff["mode"].astype(str) == "scheduling-failure")
     dff = dff.loc[keep].drop_duplicates(
         subset=["job_name", "plugin_config", "mode", "blocking", "defpreempt", "nodes", "kmax", "arrival_s"],
         keep="first",
@@ -587,9 +553,10 @@ def collect_plot_y_vals(
     nodes_order: List[int],
     arrivals_order: List[float],
     kmax: int,
+    defpreempt_value: int,
     scale: float = 1.0,
 ) -> List[float]:
-    series = plot_series(df, kmax=kmax)
+    series = plot_series(df, kmax=kmax, defpreempt_value=defpreempt_value)
     y_vals: List[float] = []
     for rk in series:
         for a in arrivals_order:
@@ -706,34 +673,30 @@ def main() -> None:
     if not kmaxs:
         raise SystemExit("No kmax values found")
 
-    # Build mode columns (per table type) with stable ordering.
     def _sorted_modes(rks: List[RowKey]) -> List[RowKey]:
-        rks2 = sorted(rks, key=lambda rk: rk.sort_key())
-        # Ensure SF is first if present
-        return rks2
+        return sorted(rks, key=lambda rk: rk.sort_key())
 
-    # Modes for "vs baseline" tables: defpreempt=1 plus SF (SF is defpreempt=0)
-    modes_vs_baseline: Dict[int, List[RowKey]] = {}
+    # Build mode columns per variant:
+    #  - defpreempt=1 vs baseline (+SF always)
+    #  - defpreempt=0 vs baseline (+SF always)
+    modes_def1: Dict[int, List[RowKey]] = {}
+    modes_def0: Dict[int, List[RowKey]] = {}
+
     for k in kmaxs:
         dff = df[df["kmax"].astype(int) == k]
         rks = [RowKey.from_plugin_config(pc) for pc in dff["plugin_config"].unique().tolist()]
-        keep = [rk for rk in rks if (rk.defpreempt == 1) or (rk.mode == "scheduling-failure")]
-        modes_vs_baseline[k] = _sorted_modes(keep)
 
-    # Modes for "w/o default preemption vs baseline" big table:
-    # defpreempt=0 only, and (per your earlier preference) DO NOT include scheduling-failure here.
-    modes_vs_baseline_nodf: Dict[int, List[RowKey]] = {}
-    for k in kmaxs:
-        dff = df[df["kmax"].astype(int) == k]
-        rks = [RowKey.from_plugin_config(pc) for pc in dff["plugin_config"].unique().tolist()]
-        keep = [rk for rk in rks if (rk.defpreempt == 0) and (rk.mode != "scheduling-failure")]
-        modes_vs_baseline_nodf[k] = _sorted_modes(keep)
+        keep_def1 = [
+            rk for rk in rks
+            if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 1)
+        ]
+        keep_def0 = [
+            rk for rk in rks
+            if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 0)
+        ]
 
-    # Modes for within-plugin deltas: only modes that have both defpreempt 0/1 (no SF)
-    def_rows = build_defpreempt_rows(df)
-    modes_def_delta: Dict[int, List[RowKey]] = {}
-    for k in kmaxs:
-        modes_def_delta[k] = _sorted_modes([RowKey(mode=m, blocking=b, defpreempt=1) for (m, b) in def_rows])
+        modes_def1[k] = _sorted_modes(keep_def1)
+        modes_def0[k] = _sorted_modes(keep_def0)
 
     # -----------------------------
     # Metric getters
@@ -741,57 +704,41 @@ def main() -> None:
     def g(col: str) -> MetricGetter:
         return lambda kmax, rk, n, a: lookup_value(lookup, nodes=n, kmax=kmax, arrival_s=a, rk=rk, col=col)
 
-    def gd(col: str) -> MetricGetter:
-        # defpreempt delta: (def0)-(def1) for rk.mode/rk.blocking; rk.defpreempt ignored
-        return lambda kmax, rk, n, a: defpreempt_delta(
-            lookup, nodes=n, kmax=kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, col=col
-        )
-
     # -----------------------------
     # Metrics per table
     # -----------------------------
-    def metrics_big(kmax: int, *, within_def_delta: bool = False) -> List[MetricRow]:
-        # Getter set depends on whether it's within-plugin delta or vs-baseline.
-        GG = gd if within_def_delta else g
-
+    def metrics_big(kmax: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
-            MetricRow(r"$\Delta U$", "ΔU", GG("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0),
+            MetricRow(r"$\Delta U$", "ΔU", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0),
+            MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", g("delta_L_s_total_mean"), "signed_float", decimals=1),
         ]
-
-        # Latency rows
-        rows.append(MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", GG("delta_L_s_total_mean"), "signed_float", decimals=1))
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta L_{{p_{p}}}$", f"ΔL_p{p}", GG(f"delta_L_s_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(MetricRow(rf"$\Delta L_{{p_{p}}}$", f"ΔL_p{p}", g(f"delta_L_s_p{p}_mean"), "signed_float", decimals=1))
 
-        # Deletions rows
-        rows.append(MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", GG("delta_D_total_mean"), "signed_float", decimals=1))
+        rows.append(MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", g("delta_D_total_mean"), "signed_float", decimals=1))
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta D_{{p_{p}}}$", f"ΔD_p{p}", GG(f"delta_D_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(MetricRow(rf"$\Delta D_{{p_{p}}}$", f"ΔD_p{p}", g(f"delta_D_p{p}_mean"), "signed_float", decimals=1))
 
-        # Optimizations (#O): in vs-baseline tables it's a non-negative count. In within-plugin deltas it can be signed.
-        if within_def_delta:
-            rows.append(MetricRow(r"$\#O$", "#O", gd("plan_activated_mean"), "signed_int"))
-        else:
-            rows.append(MetricRow(r"$\#O$", "#O", g("plan_activated_mean"), "unsigned_int"))
+        rows.append(MetricRow(r"$\#O$", "#O", g("plan_activated_mean"), "unsigned_int"))
         return rows
 
     def metrics_L_only(kmax: int) -> List[MetricRow]:
-        rows = [MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", gd("delta_L_s_total_mean"), "signed_float", decimals=1)]
+        rows = [MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", g("delta_L_s_total_mean"), "signed_float", decimals=1)]
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta L_{{p_{p}}}$", f"ΔL_p{p}", gd(f"delta_L_s_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(MetricRow(rf"$\Delta L_{{p_{p}}}$", f"ΔL_p{p}", g(f"delta_L_s_p{p}_mean"), "signed_float", decimals=1))
         return rows
 
     def metrics_D_only(kmax: int) -> List[MetricRow]:
-        rows = [MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", gd("delta_D_total_mean"), "signed_float", decimals=1)]
+        rows = [MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", g("delta_D_total_mean"), "signed_float", decimals=1)]
         if kmax != 1:
             for p in range(1, 5):
-                rows.append(MetricRow(rf"$\Delta D_{{p_{p}}}$", f"ΔD_p{p}", gd(f"delta_D_p{p}_mean"), "signed_float", decimals=1))
+                rows.append(MetricRow(rf"$\Delta D_{{p_{p}}}$", f"ΔD_p{p}", g(f"delta_D_p{p}_mean"), "signed_float", decimals=1))
         return rows
 
-    def metrics_U_only(kmax: int) -> List[MetricRow]:
+    def metrics_U_only(_kmax: int) -> List[MetricRow]:
         return [MetricRow(r"$\Delta U$", "ΔU", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0)]
 
     def metrics_R(kmax: int) -> List[MetricRow]:
@@ -807,9 +754,6 @@ def main() -> None:
     def metrics_plans_activated(_kmax: int) -> List[MetricRow]:
         return [MetricRow(r"$\#O$", "#O", g("plan_activated_mean"), "unsigned_int")]
 
-    # -----------------------------
-    # Build metrics_by_kmax per output table
-    # -----------------------------
     def build_metrics_map(builder: Callable[[int], List[MetricRow]]) -> Dict[int, List[MetricRow]]:
         return {k: builder(k) for k in kmaxs}
 
@@ -817,48 +761,29 @@ def main() -> None:
     # Write tables (LaTeX + ASCII)
     # -----------------------------
     TABLE_JOBS = [
-        # small tables (still same files, but new layout)
-        ("delta_U_eff_run", modes_vs_baseline, build_metrics_map(metrics_U_only), True),
-        ("delta_R", modes_vs_baseline, build_metrics_map(metrics_R), True),
-        ("delta_D", modes_vs_baseline, build_metrics_map(lambda k: [MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", g("delta_D_total_mean"), "signed_float", decimals=1)]
-                                                        + ([] if k == 1 else [MetricRow(rf"$\Delta D_{{p_{p}}}$", f"ΔD_p{p}", g(f"delta_D_p{p}_mean"), "signed_float", decimals=1) for p in range(1, 5)])), True),
-        ("delta_L", modes_vs_baseline, build_metrics_map(lambda k: [MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", g("delta_L_s_total_mean"), "signed_float", decimals=1)]
-                                                        + ([] if k == 1 else [MetricRow(rf"$\Delta L_{{p_{p}}}$", f"ΔL_p{p}", g(f"delta_L_s_p{p}_mean"), "signed_float", decimals=1) for p in range(1, 5)])), True),
-        ("solver_attempts", modes_vs_baseline, build_metrics_map(metrics_solver_attempts), True),
-        ("plans_activated", modes_vs_baseline, build_metrics_map(metrics_plans_activated), True),
+        # defpreempt=1 (+SF): "with default preemption"
+        ("delta_U_eff_run", modes_def1, build_metrics_map(metrics_U_only), False),
+        ("delta_R", modes_def1, build_metrics_map(metrics_R), False),
+        ("delta_D", modes_def1, build_metrics_map(metrics_D_only), False),
+        ("delta_L", modes_def1, build_metrics_map(metrics_L_only), False),
+        ("solver_attempts", modes_def1, build_metrics_map(metrics_solver_attempts), False),
+        ("plans_activated", modes_def1, build_metrics_map(metrics_plans_activated), False),
+        ("big_table_util_latency_deletions_optimizations", modes_def1, {k: metrics_big(k) for k in kmaxs}, False),
 
-        # big table vs baseline (defpreempt=1 + SF), rows are the full metric set
-        ("big_table_util_latency_deletions_optimizations",
-         modes_vs_baseline,
-         {k: metrics_big(k, within_def_delta=False) for k in kmaxs},
-         True),
-
-        # within-plugin deltas: (def0)-(def1)
-        ("delta_D_without_defaultpreemption",
-         modes_def_delta,
-         {k: metrics_D_only(k) for k in kmaxs},
-         False),
-
-        ("delta_L_without_defaultpreemption",
-         modes_def_delta,
-         {k: metrics_L_only(k) for k in kmaxs},
-         False),
-
-        # big table: defpreempt=0 vs baseline (no SF), show -NDF suffix in headers
-        ("big_table_without_defaultpreemption_util_latency_deletions_optimizations",
-         modes_vs_baseline_nodf,
-         {k: metrics_big(k, within_def_delta=False) for k in kmaxs},
-         True),
+        # defpreempt=0 (+SF): "w/o default preemption"
+        ("delta_D_without_defaultpreemption", modes_def0, build_metrics_map(metrics_D_only), True),
+        ("delta_L_without_defaultpreemption", modes_def0, build_metrics_map(metrics_L_only), True),
+        ("big_table_without_defaultpreemption_util_latency_deletions_optimizations", modes_def0, {k: metrics_big(k) for k in kmaxs}, True),
     ]
 
-    for stem, modes_map, metrics_map, include_defpreempt_suffix in TABLE_JOBS:
+    for stem, modes_map, metrics_map, without_defpreempt in TABLE_JOBS:
         latex_metric_matrix_tables(
             out_path=tables_dir / f"{stem}.tex",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             modes_by_kmax=modes_map,
             metrics_by_kmax=metrics_map,
-            include_defpreempt_suffix_in_header=include_defpreempt_suffix,
+            without_default_preemption=without_defpreempt,
         )
         ascii_metric_matrix_tables(
             out_path=tables_dir / f"{stem}.txt",
@@ -866,7 +791,7 @@ def main() -> None:
             arrivals_order=arrivals_order,
             modes_by_kmax=modes_map,
             metrics_by_kmax=metrics_map,
-            include_defpreempt_suffix_in_header=include_defpreempt_suffix,
+            without_default_preemption=without_defpreempt,
         )
 
     # -----------------------------
@@ -877,17 +802,27 @@ def main() -> None:
     latency_y_vals_all: List[float] = []
 
     for k in kmaxs:
+        # util plots exist only for defpreempt=1 in this script
         util_y_vals_all += collect_plot_y_vals(
             lookup=lookup, df=df, col="delta_U_eff_run_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, scale=100.0,
+            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=1, scale=100.0,
+        )
+        # for D/L, include both defpreempt variants so y-lims don't clip
+        deletions_y_vals_all += collect_plot_y_vals(
+            lookup=lookup, df=df, col="delta_D_total_mean",
+            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=1, scale=1.0,
         )
         deletions_y_vals_all += collect_plot_y_vals(
             lookup=lookup, df=df, col="delta_D_total_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, scale=1.0,
+            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=0, scale=1.0,
         )
         latency_y_vals_all += collect_plot_y_vals(
             lookup=lookup, df=df, col="delta_L_s_total_mean",
-            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, scale=1.0,
+            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=1, scale=1.0,
+        )
+        latency_y_vals_all += collect_plot_y_vals(
+            lookup=lookup, df=df, col="delta_L_s_total_mean",
+            nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=0, scale=1.0,
         )
 
     util_ylim = symmetric_ylim_from_y_values(util_y_vals_all)
@@ -900,19 +835,9 @@ def main() -> None:
             return float(v) * float(scale) if is_finite(v) else float("nan")
         return _y
 
-    def y_defpreempt_delta(*, col: str) -> YOfFn:
-        def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
-            if rk.mode == "scheduling-failure":
-                return float("nan")
-            return defpreempt_delta(
-                lookup, nodes=nodes, kmax=kmax, arrival_s=a,
-                mode=rk.mode, blocking=rk.blocking, col=col,
-            )
-        return _y
-
-    # Series for standard plots: defpreempt=1 (+SF)
     for plot_kmax in kmaxs:
-        series = plot_series(df, kmax=plot_kmax)
+        # defpreempt=1 (+SF) plots
+        series_def1 = plot_series(df, kmax=plot_kmax, defpreempt_value=1)
 
         plot_dumbbell(
             out_dir=figures_dir,
@@ -921,9 +846,9 @@ def main() -> None:
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=plot_kmax,
-            series=series,
+            series=series_def1,
             y_of=y_from_col(col="delta_U_eff_run_mean", scale=100.0),
-            label_of=lambda rk: rk.abbr(include_defpreempt_suffix=True),
+            label_of=lambda rk: rk.abbr(),
             ylim=util_ylim,
         )
 
@@ -934,11 +859,10 @@ def main() -> None:
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=plot_kmax,
-            series=series,
+            series=series_def1,
             y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
-            label_of=lambda rk: rk.abbr(include_defpreempt_suffix=True),
+            label_of=lambda rk: rk.abbr(),
             ylim=deletions_ylim,
-            legend_loc="upper right",
         )
 
         plot_dumbbell(
@@ -948,52 +872,39 @@ def main() -> None:
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=plot_kmax,
-            series=series,
+            series=series_def1,
             y_of=y_from_col(col="delta_L_s_total_mean", scale=1.0),
-            label_of=lambda rk: rk.abbr(include_defpreempt_suffix=True),
+            label_of=lambda rk: rk.abbr(),
             ylim=latency_ylim,
         )
 
-        # Within-plugin delta plots (def0 - def1) for the four modes (no SF)
-        def_series = [RowKey(mode=m, blocking=b, defpreempt=1) for (m, b) in def_rows]
-        def_series.sort(key=lambda rk: rk.sort_key())
-
-        # Compute ylim per kmax/col for delta plots
-        yvals_d = []
-        yvals_l = []
-        for rk in def_series:
-            for a in arrivals_order:
-                for n in nodes_order:
-                    yvals_d.append(defpreempt_delta(lookup, nodes=n, kmax=plot_kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, col="delta_D_total_mean"))
-                    yvals_l.append(defpreempt_delta(lookup, nodes=n, kmax=plot_kmax, arrival_s=a, mode=rk.mode, blocking=rk.blocking, col="delta_L_s_total_mean"))
-        ylim_d = symmetric_ylim_from_y_values(yvals_d)
-        ylim_l = symmetric_ylim_from_y_values(yvals_l)
+        # defpreempt=0 (+SF) plots (these are "w/o default preemption vs baseline")
+        series_def0 = plot_series(df, kmax=plot_kmax, defpreempt_value=0)
 
         plot_dumbbell(
             out_dir=figures_dir,
             filename_stem=f"delta_D_kmax{plot_kmax}_without_defaultpreemption",
-            y_label=r"$\Delta D_{\mathrm{w/o\ defpreempt}}$ (#deletions)",
+            y_label=r"$\Delta D$ (#deletions)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=plot_kmax,
-            series=def_series,
-            y_of=y_defpreempt_delta(col="delta_D_total_mean"),
-            label_of=lambda rk: rk.abbr(include_defpreempt_suffix=False),
-            ylim=ylim_d,
-            legend_loc="upper right",
+            series=series_def0,
+            y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
+            label_of=lambda rk: rk.abbr(),
+            ylim=deletions_ylim,
         )
 
         plot_dumbbell(
             out_dir=figures_dir,
             filename_stem=f"delta_L_kmax{plot_kmax}_without_defaultpreemption",
-            y_label=r"$\Delta L_{\mathrm{w/o\ defpreempt}}$ (seconds)",
+            y_label=r"$\Delta L$ (seconds)",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             kmax=plot_kmax,
-            series=def_series,
-            y_of=y_defpreempt_delta(col="delta_L_s_total_mean"),
-            label_of=lambda rk: rk.abbr(include_defpreempt_suffix=False),
-            ylim=ylim_l,
+            series=series_def0,
+            y_of=y_from_col(col="delta_L_s_total_mean", scale=1.0),
+            label_of=lambda rk: rk.abbr(),
+            ylim=latency_ylim,
         )
 
     print(f"Wrote tables to:  {tables_dir}")
