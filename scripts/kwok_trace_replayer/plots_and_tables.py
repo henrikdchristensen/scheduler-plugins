@@ -1,42 +1,7 @@
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/plots_and_tables.py
 """
-python -m scripts.kwok_trace_replayer.plots_and_tables \
-  --in-results analysis/kwok_trace_replayer/results_paired.csv \
-  --out-dir analysis/kwok_trace_replayer
-
-Produces:
-  Tables (under <out-dir>/tables):
-    - delta_U_eff_run.{txt,tex}
-    - delta_R.{txt,tex}
-    - delta_D.{txt,tex}
-    - delta_L.{txt,tex}
-    - solver_attempts.{txt,tex}
-    - plans_activated.{txt,tex}
-    - big_table_util_latency_deletions_optimizations.{txt,tex}
-    - delta_D_without_defaultpreemption.{txt,tex}
-    - delta_L_without_defaultpreemption.{txt,tex}
-    - big_table_without_defaultpreemption_util_latency_deletions_optimizations.{txt,tex}
-
-  Figures (under <out-dir>/figures):
-    - grid_util_latency_deletions_defaultpreemption.{png,pdf}
-    - grid_util_latency_deletions_without_defaultpreemption.{png,pdf}
-
-Key behavior:
-  - Mode labels are abbreviations: SF, PR-8-B, PR-8-NB, SQ-2-B, SQ-2-NB.
-  - NO "-NDF" suffix is ever added.
-  - Tables:
-      * defpreempt=1 ("with default preemption"): EXCLUDES SF
-      * defpreempt=0 ("w/o default preemption"): includes SF
-    and the difference is indicated in the per-kmax header line (not in mode labels).
-  - Plots:
-      * We generate two 3x2 grid figures:
-          rows: Utilisation, Latency, Deletions
-          cols: kmax=1, kmax=4
-        One grid for defpreempt=1 and one for defpreempt=0.
-      * Tick *labels* are shown only in the FIRST column.
-      * Only the bottom-left panel shows mu_A tick labels.
-      * Row y-labels are figure-level (not axes-level) so they align perfectly with the grid.
+python -m scripts.kwok_trace_replayer.plots_and_tables --in-results analysis/kwok_trace_replayer/results_paired.csv --out-dir analysis/kwok_trace_replayer
 """
 
 import argparse
@@ -44,7 +9,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -70,7 +35,7 @@ EXPECTED_COLS = [
 KEY_COLS = ["nodes", "kmax", "arrival_s", "mode", "blocking", "defpreempt"]
 
 # =============================================================================
-# Plot styling (only what we use)
+# Plot styling
 # =============================================================================
 
 PLOT_MARKER_SIZE = 3.5
@@ -91,43 +56,33 @@ PLOT_LEGEND_HANDLE_TEXT_PAD = 0.46
 PLOT_LEGEND_FRAME_LINEWIDTH = 1.0
 PLOT_LEGEND_NCOL = 5
 
-# Big grid figure (3 rows x 2 cols)
 GRID_FIGSIZE = (4.5, 5)
-GRID_LEFT   = 0.125   # room for figure-level ylabels
+GRID_LEFT   = 0.125
 GRID_RIGHT  = 0.99
 GRID_BOTTOM = 0.04
-GRID_TOP    = 0.92    # top of subplot area (not legend)
+GRID_TOP    = 0.92
 GRID_WSPACE = 0.1
 GRID_HSPACE = 0.1
 
 GRID_LEGEND_PAD = 0.04
 
 GRID_TITLE_FONTSIZE = 7
-GRID_YLABEL_PAD_FIG = 0.095  # distance left of axes bbox for fig-level ylabels
+GRID_YLABEL_PAD_FIG = 0.095
 
 # =============================================================================
 # Parsing helpers
 # =============================================================================
 
 def parse_job(job_name: str) -> Optional[Tuple[int, int, float]]:
-    """
-    Parse job_name format:
-        nodes=<N>_prio=<kmax>_arrival=<a>s
-    """
+    """Parse job_name format: nodes=<N>_prio=<kmax>_arrival=<a>s"""
     m = JOB_RE.fullmatch(str(job_name).strip())
     if not m:
         return None
-    n = int(m.group(1))
-    k = int(m.group(2))
-    a = float(m.group(3))
-    return n, k, a
+    return int(m.group(1)), int(m.group(2)), float(m.group(3))
 
 
 def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
-    """
-    plugin_config format (from seal_results.py):
-      mode=<mode>_blocking=<0/1>_defpreempt=<0/1>
-    """
+    """plugin_config: mode=<mode>_blocking=<0/1>_defpreempt=<0/1>"""
     kv: Dict[str, str] = {}
     for tok in str(plugin_config).split("_"):
         if "=" in tok:
@@ -137,7 +92,6 @@ def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
 
 
 def canonical_mode(mode: str) -> str:
-    """Canonicalize mode strings so ordering/labels are stable across inputs."""
     s = str(mode).strip().lower()
     if s in {"scheduling_failure", "scheduling-failure", "schedulingfailure", "sched-failure", "schedfailure"}:
         return "scheduling-failure"
@@ -150,7 +104,6 @@ def canonical_mode(mode: str) -> str:
     return s
 
 
-# Abbreviations (NO "-NDF" suffix anywhere)
 MODE_ABBR: Dict[Tuple[str, Optional[int]], str] = {
     ("scheduling-failure", None): "SF",
     ("periodic8s", 1): "PR-8-B",
@@ -158,7 +111,6 @@ MODE_ABBR: Dict[Tuple[str, Optional[int]], str] = {
     ("stable-queue-2s", 1): "SQ-2-B",
     ("stable-queue-2s", 0): "SQ-2-NB",
 }
-
 MODE_ORDER: List[Tuple[str, Optional[int]]] = [
     ("scheduling-failure", None),
     ("periodic8s", 1),
@@ -192,19 +144,16 @@ class RowKey:
     def sort_key(self) -> Tuple[int, int, str]:
         base = (self.mode, None) if self.mode == "scheduling-failure" else (self.mode, int(self.blocking))
         base_rank = MODE_RANK.get(base, 10_000)
-        # Prefer defpreempt=1 before defpreempt=0 when both exist
         def_rank = 0 if self.defpreempt == 1 else 1
         return (base_rank, def_rank, self.mode)
 
     def abbr(self) -> str:
         if self.mode == "scheduling-failure":
             return "SF"
-        key = (self.mode, int(self.blocking))
-        return MODE_ABBR.get(key, f"{self.mode}:{self.blocking}")
-
+        return MODE_ABBR.get((self.mode, int(self.blocking)), f"{self.mode}:{self.blocking}")
 
 # =============================================================================
-# Formatting
+# Formatting helpers (tables)
 # =============================================================================
 
 def is_finite(x: object) -> bool:
@@ -221,8 +170,7 @@ def nan_str(latex: bool) -> str:
 def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
     if not is_finite(x):
         return nan_s
-    v = float(x)
-    v = round(v, int(decimals))
+    v = round(float(x), int(decimals))
     if v == 0.0:
         v = 0.0
     return f"{v:+.{decimals}f}"
@@ -234,37 +182,17 @@ def fmt_unsigned_int(x: object, nan_s: str) -> str:
     return f"{int(round(float(x))):d}"
 
 
-def fmt_signed_int(x: object, nan_s: str) -> str:
-    if not is_finite(x):
-        return nan_s
-    return f"{int(round(float(x))):+d}"
-
-
 def arrival_group_label(a: float, *, latex: bool) -> str:
     a_i = int(a) if abs(a - round(a)) < 1e-9 else a
-    if latex:
-        return rf"$\mu_A={a_i}\,\mathrm{{s}}$"
-    return f"muA={a_i}s"
+    return (rf"$\mu_A={a_i}\,\mathrm{{s}}$" if latex else f"muA={a_i}s")
 
 
 def kmax_caption(kmax: int, *, latex: bool, without_default_preemption: bool) -> str:
     if latex:
-        if kmax == 1:
-            base = r"$k_{\max}=1$ (w/o priorities)"
-        else:
-            base = rf"$k_{{\max}}={kmax}$ (w/ priorities)"
-        if without_default_preemption:
-            return base + r" (w/o default preemption)"
-        return base
-
-    if kmax == 1:
-        base = "kmax=1 (w/o priorities)"
-    else:
-        base = f"kmax={kmax} (w/ priorities)"
-    if without_default_preemption:
-        return base + " (w/o default preemption)"
-    return base
-
+        base = (r"$k_{\max}=1$ (w/o priorities)" if kmax == 1 else rf"$k_{{\max}}={kmax}$ (w/ priorities)")
+        return base + (r" (w/o default preemption)" if without_default_preemption else "")
+    base = ("kmax=1 (w/o priorities)" if kmax == 1 else f"kmax={kmax} (w/ priorities)")
+    return base + (" (w/o default preemption)" if without_default_preemption else "")
 
 # =============================================================================
 # Data access
@@ -297,8 +225,7 @@ def load_results(results_csv: Path) -> pd.DataFrame:
 
 
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
-    d = df.copy()
-    d = d.drop_duplicates(subset=KEY_COLS, keep="first")
+    d = df.drop_duplicates(subset=KEY_COLS, keep="first").copy()
     return d.set_index(KEY_COLS).sort_index()
 
 
@@ -317,9 +244,8 @@ def lookup_value(
     except KeyError:
         return float("nan")
 
-
 # =============================================================================
-# Table model (metrics-as-rows; arrivals top; modes under arrivals)
+# Tables (metrics-as-rows; arrivals top; modes under arrivals)
 # =============================================================================
 
 MetricGetter = Callable[[int, RowKey, int, float], float]  # (kmax, rk, nodes, arrival) -> value
@@ -330,7 +256,7 @@ class MetricRow:
     latex_label: str
     ascii_label: str
     getter: MetricGetter
-    fmt_kind: str  # "signed_float", "unsigned_int", "signed_int"
+    fmt_kind: str  # "signed_float" | "unsigned_int"
     decimals: int = TABLE_DECIMALS
     scale: float = 1.0
 
@@ -344,8 +270,6 @@ def _fmt_metric_value(v: float, *, row: MetricRow, latex: bool) -> str:
         return fmt_signed(vv, row.decimals, ns)
     if row.fmt_kind == "unsigned_int":
         return fmt_unsigned_int(vv, ns)
-    if row.fmt_kind == "signed_int":
-        return fmt_signed_int(vv, ns)
     return fmt_signed(vv, row.decimals, ns)
 
 
@@ -358,13 +282,6 @@ def latex_metric_matrix_tables(
     metrics_by_kmax: Dict[int, List[MetricRow]],
     without_default_preemption: bool,
 ) -> None:
-    """
-    Write one tabular per kmax, with:
-      - columns grouped by arrival (mu_A) at top
-      - modes under each arrival
-      - rows are metrics
-      - N shown as row blocks (N=16 then N=32)
-    """
     lines: List[str] = []
     for kmax in sorted(metrics_by_kmax.keys()):
         if kmax not in modes_by_kmax:
@@ -388,8 +305,7 @@ def latex_metric_matrix_tables(
         arrival_hdr = " & " + " & ".join(
             [rf"\multicolumn{{{n_modes}}}{{c}}{{{arrival_group_label(a, latex=True)}}}" for a in arrivals_order]
         ) + r" \\"
-        mode_labels = [rk.abbr() for _a in arrivals_order for rk in modes]
-        mode_hdr = " & " + " & ".join(mode_labels) + r" \\"
+        mode_hdr = " & " + " & ".join([rk.abbr() for _a in arrivals_order for rk in modes]) + r" \\"
 
         lines.append(rf"\begin{{tabular}}{{{tab_spec}}}")
         lines.append(r"\toprule")
@@ -487,9 +403,8 @@ def ascii_metric_matrix_tables(
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
-
 # =============================================================================
-# Plot helpers (grid only)
+# Plot helpers
 # =============================================================================
 
 YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, kmax) -> y
@@ -522,7 +437,7 @@ def symmetric_ylim_from_y_values(y_vals: List[float]) -> Tuple[float, float]:
 def plot_series(df: pd.DataFrame, *, kmax: int, defpreempt_value: int) -> List[RowKey]:
     """
     For plotting we keep:
-      - the requested defpreempt_value configs (0 or 1)
+      - requested defpreempt_value configs (0 or 1)
       - plus scheduling-failure (SF) always
     """
     dff = df[df["kmax"].astype(int) == int(kmax)].copy()
@@ -531,14 +446,13 @@ def plot_series(df: pd.DataFrame, *, kmax: int, defpreempt_value: int) -> List[R
         subset=["job_name", "plugin_config", "mode", "blocking", "defpreempt", "nodes", "kmax", "arrival_s"],
         keep="first",
     )
-    series = sorted(
+    return sorted(
         {
             RowKey(mode=m, blocking=int(b), defpreempt=int(d))
             for (m, b, d) in dff[["mode", "blocking", "defpreempt"]].drop_duplicates().itertuples(index=False, name=None)
         },
         key=lambda rk: rk.sort_key(),
     )
-    return series
 
 
 def collect_plot_y_vals(
@@ -599,12 +513,10 @@ def draw_dumbbell_on_ax(
     ax.axhline(0.0, linewidth=0.8, color="black", linestyle="--", alpha=0.7)
     ax.set_ylim(float(ylim[0]), float(ylim[1]))
 
-    # consistent x-lims so plotting area aligns across ALL subplots
     pad = max(0.10, PLOT_MODE_X_SPACING * (m / 2.0 + 1.0))
     ax.set_xlim(min(x_base) - pad, max(x_base) + pad)
 
     ax.set_xticks(x_base)
-
     ax.tick_params(
         axis="both",
         which="major",
@@ -621,19 +533,17 @@ def draw_dumbbell_on_ax(
     if not show_yticklabels:
         ax.tick_params(labelleft=False)
 
-    # subtle horizontal guide lines (exclude y=0)
     for y in ax.get_yticks():
         if abs(y) < 1e-8:
             continue
         ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
-
 
 # =============================================================================
 # Main + CLI
 # =============================================================================
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate tables and figures from sealed results.")
+    p = argparse.ArgumentParser(description="Generate BIG tables and grid figures from sealed results.")
     p.add_argument("--in-results", type=Path, required=True, help="Path to sealed results_paired.csv.")
     p.add_argument("--out-dir", type=Path, required=True, help="Output directory (tables + figures subdirs).")
     return p.parse_args()
@@ -663,45 +573,36 @@ def main() -> None:
     if not kmaxs:
         raise SystemExit("No kmax values found")
 
+    # Exactly two columns: kmax=1 and kmax=4
+    kmax_cols = [k for k in (1, 4) if k in kmaxs]
+    if len(kmax_cols) != 2:
+        raise SystemExit(f"Expected kmax values [1,4] for the 2 columns; found kmaxs={kmaxs}")
+
     def _sorted_modes(rks: List[RowKey]) -> List[RowKey]:
         return sorted(rks, key=lambda rk: rk.sort_key())
 
-    # Build mode columns per variant:
-    #  - defpreempt=1 vs baseline (+SF always in raw list)
-    #  - defpreempt=0 vs baseline (+SF always)
-    modes_def1_all: Dict[int, List[RowKey]] = {}
-    modes_def0: Dict[int, List[RowKey]] = {}
+    # Modes for tables:
+    #  - defpreempt=1: EXCLUDE SF
+    #  - defpreempt=0: include SF (and other defpreempt=0 modes)
+    modes_def1_tables: Dict[int, List[RowKey]] = {}
+    modes_def0_tables: Dict[int, List[RowKey]] = {}
 
     for k in kmaxs:
         dff = df[df["kmax"].astype(int) == k]
         rks = [RowKey.from_plugin_config(pc) for pc in dff["plugin_config"].unique().tolist()]
 
-        keep_def1 = [
-            rk for rk in rks
-            if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 1)
-        ]
-        keep_def0 = [
-            rk for rk in rks
-            if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 0)
-        ]
+        modes_def1_tables[k] = _sorted_modes(
+            [rk for rk in rks if (rk.mode != "scheduling-failure" and rk.defpreempt == 1)]
+        )
+        modes_def0_tables[k] = _sorted_modes(
+            [rk for rk in rks if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 0)]
+        )
 
-        modes_def1_all[k] = _sorted_modes(keep_def1)
-        modes_def0[k] = _sorted_modes(keep_def0)
-
-    modes_def1_tables: Dict[int, List[RowKey]] = {
-        k: [rk for rk in rks if rk.mode != "scheduling-failure"]
-        for k, rks in modes_def1_all.items()
-    }
-
-    # -----------------------------
-    # Metric getters
-    # -----------------------------
+    # Metric getter
     def g(col: str) -> MetricGetter:
         return lambda kmax, rk, n, a: lookup_value(lookup, nodes=n, kmax=kmax, arrival_s=a, rk=rk, col=col)
 
-    # -----------------------------
-    # Metrics per table
-    # -----------------------------
+    # Table rows
     def metrics_big(kmax: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
             MetricRow(r"$\Delta U$", "ΔU", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0),
@@ -735,89 +636,21 @@ def main() -> None:
         rows.append(MetricRow(r"$\#O$", "#O", g("plan_activated_mean"), "unsigned_int"))
         return rows
 
-    def metrics_L_only(kmax: int) -> List[MetricRow]:
-        rows = [MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", g("delta_L_s_total_mean"), "signed_float", decimals=1)]
-        if kmax != 1:
-            for p in range(1, 5):
-                rows.append(
-                    MetricRow(
-                        rf"$\Delta L_{{p_{p}}}$",
-                        f"ΔL_p{p}",
-                        g(f"delta_L_s_p{p}_mean"),
-                        "signed_float",
-                        decimals=1,
-                    )
-                )
-        return rows
-
-    def metrics_D_only(kmax: int) -> List[MetricRow]:
-        rows = [MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", g("delta_D_total_mean"), "signed_float", decimals=1)]
-        if kmax != 1:
-            for p in range(1, 5):
-                rows.append(
-                    MetricRow(
-                        rf"$\Delta D_{{p_{p}}}$",
-                        f"ΔD_p{p}",
-                        g(f"delta_D_p{p}_mean"),
-                        "signed_float",
-                        decimals=1,
-                    )
-                )
-        return rows
-
-    def metrics_U_only(_kmax: int) -> List[MetricRow]:
-        return [MetricRow(r"$\Delta U$", "ΔU", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0)]
-
-    def metrics_R(kmax: int) -> List[MetricRow]:
-        rows = [MetricRow(r"$\Delta R_{\mathrm{tot}}$", "ΔR_tot", g("delta_R_total_mean"), "signed_float", decimals=1)]
-        if kmax != 1:
-            for p in range(1, 5):
-                rows.append(
-                    MetricRow(
-                        rf"$\Delta R_{{p_{p}}}$",
-                        f"ΔR_p{p}",
-                        g(f"delta_R_p{p}_mean"),
-                        "signed_float",
-                        decimals=1,
-                    )
-                )
-        return rows
-
-    def metrics_solver_attempts(_kmax: int) -> List[MetricRow]:
-        return [MetricRow(r"$\#S$", "#S", g("solver_attempts_mean"), "unsigned_int")]
-
-    def metrics_plans_activated(_kmax: int) -> List[MetricRow]:
-        return [MetricRow(r"$\#O$", "#O", g("plan_activated_mean"), "unsigned_int")]
-
-    def build_metrics_map(builder: Callable[[int], List[MetricRow]]) -> Dict[int, List[MetricRow]]:
-        return {k: builder(k) for k in kmaxs}
+    metrics_map_big = {k: metrics_big(k) for k in kmaxs}
 
     # -----------------------------
-    # Write tables (LaTeX + ASCII)
+    # Tables
     # -----------------------------
-    TABLE_JOBS = [
-        # defpreempt=1: "with default preemption" (SF EXCLUDED here)
-        ("delta_U_eff_run", modes_def1_tables, build_metrics_map(metrics_U_only), False),
-        ("delta_R", modes_def1_tables, build_metrics_map(metrics_R), False),
-        ("delta_D", modes_def1_tables, build_metrics_map(metrics_D_only), False),
-        ("delta_L", modes_def1_tables, build_metrics_map(metrics_L_only), False),
-        ("solver_attempts", modes_def1_tables, build_metrics_map(metrics_solver_attempts), False),
-        ("plans_activated", modes_def1_tables, build_metrics_map(metrics_plans_activated), False),
-        ("big_table_util_latency_deletions_optimizations", modes_def1_tables, {k: metrics_big(k) for k in kmaxs}, False),
-
-        # defpreempt=0 (+SF): "w/o default preemption"
-        ("delta_D_without_defaultpreemption", modes_def0, build_metrics_map(metrics_D_only), True),
-        ("delta_L_without_defaultpreemption", modes_def0, build_metrics_map(metrics_L_only), True),
-        ("big_table_without_defaultpreemption_util_latency_deletions_optimizations", modes_def0, {k: metrics_big(k) for k in kmaxs}, True),
-    ]
-
-    for stem, modes_map, metrics_map, without_defpreempt in TABLE_JOBS:
+    for stem, modes_map, without_defpreempt in [
+        ("table_util_latency_deletions_optimizations", modes_def1_tables, False),
+        ("table_without_defaultpreemption_util_latency_deletions_optimizations", modes_def0_tables, True),
+    ]:
         latex_metric_matrix_tables(
             out_path=tables_dir / f"{stem}.tex",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             modes_by_kmax=modes_map,
-            metrics_by_kmax=metrics_map,
+            metrics_by_kmax=metrics_map_big,
             without_default_preemption=without_defpreempt,
         )
         ascii_metric_matrix_tables(
@@ -825,15 +658,15 @@ def main() -> None:
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             modes_by_kmax=modes_map,
-            metrics_by_kmax=metrics_map,
+            metrics_by_kmax=metrics_map_big,
             without_default_preemption=without_defpreempt,
         )
 
     # -----------------------------
-    # Figures (two big 3x2 grids)
+    # Figures
     # -----------------------------
 
-    # We want consistent y-lims across BOTH big figures, so include both defpreempt values.
+    # Consistent y-lims across BOTH figures
     util_y_vals_all: List[float] = []
     deletions_y_vals_all: List[float] = []
     latency_y_vals_all: List[float] = []
@@ -863,13 +696,7 @@ def main() -> None:
             return float(v) * float(scale) if is_finite(v) else float("nan")
         return _y
 
-    # Exactly two columns: kmax=1 and kmax=4
-    kmax_cols = [k for k in (1, 4) if k in kmaxs]
-    if len(kmax_cols) != 2:
-        raise SystemExit(f"Expected kmax values [1,4] for the 2 columns; found kmaxs={kmaxs}")
-
     def plot_grid_figure(*, defpreempt_value: int, filename_stem: str) -> None:
-        # union series across both columns so legend/colors are identical
         series_union = sorted(
             set(plot_series(df, kmax=kmax_cols[0], defpreempt_value=defpreempt_value))
             | set(plot_series(df, kmax=kmax_cols[1], defpreempt_value=defpreempt_value)),
@@ -878,17 +705,11 @@ def main() -> None:
         labels = [rk.abbr() for rk in series_union]
         color_map = _build_color_map(labels)
 
-        fig, axes = plt.subplots(
-            nrows=3, ncols=2,
-            figsize=GRID_FIGSIZE,
-            sharex=True,
-        )
+        fig, axes = plt.subplots(nrows=3, ncols=2, figsize=GRID_FIGSIZE, sharex=True)
 
-        # column titles only (2 total)
         axes[0, 0].set_title(rf"$k_{{\max}}={kmax_cols[0]}$", fontsize=GRID_TITLE_FONTSIZE)
         axes[0, 1].set_title(rf"$k_{{\max}}={kmax_cols[1]}$", fontsize=GRID_TITLE_FONTSIZE)
 
-        # Row 0: Utilisation
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[0, col_i],
@@ -903,7 +724,6 @@ def main() -> None:
                 show_yticklabels=(col_i == 0),
             )
 
-        # Row 1: Latency
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[1, col_i],
@@ -918,8 +738,7 @@ def main() -> None:
                 show_yticklabels=(col_i == 0),
             )
 
-        # Row 2: Deletions
-        # Only bottom-left shows mu_A labels (because tick labels only in first column).
+        # μ_A tick labels on BOTH bottom panels
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[2, col_i],
@@ -934,20 +753,18 @@ def main() -> None:
                 show_yticklabels=(col_i == 0),
             )
 
-        # Layout first (so axes positions are final)
         fig.subplots_adjust(
             left=GRID_LEFT, right=GRID_RIGHT, bottom=GRID_BOTTOM, top=GRID_TOP,
             wspace=GRID_WSPACE, hspace=GRID_HSPACE,
         )
 
-        # Legend aligned to the two plot columns (axes grid), not the full figure
+        # Legend centered over the two plot columns (axes grid), not the whole figure
         handles = _make_mode_legend_handles(labels, color_map)
-
         bbox_l = axes[0, 0].get_position()
         bbox_r = axes[0, 1].get_position()
-        x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)             # center over the two columns
-        y_top_grid = max(bbox_l.y1, bbox_r.y1)                    # top of subplot area
-        legend_y = y_top_grid + GRID_LEGEND_PAD                   # just above the grid
+        x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
+        y_top_grid = max(bbox_l.y1, bbox_r.y1)
+        legend_y = min(0.98, y_top_grid + GRID_LEGEND_PAD)
 
         leg = fig.legend(
             handles, labels,
@@ -963,7 +780,7 @@ def main() -> None:
         )
         leg.get_frame().set_linewidth(PLOT_LEGEND_FRAME_LINEWIDTH)
 
-        # Figure-level ylabels aligned to the grid (perfect vertical alignment)
+        # Figure-level ylabels aligned to the grid
         left_bbox = axes[0, 0].get_position()
         x_text = max(0.0, left_bbox.x0 - GRID_YLABEL_PAD_FIG)
 
@@ -975,21 +792,12 @@ def main() -> None:
         for r, text in enumerate(row_labels):
             bbox = axes[r, 0].get_position()
             y_center = 0.5 * (bbox.y0 + bbox.y1)
-            fig.text(
-                x_text,
-                y_center,
-                text,
-                rotation=90,
-                va="center",
-                ha="right",
-                fontsize=PLOT_AXIS_LABEL_FONTSIZE,
-            )
+            fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
         fig.savefig(figures_dir / f"{filename_stem}.png", dpi=200)
         fig.savefig(figures_dir / f"{filename_stem}.pdf")
         plt.close(fig)
 
-    # two big figures: with default preemption (defpreempt=1) and without (defpreempt=0)
     plot_grid_figure(defpreempt_value=1, filename_stem="grid_util_latency_deletions")
     plot_grid_figure(defpreempt_value=0, filename_stem="grid_util_latency_deletions_without_defaultpreemption")
 
