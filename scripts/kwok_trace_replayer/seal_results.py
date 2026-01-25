@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/seal_results.py
 """
-python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer/sealed
+python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer
 
 We compute per-seed metrics over the common horizon H = min(T_end_default, T_end_plugin), then mean over seeds.
 """
@@ -30,8 +30,8 @@ TIME_COL = "time_s"
 
 CPU_RUN_COL = "cpu_run_util"
 MEM_RUN_COL = "mem_run_util"
-RUNNING_PREFIX = "running_p"              # running_p1..pK (instantaneous count)
-DELETIONS_CUM_PREFIX = "deletions_cum_p"  # deletions_cum_p1..pK (cumulative counter)
+RUNNING_PREFIX = "running_p"
+DELETIONS_CUM_PREFIX = "deletions_cum_p"
 
 POD_EVENT_COL = "event"
 POD_NAME_COL = "pod_name"
@@ -79,17 +79,17 @@ def parse_args() -> argparse.Namespace:
 
 @dataclass(frozen=True)
 class GeneralData:
-    t: np.ndarray                     # normalized time (starts at 0)
+    t: np.ndarray # normalized time (starts at 0)
     T_end: float
     cpu_util: np.ndarray
     mem_util: np.ndarray
     eff_util: np.ndarray
-    pods_running: np.ndarray                   # shape (n, MAX_K_OUT) for p=1..MAX_K_OUT
-    pods_deleted: np.ndarray                  # shape (n, MAX_K_OUT), NaN where missing
-    cum_cpu_util: np.ndarray              # prefix integral arrays (length n)
+    pods_running: np.ndarray
+    pods_deleted: np.ndarray
+    cum_cpu_util: np.ndarray
     cum_mem_util: np.ndarray
     cum_eff_util: np.ndarray
-    cum_pods_running: np.ndarray              # shape (n, MAX_K_OUT)
+    cum_pods_running: np.ndarray
 
 def cummulative_time_integral(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     """

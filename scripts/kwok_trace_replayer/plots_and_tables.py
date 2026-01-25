@@ -23,6 +23,16 @@ import pandas as pd
 TABLE_DECIMALS: int = 1
 JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
 
+# Convert latency from seconds -> milliseconds in BOTH tables and plots
+LATENCY_SCALE: float = 1000.0
+
+# --- Symmetric-log (symlog) settings for plots ---
+SYMLOG_BASE: float = 10.0
+# Linear region around 0 (in data units of the plotted metric):
+SYMLOG_LINTHRESH_LAT_MS: float = 1.0      # 1 ms linear region
+SYMLOG_LINTHRESH_DELETIONS: float = 1.0   # 1 deletion linear region
+SYMLOG_LINSCALE: float = 1.0              # size of linear region (visual)
+
 EXPECTED_COLS = [
     "job_name",
     "plugin_config",
@@ -489,6 +499,8 @@ def draw_dumbbell_on_ax(
     ylim: Tuple[float, float],
     show_xticklabels: bool,
     show_yticklabels: bool,
+    y_scale: str = "linear",          # "linear" | "symlog"
+    symlog_linthresh: float = 1.0,    # only used when y_scale="symlog"
 ) -> None:
     x_base = [i * PLOT_ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
     m = max(1, len(series))
@@ -509,6 +521,17 @@ def draw_dumbbell_on_ax(
                 ax.plot([x], [y0], linestyle="None", marker="o", markersize=PLOT_MARKER_SIZE, color=color)
             if is_finite(y1):
                 ax.plot([x], [y1], linestyle="None", marker="s", markersize=PLOT_MARKER_SIZE, color=color)
+
+    # Scale first (so tick locators are correct), then limits
+    if y_scale == "symlog":
+        ax.set_yscale(
+            "symlog",
+            base=SYMLOG_BASE,
+            linthresh=symlog_linthresh,
+            linscale=SYMLOG_LINSCALE,
+        )
+    else:
+        ax.set_yscale("linear")
 
     ax.axhline(0.0, linewidth=0.8, color="black", linestyle="--", alpha=0.7)
     ax.set_ylim(float(ylim[0]), float(ylim[1]))
@@ -602,21 +625,25 @@ def main() -> None:
     def g(col: str) -> MetricGetter:
         return lambda kmax, rk, n, a: lookup_value(lookup, nodes=n, kmax=kmax, arrival_s=a, rk=rk, col=col)
 
-    # Table rows
+    # Table rows (latency shown in ms + labeled as ms)
     def metrics_big(kmax: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
             MetricRow(r"$\Delta U$", "ΔU", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0),
-            MetricRow(r"$\Delta L_{\mathrm{tot}}$", "ΔL_tot", g("delta_L_s_total_mean"), "signed_float", decimals=1),
+
+            # seconds -> ms in tables, and label explicitly shows ms
+            MetricRow(r"$\Delta L_{\mathrm{tot}}\;(\mathrm{ms})$", "ΔL_tot (ms)",
+                      g("delta_L_s_total_mean"), "signed_float", decimals=0, scale=LATENCY_SCALE),
         ]
         if kmax != 1:
             for p in range(1, 5):
                 rows.append(
                     MetricRow(
-                        rf"$\Delta L_{{p_{p}}}$",
-                        f"ΔL_p{p}",
+                        rf"$\Delta L_{{p_{p}}}\;(\mathrm{{ms}})$",
+                        f"ΔL_p{p} (ms)",
                         g(f"delta_L_s_p{p}_mean"),
                         "signed_float",
-                        decimals=1,
+                        decimals=0,
+                        scale=LATENCY_SCALE,  # seconds -> ms
                     )
                 )
 
@@ -666,7 +693,6 @@ def main() -> None:
     # Figures
     # -----------------------------
 
-    # Consistent y-lims across BOTH figures
     util_y_vals_all: List[float] = []
     deletions_y_vals_all: List[float] = []
     latency_y_vals_all: List[float] = []
@@ -683,7 +709,7 @@ def main() -> None:
             )
             latency_y_vals_all += collect_plot_y_vals(
                 lookup=lookup, df=df, col="delta_L_s_total_mean",
-                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=1.0,
+                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=LATENCY_SCALE,
             )
 
     util_ylim = symmetric_ylim_from_y_values(util_y_vals_all)
@@ -710,6 +736,7 @@ def main() -> None:
         axes[0, 0].set_title(rf"$k_{{\max}}={kmax_cols[0]}$", fontsize=GRID_TITLE_FONTSIZE)
         axes[0, 1].set_title(rf"$k_{{\max}}={kmax_cols[1]}$", fontsize=GRID_TITLE_FONTSIZE)
 
+        # Util (linear)
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[0, col_i],
@@ -719,11 +746,13 @@ def main() -> None:
                 series=series_union,
                 y_of=y_from_col(col="delta_U_eff_run_mean", scale=100.0),
                 color_map=color_map,
-                ylim=util_ylim,
+                ylim=(-4.1, 4.1),
                 show_xticklabels=False,
                 show_yticklabels=(col_i == 0),
+                y_scale="linear",
             )
 
+        # Latency (symlog, symmetric around 0)
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[1, col_i],
@@ -731,14 +760,16 @@ def main() -> None:
                 arrivals_order=arrivals_order,
                 kmax=k,
                 series=series_union,
-                y_of=y_from_col(col="delta_L_s_total_mean", scale=1.0),
+                y_of=y_from_col(col="delta_L_s_total_mean", scale=LATENCY_SCALE),  # ms
                 color_map=color_map,
-                ylim=latency_ylim,
+                ylim=(-10e3 - 1.0, 10e3 + 1.0),
                 show_xticklabels=False,
                 show_yticklabels=(col_i == 0),
+                y_scale="symlog",
+                symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS,
             )
 
-        # μ_A tick labels on BOTH bottom panels
+        # Deletions (symlog, symmetric around 0)
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[2, col_i],
@@ -748,9 +779,11 @@ def main() -> None:
                 series=series_union,
                 y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
                 color_map=color_map,
-                ylim=deletions_ylim,
+                ylim=(-10e3 - 1.0, 10e3 + 1.0),
                 show_xticklabels=True,
                 show_yticklabels=(col_i == 0),
+                y_scale="symlog",
+                symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS,
             )
 
         fig.subplots_adjust(
@@ -786,7 +819,7 @@ def main() -> None:
 
         row_labels = [
             r"$\Delta U_{\mathrm{eff}}$ (pp)",
-            r"$\Delta L$ (s)",
+            r"$\Delta L$ (ms)",
             r"$\Delta D$ (#deletions)",
         ]
         for r, text in enumerate(row_labels):
