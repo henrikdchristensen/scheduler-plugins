@@ -628,7 +628,7 @@ def main() -> None:
     # Table rows (latency shown in ms + labeled as ms)
     def metrics_big(kmax: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
-            MetricRow(r"$\Delta U$", "ΔU", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0),
+            MetricRow(r"$\Delta U \;(\mathrm{pp})$", "ΔU (pp)", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0),
 
             # seconds -> ms in tables, and label explicitly shows ms
             MetricRow(r"$\Delta L_{\mathrm{tot}}\;(\mathrm{ms})$", "ΔL_tot (ms)",
@@ -647,13 +647,13 @@ def main() -> None:
                     )
                 )
 
-        rows.append(MetricRow(r"$\Delta D_{\mathrm{tot}}$", "ΔD_tot", g("delta_D_total_mean"), "signed_float", decimals=1))
+        rows.append(MetricRow(r"$\Delta D_{\mathrm{tot}}\;(\mathrm{\#deletions})$", "ΔD_tot (#deletions)", g("delta_D_total_mean"), "signed_float", decimals=1))
         if kmax != 1:
             for p in range(1, 5):
                 rows.append(
                     MetricRow(
-                        rf"$\Delta D_{{p_{p}}}$",
-                        f"ΔD_p{p}",
+                        rf"$\Delta D_{{p_{p}}}\;(\mathrm{{\#deletions}})$",
+                        f"ΔD_p{p} (#deletions)",
                         g(f"delta_D_p{p}_mean"),
                         "signed_float",
                         decimals=1,
@@ -711,10 +711,6 @@ def main() -> None:
                 lookup=lookup, df=df, col="delta_L_s_total_mean",
                 nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=LATENCY_SCALE,
             )
-
-    util_ylim = symmetric_ylim_from_y_values(util_y_vals_all)
-    deletions_ylim = symmetric_ylim_from_y_values(deletions_y_vals_all)
-    latency_ylim = symmetric_ylim_from_y_values(latency_y_vals_all)
 
     def y_from_col(*, col: str, scale: float) -> YOfFn:
         def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
