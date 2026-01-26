@@ -4,6 +4,7 @@ package mypriorityoptimizer
 import (
 	"context"
 	"testing"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	fwk "k8s.io/kube-scheduler/framework"
@@ -14,6 +15,9 @@ import (
 // -------------------------
 
 func TestPostFilter(t *testing.T) {
+	origSleep := postFilterSleep
+	postFilterSleep = func(time.Duration) {}
+	t.Cleanup(func() { postFilterSleep = origSleep })
 
 	type tc struct {
 		name                     string
