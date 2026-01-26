@@ -10,7 +10,7 @@ Creates:
   <out-dir>/plugin/*.yaml
 """
 
-#TODO: TO BE DELETED BEFORE SUBMISSION
+# TODO: TO BE DELETED BEFORE SUBMISSION
 
 import argparse
 from pathlib import Path
@@ -20,10 +20,14 @@ from typing import Iterable, List, Tuple
 
 NODES = [16, 32]
 PRIOS = [1, 4]
-ARRIVALS_S = [4, 8, 16, 32]
+ARRIVALS_S = [4, 8, 16]
 
 BLOCKING_VALUES = [0, 1]
 DEFPREEMPT_VALUES = [0, 1]
+
+# NEW: additional optimize-mode parameters
+PERIODIC_INTERVALS_S = [8, 32]
+STABLE_QUEUE_DELAYS_S = [2, 8]
 
 DEFAULT_KWOKCTL_CONFIG = "data/configs-kwokctl/default.yaml"
 # NEW convention:
@@ -99,74 +103,87 @@ def iter_plugin_jobs(out_dir: Path) -> Iterable[Path]:
     for n in NODES:
         for p in PRIOS:
             for a in ARRIVALS_S:
-                # schedulingfailure (no blocking/defpreempt)
-                # Keep using the non-defpreempt-specific config unless you want otherwise.
-                base = f"mode=schedulingfailure_nodes={n}_prio={p}_arrival={a}s"
-                path = out_dir / "plugin" / f"{base}.yaml"
-                yml = render_job_yaml(
-                    trace_dir=trace_dir(n, p, a),
-                    result_dir=plugin_result_dir(base),
-                    kwokctl_config_file="data/configs-kwokctl/plugin-scheduler.yaml",
-                    override_envs=[
-                        ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
-                        ("OPTIMIZE_MODE", "scheduling_failure"),
-                    ],
-                )
-                write_text(path, yml)
-                yield path
+                # ---------------------------------------------------------
+                # schedulingfailure: NOW also with/without default preemption
+                # ---------------------------------------------------------
+                for defpreempt in DEFPREEMPT_VALUES:
+                    kwokcfg = plugin_config_for(defpreempt)
 
-                # periodic8s and stablequeue2s (with blocking + defpreempt)
+                    base = (
+                        f"mode=schedulingfailure_defpreempt={defpreempt}"
+                        f"_nodes={n}_prio={p}_arrival={a}s"
+                    )
+                    path = out_dir / "plugin" / f"{base}.yaml"
+                    yml = render_job_yaml(
+                        trace_dir=trace_dir(n, p, a),
+                        result_dir=plugin_result_dir(base),
+                        kwokctl_config_file=kwokcfg,
+                        override_envs=[
+                            ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
+                            ("OPTIMIZE_MODE", "scheduling_failure"),
+                        ],
+                    )
+                    write_text(path, yml)
+                    yield path
+
+                # periodic (with blocking + defpreempt + interval)
+                # stable_queue (with blocking + defpreempt + delay)
                 for blocking in BLOCKING_VALUES:
                     blocking_str = "true" if blocking == 1 else "false"
 
                     for defpreempt in DEFPREEMPT_VALUES:
                         kwokcfg = plugin_config_for(defpreempt)
 
-                        # periodic8s
-                        base = (
-                            f"mode=periodic8s_blocking={blocking}_defpreempt={defpreempt}"
-                            f"_nodes={n}_prio={p}_arrival={a}s"
-                        )
-                        path = out_dir / "plugin" / f"{base}.yaml"
-                        yml = render_job_yaml(
-                            trace_dir=trace_dir(n, p, a),
-                            result_dir=plugin_result_dir(base),
-                            kwokctl_config_file=kwokcfg,
-                            override_envs=[
-                                ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
-                                ("OPTIMIZE_MODE", "periodic"),
-                                ("OPTIMIZE_BLOCKING_SOLVING", blocking_str),
-                                ("OPTIMIZE_PERIODIC_INTERVAL", "8s"),
-                            ],
-                        )
-                        write_text(path, yml)
-                        yield path
+                        # periodic intervals: 8s + 32s
+                        for interval_s in PERIODIC_INTERVALS_S:
+                            base = (
+                                f"mode=periodic{interval_s}s_blocking={blocking}_defpreempt={defpreempt}"
+                                f"_nodes={n}_prio={p}_arrival={a}s"
+                            )
+                            path = out_dir / "plugin" / f"{base}.yaml"
+                            yml = render_job_yaml(
+                                trace_dir=trace_dir(n, p, a),
+                                result_dir=plugin_result_dir(base),
+                                kwokctl_config_file=kwokcfg,
+                                override_envs=[
+                                    ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
+                                    ("OPTIMIZE_MODE", "periodic"),
+                                    ("OPTIMIZE_BLOCKING_SOLVING", blocking_str),
+                                    ("OPTIMIZE_PERIODIC_INTERVAL", f"{interval_s}s"),
+                                ],
+                            )
+                            write_text(path, yml)
+                            yield path
 
-                        # stablequeue2s
-                        base = (
-                            f"mode=stablequeue2s_blocking={blocking}_defpreempt={defpreempt}"
-                            f"_nodes={n}_prio={p}_arrival={a}s"
-                        )
-                        path = out_dir / "plugin" / f"{base}.yaml"
-                        yml = render_job_yaml(
-                            trace_dir=trace_dir(n, p, a),
-                            result_dir=plugin_result_dir(base),
-                            kwokctl_config_file=kwokcfg,
-                            override_envs=[
-                                ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
-                                ("OPTIMIZE_MODE", "stable_queue"),
-                                ("OPTIMIZE_BLOCKING_SOLVING", blocking_str),
-                                ("OPTIMIZE_STABLE_QUEUE_DELAY", "2s"),
-                            ],
-                        )
-                        write_text(path, yml)
-                        yield path
+                        # stable-queue delays: 2s + 8s
+                        for delay_s in STABLE_QUEUE_DELAYS_S:
+                            base = (
+                                f"mode=stablequeue{delay_s}s_blocking={blocking}_defpreempt={defpreempt}"
+                                f"_nodes={n}_prio={p}_arrival={a}s"
+                            )
+                            path = out_dir / "plugin" / f"{base}.yaml"
+                            yml = render_job_yaml(
+                                trace_dir=trace_dir(n, p, a),
+                                result_dir=plugin_result_dir(base),
+                                kwokctl_config_file=kwokcfg,
+                                override_envs=[
+                                    ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
+                                    ("OPTIMIZE_MODE", "stable_queue"),
+                                    ("OPTIMIZE_BLOCKING_SOLVING", blocking_str),
+                                    ("OPTIMIZE_STABLE_QUEUE_DELAY", f"{delay_s}s"),
+                                ],
+                            )
+                            write_text(path, yml)
+                            yield path
 
 # ----------------------------- CLI -----------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out-dir", required=True, type=Path,
+    ap.add_argument(
+        "--out-dir",
+        required=True,
+        type=Path,
         help="Output directory root, e.g. data/jobs/kwok_trace_replayer",
     )
     args = ap.parse_args()

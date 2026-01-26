@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/plots_and_tables.py
 """
-python -m scripts.kwok_trace_replayer.plots_and_tables \
-  --in-results analysis/kwok_trace_replayer/results_paired.csv \
-  --out-dir analysis/kwok_trace_replayer
+python -m scripts.kwok_trace_replayer.plots_and_tables
+
+NOTE:
+  - seal_results.py now stores util deltas (delta_U_pp_*) in percentage points (pp) already.
+    So we MUST NOT multiply ΔU by 100 here anymore.
 """
 
-import argparse
-import math
-import re
+import math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -17,6 +17,27 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
+
+from scripts.config.plot_config import (
+    PLOT_FIGURE_DPI,
+    PLOT_TITLE_FONTSIZE,
+    PLOT_AXIS_LABEL_FONTSIZE,
+    PLOT_TICK_FONTSIZE,
+    PLOT_LEGEND_FONTSIZE,
+    PLOT_LEGEND_HANDLE_LENGTH,
+    PLOT_LEGEND_COLUMN_SPACING,
+    PLOT_LEGEND_HANDLE_TEXT_PAD,
+)
+
+# =============================================================================
+# Load and Output paths
+# =============================================================================
+
+IN_RESULTS = Path("analysis/kwok_trace_replayer/results_paired.csv")
+OUT_DIR = Path("analysis/kwok_trace_replayer")
+
+OUT_TABLES_DIR = OUT_DIR / "tables"
+OUT_FIGURES_DIR = OUT_DIR / "figures"
 
 # =============================================================================
 # Constants
@@ -27,7 +48,6 @@ JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
 
 # --- Symmetric-log (symlog) settings for plots ---
 SYMLOG_BASE: float = 10.0
-# Linear region around 0 (in data units of the plotted metric):
 SYMLOG_LINTHRESH_LAT_MS: float = 1.0      # 1 ms linear region
 SYMLOG_LINTHRESH_DELETIONS: float = 1.0   # 1 deletion linear region
 SYMLOG_LINSCALE: float = 1.0              # size of linear region (visual)
@@ -37,7 +57,7 @@ EXPECTED_COLS = [
     "job_name",
     "plugin_config",
 
-    # Util deltas are in fraction-units; we plot/table as percentage points via scale=100.
+    # Util deltas are STORED IN PP already (percentage points)
     "delta_U_pp_eff_mean",
 
     # Running pods deltas (counts)
@@ -57,36 +77,26 @@ KEY_COLS = ["nodes", "kmax", "arrival_s", "mode", "blocking", "defpreempt"]
 # Plot styling
 # =============================================================================
 
-PLOT_MARKER_SIZE = 3.5
+PLOT_TICK_PAD = 2.0
+
+PLOT_MARKER_SIZE = 4.0
+PLOT_MARKER_LINEWIDTH = 0.4
+
 PLOT_ARRIVAL_X_SPACING = 0.35
 PLOT_MODE_X_SPACING = 0.05
 
-PLOT_TICK_FONTSIZE = 7
-PLOT_TICK_PAD = 2.0
-PLOT_TICK_LENGTH = 4.0
+GRID_LEGEND_PAD = 0.046
+PLOT_LEGEND_NCOL = 2
 
-PLOT_AXIS_LABEL_FONTSIZE = 7
-PLOT_Y_PADDING = 0.15
-
-PLOT_LEGEND_FONTSIZE = 7
-PLOT_LEGEND_HANDLE_LENGTH = 0.4
-PLOT_LEGEND_COLUMN_SPACING = 0.5
-PLOT_LEGEND_HANDLE_TEXT_PAD = 0.46
-PLOT_LEGEND_FRAME_LINEWIDTH = 1.0
-PLOT_LEGEND_NCOL = 5
-
-GRID_FIGSIZE = (4.5, 5)
-GRID_LEFT   = 0.125
+GRID_FIGSIZE = (6.0, 5)
+GRID_LEFT   = 0.08
 GRID_RIGHT  = 0.99
 GRID_BOTTOM = 0.04
-GRID_TOP    = 0.92
+GRID_TOP    = 0.86
 GRID_WSPACE = 0.1
 GRID_HSPACE = 0.1
 
-GRID_LEGEND_PAD = 0.04
-
-GRID_TITLE_FONTSIZE = 7
-GRID_YLABEL_PAD_FIG = 0.095
+GRID_YLABEL_PAD_FIG = 0.055
 
 # =============================================================================
 # Parsing helpers
@@ -168,6 +178,29 @@ class RowKey:
         return MODE_ABBR.get((self.mode, int(self.blocking)), f"{self.mode}:{self.blocking}")
 
 # =============================================================================
+# Fixed series colors + labels (deterministic)
+# =============================================================================
+
+set2, set3 = plt.get_cmap("Set2").colors, plt.get_cmap("Set3").colors
+
+SERIES = [
+    {"key": "sf",    "label": "Scheduling-failure",      "color": set3[11], "match": lambda rk: rk.mode == "scheduling-failure"},
+    {"key": "pr8b",  "label": "Periodic (blocking) with 8 s interval",  "color": set2[0],  "match": lambda rk: (rk.mode == "periodic8s") and (int(rk.blocking) == 1)},
+    {"key": "pr8nb", "label": "Periodic (non-blocking) with 8 s interval", "color": set2[1],  "match": lambda rk: (rk.mode == "periodic8s") and (int(rk.blocking) == 0)},
+    {"key": "sq2b",  "label": "Stable-queue (blocking) with 2 s interval",  "color": set2[2],  "match": lambda rk: (rk.mode == "stable-queue-2s") and (int(rk.blocking) == 1)},
+    {"key": "sq2nb", "label": "Stable-queue (non-blocking) with 2 s interval", "color": set2[3],  "match": lambda rk: (rk.mode == "stable-queue-2s") and (int(rk.blocking) == 0)},
+]
+
+def series_style(rk: "RowKey") -> Dict[str, object]:
+    for i, s in enumerate(SERIES):
+        if s["match"](rk):
+            return {"label": str(s["label"]), "color": s["color"], "rank": i}
+    return {"label": rk.abbr(), "color": set3[0], "rank": 10_000}
+
+def sort_series(rks: List["RowKey"]) -> List["RowKey"]:
+    return sorted(rks, key=lambda rk: (series_style(rk)["rank"], rk.sort_key()))
+
+# =============================================================================
 # Formatting helpers (tables)
 # =============================================================================
 
@@ -195,7 +228,10 @@ def fmt_unsigned_int(x: object, nan_s: str) -> str:
 
 def arrival_group_label(a: float, *, latex: bool) -> str:
     a_i = int(a) if abs(a - round(a)) < 1e-9 else a
-    return (rf"$\mu_A={a_i}\,\mathrm{{s}}$" if latex else f"muA={a_i}s")
+    if latex:
+        return rf"$\mathrm{{inter-arrival}}={a_i}\,\mathrm{{s}}$"
+    return f"inter-arrival = {a_i} s"
+
 
 def kmax_caption(kmax: int, *, latex: bool, without_default_preemption: bool) -> str:
     if latex:
@@ -265,7 +301,7 @@ class MetricRow:
     getter: MetricGetter
     fmt_kind: str  # "signed_float" | "unsigned_int"
     decimals: int = TABLE_DECIMALS
-    scale: float = 1.0
+    scale: float = 1.0  # keep for other metrics; ΔU must be 1.0 now
 
 def _fmt_metric_value(v: float, *, row: MetricRow, latex: bool) -> str:
     ns = nan_str(latex)
@@ -413,16 +449,6 @@ def ascii_metric_matrix_tables(
 
 YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, kmax) -> y
 
-def _default_color_cycle() -> List[str]:
-    return list(plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3", "C4"]))
-
-def _build_color_map(labels: List[str]) -> Dict[str, str]:
-    cycle = _default_color_cycle()
-    return {lbl: cycle[i % len(cycle)] for i, lbl in enumerate(labels)}
-
-def _make_mode_legend_handles(labels: List[str], color_map: Dict[str, str]) -> List[Line2D]:
-    return [Line2D([0], [0], color=color_map[lbl], linewidth=1.8) for lbl in labels]
-
 def plot_series(df: pd.DataFrame, *, kmax: int, defpreempt_value: int) -> List[RowKey]:
     """
     For plotting we keep:
@@ -443,28 +469,7 @@ def plot_series(df: pd.DataFrame, *, kmax: int, defpreempt_value: int) -> List[R
         key=lambda rk: rk.sort_key(),
     )
 
-def collect_plot_y_vals(
-    *,
-    lookup: pd.DataFrame,
-    df: pd.DataFrame,
-    col: str,
-    nodes_order: List[int],
-    arrivals_order: List[float],
-    kmax: int,
-    defpreempt_value: int,
-    scale: float = 1.0,
-) -> List[float]:
-    series = plot_series(df, kmax=kmax, defpreempt_value=defpreempt_value)
-    y_vals: List[float] = []
-    for rk in series:
-        for a in arrivals_order:
-            for n in nodes_order:
-                v = lookup_value(lookup, nodes=n, kmax=kmax, arrival_s=a, rk=rk, col=col)
-                if is_finite(v):
-                    y_vals.append(float(v) * float(scale))
-    return y_vals
-
-def draw_dumbbell_on_ax(
+def draw_points_on_ax(
     *,
     ax: plt.Axes,
     nodes_order: List[int],
@@ -472,49 +477,87 @@ def draw_dumbbell_on_ax(
     kmax: int,
     series: List[RowKey],
     y_of: YOfFn,
-    color_map: Dict[str, str],
     ylim: Tuple[float, float],
     show_xticklabels: bool,
     show_yticklabels: bool,
     y_scale: str = "linear",   # "linear" | "symlog"
     symlog_linthresh: float = 1.0,
 ) -> None:
-    x_base = [i * PLOT_ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
+    n_arr = len(arrivals_order)
+    step = float(PLOT_ARRIVAL_X_SPACING)
+
+    # Bands start at x=0: boundaries are 0, step, 2*step, ...
+    boundaries = [i * step for i in range(n_arr + 1)]
+
+    # Points centered in each band: 0.5*step, 1.5*step, ...
+    x_base = [(i + 0.5) * step for i in range(n_arr)]
+
     m = max(1, len(series))
 
+    # Ensure points fit inside the first/last band while using full x-range
+    if m <= 1:
+        mode_spacing = 0.0
+    else:
+        # keep max offset within ~45% of band half-width
+        max_allowed = 0.45 * step
+        mode_spacing = min(PLOT_MODE_X_SPACING, (2.0 * max_allowed) / float(m - 1))
+
     for i, rk in enumerate(series):
-        label = rk.abbr()
-        color = color_map[label]
-        mode_offset = (i - (m - 1) / 2.0) * PLOT_MODE_X_SPACING
+        sty = series_style(rk)
+        color = sty["color"]
+        mode_offset = (i - (m - 1) / 2.0) * mode_spacing
 
         for xi, a in enumerate(arrivals_order):
             x = x_base[xi] + mode_offset
             y0 = y_of(rk, nodes_order[0], a, kmax)
             y1 = y_of(rk, nodes_order[1], a, kmax)
 
-            if is_finite(y0) and is_finite(y1):
-                ax.plot([x, x], [y0, y1], linestyle="--", color=color, linewidth=1.0)
             if is_finite(y0):
-                ax.plot([x], [y0], linestyle="None", marker="o", markersize=PLOT_MARKER_SIZE, color=color)
+                ax.plot([x], [y0], marker="o", linestyle="None",
+                        markersize=PLOT_MARKER_SIZE, markerfacecolor=color,
+                        markeredgecolor="black", markeredgewidth=PLOT_MARKER_LINEWIDTH)
             if is_finite(y1):
-                ax.plot([x], [y1], linestyle="None", marker="s", markersize=PLOT_MARKER_SIZE, color=color)
+                ax.plot([x], [y1], marker="s", linestyle="None",
+                        markersize=PLOT_MARKER_SIZE, markerfacecolor=color,
+                        markeredgecolor="black", markeredgewidth=PLOT_MARKER_LINEWIDTH)
 
     if y_scale == "symlog":
         ax.set_yscale("symlog", base=SYMLOG_BASE, linthresh=symlog_linthresh, linscale=SYMLOG_LINSCALE)
     else:
         ax.set_yscale("linear")
 
-    ax.axhline(0.0, linewidth=0.8, color="black", linestyle="--", alpha=0.7)
+    ax.axhline(0.0, linewidth=0.8, color="black", linestyle="-", alpha=0.7)
     ax.set_ylim(float(ylim[0]), float(ylim[1]))
 
-    pad = max(0.10, PLOT_MODE_X_SPACING * (m / 2.0 + 1.0))
-    ax.set_xlim(min(x_base) - pad, max(x_base) + pad)
+    if y_scale == "linear":
+        y0 = int(math.ceil(float(ylim[0])))
+        y1 = int(math.floor(float(ylim[1])))
+        ax.set_yticks(list(range(y0, y1 + 1)))
 
-    ax.set_xticks(x_base)
-    ax.tick_params(axis="both", which="major", labelsize=PLOT_TICK_FONTSIZE, pad=PLOT_TICK_PAD, length=PLOT_TICK_LENGTH)
+    # Use the full plotting width for categories (no extra right padding)
+    ax.set_xlim(boundaries[0], boundaries[-1])
+    ax.margins(x=0)
+
+    # Draw dashed boundary lines
+    for bx in boundaries:
+        ax.axvline(bx, linewidth=0.8, color="black", linestyle="--", alpha=0.7, zorder=0)
+
+    # Ticks at boundaries (two ticks per category)
+    ax.set_xticks(boundaries)
+
+    ax.tick_params(axis="both", which="major", labelsize=PLOT_TICK_FONTSIZE, pad=PLOT_TICK_PAD)
 
     if show_xticklabels:
-        ax.set_xticklabels([arrival_group_label(a, latex=True) for a in arrivals_order])
+        ax.set_xticklabels([""] * len(boundaries))
+        for xi, a in enumerate(arrivals_order):
+            ax.text(
+                x_base[xi], -0.05,
+                arrival_group_label(a, latex=False),
+                transform=ax.get_xaxis_transform(),
+                ha="center", va="top",
+                fontsize=PLOT_TICK_FONTSIZE,
+                clip_on=False,
+            )
     else:
         ax.tick_params(labelbottom=False)
 
@@ -526,27 +569,17 @@ def draw_dumbbell_on_ax(
             continue
         ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
 
-# =============================================================================
-# Main + CLI
-# =============================================================================
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate BIG tables and grid figures from sealed results.")
-    p.add_argument("--in-results", type=Path, required=True, help="Path to sealed results_paired.csv.")
-    p.add_argument("--out-dir", type=Path, required=True, help="Output directory (tables + figures subdirs).")
-    return p.parse_args()
+# =============================================================================
+# Main
+# =============================================================================
 
 def main() -> None:
-    args = parse_args()
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUT_TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    tables_dir = out_dir / "tables"
-    figures_dir = out_dir / "figures"
-    tables_dir.mkdir(parents=True, exist_ok=True)
-    figures_dir.mkdir(parents=True, exist_ok=True)
-
-    df = load_results(Path(args.in_results))
+    df = load_results(IN_RESULTS)
     lookup = build_lookup(df)
 
     nodes_order = sorted(df["nodes"].dropna().astype(int).unique().tolist())
@@ -576,7 +609,6 @@ def main() -> None:
     for k in kmaxs:
         dff = df[df["kmax"].astype(int) == k]
         rks = [RowKey.from_plugin_config(pc) for pc in dff["plugin_config"].unique().tolist()]
-
         modes_def1_tables[k] = _sorted_modes([rk for rk in rks if (rk.mode != "scheduling-failure" and rk.defpreempt == 1)])
         modes_def0_tables[k] = _sorted_modes([rk for rk in rks if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 0)])
 
@@ -585,19 +617,16 @@ def main() -> None:
 
     def metrics_big(kmax: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
-            # Util is stored as fraction delta; convert to percentage points
-            MetricRow(r"$\Delta U \;(\mathrm{pp})$", "ΔU (pp)", g("delta_U_pp_eff_mean"), "signed_float", decimals=1, scale=100.0),
+            MetricRow(r"$\Delta~\mathrm{usage}\;(\mathrm{pp})$", "Δ usage (pp)", g("delta_U_pp_eff_mean"), "signed_float", decimals=1, scale=1.0),
 
-            # Already in ms in results_paired.csv -> no scaling
-            MetricRow(r"$\Delta L_{\mathrm{tot}}\;(\mathrm{ms})$", "ΔL_tot (ms)",
-                      g("delta_L_ms_total_mean"), "signed_float", decimals=0, scale=1.0),
+            MetricRow(r"$\Delta~\mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", "Δ latency_total (ms)", g("delta_L_ms_total_mean"), "signed_float", decimals=0, scale=1.0),
         ]
         if kmax != 1:
             for p in range(1, 5):
                 rows.append(
                     MetricRow(
-                        rf"$\Delta L_{{p_{p}}}\;(\mathrm{{ms}})$",
-                        f"ΔL_p{p} (ms)",
+                        rf"$\Delta~\mathrm{{latency}}_{{p_{p}}}\;(\mathrm{{ms}})$",
+                        f"Δ latency_p{p} (ms)",
                         g(f"delta_L_ms_p{p}_mean"),
                         "signed_float",
                         decimals=0,
@@ -605,29 +634,32 @@ def main() -> None:
                     )
                 )
 
-        # Deletions columns are delta_D_num_*
         rows.append(
             MetricRow(
-                r"$\Delta D_{\mathrm{tot}}\;(\mathrm{\#deletions})$",
-                "ΔD_tot (#deletions)",
+                r"$\Delta~\mathrm{deletions}_{\mathrm{total}}\;(\mathrm{count})$",
+                "Δ deletions_total (count)",
                 g("delta_D_num_total_mean"),
                 "signed_float",
                 decimals=1,
+                scale=1.0,
             )
         )
         if kmax != 1:
             for p in range(1, 5):
                 rows.append(
                     MetricRow(
-                        rf"$\Delta D_{{p_{p}}}\;(\mathrm{{\#deletions}})$",
-                        f"ΔD_p{p} (#deletions)",
+                        rf"$\Delta~\mathrm{{deletions}}_{{p_{p}}}\;(\mathrm{{count}})$",
+                        f"Δ deletions_p{p} (count)",
                         g(f"delta_D_num_p{p}_mean"),
                         "signed_float",
                         decimals=1,
+                        scale=1.0,
                     )
                 )
+        
+        rows.append(MetricRow(f"# solver runs", "# solver runs", g("solver_attempts_mean"), "unsigned_int"))
 
-        rows.append(MetricRow(r"$\#O$", "#O", g("plan_activated_mean"), "unsigned_int"))
+        rows.append(MetricRow(f"# plan activations", "# plan activations", g("plan_activated_mean"), "unsigned_int"))
         return rows
 
     metrics_map_big = {k: metrics_big(k) for k in kmaxs}
@@ -640,7 +672,7 @@ def main() -> None:
         ("table_without_defaultpreemption_util_latency_deletions_optimizations", modes_def0_tables, True),
     ]:
         latex_metric_matrix_tables(
-            out_path=tables_dir / f"{stem}.tex",
+            out_path=OUT_TABLES_DIR / f"{stem}.tex",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             modes_by_kmax=modes_map,
@@ -648,7 +680,7 @@ def main() -> None:
             without_default_preemption=without_defpreempt,
         )
         ascii_metric_matrix_tables(
-            out_path=tables_dir / f"{stem}.txt",
+            out_path=OUT_TABLES_DIR / f"{stem}.txt",
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
             modes_by_kmax=modes_map,
@@ -659,7 +691,6 @@ def main() -> None:
     # -----------------------------
     # Figures
     # -----------------------------
-
     def y_from_col(*, col: str, scale: float) -> YOfFn:
         def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
             v = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk, col=col)
@@ -667,30 +698,42 @@ def main() -> None:
         return _y
 
     def plot_grid_figure(*, defpreempt_value: int, filename_stem: str) -> None:
-        series_union = sorted(
+        series_union = sort_series(list(
             set(plot_series(df, kmax=kmax_cols[0], defpreempt_value=defpreempt_value))
-            | set(plot_series(df, kmax=kmax_cols[1], defpreempt_value=defpreempt_value)),
-            key=lambda rk: rk.sort_key(),
-        )
-        labels = [rk.abbr() for rk in series_union]
-        color_map = _build_color_map(labels)
+            | set(plot_series(df, kmax=kmax_cols[1], defpreempt_value=defpreempt_value))
+        ))
+        present = {series_style(rk)["label"] for rk in series_union}
+
+        legend_labels = []
+        legend_handles = []
+        for s in SERIES:
+            if s["label"] in present:
+                legend_labels.append(s["label"])
+                legend_handles.append(Line2D([0], [0], color=s["color"], linewidth=1.8))
+
+        seen = set(legend_labels)
+        for rk in series_union:
+            sty = series_style(rk)
+            if sty["label"] not in seen:
+                legend_labels.append(sty["label"])
+                legend_handles.append(Line2D([0], [0], color=sty["color"], linewidth=1.8))
+                seen.add(sty["label"])
 
         fig, axes = plt.subplots(nrows=3, ncols=2, figsize=GRID_FIGSIZE, sharex=True)
 
-        axes[0, 0].set_title(rf"$k_{{\max}}={kmax_cols[0]}$", fontsize=GRID_TITLE_FONTSIZE)
-        axes[0, 1].set_title(rf"$k_{{\max}}={kmax_cols[1]}$", fontsize=GRID_TITLE_FONTSIZE)
+        axes[0, 0].set_title(f"#priorities = {kmax_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
+        axes[0, 1].set_title(f"#priorities = {kmax_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
 
-        # Util (linear) -- uses delta_U_pp_eff_mean
+        # Util (linear) -- ΔU already pp -> scale=1.0
         for col_i, k in enumerate(kmax_cols):
-            draw_dumbbell_on_ax(
+            draw_points_on_ax(
                 ax=axes[0, col_i],
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
                 kmax=k,
                 series=series_union,
-                y_of=y_from_col(col="delta_U_pp_eff_mean", scale=100.0),  # fraction -> pp
-                color_map=color_map,
-                ylim=(-4.1, 4.1),
+                y_of=y_from_col(col="delta_U_pp_eff_mean", scale=1.0),
+                ylim=(-4.0, 4.0),
                 show_xticklabels=False,
                 show_yticklabels=(col_i == 0),
                 y_scale="linear",
@@ -698,14 +741,13 @@ def main() -> None:
 
         # Latency (symlog) -- already in ms
         for col_i, k in enumerate(kmax_cols):
-            draw_dumbbell_on_ax(
+            draw_points_on_ax(
                 ax=axes[1, col_i],
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
                 kmax=k,
                 series=series_union,
                 y_of=y_from_col(col="delta_L_ms_total_mean", scale=1.0),
-                color_map=color_map,
                 ylim=(-10e3 - 1.0, 10e3 + 1.0),
                 show_xticklabels=False,
                 show_yticklabels=(col_i == 0),
@@ -713,16 +755,15 @@ def main() -> None:
                 symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS,
             )
 
-        # Deletions (symlog) -- uses delta_D_num_total_mean
+        # Deletions (symlog)
         for col_i, k in enumerate(kmax_cols):
-            draw_dumbbell_on_ax(
+            draw_points_on_ax(
                 ax=axes[2, col_i],
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
                 kmax=k,
                 series=series_union,
                 y_of=y_from_col(col="delta_D_num_total_mean", scale=1.0),
-                color_map=color_map,
                 ylim=(-10e3 - 1.0, 10e3 + 1.0),
                 show_xticklabels=True,
                 show_yticklabels=(col_i == 0),
@@ -735,49 +776,45 @@ def main() -> None:
             wspace=GRID_WSPACE, hspace=GRID_HSPACE,
         )
 
-        handles = _make_mode_legend_handles(labels, color_map)
         bbox_l = axes[0, 0].get_position()
         bbox_r = axes[0, 1].get_position()
         x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
         y_top_grid = max(bbox_l.y1, bbox_r.y1)
         legend_y = min(0.98, y_top_grid + GRID_LEGEND_PAD)
 
-        leg = fig.legend(
-            handles, labels,
+        fig.legend(
+            legend_handles, legend_labels,
             loc="lower center",
             bbox_to_anchor=(x_center_grid, legend_y),
-            ncol=min(int(PLOT_LEGEND_NCOL), len(labels)),
-            frameon=True,
+            ncol=min(int(PLOT_LEGEND_NCOL), len(legend_labels)),
             fontsize=PLOT_LEGEND_FONTSIZE,
             handlelength=PLOT_LEGEND_HANDLE_LENGTH,
             handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
             columnspacing=PLOT_LEGEND_COLUMN_SPACING,
-            borderaxespad=0.0,
         )
-        leg.get_frame().set_linewidth(PLOT_LEGEND_FRAME_LINEWIDTH)
 
         left_bbox = axes[0, 0].get_position()
         x_text = max(0.0, left_bbox.x0 - GRID_YLABEL_PAD_FIG)
 
         row_labels = [
-            r"$\Delta U_{\mathrm{eff}}$ (pp)",
-            r"$\Delta L$ (ms)",
-            r"$\Delta D$ (#deletions)",
+            r"$\Delta$ usage (pp)",
+            r"$\Delta$ latency (ms)",
+            r"$\Delta$ deletions (count)",
         ]
         for r, text in enumerate(row_labels):
             bbox = axes[r, 0].get_position()
             y_center = 0.5 * (bbox.y0 + bbox.y1)
             fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
-        fig.savefig(figures_dir / f"{filename_stem}.png", dpi=200)
-        fig.savefig(figures_dir / f"{filename_stem}.pdf")
+        fig.savefig(OUT_FIGURES_DIR / f"{filename_stem}.png", dpi=PLOT_FIGURE_DPI)
+        fig.savefig(OUT_FIGURES_DIR / f"{filename_stem}.pdf")
         plt.close(fig)
 
     plot_grid_figure(defpreempt_value=1, filename_stem="grid_util_latency_deletions")
     plot_grid_figure(defpreempt_value=0, filename_stem="grid_util_latency_deletions_without_defaultpreemption")
 
-    print(f"Wrote tables to:  {tables_dir}")
-    print(f"Wrote figures to: {figures_dir}")
+    print(f"Wrote tables to:  {OUT_TABLES_DIR}")
+    print(f"Wrote figures to: {OUT_FIGURES_DIR}")
 
 if __name__ == "__main__":
     main()

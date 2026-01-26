@@ -2,6 +2,10 @@
 # scripts/kwok_trace_replayer/seal_results.py
 """
 python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer
+
+NOTE:
+  - We now STORE util deltas as percentage points (pp) directly in results_paired.csv.
+    I.e., +1.2 means +1.2 percentage points, not +0.012 (fraction).
 """
 
 import argparse, json, math, re
@@ -40,13 +44,19 @@ POD_TIME_COL = "time_s"
 MAX_K_OUT = 4
 
 # latency in seconds conversion
-LATENCY_S_SCALE = 1000.0 # to milliseconds
+LATENCY_S_SCALE = 1000.0  # to milliseconds
+
+# Util scaling:
+# - internal util values are assumed in [0,1]
+# - we STORE delta_U_* in percentage points (pp) => multiply by 100
+UTIL_TO_PP = 100.0
 
 PAIRED_COLS = [
     "job_name",
     "plugin_config",
     "n_seed",
     "T_end_s_mean",
+    # STORED IN pp (percentage points)
     "delta_U_pp_cpu_mean", "delta_U_pp_mem_mean", "delta_U_pp_eff_mean",
     "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
     "delta_D_num_p1_mean", "delta_D_num_p2_mean", "delta_D_num_p3_mean", "delta_D_num_p4_mean", "delta_D_num_total_mean",
@@ -520,15 +530,17 @@ def main() -> None:
             default_metrics = compute_horizon_metrics(default_general_stats, H)
             plugin_metrics = compute_horizon_metrics(plugin_general_stats, H)
 
-            dU_cpu = float(plugin_metrics["U_cpu_mean"]) - float(default_metrics["U_cpu_mean"])
-            dU_mem = float(plugin_metrics["U_mem_mean"]) - float(default_metrics["U_mem_mean"])
-            dU_eff = float(plugin_metrics["U_eff_mean"]) - float(default_metrics["U_eff_mean"])
+            # Util deltas (fraction) -> STORE IN PP
+            dU_cpu_pp = (float(plugin_metrics["U_cpu_mean"]) - float(default_metrics["U_cpu_mean"])) * UTIL_TO_PP
+            dU_mem_pp = (float(plugin_metrics["U_mem_mean"]) - float(default_metrics["U_mem_mean"])) * UTIL_TO_PP
+            dU_eff_pp = (float(plugin_metrics["U_eff_mean"]) - float(default_metrics["U_eff_mean"])) * UTIL_TO_PP
+
             dR = {p: float(plugin_metrics[f"R_p{p}_mean"]) - float(default_metrics[f"R_p{p}_mean"]) for p in range(1, MAX_K_OUT + 1)}
             dD = {p: float(plugin_metrics[f"D_p{p}"]) - float(default_metrics[f"D_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
             dR_total = float(np.nansum(list(dR.values())))
             dD_total = float(np.nansum(list(dD.values())))
 
-            # Latency (NOW IN MS)
+            # Latency (MS)
             default_L = latency_means_first_batch_ms(default_pod_stats, eps_s=eps_s)
             plugin_L = latency_means_first_batch_ms(plugin_pod_stats, eps_s=eps_s)
             dL_total = float(plugin_L["L_ms_total"]) - float(default_L["L_ms_total"])
@@ -542,24 +554,30 @@ def main() -> None:
                     "plugin_config": plugin_config,
                     "seed": seed,
                     "T_end_s": H,
-                    "delta_U_pp_cpu": dU_cpu,
-                    "delta_U_pp_mem": dU_mem,
-                    "delta_U_pp_eff": dU_eff,
+
+                    # STORED IN PP (percentage points)
+                    "delta_U_pp_cpu": dU_cpu_pp,
+                    "delta_U_pp_mem": dU_mem_pp,
+                    "delta_U_pp_eff": dU_eff_pp,
+
                     "delta_R_num_p1": dR[1],
                     "delta_R_num_p2": dR[2],
                     "delta_R_num_p3": dR[3],
                     "delta_R_num_p4": dR[4],
                     "delta_R_num_total": dR_total,
+
                     "delta_D_num_p1": dD[1],
                     "delta_D_num_p2": dD[2],
                     "delta_D_num_p3": dD[3],
                     "delta_D_num_p4": dD[4],
                     "delta_D_num_total": dD_total,
+
                     "delta_L_ms_p1": dL_prio[1],
                     "delta_L_ms_p2": dL_prio[2],
                     "delta_L_ms_p3": dL_prio[3],
                     "delta_L_ms_p4": dL_prio[4],
                     "delta_L_ms_total": dL_total,
+
                     "solver_attempts": float(opt_totals["solver_attempts"]),
                     "solver_optimal": float(opt_totals["solver_optimal"]),
                     "solver_feasible": float(opt_totals["solver_feasible"]),
@@ -617,6 +635,7 @@ def main() -> None:
     agg.to_csv(out_dir / "results_paired.csv", index=False)
 
     print(f"Wrote outputs to: {out_dir}")
+    print("NOTE: plots/tables scripts should NOT multiply ΔU by 100 anymore (it is already pp).")
 
 if __name__ == "__main__":
     main()

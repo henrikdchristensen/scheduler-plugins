@@ -1,8 +1,0 @@
-trace-dir: data/traces/nodes=32_prio=1_arrival=4s
-result-dir: results/plugin/mode=schedulingfailure_nodes=32_prio=1_arrival=4s
-kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
-override-kwokctl-envs:
-  - name: SOLVER_PYTHON_TIMEOUT
-    value: "16s"
-  - name: OPTIMIZE_MODE
-    value: "scheduling_failure"
