@@ -43,6 +43,7 @@ def _yaml_quote(value: str) -> str:
     escaped = value.replace('"', '\\"')
     return f'"{escaped}"'
 
+
 def render_job_yaml(
     trace_dir: str,
     result_dir: str,
@@ -63,23 +64,29 @@ def render_job_yaml(
 
     return "\n".join(lines) + "\n"
 
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
 
 # ----------------------------- Path conventions -----------------------------
 
 def trace_dir(nodes: int, prio: int, arrival_s: int) -> str:
     return f"data/traces/nodes={nodes}_prio={prio}_arrival={arrival_s}s"
 
+
 def default_result_dir(nodes: int, prio: int, arrival_s: int) -> str:
     return f"results/default/nodes={nodes}_prio={prio}_arrival={arrival_s}s"
+
 
 def plugin_result_dir(base_filename_no_ext: str) -> str:
     return f"results/plugin/{base_filename_no_ext}"
 
+
 def plugin_config_for(defpreempt: int) -> str:
     return PLUGIN_KWOKCTL_CONFIG_TEMPLATE.format(defpreempt=defpreempt)
+
 
 # ----------------------------- Generators -----------------------------
 
@@ -99,32 +106,37 @@ def iter_default_jobs(out_dir: Path) -> Iterable[Path]:
                 write_text(path, yml)
                 yield path
 
+
 def iter_plugin_jobs(out_dir: Path) -> Iterable[Path]:
     for n in NODES:
         for p in PRIOS:
             for a in ARRIVALS_S:
-                # ---------------------------------------------------------
-                # schedulingfailure: NOW also with/without default preemption
-                # ---------------------------------------------------------
-                for defpreempt in DEFPREEMPT_VALUES:
-                    kwokcfg = plugin_config_for(defpreempt)
+                # ---------------------------------------------------------------------
+                # schedulingfailure: NOW with blocking/non-blocking AND with/without
+                # default preemption
+                # ---------------------------------------------------------------------
+                for blocking in BLOCKING_VALUES:
+                    blocking_str = "true" if blocking == 1 else "false"
+                    for defpreempt in DEFPREEMPT_VALUES:
+                        kwokcfg = plugin_config_for(defpreempt)
 
-                    base = (
-                        f"mode=schedulingfailure_defpreempt={defpreempt}"
-                        f"_nodes={n}_prio={p}_arrival={a}s"
-                    )
-                    path = out_dir / "plugin" / f"{base}.yaml"
-                    yml = render_job_yaml(
-                        trace_dir=trace_dir(n, p, a),
-                        result_dir=plugin_result_dir(base),
-                        kwokctl_config_file=kwokcfg,
-                        override_envs=[
-                            ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
-                            ("OPTIMIZE_MODE", "scheduling_failure"),
-                        ],
-                    )
-                    write_text(path, yml)
-                    yield path
+                        base = (
+                            f"mode=schedulingfailure_blocking={blocking}_defpreempt={defpreempt}"
+                            f"_nodes={n}_prio={p}_arrival={a}s"
+                        )
+                        path = out_dir / "plugin" / f"{base}.yaml"
+                        yml = render_job_yaml(
+                            trace_dir=trace_dir(n, p, a),
+                            result_dir=plugin_result_dir(base),
+                            kwokctl_config_file=kwokcfg,
+                            override_envs=[
+                                ("SOLVER_PYTHON_TIMEOUT", SOLVER_TIMEOUT),
+                                ("OPTIMIZE_MODE", "scheduling_failure"),
+                                ("OPTIMIZE_BLOCKING_SOLVING", blocking_str),
+                            ],
+                        )
+                        write_text(path, yml)
+                        yield path
 
                 # periodic (with blocking + defpreempt + interval)
                 # stable_queue (with blocking + defpreempt + delay)
@@ -176,6 +188,7 @@ def iter_plugin_jobs(out_dir: Path) -> Iterable[Path]:
                             write_text(path, yml)
                             yield path
 
+
 # ----------------------------- CLI -----------------------------
 
 def main() -> None:
@@ -199,6 +212,7 @@ def main() -> None:
     print(f"Wrote {written} job files under: {out_dir}")
     print(f"  - {out_dir / 'default'}")
     print(f"  - {out_dir / 'plugin'}")
+
 
 if __name__ == "__main__":
     main()

@@ -29,7 +29,7 @@ func TestModePredicates(t *testing.T) {
 					// Expected behavior derived directly from implementation contracts.
 					wantSchedulingFailure := mode == ModeSchedulingFailure
 					wantManualBlocking := mode == ModeManualBlocking
-					wantNonBlocking := (mode != ModeSchedulingFailure) && !blocking
+					wantNonBlocking := !blocking
 
 					wantBlockingStr := "Blocking"
 					if wantNonBlocking {

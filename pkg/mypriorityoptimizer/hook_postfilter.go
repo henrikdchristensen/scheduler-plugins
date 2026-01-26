@@ -3,7 +3,6 @@ package mypriorityoptimizer
 
 import (
 	"context"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -34,7 +33,6 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 	}
 
 	klog.InfoS(msg(stage, "start"), "pod", klog.KObj(pending))
-	postFilterSleep(1 * time.Second)
 
 	// Run optimization to get a plan for this pod.
 	plan, err := postFilterRunOptimization(pl, ctx, pending)
@@ -62,7 +60,6 @@ func (pl *SharedState) PostFilter(ctx context.Context, state fwk.CycleState, pen
 // -------------------------
 
 var (
-	postFilterSleep                    = time.Sleep
 	postFilterSchedulingFailureEnabled = isSchedulingFailureMode
 	postFilterRunOptimization          = func(pl *SharedState, ctx context.Context, pending *v1.Pod) (*Plan, error) {
 		plan, _, _, _, _, err := pl.runOptimizationFlow(ctx, pending)

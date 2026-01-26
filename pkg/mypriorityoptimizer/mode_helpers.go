@@ -22,9 +22,8 @@ func isManualBlockingMode() bool { return OptimizeMode == ModeManualBlocking }
 // isNonBlockingSolving is true for modes where we:
 // - collect pods at PostFilter, and
 // - take Active only after we know a plan is worthwhile.
-// SchedulingFailure is always treated as blocking.
 func isNonBlockingSolving() bool {
-	return OptimizeMode != ModeSchedulingFailure && !OptimizeBlockingSolving
+	return !OptimizeBlockingSolving
 }
 
 // -------------------------
