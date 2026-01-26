@@ -11,10 +11,11 @@ profiles:
         - name: MyPriorityOptimizer
     postFilter:
       enabled:
+        - name: DefaultPreemption
         - name: MyPriorityOptimizer
     reserve:
       enabled:
         - name: MyPriorityOptimizer
-    # multiPoint:
-    #   disabled:
-    #     - name: DefaultPreemption
+    multiPoint:
+      disabled:
+        - name: DefaultPreemption
