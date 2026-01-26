@@ -19,8 +19,6 @@ NOTE (initial pods / steady-state alignment):
     This avoids ramping from an empty cluster without explicitly simulating t<0 arrivals.
 """
 
-#TODO: make all initial pods lower than MIN_LIFETIME_S to MIN_LIFETIME_S
-
 import os, argparse, math, copy, heapq, json, logging, yaml
 from dataclasses import asdict, dataclass, field
 from pathlib import Path

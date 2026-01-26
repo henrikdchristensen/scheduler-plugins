@@ -2,8 +2,6 @@
 # scripts/kwok_trace_replayer/seal_results.py
 """
 python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer
-
-We compute per-seed metrics over the common horizon H = min(T_end_default, T_end_plugin), then mean over seeds.
 """
 
 import argparse, json, math, re
@@ -41,16 +39,20 @@ POD_TIME_COL = "time_s"
 
 MAX_K_OUT = 4
 
+# latency in seconds conversion
+LATENCY_S_SCALE = 1000.0 # to milliseconds
+
 PAIRED_COLS = [
     "job_name",
     "plugin_config",
     "n_seed",
     "T_end_s_mean",
-    "delta_U_cpu_run_mean", "delta_U_mem_run_mean", "delta_U_eff_run_mean",
-    "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean", "delta_R_total_mean",
-    "delta_D_p1_mean", "delta_D_p2_mean", "delta_D_p3_mean", "delta_D_p4_mean", "delta_D_total_mean",
-    "delta_L_s_p1_mean", "delta_L_s_p2_mean", "delta_L_s_p3_mean", "delta_L_s_p4_mean", "delta_L_s_total_mean",
-    "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean", "solver_failed_mean", "plan_not_applicable_mean", "plan_activated_mean",
+    "delta_U_pp_cpu_mean", "delta_U_pp_mem_mean", "delta_U_pp_eff_mean",
+    "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
+    "delta_D_num_p1_mean", "delta_D_num_p2_mean", "delta_D_num_p3_mean", "delta_D_num_p4_mean", "delta_D_num_total_mean",
+    "delta_L_ms_p1_mean", "delta_L_ms_p2_mean", "delta_L_ms_p3_mean", "delta_L_ms_p4_mean", "delta_L_ms_total_mean",
+    "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean", "solver_failed_mean",
+    "plan_not_applicable_mean", "plan_activated_mean",
 ]
 
 OPT_TOTAL_KEYS = {
@@ -79,7 +81,7 @@ def parse_args() -> argparse.Namespace:
 
 @dataclass(frozen=True)
 class GeneralData:
-    t: np.ndarray # normalized time (starts at 0)
+    t: np.ndarray  # normalized time (starts at 0)
     T_end: float
     cpu_util: np.ndarray
     mem_util: np.ndarray
@@ -93,7 +95,9 @@ class GeneralData:
 
 def cummulative_time_integral(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
+    Compute cumulative time integral of stepwise y over t.
     cumulative[i] = ∫_0^{t[i]} y(s) ds, with y stepwise using y[j] on [t[j], t[j+1]).
+    Used for time-weighted means.
     Supports:
       - y shape (n,) -> returns shape (n,)
       - y shape (n, m) -> returns shape (n, m) with column-wise integrals
@@ -102,8 +106,7 @@ def cummulative_time_integral(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     y_arr = np.asarray(y)
     if y_arr.ndim not in (1, 2):
         raise ValueError(f"_cummulative_time_integral expects 1D or 2D y, got shape {y_arr.shape}")
-    
-    # Handle edge cases
+
     if n == 0:
         if y_arr.ndim == 1:
             return np.array([], dtype=float)
@@ -112,15 +115,14 @@ def cummulative_time_integral(t: np.ndarray, y: np.ndarray) -> np.ndarray:
         if y_arr.ndim == 1:
             return np.zeros(1, dtype=float)
         return np.zeros((1, y_arr.shape[1]), dtype=float)
-    
-    # Compute time differences
+
     dt = np.diff(t)
 
-    # Cumulative integral
     if y_arr.ndim == 1:
         cum1 = np.zeros(n, dtype=float)
         cum1[1:] = np.cumsum(y_arr[:-1] * dt)
         return cum1
+
     dt_col = dt[:, None]
     cum2 = np.zeros((n, y_arr.shape[1]), dtype=float)
     cum2[1:, :] = np.cumsum(y_arr[:-1, :] * dt_col, axis=0)
@@ -132,15 +134,10 @@ def mean_over_horizon(t: np.ndarray, y: np.ndarray, cum: np.ndarray, H: float) -
     """
     if not (math.isfinite(H) and H > 0.0) or t.size == 0:
         return float("nan")
-    if H <= 0.0:
-        return float("nan")
-    # If H beyond end, clamp to end time
     Hc = min(H, float(t[-1]))
-    # Find index of last time <= Hc
     idx = int(np.searchsorted(t, Hc, side="right") - 1)
     if idx < 0:
         idx = 0
-    # Compute mean
     base = float(cum[idx])
     tail = float(y[idx]) * float(Hc - t[idx])
     return float((base + tail) / Hc) if Hc > 0 else float("nan")
@@ -165,83 +162,79 @@ def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
     """
     t = g.t
     out: Dict[str, float] = {
-        "U_cpu_run_mean": mean_over_horizon(t, g.cpu_util, g.cum_cpu_util, H),
-        "U_mem_run_mean": mean_over_horizon(t, g.mem_util, g.cum_mem_util, H),
-        "U_eff_run_mean": mean_over_horizon(t, g.eff_util, g.cum_eff_util, H),
+        "U_cpu_mean": mean_over_horizon(t, g.cpu_util, g.cum_cpu_util, H),
+        "U_mem_mean": mean_over_horizon(t, g.mem_util, g.cum_mem_util, H),
+        "U_eff_mean": mean_over_horizon(t, g.eff_util, g.cum_eff_util, H),
     }
-    # Per-priority running pods and deletions
     for i, p in enumerate(range(1, MAX_K_OUT + 1)):
         out[f"R_p{p}_mean"] = mean_over_horizon(t, g.pods_running[:, i], g.cum_pods_running[:, i], H)
         out[f"D_p{p}"] = value_at_horizon(t, g.pods_deleted[:, i], H)
-    # Totals
+
     out["R_total_mean"] = float(np.nansum([out[f"R_p{p}_mean"] for p in range(1, MAX_K_OUT + 1)]))
     out["D_total"] = float(np.nansum([out[f"D_p{p}"] for p in range(1, MAX_K_OUT + 1)]))
     return out
 
-def latency_means_first_batch(pod_csv: Path, eps_s: float) -> Dict[str, float]:
+def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float]:
     """
     Mean latency (running - apply) for first-batch pods, overall and per priority p1..p4.
+    Returned in MILLISECONDS (ms).
+
     First-batch: for each rs_prefix, take t0=min(apply), include apply times within eps_s of t0.
     """
+    nan_out = {**{f"L_ms_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "L_ms_total": float("nan")}
     try:
         pod_df = read_pod(pod_csv)
     except Exception:
-        return {**{f"L_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "L_s_total": float("nan")}
+        return nan_out
 
-    # Drop rows with missing data
     pod_df = pod_df.dropna(subset=[POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL]).copy()
     if pod_df.empty:
-        return {**{f"L_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "L_s_total": float("nan")}
+        return nan_out
 
-    # Separate apply-time and running-time
     apply_time_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
     running_time_df = pod_df[pod_df[POD_EVENT_COL] == "running-time"].copy()
     if apply_time_df.empty:
-        return {**{f"L_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "L_s_total": float("nan")}
+        return nan_out
 
-    # Keep first occurrence per pod_uid
     apply_time_df = apply_time_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
     running_time_df = running_time_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
 
-    # Add rs_prefix column
     apply_time_df["rs_prefix"] = apply_time_df[POD_NAME_COL].map(rs_prefix_from_pod_name)
 
-    # Join apply and running times
     joined = apply_time_df.merge(
         running_time_df[[POD_UID_COL, POD_TIME_COL]].rename(columns={POD_TIME_COL: "running_time_s"}),
         on=POD_UID_COL,
         how="left",
     ).rename(columns={POD_TIME_COL: "apply_time_s"})
+
     joined["apply_time_s"] = pd.to_numeric(joined["apply_time_s"], errors="coerce")
     joined["running_time_s"] = pd.to_numeric(joined["running_time_s"], errors="coerce")
     joined[POD_PRIO_COL] = pd.to_numeric(joined[POD_PRIO_COL], errors="coerce")
     joined = joined.dropna(subset=["rs_prefix", "apply_time_s", POD_PRIO_COL]).copy()
     if joined.empty:
-        return {**{f"L_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "L_s_total": float("nan")}
+        return nan_out
+
     joined = joined.sort_values(["rs_prefix", "apply_time_s"], kind="mergesort")
     t0 = joined.groupby("rs_prefix", sort=False)["apply_time_s"].transform("min")
     in_batch = (joined["apply_time_s"] - t0) <= float(eps_s)
     batch = joined.loc[in_batch].copy()
     if batch.empty:
-        return {**{f"L_s_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "L_s_total": float("nan")}
-    
-    # Compute latencies
-    latency = batch["running_time_s"] - batch["apply_time_s"]
-    # Only keep finite, non-negative latencies (same semantics as before)
-    latency = latency.where(np.isfinite(latency) & (latency >= 0.0), np.nan)
-    batch["latency_s"] = latency
+        return nan_out
 
-    # Compute means and totals
+    # Compute latency in SECONDS, then convert to MS
+    latency_s = batch["running_time_s"] - batch["apply_time_s"]
+    latency_s = latency_s.where(np.isfinite(latency_s) & (latency_s >= 0.0), np.nan)
+    batch["latency_ms"] = latency_s * LATENCY_S_SCALE
+
     out: Dict[str, float] = {}
-    out["L_s_total"] = float(np.nanmean(batch["latency_s"].to_numpy(dtype=float))) if batch.shape[0] else float("nan")
+    out["L_ms_total"] = float(np.nanmean(batch["latency_ms"].to_numpy(dtype=float))) if batch.shape[0] else float("nan")
 
     pod_prio = batch[POD_PRIO_COL].to_numpy(dtype=float)
-    latency_value = batch["latency_s"].to_numpy(dtype=float)
+    latency_value = batch["latency_ms"].to_numpy(dtype=float)
 
-    # Per-priority means
     for p in range(1, MAX_K_OUT + 1):
         mask = pod_prio == float(p)
-        out[f"L_s_p{p}"] = float(np.nanmean(latency_value[mask])) if np.any(mask) else float("nan")
+        out[f"L_ms_p{p}"] = float(np.nanmean(latency_value[mask])) if np.any(mask) else float("nan")
 
     return out
 
@@ -306,9 +299,6 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     return job_name, plugin_config
 
 def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
-    """
-    Iterate (seed, seed_dir) under parent dir.
-    """
     if not parent.exists() or not parent.is_dir():
         return
     for d in sorted(parent.iterdir()):
@@ -317,10 +307,7 @@ def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
         if (d / GENERAL_STATS_FILENAME).exists() and (d / POD_STATS_FILENAME).exists():
             yield d.name, d
 
-def read_opt_totals(opt_json: Path) -> Dict[str, float]:
-    """
-    Read optimization totals from JSON file.
-    """
+def read_optimization_stats(opt_json: Path) -> Dict[str, float]:
     out = {v: float("nan") for v in OPT_TOTAL_KEYS.values()}
     if not opt_json.exists():
         return out
@@ -337,9 +324,6 @@ def read_opt_totals(opt_json: Path) -> Dict[str, float]:
     return out
 
 def read_pod(pod_csv: Path) -> pd.DataFrame:
-    """
-    Read pod data from CSV file.
-    """
     df = pd.read_csv(
         pod_csv,
         usecols=[POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL],
@@ -355,27 +339,18 @@ def read_pod(pod_csv: Path) -> pd.DataFrame:
     return df
 
 def read_general_data(general_csv: Path) -> GeneralData:
-    """
-    Read general data from CSV file.
-    Reads only necessary columns for horizon metrics.
-    Normalizes time to start at 0, drops invalid times.
-    """
-    # Determine needed columns; 
     cols_needed = {TIME_COL, CPU_RUN_COL, MEM_RUN_COL}
     for p in range(1, MAX_K_OUT + 1):
         cols_needed.add(f"{RUNNING_PREFIX}{p}")
         cols_needed.add(f"{DELETIONS_CUM_PREFIX}{p}")
 
-    # Read CSV
     df = pd.read_csv(
         general_csv,
         usecols=lambda c: c in cols_needed,
     )
 
     time_raw = pd.to_numeric(df[TIME_COL], errors="coerce")
-    df = df.loc[time_raw.notna()].copy() # drop rows with invalid time
-    
-    # Early exit if empty
+    df = df.loc[time_raw.notna()].copy()
     if df.empty:
         return GeneralData(
             t=np.array([], dtype=float),
@@ -391,12 +366,11 @@ def read_general_data(general_csv: Path) -> GeneralData:
             cum_pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
         )
 
-    # Normalize time to start at 0, sort by time
     df[TIME_COL] = time_raw.loc[df.index].astype(float)
     df = df.sort_values(TIME_COL, kind="mergesort")
     t0 = float(df[TIME_COL].iloc[0])
     t = (df[TIME_COL].to_numpy(dtype=float) - t0).astype(float)
-    # Drop any negative / NaN issues after normalization
+
     valid = np.isfinite(t) & (t >= 0.0)
     if not np.any(valid):
         t = np.array([], dtype=float)
@@ -404,7 +378,6 @@ def read_general_data(general_csv: Path) -> GeneralData:
         df = df.loc[valid].copy()
         t = t[valid]
 
-    # Early exit if empty after filtering
     if t.size == 0:
         return GeneralData(
             t=t,
@@ -420,10 +393,8 @@ def read_general_data(general_csv: Path) -> GeneralData:
             cum_pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
         )
 
-    # Final T_end
     T_end = float(t[-1])
 
-    # Read utilization
     util_cpu_run = (
         pd.to_numeric(df[CPU_RUN_COL], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         if CPU_RUN_COL in df.columns
@@ -436,11 +407,9 @@ def read_general_data(general_csv: Path) -> GeneralData:
     )
     eff_util_run = np.maximum(util_cpu_run, mem_util_run)
 
-    # Read pods running and deleted per priority
     pods_running = np.zeros((t.size, MAX_K_OUT), dtype=float)
     pods_deleted = np.full((t.size, MAX_K_OUT), np.nan, dtype=float)
 
-    # Fill in per priority
     for i, p in enumerate(range(1, MAX_K_OUT + 1)):
         rc = f"{RUNNING_PREFIX}{p}"
         dc = f"{DELETIONS_CUM_PREFIX}{p}"
@@ -448,7 +417,6 @@ def read_general_data(general_csv: Path) -> GeneralData:
             pods_running[:, i] = pd.to_numeric(df[rc], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         if dc in df.columns:
             pods_deleted[:, i] = pd.to_numeric(df[dc], errors="coerce").to_numpy(dtype=float)
-
 
     cum_cpu_util_run = cummulative_time_integral(t, util_cpu_run)
     cum_mem_util_run = cummulative_time_integral(t, mem_util_run)
@@ -489,13 +457,11 @@ def main() -> None:
 
     eps_s = float(args.eps_s)
 
-    print("Sealing ...")
+    print("Sealing results...")
 
-    # Index defaults and seeds per job
     default_idx: Dict[Tuple[str, str], Tuple[Path, Path]] = {}
     default_seeds_by_job: Dict[str, set[str]] = {}
 
-    # Find all default runs
     for job_dir in sorted(default_root.iterdir()):
         if not job_dir.is_dir():
             continue
@@ -511,7 +477,6 @@ def main() -> None:
 
     seed_rows: List[Dict[str, object]] = []
 
-    # Process all plugin runs
     for run_dir in sorted(plugin_root.iterdir()):
         if not run_dir.is_dir():
             continue
@@ -520,7 +485,6 @@ def main() -> None:
             continue
         job_name, plugin_config = parsed
 
-        # Get default seeds for this job
         default_seeds = default_seeds_by_job.get(job_name, set())
         if not default_seeds:
             print(f"[warn] no default seeds for job={job_name}")
@@ -532,25 +496,19 @@ def main() -> None:
             print(f"[warn] no common seeds for job={job_name} plugin={plugin_config}")
             continue
 
-        # Process common seeds
         for seed in common_seeds:
-            default_general_stats, default_pod_stats = default_idx[(job_name, seed)]
+            default_general_stats_path, default_pod_stats = default_idx[(job_name, seed)]
             plugin_seed_dir = run_dir / seed
-            plugin_general_stats = plugin_seed_dir / GENERAL_STATS_FILENAME
+            plugin_general_stats_path = plugin_seed_dir / GENERAL_STATS_FILENAME
             plugin_pod_stats = plugin_seed_dir / POD_STATS_FILENAME
             plugin_opt_stats = plugin_seed_dir / OPT_STATS_FILENAME
 
-            # Read general data
             try:
-                default_general_stats = read_general_data(default_general_stats)
-            except Exception:
-                continue
-            try:
-                plugin_general_stats = read_general_data(plugin_general_stats)
+                default_general_stats = read_general_data(default_general_stats_path)
+                plugin_general_stats = read_general_data(plugin_general_stats_path)
             except Exception:
                 continue
 
-            # Common horizon
             if not (math.isfinite(default_general_stats.T_end) and math.isfinite(plugin_general_stats.T_end)):
                 continue
             if default_general_stats.T_end <= 0.0 or plugin_general_stats.T_end <= 0.0:
@@ -559,56 +517,49 @@ def main() -> None:
             if H <= 0.0:
                 continue
 
-            # Horizon metrics
             default_metrics = compute_horizon_metrics(default_general_stats, H)
             plugin_metrics = compute_horizon_metrics(plugin_general_stats, H)
 
-            # Deltas
-            d_run_cpu_util = float(plugin_metrics["U_cpu_run_mean"]) - float(default_metrics["U_cpu_run_mean"])
-            d_run_mem_util = float(plugin_metrics["U_mem_run_mean"]) - float(default_metrics["U_mem_run_mean"])
-            d_run_eff_util = float(plugin_metrics["U_eff_run_mean"]) - float(default_metrics["U_eff_run_mean"])
+            dU_cpu = float(plugin_metrics["U_cpu_mean"]) - float(default_metrics["U_cpu_mean"])
+            dU_mem = float(plugin_metrics["U_mem_mean"]) - float(default_metrics["U_mem_mean"])
+            dU_eff = float(plugin_metrics["U_eff_mean"]) - float(default_metrics["U_eff_mean"])
             dR = {p: float(plugin_metrics[f"R_p{p}_mean"]) - float(default_metrics[f"R_p{p}_mean"]) for p in range(1, MAX_K_OUT + 1)}
             dD = {p: float(plugin_metrics[f"D_p{p}"]) - float(default_metrics[f"D_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
             dR_total = float(np.nansum(list(dR.values())))
             dD_total = float(np.nansum(list(dD.values())))
 
-            # Latency
-            default_L = latency_means_first_batch(default_pod_stats, eps_s=eps_s)
-            plugin_L = latency_means_first_batch(plugin_pod_stats, eps_s=eps_s)
-            dL_total = float(plugin_L["L_s_total"]) - float(default_L["L_s_total"])
-            dL_prio = {
-                p: float(plugin_L[f"L_s_p{p}"]) - float(default_L[f"L_s_p{p}"])
-                for p in range(1, MAX_K_OUT + 1)
-            }
+            # Latency (NOW IN MS)
+            default_L = latency_means_first_batch_ms(default_pod_stats, eps_s=eps_s)
+            plugin_L = latency_means_first_batch_ms(plugin_pod_stats, eps_s=eps_s)
+            dL_total = float(plugin_L["L_ms_total"]) - float(default_L["L_ms_total"])
+            dL_prio = {p: float(plugin_L[f"L_ms_p{p}"]) - float(default_L[f"L_ms_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
 
-            # Optimization totals (plugin only)
-            opt_totals = read_opt_totals(plugin_opt_stats)
+            opt_totals = read_optimization_stats(plugin_opt_stats)
 
-            # Record seed row
             seed_rows.append(
                 {
                     "job_name": job_name,
                     "plugin_config": plugin_config,
                     "seed": seed,
                     "T_end_s": H,
-                    "delta_U_cpu_run": d_run_cpu_util,
-                    "delta_U_mem_run": d_run_mem_util,
-                    "delta_U_eff_run": d_run_eff_util,
-                    "delta_R_p1": dR[1],
-                    "delta_R_p2": dR[2],
-                    "delta_R_p3": dR[3],
-                    "delta_R_p4": dR[4],
-                    "delta_R_total": dR_total,
-                    "delta_D_p1": dD[1],
-                    "delta_D_p2": dD[2],
-                    "delta_D_p3": dD[3],
-                    "delta_D_p4": dD[4],
-                    "delta_D_total": dD_total,
-                    "delta_L_s_p1": dL_prio[1],
-                    "delta_L_s_p2": dL_prio[2],
-                    "delta_L_s_p3": dL_prio[3],
-                    "delta_L_s_p4": dL_prio[4],
-                    "delta_L_s_total": dL_total,
+                    "delta_U_pp_cpu": dU_cpu,
+                    "delta_U_pp_mem": dU_mem,
+                    "delta_U_pp_eff": dU_eff,
+                    "delta_R_num_p1": dR[1],
+                    "delta_R_num_p2": dR[2],
+                    "delta_R_num_p3": dR[3],
+                    "delta_R_num_p4": dR[4],
+                    "delta_R_num_total": dR_total,
+                    "delta_D_num_p1": dD[1],
+                    "delta_D_num_p2": dD[2],
+                    "delta_D_num_p3": dD[3],
+                    "delta_D_num_p4": dD[4],
+                    "delta_D_num_total": dD_total,
+                    "delta_L_ms_p1": dL_prio[1],
+                    "delta_L_ms_p2": dL_prio[2],
+                    "delta_L_ms_p3": dL_prio[3],
+                    "delta_L_ms_p4": dL_prio[4],
+                    "delta_L_ms_total": dL_total,
                     "solver_attempts": float(opt_totals["solver_attempts"]),
                     "solver_optimal": float(opt_totals["solver_optimal"]),
                     "solver_feasible": float(opt_totals["solver_feasible"]),
@@ -618,39 +569,36 @@ def main() -> None:
                 }
             )
 
-    # results_paired.csv
     df_seed = pd.DataFrame(seed_rows)
     if df_seed.empty:
         pd.DataFrame(columns=PAIRED_COLS).to_csv(out_dir / "results_paired.csv", index=False)
         print(f"Wrote outputs to: {out_dir}")
         return
 
-    # Aggregate over seeds
     grp = df_seed.groupby(["job_name", "plugin_config"], dropna=False)
     agg = grp.mean(numeric_only=True).reset_index()
     agg.insert(2, "n_seed", grp.size().to_numpy())
 
-    # Rename columns
     rename = {
         "T_end_s": "T_end_s_mean",
-        "delta_U_cpu_run": "delta_U_cpu_run_mean",
-        "delta_U_mem_run": "delta_U_mem_run_mean",
-        "delta_U_eff_run": "delta_U_eff_run_mean",
-        "delta_R_p1": "delta_R_p1_mean",
-        "delta_R_p2": "delta_R_p2_mean",
-        "delta_R_p3": "delta_R_p3_mean",
-        "delta_R_p4": "delta_R_p4_mean",
-        "delta_R_total": "delta_R_total_mean",
-        "delta_D_p1": "delta_D_p1_mean",
-        "delta_D_p2": "delta_D_p2_mean",
-        "delta_D_p3": "delta_D_p3_mean",
-        "delta_D_p4": "delta_D_p4_mean",
-        "delta_D_total": "delta_D_total_mean",
-        "delta_L_s_p1": "delta_L_s_p1_mean",
-        "delta_L_s_p2": "delta_L_s_p2_mean",
-        "delta_L_s_p3": "delta_L_s_p3_mean",
-        "delta_L_s_p4": "delta_L_s_p4_mean",
-        "delta_L_s_total": "delta_L_s_total_mean",
+        "delta_U_pp_cpu": "delta_U_pp_cpu_mean",
+        "delta_U_pp_mem": "delta_U_pp_mem_mean",
+        "delta_U_pp_eff": "delta_U_pp_eff_mean",
+        "delta_R_num_p1": "delta_R_num_p1_mean",
+        "delta_R_num_p2": "delta_R_num_p2_mean",
+        "delta_R_num_p3": "delta_R_num_p3_mean",
+        "delta_R_num_p4": "delta_R_num_p4_mean",
+        "delta_R_num_total": "delta_R_num_total_mean",
+        "delta_D_num_p1": "delta_D_num_p1_mean",
+        "delta_D_num_p2": "delta_D_num_p2_mean",
+        "delta_D_num_p3": "delta_D_num_p3_mean",
+        "delta_D_num_p4": "delta_D_num_p4_mean",
+        "delta_D_num_total": "delta_D_num_total_mean",
+        "delta_L_ms_p1": "delta_L_ms_p1_mean",
+        "delta_L_ms_p2": "delta_L_ms_p2_mean",
+        "delta_L_ms_p3": "delta_L_ms_p3_mean",
+        "delta_L_ms_p4": "delta_L_ms_p4_mean",
+        "delta_L_ms_total": "delta_L_ms_total_mean",
         "solver_attempts": "solver_attempts_mean",
         "solver_optimal": "solver_optimal_mean",
         "solver_feasible": "solver_feasible_mean",
@@ -660,13 +608,11 @@ def main() -> None:
     }
     agg = agg.rename(columns=rename)
 
-    # Ensure all columns present; insert NaN where missing
     for c in PAIRED_COLS:
         if c not in agg.columns:
             agg[c] = np.nan
     agg = agg[PAIRED_COLS]
 
-    # Round numeric columns
     round_numeric_df(agg, exclude=["job_name", "plugin_config", "n_seed"])
     agg.to_csv(out_dir / "results_paired.csv", index=False)
 

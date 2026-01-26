@@ -2,8 +2,7 @@
 # trace_replayer.py
 
 """
-python -m scripts.kwok_trace_replayer.trace_replayer \
---job-file <job-file.yaml>
+python -m scripts.kwok_trace_replayer.trace_replayer --job-file <job-file.yaml>
 """
 
 import argparse, csv, json, logging, threading, time, yaml, subprocess, re
@@ -41,7 +40,7 @@ LOGGER_NAME = "trace-replayer" # logger name
 LOG = logging.getLogger(LOGGER_NAME) # module logger
 from scripts.kwok_trace_replayer.trace_helpers import TraceRecord, rs_prefix_from_pod_name
 
-# Plugin-exported cumulative optimization stats
+# Plugin-exported optimization stats
 OPT_STATS_NS = "kube-system"
 OPT_STATS_CM = "optimization-stats"
 OPT_STATS_KEY = "optimization-stats.json"
@@ -288,7 +287,6 @@ class TraceReplayer:
     def resolve_clock(clock: Clock | None) -> Clock:
         """
         Choose a clock implementation.
-        #TODO: NOT SURE WE NEED THIS
         """
         c = clock or SystemClock()
         return c if (hasattr(c, "time") and hasattr(c, "sleep")) else TimeClock()
@@ -348,14 +346,14 @@ class TraceReplayer:
         self.node_mem_b: int = 0
 
         self.events: List[Event] = [] # sorted create/delete events
-        self.prio_by_rs: Dict[str, int] = {}# rs -> priority (include both initial + trace pods)
+        self.prio_by_rs: Dict[str, int] = {} # rs -> priority (include both initial + trace pods)
         self.initial_rs_names: Set[str] = set() # rs names that belong to initial pods (skip these in pod_stats.csv)
 
         self.ctx: str = f"kwok-{self.args.cluster_name}"
 
-        # Run start epoch/time base (set in run())
-        self.run_start_wall: float = 0.0       # epoch seconds
-        self.run_start_monotonic: float = 0.0  # from clock.time()
+        # Run start epoch/time base
+        self.run_start_wall: float = 0.0      # epoch seconds
+        self.run_start_monotonic: float = 0.0 # monotonic seconds
 
     # ------------------------------
     # Logging / Metadata
@@ -487,7 +485,6 @@ class TraceReplayer:
         def deep_get(d: Dict[str, Any], path: List[str]) -> Any:
             """
             Get a nested value from a dict, returning None if missing.
-            TODO: DO WE NEED THIS. 
             """
             cur: Any = d
             for k in path:
@@ -496,7 +493,7 @@ class TraceReplayer:
                 cur = cur[k]
             return cur
 
-        #TODO: Not sure about the below what do we use it for?
+        # Try multiple possible paths for each value
         for candidate in [
             deep_get(gen_info, ["inputs", "generated", "num_nodes"]),
             deep_get(gen_info, ["generated", "num_nodes"]),
@@ -613,12 +610,13 @@ class TraceReplayer:
                 )
 
             # Only delete if within horizon; if a pod would naturally end after
-            # the trace horizon, we just stop the replay while it’s still alive.
+            # the trace horizon, we just stop the replay while it is still alive.
             delete_t = start_delay + float(p.end_time)
             if delete_t <= replay_end_s:
                 events.append(Event(sim_time_s=delete_t, kind="delete", record_id=p.id))
 
-        # At identical timestamps, process deletes first to free capacity.
+        # At identical timestamps, process deletes first to free capacity and
+        # for determinism.
         events.sort(key=lambda e: (e.sim_time_s, 0 if e.kind == "delete" else 1))
         self.events = events
         
@@ -803,9 +801,8 @@ class TraceReplayer:
         """
         Dump optimization stats ConfigMap to a local JSON file.
         """
-        # IMPORTANT: Don't call get_json_ctx() here.
-        # In environments without a live cluster (e.g. unit tests), kubectl can
-        # block indefinitely. Use a small timeout for this best-effort dump.
+        # IMPORTANT: Don't call get_json_ctx() here as kubectl can block
+        # indefinitely. Use a small timeout for this best-effort dump.
         cmd = ["kubectl"]
         if self.ctx:
             cmd += ["--context", str(self.ctx)]

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/plots_and_tables.py
 """
-python -m scripts.kwok_trace_replayer.plots_and_tables --in-results analysis/kwok_trace_replayer/results_paired.csv --out-dir analysis/kwok_trace_replayer
+python -m scripts.kwok_trace_replayer.plots_and_tables \
+  --in-results analysis/kwok_trace_replayer/results_paired.csv \
+  --out-dir analysis/kwok_trace_replayer
 """
 
 import argparse
@@ -23,9 +25,6 @@ import pandas as pd
 TABLE_DECIMALS: int = 1
 JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
 
-# Convert latency from seconds -> milliseconds in BOTH tables and plots
-LATENCY_SCALE: float = 1000.0
-
 # --- Symmetric-log (symlog) settings for plots ---
 SYMLOG_BASE: float = 10.0
 # Linear region around 0 (in data units of the plotted metric):
@@ -33,13 +32,23 @@ SYMLOG_LINTHRESH_LAT_MS: float = 1.0      # 1 ms linear region
 SYMLOG_LINTHRESH_DELETIONS: float = 1.0   # 1 deletion linear region
 SYMLOG_LINSCALE: float = 1.0              # size of linear region (visual)
 
+# NOTE: These must match seal_results.py outputs (results_paired.csv)
 EXPECTED_COLS = [
     "job_name",
     "plugin_config",
-    "delta_U_eff_run_mean",
-    "delta_R_p1_mean", "delta_R_p2_mean", "delta_R_p3_mean", "delta_R_p4_mean", "delta_R_total_mean",
-    "delta_D_p1_mean", "delta_D_p2_mean", "delta_D_p3_mean", "delta_D_p4_mean", "delta_D_total_mean",
-    "delta_L_s_p1_mean", "delta_L_s_p2_mean", "delta_L_s_p3_mean", "delta_L_s_p4_mean", "delta_L_s_total_mean",
+
+    # Util deltas are in fraction-units; we plot/table as percentage points via scale=100.
+    "delta_U_pp_eff_mean",
+
+    # Running pods deltas (counts)
+    "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
+
+    # Deletions deltas (counts)
+    "delta_D_num_p1_mean", "delta_D_num_p2_mean", "delta_D_num_p3_mean", "delta_D_num_p4_mean", "delta_D_num_total_mean",
+
+    # Latency deltas already in ms
+    "delta_L_ms_p1_mean", "delta_L_ms_p2_mean", "delta_L_ms_p3_mean", "delta_L_ms_p4_mean", "delta_L_ms_total_mean",
+
     "solver_attempts_mean", "plan_activated_mean",
 ]
 KEY_COLS = ["nodes", "kmax", "arrival_s", "mode", "blocking", "defpreempt"]
@@ -90,7 +99,6 @@ def parse_job(job_name: str) -> Optional[Tuple[int, int, float]]:
         return None
     return int(m.group(1)), int(m.group(2)), float(m.group(3))
 
-
 def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
     """plugin_config: mode=<mode>_blocking=<0/1>_defpreempt=<0/1>"""
     kv: Dict[str, str] = {}
@@ -99,7 +107,6 @@ def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
             k, v = tok.split("=", 1)
             kv[k.strip().lower()] = v.strip()
     return kv
-
 
 def canonical_mode(mode: str) -> str:
     s = str(mode).strip().lower()
@@ -112,7 +119,6 @@ def canonical_mode(mode: str) -> str:
     if m:
         return f"stable-queue-{m.group(1)}s"
     return s
-
 
 MODE_ABBR: Dict[Tuple[str, Optional[int]], str] = {
     ("scheduling-failure", None): "SF",
@@ -129,7 +135,6 @@ MODE_ORDER: List[Tuple[str, Optional[int]]] = [
     ("stable-queue-2s", 0),
 ]
 MODE_RANK: Dict[Tuple[str, Optional[int]], int] = {k: i for i, k in enumerate(MODE_ORDER)}
-
 
 @dataclass(frozen=True)
 class RowKey:
@@ -172,10 +177,8 @@ def is_finite(x: object) -> bool:
     except Exception:
         return False
 
-
 def nan_str(latex: bool) -> str:
     return (r"\text{--}" if latex else "--")
-
 
 def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
     if not is_finite(x):
@@ -185,17 +188,14 @@ def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
         v = 0.0
     return f"{v:+.{decimals}f}"
 
-
 def fmt_unsigned_int(x: object, nan_s: str) -> str:
     if not is_finite(x):
         return nan_s
     return f"{int(round(float(x))):d}"
 
-
 def arrival_group_label(a: float, *, latex: bool) -> str:
     a_i = int(a) if abs(a - round(a)) < 1e-9 else a
     return (rf"$\mu_A={a_i}\,\mathrm{{s}}$" if latex else f"muA={a_i}s")
-
 
 def kmax_caption(kmax: int, *, latex: bool, without_default_preemption: bool) -> str:
     if latex:
@@ -233,11 +233,9 @@ def load_results(results_csv: Path) -> pd.DataFrame:
 
     return df
 
-
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
     d = df.drop_duplicates(subset=KEY_COLS, keep="first").copy()
     return d.set_index(KEY_COLS).sort_index()
-
 
 def lookup_value(
     lookup: pd.DataFrame,
@@ -255,11 +253,10 @@ def lookup_value(
         return float("nan")
 
 # =============================================================================
-# Tables (metrics-as-rows; arrivals top; modes under arrivals)
+# Tables
 # =============================================================================
 
 MetricGetter = Callable[[int, RowKey, int, float], float]  # (kmax, rk, nodes, arrival) -> value
-
 
 @dataclass(frozen=True)
 class MetricRow:
@@ -269,7 +266,6 @@ class MetricRow:
     fmt_kind: str  # "signed_float" | "unsigned_int"
     decimals: int = TABLE_DECIMALS
     scale: float = 1.0
-
 
 def _fmt_metric_value(v: float, *, row: MetricRow, latex: bool) -> str:
     ns = nan_str(latex)
@@ -281,7 +277,6 @@ def _fmt_metric_value(v: float, *, row: MetricRow, latex: bool) -> str:
     if row.fmt_kind == "unsigned_int":
         return fmt_unsigned_int(vv, ns)
     return fmt_signed(vv, row.decimals, ns)
-
 
 def latex_metric_matrix_tables(
     *,
@@ -346,7 +341,6 @@ def latex_metric_matrix_tables(
         lines.append("")
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
-
 
 def ascii_metric_matrix_tables(
     *,
@@ -419,30 +413,15 @@ def ascii_metric_matrix_tables(
 
 YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, kmax) -> y
 
-
 def _default_color_cycle() -> List[str]:
     return list(plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1", "C2", "C3", "C4"]))
-
 
 def _build_color_map(labels: List[str]) -> Dict[str, str]:
     cycle = _default_color_cycle()
     return {lbl: cycle[i % len(cycle)] for i, lbl in enumerate(labels)}
 
-
 def _make_mode_legend_handles(labels: List[str], color_map: Dict[str, str]) -> List[Line2D]:
     return [Line2D([0], [0], color=color_map[lbl], linewidth=1.8) for lbl in labels]
-
-
-def symmetric_ylim_from_y_values(y_vals: List[float]) -> Tuple[float, float]:
-    vals = [abs(float(y)) for y in y_vals if is_finite(y)]
-    if not vals:
-        return (-1.0, 1.0)
-    m = max(vals)
-    if m <= 0:
-        return (-1.0, 1.0)
-    pad = PLOT_Y_PADDING * m
-    return (-(m + pad), (m + pad))
-
 
 def plot_series(df: pd.DataFrame, *, kmax: int, defpreempt_value: int) -> List[RowKey]:
     """
@@ -463,7 +442,6 @@ def plot_series(df: pd.DataFrame, *, kmax: int, defpreempt_value: int) -> List[R
         },
         key=lambda rk: rk.sort_key(),
     )
-
 
 def collect_plot_y_vals(
     *,
@@ -486,7 +464,6 @@ def collect_plot_y_vals(
                     y_vals.append(float(v) * float(scale))
     return y_vals
 
-
 def draw_dumbbell_on_ax(
     *,
     ax: plt.Axes,
@@ -499,8 +476,8 @@ def draw_dumbbell_on_ax(
     ylim: Tuple[float, float],
     show_xticklabels: bool,
     show_yticklabels: bool,
-    y_scale: str = "linear",          # "linear" | "symlog"
-    symlog_linthresh: float = 1.0,    # only used when y_scale="symlog"
+    y_scale: str = "linear",   # "linear" | "symlog"
+    symlog_linthresh: float = 1.0,
 ) -> None:
     x_base = [i * PLOT_ARRIVAL_X_SPACING for i in range(len(arrivals_order))]
     m = max(1, len(series))
@@ -522,14 +499,8 @@ def draw_dumbbell_on_ax(
             if is_finite(y1):
                 ax.plot([x], [y1], linestyle="None", marker="s", markersize=PLOT_MARKER_SIZE, color=color)
 
-    # Scale first (so tick locators are correct), then limits
     if y_scale == "symlog":
-        ax.set_yscale(
-            "symlog",
-            base=SYMLOG_BASE,
-            linthresh=symlog_linthresh,
-            linscale=SYMLOG_LINSCALE,
-        )
+        ax.set_yscale("symlog", base=SYMLOG_BASE, linthresh=symlog_linthresh, linscale=SYMLOG_LINSCALE)
     else:
         ax.set_yscale("linear")
 
@@ -540,13 +511,7 @@ def draw_dumbbell_on_ax(
     ax.set_xlim(min(x_base) - pad, max(x_base) + pad)
 
     ax.set_xticks(x_base)
-    ax.tick_params(
-        axis="both",
-        which="major",
-        labelsize=PLOT_TICK_FONTSIZE,
-        pad=PLOT_TICK_PAD,
-        length=PLOT_TICK_LENGTH,
-    )
+    ax.tick_params(axis="both", which="major", labelsize=PLOT_TICK_FONTSIZE, pad=PLOT_TICK_PAD, length=PLOT_TICK_LENGTH)
 
     if show_xticklabels:
         ax.set_xticklabels([arrival_group_label(a, latex=True) for a in arrivals_order])
@@ -570,7 +535,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--in-results", type=Path, required=True, help="Path to sealed results_paired.csv.")
     p.add_argument("--out-dir", type=Path, required=True, help="Output directory (tables + figures subdirs).")
     return p.parse_args()
-
 
 def main() -> None:
     args = parse_args()
@@ -596,7 +560,6 @@ def main() -> None:
     if not kmaxs:
         raise SystemExit("No kmax values found")
 
-    # Exactly two columns: kmax=1 and kmax=4
     kmax_cols = [k for k in (1, 4) if k in kmaxs]
     if len(kmax_cols) != 2:
         raise SystemExit(f"Expected kmax values [1,4] for the 2 columns; found kmaxs={kmaxs}")
@@ -606,7 +569,7 @@ def main() -> None:
 
     # Modes for tables:
     #  - defpreempt=1: EXCLUDE SF
-    #  - defpreempt=0: include SF (and other defpreempt=0 modes)
+    #  - defpreempt=0: include SF
     modes_def1_tables: Dict[int, List[RowKey]] = {}
     modes_def0_tables: Dict[int, List[RowKey]] = {}
 
@@ -614,25 +577,20 @@ def main() -> None:
         dff = df[df["kmax"].astype(int) == k]
         rks = [RowKey.from_plugin_config(pc) for pc in dff["plugin_config"].unique().tolist()]
 
-        modes_def1_tables[k] = _sorted_modes(
-            [rk for rk in rks if (rk.mode != "scheduling-failure" and rk.defpreempt == 1)]
-        )
-        modes_def0_tables[k] = _sorted_modes(
-            [rk for rk in rks if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 0)]
-        )
+        modes_def1_tables[k] = _sorted_modes([rk for rk in rks if (rk.mode != "scheduling-failure" and rk.defpreempt == 1)])
+        modes_def0_tables[k] = _sorted_modes([rk for rk in rks if (rk.mode == "scheduling-failure") or (rk.mode != "scheduling-failure" and rk.defpreempt == 0)])
 
-    # Metric getter
     def g(col: str) -> MetricGetter:
         return lambda kmax, rk, n, a: lookup_value(lookup, nodes=n, kmax=kmax, arrival_s=a, rk=rk, col=col)
 
-    # Table rows (latency shown in ms + labeled as ms)
     def metrics_big(kmax: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
-            MetricRow(r"$\Delta U \;(\mathrm{pp})$", "ΔU (pp)", g("delta_U_eff_run_mean"), "signed_float", decimals=1, scale=100.0),
+            # Util is stored as fraction delta; convert to percentage points
+            MetricRow(r"$\Delta U \;(\mathrm{pp})$", "ΔU (pp)", g("delta_U_pp_eff_mean"), "signed_float", decimals=1, scale=100.0),
 
-            # seconds -> ms in tables, and label explicitly shows ms
+            # Already in ms in results_paired.csv -> no scaling
             MetricRow(r"$\Delta L_{\mathrm{tot}}\;(\mathrm{ms})$", "ΔL_tot (ms)",
-                      g("delta_L_s_total_mean"), "signed_float", decimals=0, scale=LATENCY_SCALE),
+                      g("delta_L_ms_total_mean"), "signed_float", decimals=0, scale=1.0),
         ]
         if kmax != 1:
             for p in range(1, 5):
@@ -640,21 +598,30 @@ def main() -> None:
                     MetricRow(
                         rf"$\Delta L_{{p_{p}}}\;(\mathrm{{ms}})$",
                         f"ΔL_p{p} (ms)",
-                        g(f"delta_L_s_p{p}_mean"),
+                        g(f"delta_L_ms_p{p}_mean"),
                         "signed_float",
                         decimals=0,
-                        scale=LATENCY_SCALE,  # seconds -> ms
+                        scale=1.0,
                     )
                 )
 
-        rows.append(MetricRow(r"$\Delta D_{\mathrm{tot}}\;(\mathrm{\#deletions})$", "ΔD_tot (#deletions)", g("delta_D_total_mean"), "signed_float", decimals=1))
+        # Deletions columns are delta_D_num_*
+        rows.append(
+            MetricRow(
+                r"$\Delta D_{\mathrm{tot}}\;(\mathrm{\#deletions})$",
+                "ΔD_tot (#deletions)",
+                g("delta_D_num_total_mean"),
+                "signed_float",
+                decimals=1,
+            )
+        )
         if kmax != 1:
             for p in range(1, 5):
                 rows.append(
                     MetricRow(
                         rf"$\Delta D_{{p_{p}}}\;(\mathrm{{\#deletions}})$",
                         f"ΔD_p{p} (#deletions)",
-                        g(f"delta_D_p{p}_mean"),
+                        g(f"delta_D_num_p{p}_mean"),
                         "signed_float",
                         decimals=1,
                     )
@@ -693,25 +660,6 @@ def main() -> None:
     # Figures
     # -----------------------------
 
-    util_y_vals_all: List[float] = []
-    deletions_y_vals_all: List[float] = []
-    latency_y_vals_all: List[float] = []
-
-    for k in kmaxs:
-        for dp in (0, 1):
-            util_y_vals_all += collect_plot_y_vals(
-                lookup=lookup, df=df, col="delta_U_eff_run_mean",
-                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=100.0,
-            )
-            deletions_y_vals_all += collect_plot_y_vals(
-                lookup=lookup, df=df, col="delta_D_total_mean",
-                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=1.0,
-            )
-            latency_y_vals_all += collect_plot_y_vals(
-                lookup=lookup, df=df, col="delta_L_s_total_mean",
-                nodes_order=nodes_order, arrivals_order=arrivals_order, kmax=k, defpreempt_value=dp, scale=LATENCY_SCALE,
-            )
-
     def y_from_col(*, col: str, scale: float) -> YOfFn:
         def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
             v = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk, col=col)
@@ -732,7 +680,7 @@ def main() -> None:
         axes[0, 0].set_title(rf"$k_{{\max}}={kmax_cols[0]}$", fontsize=GRID_TITLE_FONTSIZE)
         axes[0, 1].set_title(rf"$k_{{\max}}={kmax_cols[1]}$", fontsize=GRID_TITLE_FONTSIZE)
 
-        # Util (linear)
+        # Util (linear) -- uses delta_U_pp_eff_mean
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[0, col_i],
@@ -740,7 +688,7 @@ def main() -> None:
                 arrivals_order=arrivals_order,
                 kmax=k,
                 series=series_union,
-                y_of=y_from_col(col="delta_U_eff_run_mean", scale=100.0),
+                y_of=y_from_col(col="delta_U_pp_eff_mean", scale=100.0),  # fraction -> pp
                 color_map=color_map,
                 ylim=(-4.1, 4.1),
                 show_xticklabels=False,
@@ -748,7 +696,7 @@ def main() -> None:
                 y_scale="linear",
             )
 
-        # Latency (symlog, symmetric around 0)
+        # Latency (symlog) -- already in ms
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[1, col_i],
@@ -756,7 +704,7 @@ def main() -> None:
                 arrivals_order=arrivals_order,
                 kmax=k,
                 series=series_union,
-                y_of=y_from_col(col="delta_L_s_total_mean", scale=LATENCY_SCALE),  # ms
+                y_of=y_from_col(col="delta_L_ms_total_mean", scale=1.0),
                 color_map=color_map,
                 ylim=(-10e3 - 1.0, 10e3 + 1.0),
                 show_xticklabels=False,
@@ -765,7 +713,7 @@ def main() -> None:
                 symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS,
             )
 
-        # Deletions (symlog, symmetric around 0)
+        # Deletions (symlog) -- uses delta_D_num_total_mean
         for col_i, k in enumerate(kmax_cols):
             draw_dumbbell_on_ax(
                 ax=axes[2, col_i],
@@ -773,7 +721,7 @@ def main() -> None:
                 arrivals_order=arrivals_order,
                 kmax=k,
                 series=series_union,
-                y_of=y_from_col(col="delta_D_total_mean", scale=1.0),
+                y_of=y_from_col(col="delta_D_num_total_mean", scale=1.0),
                 color_map=color_map,
                 ylim=(-10e3 - 1.0, 10e3 + 1.0),
                 show_xticklabels=True,
@@ -787,7 +735,6 @@ def main() -> None:
             wspace=GRID_WSPACE, hspace=GRID_HSPACE,
         )
 
-        # Legend centered over the two plot columns (axes grid), not the whole figure
         handles = _make_mode_legend_handles(labels, color_map)
         bbox_l = axes[0, 0].get_position()
         bbox_r = axes[0, 1].get_position()
@@ -809,7 +756,6 @@ def main() -> None:
         )
         leg.get_frame().set_linewidth(PLOT_LEGEND_FRAME_LINEWIDTH)
 
-        # Figure-level ylabels aligned to the grid
         left_bbox = axes[0, 0].get_position()
         x_text = max(0.0, left_bbox.x0 - GRID_YLABEL_PAD_FIG)
 
@@ -832,7 +778,6 @@ def main() -> None:
 
     print(f"Wrote tables to:  {tables_dir}")
     print(f"Wrote figures to: {figures_dir}")
-
 
 if __name__ == "__main__":
     main()
