@@ -2,10 +2,6 @@
 # scripts/kwok_trace_replayer/seal_results.py
 """
 python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer
-
-NOTE:
-  - We now STORE util deltas as percentage points (pp) directly in results_paired.csv.
-    I.e., +1.2 means +1.2 percentage points, not +0.012 (fraction).
 """
 
 import argparse, json, math, re
@@ -259,6 +255,17 @@ def round_numeric_df(df: pd.DataFrame, exclude: Optional[List[str]] = None) -> p
         df[num_cols] = df[num_cols].round(FLOAT_DECIMALS)
     return df
 
+def canonicalize_mode(mode: str) -> str:
+    """
+    Canonicalize mode so scheduling-failure uses the new convention:
+      - schedulingfailure (no hyphen)
+    """
+    s = str(mode).strip().lower()
+    s_compact = s.replace("-", "").replace("_", "")
+    if s_compact in {"schedulingfailure", "schedfailure", "scheduingfailure"}:
+        return "schedulingfailure"
+    return s
+
 def parse_job_dir_name(name: str) -> Optional[str]:
     """
     Parse job dir name.
@@ -280,7 +287,8 @@ def parse_job_dir_name(name: str) -> Optional[str]:
 def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     """
     Parse plugin run dir name.
-    Example: mode=periodic8s_blocking=0_defpreempt=1_nodes=16_prio=1_arrival=8s
+    Example: mode=schedulingfailure_blocking=0_defpreempt=0_nodes=32_prio=1_arrival=4s
+
     Returns: (job_name, plugin_config)
         plugin_config: mode=<mode>_blocking=<0/1>_defpreempt=<0/1>
     """
@@ -299,12 +307,15 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
         return None
     arrival_str = str(int(arrival)) if abs(arrival - round(arrival)) < 1e-9 else f"{arrival:g}"
     job_name = f"nodes={n}_prio={kmax}_arrival={arrival_str}s"
-    mode = kv.get("mode", "unknown")
+
+    mode = canonicalize_mode(kv.get("mode", "unknown"))
+
     blocking = 1 if kv.get("blocking", "0").strip().lower() in {"1", "true", "yes"} else 0
     try:
         defpreempt = int(str(kv.get("defpreempt", "0")).strip())
     except Exception:
         defpreempt = 0
+
     plugin_config = f"mode={mode}_blocking={blocking}_defpreempt={defpreempt}"
     return job_name, plugin_config
 
@@ -635,7 +646,6 @@ def main() -> None:
     agg.to_csv(out_dir / "results_paired.csv", index=False)
 
     print(f"Wrote outputs to: {out_dir}")
-    print("NOTE: plots/tables scripts should NOT multiply ΔU by 100 anymore (it is already pp).")
 
 if __name__ == "__main__":
     main()
