@@ -787,7 +787,7 @@ def write_mode_delta_table_tex_txt(
     ]
 
     metric_specs = [
-        ("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", "diff. usage (%)", "signed_float", 1),
+        ("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", "diff. usage (%)", "signed_float", 2),
         (
             "delta_L_ms_total_mean",
             r"$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$",
@@ -1644,8 +1644,8 @@ def make_grid_plot_custom_series(
         r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$",
         r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$",
         r"$\mathrm{diff.}\ \mathrm{deletions}$",
-        r"$\Delta\ \#\mathrm{solver\ runs}$",
-        r"$\Delta\ \#\mathrm{plan\ activations}$",
+        r"$\mathrm{diff.}\ \#\mathrm{solver\ runs}$",
+        r"$\mathrm{diff.}\ \#\mathrm{plan\ activations}$",
     ]
     for r, text in enumerate(row_labels):
         bbox = axes[r, 0].get_position()
@@ -1679,7 +1679,7 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
                 "diff. usage (%)",
                 g("delta_U_pct_eff_mean"),
                 "signed_float",
-                decimals=1,
+                decimals=2,
                 scale=1.0,
             ),
             MetricRow(
