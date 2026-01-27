@@ -7,7 +7,7 @@ python -m scripts.kwok_trace_replayer.plots_and_tables
 import math, re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Iterable
+from typing import Callable, Dict, List, Optional, Tuple, Iterable, Sequence
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -64,20 +64,37 @@ KEY_COLS = ["nodes", "kmax", "arrival_s", "mode", "blocking", "defpreempt"]
 PLOT_TICK_PAD = 2.0
 PLOT_MARKER_SIZE = 4.0
 PLOT_MARKER_LINEWIDTH = 0.4
-PLOT_ARRIVAL_X_SPACING = 0.35
-PLOT_MODE_X_SPACING = 0.05
 
-GRID_LEGEND_PAD = 0.046
-PLOT_LEGEND_NCOL = 3
 
-GRID_FIGSIZE = (6.0, 5)
-GRID_LEFT   = 0.08
-GRID_RIGHT  = 0.99
-GRID_BOTTOM = 0.04
-GRID_TOP    = 0.89
-GRID_WSPACE = 0.1
-GRID_HSPACE = 0.1
-GRID_YLABEL_PAD_FIG = 0.055
+# ---- Layout for "all configs" figures ----
+GRID_LEGEND_NCOL_ALL = 3
+GRID_FIGSIZE = (5.4, 6)
+GRID_LEGEND_PAD_ALL = 0.033
+GRID_LEFT_ALL   = 0.08
+GRID_RIGHT_ALL  = 0.99
+GRID_BOTTOM_ALL = 0.04
+GRID_TOP_ALL    = 0.91
+GRID_WSPACE_ALL = 0.10
+GRID_HSPACE_ALL = 0.10
+GRID_YLABEL_PAD_PT_ALL = 22.0
+PLOT_ARRIVAL_X_SPACING_ALL = 0.35
+PLOT_MODE_X_SPACING_ALL    = 0.05
+
+# ---- Layout for "deltas" figures ----
+GRID_LEGEND_NCOL_DELTAS = 1
+GRID_FIGSIZE_DELTAS = (2.9, 6)
+GRID_LEGEND_PAD_DELTAS = 0.033
+GRID_LEFT_DELTAS   = 0.15
+GRID_RIGHT_DELTAS  = 0.99
+GRID_BOTTOM_DELTAS = 0.04
+GRID_TOP_DELTAS    = 0.91
+GRID_WSPACE_DELTAS = 0.10
+GRID_HSPACE_DELTAS = 0.10
+GRID_YLABEL_PAD_PT_DELTAS = 22.0
+PLOT_ARRIVAL_X_SPACING_DELTAS = 0.35
+PLOT_MODE_X_SPACING_DELTAS    = 0.11
+
+MIN_LINEAR_YTICKS = 5
 
 # =============================================================================
 # CONFIG
@@ -97,60 +114,50 @@ VIEWS: List[ViewConfig] = [
         defpreempt_value=1,
         without_default_preemption_caption=False,
         table_stem="table_util_latency_deletions_optimizations",
-        figure_stem="grid_util_latency_deletions",
+        figure_stem="grid_util_latency_deletions_all_configs",
     ),
     ViewConfig(
         name="without_default_preemption",
         defpreempt_value=0,
         without_default_preemption_caption=True,
         table_stem="table_util_latency_deletions_optimizations",
-        figure_stem="grid_util_latency_deletions",
+        figure_stem="grid_util_latency_deletions_all_configs",
     ),
 ]
 
 @dataclass(frozen=True)
 class ModeSpec:
-    # canonical mode name (after canonical_mode())
     mode: str
-    # blocking variant 0/1
     blocking: int
-    # table short name
     abbr: str
-    # plot legend label
     label: str
-    # rank/order in tables and plots
     rank: int
-    # color index (we pick from matplotlib Set2/Set3 deterministically)
     palette: str  # "set2" or "set3"
     color_idx: int
 
-# Define all mode variants you might want to show and how they should look.
 MODE_SPECS: List[ModeSpec] = [
     # Scheduling-failure (both variants)
     ModeSpec("schedulingfailure", 1, "SF-B",        "Scheduling-failure (blocking)",               rank=0, palette="set2", color_idx=0),
     ModeSpec("schedulingfailure", 0, "SF-NB",       "Scheduling-failure (non-blocking)",           rank=1, palette="set2", color_idx=1),
 
     # Periodic 8s
-    ModeSpec("periodic8s",        1, "PR-8-B",      "Periodic (blocking) with 8 s interval",        rank=2, palette="set2", color_idx=2),
-    ModeSpec("periodic8s",        0, "PR-8-NB",     "Periodic (non-blocking) with 8 s interval",    rank=3, palette="set2", color_idx=3),
-    
+    ModeSpec("periodic8s",        1, "PR-8-B",      "Periodic (blocking), 8s interval",        rank=2, palette="set2", color_idx=2),
+    ModeSpec("periodic8s",        0, "PR-8-NB",     "Periodic (non-blocking), 8s interval",    rank=3, palette="set2", color_idx=3),
+
     # Periodic 32s
-    ModeSpec("periodic32s",        1, "PR-32-B",    "Periodic (blocking) with 32 s interval",       rank=2, palette="set2", color_idx=8),
-    ModeSpec("periodic32s",        0, "PR-32-NB",   "Periodic (non-blocking) with 32 s interval",   rank=3, palette="set2", color_idx=9),
-    
+    ModeSpec("periodic32s",        1, "PR-32-B",    "Periodic (blocking), 32s interval",       rank=4, palette="set2", color_idx=4),
+    ModeSpec("periodic32s",        0, "PR-32-NB",   "Periodic (non-blocking), 32s interval",   rank=5, palette="set2", color_idx=5),
     # Stable-queue 2s
-    ModeSpec("stable-queue-2s",   1, "SQ-2-B",      "Stable-queue (blocking) with 2 s delay",       rank=4, palette="set2", color_idx=4),
-    ModeSpec("stable-queue-2s",   0, "SQ-2-NB",     "Stable-queue (non-blocking) with 2 s delay",   rank=5, palette="set2", color_idx=5),
-    
+    ModeSpec("stable-queue-2s",   1, "SQ-2-B",      "Stable-queue (blocking), 2s delay",       rank=6, palette="set2", color_idx=6),
+    ModeSpec("stable-queue-2s",   0, "SQ-2-NB",     "Stable-queue (non-blocking), 2s delay",   rank=7, palette="set2", color_idx=7),
+
     # Stable-queue 8s
-    ModeSpec("stable-queue-8s",   1, "SQ-8-B",      "Stable-queue (blocking) with 8 s delay",       rank=4, palette="set2", color_idx=10),
-    ModeSpec("stable-queue-8s",   0, "SQ-8-NB",     "Stable-queue (non-blocking) with 8 s delay",   rank=5, palette="set2", color_idx=11),
+    ModeSpec("stable-queue-8s",   1, "SQ-8-B",      "Stable-queue (blocking), 8s delay",       rank=8, palette="set3", color_idx=3),
+    ModeSpec("stable-queue-8s",   0, "SQ-8-NB",     "Stable-queue (non-blocking), 8s delay",   rank=9, palette="set3", color_idx=4),
 ]
 
-# What to include per view.
-# You can control inclusion by listing allowed (mode, blocking) pairs.
-INCLUDE: Dict[str, Optional[List[Tuple[str, int]]]] = {
-    # Show all 6 variants in both views:
+# "all configs" per view (tables + plots)
+INCLUDE_ALL: Dict[str, Optional[List[Tuple[str, int]]]] = {
     "with_default_preemption": [
         ("schedulingfailure", 1), ("schedulingfailure", 0),
         ("periodic8s", 1), ("periodic8s", 0),
@@ -167,6 +174,39 @@ INCLUDE: Dict[str, Optional[List[Tuple[str, int]]]] = {
     ],
 }
 
+# Tables should contain *all configs* (no mode/blocking filtering).
+# Using `None` means "include everything" (filtering only by defpreempt).
+INCLUDE_TABLES_ALL: Dict[str, Optional[List[Tuple[str, int]]]] = {
+    "with_default_preemption": None,
+    "without_default_preemption": None,
+}
+
+# Plots "grid_util_latency_deletions_all_configs_*" should still only show:
+#   scheduling-failure, periodic 8s, stable-queue 2s (both blocking variants)
+INCLUDE_PLOTS_ALL: Dict[str, Optional[List[Tuple[str, int]]]] = {
+    "with_default_preemption": [
+        ("schedulingfailure", 1), ("schedulingfailure", 0),
+        ("periodic8s", 1), ("periodic8s", 0),
+        ("stable-queue-2s", 1), ("stable-queue-2s", 0),
+    ],
+    "without_default_preemption": [
+        ("schedulingfailure", 1), ("schedulingfailure", 0),
+        ("periodic8s", 1), ("periodic8s", 0),
+        ("stable-queue-2s", 1), ("stable-queue-2s", 0),
+    ],
+}
+
+# "periodic + stable-queue only" plots per view
+# We will plot *deltas between modes* (ΔΔ), not the raw modes.
+# Requested:
+#   - Periodic: 8s -> 32s
+#   - Stable-queue: 2s -> 8s
+PERIODIC_STABLE_DELTA_PAIRS = [
+    # (label, left_mode, right_mode, blocking)
+    ("Periodic Δ(8s→32s) (blocking)", "periodic8s", "periodic32s", 1),
+    ("Stable-queue Δ(2s→8s) (blocking)", "stable-queue-2s", "stable-queue-8s", 1),
+]
+
 # =============================================================================
 # PLOT Y-AXIS CONFIG (per view)
 # =============================================================================
@@ -177,8 +217,6 @@ class YAxisConfig:
     ylim: Tuple[float, float]      # (min, max)
     symlog_linthresh: float = 1.0  # only used for symlog
 
-# Per-view y-axis settings:
-#   PLOT_Y[view.name]["util" | "latency" | "deletions"]
 PLOT_Y: Dict[str, Dict[str, YAxisConfig]] = {
     "with_default_preemption": {
         "util":      YAxisConfig(scale="linear", ylim=(-4.0, 4.0)),
@@ -191,6 +229,21 @@ PLOT_Y: Dict[str, Dict[str, YAxisConfig]] = {
         "deletions": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
     },
 }
+
+# Separate y-axis config for the "periodic+stable ΔΔ" plots
+PLOT_Y_DELTAS: Dict[str, Dict[str, YAxisConfig]] = {
+    "with_default_preemption": {
+        "util":      YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
+        "latency":   YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
+        "deletions": YAxisConfig(scale="symlog", ylim=(-1e3 - 1.0, 1e3 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
+    },
+    "without_default_preemption": {
+        "util":      YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
+        "latency":   YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
+        "deletions": YAxisConfig(scale="symlog", ylim=(-1e3 - 1.0, 1e3 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
+    },
+}
+
 
 # =============================================================================
 # Parsing helpers
@@ -247,7 +300,6 @@ class RowKey:
             defpreempt = 0
         return RowKey(mode=mode, blocking=blocking, defpreempt=defpreempt)
 
-# build fast lookup for mode specs
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
 
 def rk_rank(rk: RowKey) -> int:
@@ -303,15 +355,20 @@ def fmt_unsigned_int(x: object, nan_s: str) -> str:
 def arrival_group_label(a: float, *, latex: bool) -> str:
     a_i = int(a) if abs(a - round(a)) < 1e-9 else a
     if latex:
-        return rf"$\mathrm{{inter-arrival}}={a_i}\,\mathrm{{s}}$"
+        return rf"inter-arrival = {a_i}\,s"
     return f"inter-arrival = {a_i} s"
 
 def kmax_caption(kmax: int, *, latex: bool, without_default_preemption: bool) -> str:
     if latex:
-        base = (r"$k_{\max}=1$ (w/o priorities)" if kmax == 1 else rf"$k_{{\max}}={kmax}$ (w/ priorities)")
+        base = (rf"\#priorities = {kmax}" + (r" (w/o priorities)" if kmax == 1 else r" (w/ priorities)"))
         return base + (r" (w/o default preemption)" if without_default_preemption else "")
-    base = ("kmax=1 (w/o priorities)" if kmax == 1 else f"kmax={kmax} (w/ priorities)")
+    base = (f"#priorities = {kmax}" + (" (w/o priorities)" if kmax == 1 else " (w/ priorities)"))
     return base + (" (w/o default preemption)" if without_default_preemption else "")
+
+def rk_label_tex(rk: RowKey) -> str:
+    # No makecell, no line breaks, no wrapping logic
+    return rk_label(rk)
+
 
 def view_suffix(view: ViewConfig) -> str:
     return "with_defaultpreemption" if int(view.defpreempt_value) == 1 else "without_defaultpreemption"
@@ -365,18 +422,18 @@ def lookup_value(
         return float("nan")
 
 # =============================================================================
-# Inclusion helpers (THIS makes changing inclusion easy)
+# Inclusion helpers
 # =============================================================================
 
-def included_pairs_for_view(view: ViewConfig) -> Optional[set[Tuple[str, int]]]:
-    items = INCLUDE.get(view.name, None)
+def included_pairs_for_view(view: ViewConfig, include_map: Dict[str, Optional[List[Tuple[str, int]]]]) -> Optional[set[Tuple[str, int]]]:
+    items = include_map.get(view.name, None)
     if items is None:
         return None
     return {(canonical_mode(m), int(b)) for (m, b) in items}
 
-def filter_rks_for_view(rks: Iterable[RowKey], view: ViewConfig) -> List[RowKey]:
-    pairs = included_pairs_for_view(view)
-    out = []
+def filter_rks_for_view(rks: Iterable[RowKey], view: ViewConfig, include_map: Dict[str, Optional[List[Tuple[str, int]]]]) -> List[RowKey]:
+    pairs = included_pairs_for_view(view, include_map)
+    out: List[RowKey] = []
     for rk in rks:
         if int(rk.defpreempt) != int(view.defpreempt_value):
             continue
@@ -386,7 +443,7 @@ def filter_rks_for_view(rks: Iterable[RowKey], view: ViewConfig) -> List[RowKey]
     return sort_rks(out)
 
 # =============================================================================
-# Tables
+# Tables (big tables per view)
 # =============================================================================
 
 MetricGetter = Callable[[int, RowKey, int, float], float]  # (kmax, rk, nodes, arrival) -> value
@@ -416,72 +473,333 @@ def latex_metric_matrix_tables(
     out_path: Path,
     nodes_order: List[int],
     arrivals_order: List[float],
-    modes_by_kmax: Dict[int, List[RowKey]],
-    metrics_by_kmax: Dict[int, List[MetricRow]],
+    modes: List[RowKey],
+    metrics: List[MetricRow],
+    kmax: int,
     without_default_preemption: bool,
 ) -> None:
+    """
+    Flipped layout using ONLY tabular:
+      Columns: (empty) | metric1 | metric2 | ... | metricK
+      Rows: mode1..modeM
+      Blocks stacked for each (#nodes, inter-arrival).
+
+    - No tabularx, no makecell.
+    - Mode column left-aligned.
+    - No "Mode" header (first header cell is empty).
+    - Metric headers can be split into two lines via \\shortstack.
+    """
+
+    n_metrics = len(metrics)
+    total_cols = 1 + n_metrics
+
+    def _ai(a: float) -> str:
+        return str(int(a)) if abs(a - round(a)) < 1e-9 else str(a)
+
     lines: List[str] = []
-    for kmax in sorted(metrics_by_kmax.keys()):
-        modes = modes_by_kmax.get(kmax, [])
-        metrics = metrics_by_kmax.get(kmax, [])
-        if not modes or not metrics:
-            continue
 
-        n_modes = len(modes)
-        n_arr = len(arrivals_order)
-        total_cols = 1 + n_modes * n_arr
-        tab_spec = "l" + " c" * (total_cols - 1)
+    # colspec: mode column left (l), metric columns centered (c)
+    colspec = "l" + (" " + "c" * n_metrics if n_metrics > 0 else "")
+    # NOTE: the above produces e.g. "l ccc" (booktabs doesn't care about spaces)
+    # If you prefer: colspec = "l" + "c" * n_metrics
 
-        cmid = []
-        for i in range(n_arr):
-            start = 2 + i * n_modes
-            end = start + n_modes - 1
-            cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
+    lines.append(rf"\begin{{tabular}}{{{colspec}}}")
+    lines.append(r"\toprule")
 
-        arrival_hdr = " & " + " & ".join(
-            [rf"\multicolumn{{{n_modes}}}{{c}}{{{arrival_group_label(a, latex=True)}}}" for a in arrivals_order]
-        ) + r" \\"
-        mode_hdr = " & " + " & ".join([rk_abbr(rk) for _a in arrivals_order for rk in modes]) + r" \\"
+    # Header row: empty first cell, then metric headers
+    metric_hdrs = [metric_header_tex(m.latex_label) for m in metrics]
+    if metric_hdrs:
+        lines.append(" & " + " & ".join(metric_hdrs) + r" \\")
+    else:
+        lines.append(r"\\")  # degenerate case
+    lines.append(r"\midrule")
 
-        lines.append(rf"\begin{{tabular}}{{{tab_spec}}}")
-        lines.append(r"\toprule")
-        lines.append(
-            rf"\multicolumn{{{total_cols}}}{{l}}{{{kmax_caption(kmax, latex=True, without_default_preemption=without_default_preemption)}}} \\"
-        )
-        lines.append(r"\addlinespace[0.2em]")
-        lines.append(arrival_hdr)
-        lines.append("".join(cmid))
-        lines.append(mode_hdr)
-        lines.append(r"\midrule")
-
-        for ni, n in enumerate(nodes_order):
-            if ni > 0:
+    first_block = True
+    for n in nodes_order:
+        for a in arrivals_order:
+            if not first_block:
                 lines.append(r"\midrule")
-            lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{${{N={n}}}$}} \\")
-            lines.append(r"\midrule")
-            for mrow in metrics:
-                cells: List[str] = []
-                for a in arrivals_order:
-                    for rk in modes:
-                        v = mrow.getter(kmax, rk, n, float(a))
-                        cells.append(_fmt_metric_value(v, row=mrow, latex=True))
-                lines.append(f"{mrow.latex_label} & " + " & ".join(cells) + r" \\")
+            first_block = False
 
-        lines.append(r"\bottomrule")
-        lines.append(r"\end{tabular}")
-        lines.append("")
+            lines.append(
+                rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {int(n)}, inter-arrival = {_ai(float(a))}\,s}} \\"
+            )
+            lines.append(r"\midrule")
+
+            for rk in modes:
+                cells: List[str] = []
+                for mrow in metrics:
+                    v = mrow.getter(int(kmax), rk, int(n), float(a))
+                    cells.append(_fmt_metric_value(v, row=mrow, latex=True))
+
+                # Left-aligned mode label, no forced wrapping
+                lines.append(f"{rk_label_tex(rk)} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    lines.append("")
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def metric_header_tex(label: str) -> str:
+    """
+    Package-free, non-overlapping, top-aligned + centered metric headers.
+
+    We return a tiny 1-col tabular placed with [t] so the header content is
+    aligned at the top of the cell, and centered within the column.
+    If there is a unit in parentheses, split into two lines.
+    If label is in $...$, we restart math mode per line.
+    """
+    s = str(label).strip()
+
+    def _split_core(core: str) -> Optional[Tuple[str, str]]:
+        core = core.strip()
+        # LaTeX style: "... \;(\mathrm{ms})"
+        if r"\;(" in core:
+            left, right = core.split(r"\;(", 1)
+            return left.strip(), ("(" + right.strip())
+        # Plain text style: "... (ms)"
+        if " (" in core and core.endswith(")"):
+            left, right = core.rsplit(" (", 1)
+            return left.strip(), ("(" + right.strip())
+        return None
+
+    # Math-wrapped: $ ... $
+    if s.startswith("$") and s.endswith("$") and len(s) >= 2:
+        core = s[1:-1].strip()
+        parts = _split_core(core)
+        if parts is None:
+            line1 = f"${core}$"
+            return rf"\begin{{tabular}}[t]{{@{{}}c@{{}}}}{line1}\end{{tabular}}"
+        left, right = parts
+        line1 = f"${left}$"
+        line2 = f"${right}$"
+        return rf"\begin{{tabular}}[t]{{@{{}}c@{{}}}}{line1}\\{line2}\end{{tabular}}"
+
+    # Plain text
+    parts = _split_core(s)
+    if parts is None:
+        return rf"\begin{{tabular}}[t]{{@{{}}c@{{}}}}{s}\end{{tabular}}"
+
+    left, right = parts
+    return rf"\begin{{tabular}}[t]{{@{{}}c@{{}}}}{left}\\{right}\end{{tabular}}"
+
+
 
 def ascii_metric_matrix_tables(
     *,
     out_path: Path,
     nodes_order: List[int],
     arrivals_order: List[float],
-    modes_by_kmax: Dict[int, List[RowKey]],
-    metrics_by_kmax: Dict[int, List[MetricRow]],
+    modes: List[RowKey],
+    metrics: List[MetricRow],
+    kmax: int,
     without_default_preemption: bool,
 ) -> None:
+    def center(s: str, w: int) -> str:
+        s = str(s)
+        if len(s) >= w:
+            return s[:w]
+        pad = w - len(s)
+        return " " * (pad // 2) + s + " " * (pad - pad // 2)
+
+    def split_unit(s: str) -> Tuple[str, str]:
+        # "Δ latency_total (ms)" -> ("Δ latency_total", "(ms)")
+        t = str(s)
+        if " (" in t and t.endswith(")"):
+            a, b = t.rsplit(" (", 1)
+            return a, "(" + b
+        return t, ""
+
+    def _ai(a: float) -> str:
+        return str(int(a)) if abs(a - round(a)) < 1e-9 else str(a)
+
+    mode_w = 30
+    cell_w = 16
+    total_w = mode_w + cell_w * len(metrics)
+    sep = "-" * total_w
+
+    # Two-line metric header if units exist
+    hdr_top = " " * mode_w
+    hdr_bot = " " * mode_w
+    for m in metrics:
+        a, b = split_unit(m.ascii_label)
+        hdr_top += center(a, cell_w)
+        hdr_bot += center(b, cell_w)
+
+    lines: List[str] = []
+    lines.append(kmax_caption(kmax, latex=False, without_default_preemption=without_default_preemption))
+    lines.append("")
+    lines.append(hdr_top.rstrip())
+    if any(split_unit(m.ascii_label)[1] for m in metrics):
+        lines.append(hdr_bot.rstrip())
+    lines.append(sep)
+
+    first_block = True
+    for n in nodes_order:
+        for a in arrivals_order:
+            if not first_block:
+                lines.append(sep)
+            first_block = False
+
+            lines.append(f"#nodes = {int(n)}, inter-arrival = {_ai(float(a))}s")
+            lines.append(sep)
+
+            for rk in modes:
+                row = center(rk_label(rk), mode_w)
+                for mrow in metrics:
+                    v = mrow.getter(int(kmax), rk, int(n), float(a))
+                    row += center(_fmt_metric_value(v, row=mrow, latex=False), cell_w)
+                lines.append(row.rstrip())
+
+    lines.append(sep)
+    lines.append("")
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+
+# =============================================================================
+# Delta-between-modes table (ONE table, contains both with/without views)
+# =============================================================================
+
+@dataclass(frozen=True)
+class ModeDeltaCol:
+    abbr: str
+    left_mode: str   # baseline mode (e.g., periodic2s)
+    right_mode: str  # compare mode  (e.g., periodic8s)
+    blocking: int
+
+def _mode_delta_value(
+    lookup: pd.DataFrame,
+    *,
+    col: str,
+    nodes: int,
+    kmax: int,
+    arrival_s: float,
+    defpreempt: int,
+    left_mode: str,
+    right_mode: str,
+    blocking: int,
+) -> float:
+    rk_l = RowKey(mode=canonical_mode(left_mode), blocking=int(blocking), defpreempt=int(defpreempt))
+    rk_r = RowKey(mode=canonical_mode(right_mode), blocking=int(blocking), defpreempt=int(defpreempt))
+    vl = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, rk=rk_l, col=col)
+    vr = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, rk=rk_r, col=col)
+    if not is_finite(vl) or not is_finite(vr):
+        return float("nan")
+    return float(vr) - float(vl)
+
+def write_mode_delta_table_tex_txt(
+    *,
+    out_tex: Path,
+    out_txt: Path,
+    lookup: pd.DataFrame,
+    views: Sequence[ViewConfig],
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmaxs: List[int],
+) -> None:
+    """
+    Single table (tex + txt) that includes:
+      - Δ(Periodic 2s -> 8s) over metrics
+      - Δ(Stable-queue 2s -> 8s) over metrics
+    for both views (with/without default preemption).
+
+    NOTE: If "periodic2s" does not exist in results, those cells become "--".
+    """
+
+    # Requested comparisons:
+    #   periodic 2s vs 8s
+    #   stable-queue 2s vs 8s
+    delta_cols: List[ModeDeltaCol] = [
+        ModeDeltaCol("PR 8→32 (B)",  "periodic8s",       "periodic32s",      blocking=1),
+        ModeDeltaCol("SQ 2→8 (B)",   "stable-queue-2s",  "stable-queue-8s",  blocking=1),
+    ]
+
+    # Metrics to compare (difference between the two modes' deltas vs baseline)
+    metric_specs = [
+        ("delta_U_pp_eff_mean",   r"$\Delta~\mathrm{usage}\;(\mathrm{pp})$",       "Δ usage (pp)",        "signed_float", 1),
+        ("delta_L_ms_total_mean", r"$\Delta~\mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", "Δ latency_total (ms)", "signed_float", 0),
+        ("delta_D_num_total_mean",r"$\Delta~\mathrm{deletions}_{\mathrm{total}}\;(\mathrm{count})$", "Δ deletions_total", "signed_float", 1),
+        ("solver_attempts_mean",  r"$\Delta~\#\mathrm{solver\ runs}$",                  "Δ #solver runs",      "signed_float", 1),
+        ("plan_activated_mean",   r"$\Delta~\#\mathrm{plan\ activations}$",             "Δ #plan activations", "signed_float", 1),
+    ]
+
+    # --------------------- TEX ---------------------
+    tex_lines: List[str] = []
+    for view in views:
+        tex_lines.append(r"% ------------------------------------------------------------")
+        tex_lines.append(rf"% Mode-delta table section: {view.name}")
+        tex_lines.append(r"% ------------------------------------------------------------")
+        tex_lines.append("")
+
+        for kmax in sorted(kmaxs):
+            n_modes = len(delta_cols)
+            n_arr = len(arrivals_order)
+            total_cols = 1 + n_modes * n_arr
+            tab_spec = "l" + " c" * (total_cols - 1)
+
+            cmid = []
+            for i in range(n_arr):
+                start = 2 + i * n_modes
+                end = start + n_modes - 1
+                cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
+
+            arrival_hdr = " & " + " & ".join(
+                [rf"\multicolumn{{{n_modes}}}{{c}}{{{arrival_group_label(a, latex=True)}}}" for a in arrivals_order]
+            ) + r" \\"
+            mode_hdr = " & " + " & ".join([c.abbr for _a in arrivals_order for c in delta_cols]) + r" \\"
+
+            tex_lines.append(rf"\begin{{tabular}}{{{tab_spec}}}")
+            tex_lines.append(r"\toprule")
+            tex_lines.append(
+                rf"\multicolumn{{{total_cols}}}{{l}}{{Mode deltas (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), {kmax_caption(kmax, latex=True, without_default_preemption=view.without_default_preemption_caption)}}} \\"
+            )
+            tex_lines.append(r"\addlinespace[0.2em]")
+            tex_lines.append(arrival_hdr)
+            tex_lines.append("".join(cmid))
+            tex_lines.append(mode_hdr)
+            tex_lines.append(r"\midrule")
+
+            for ni, n in enumerate(nodes_order):
+                if ni > 0:
+                    tex_lines.append(r"\midrule")
+                tex_lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {n}}} \\")
+                tex_lines.append(r"\midrule")
+
+                for (col, latex_lbl, _ascii_lbl, fmt_kind, dec) in metric_specs:
+                    cells: List[str] = []
+                    for a in arrivals_order:
+                        for c in delta_cols:
+                            v = _mode_delta_value(
+                                lookup,
+                                col=col,
+                                nodes=n,
+                                kmax=kmax,
+                                arrival_s=float(a),
+                                defpreempt=int(view.defpreempt_value),
+                                left_mode=c.left_mode,
+                                right_mode=c.right_mode,
+                                blocking=int(c.blocking),
+                            )
+                            ns = nan_str(True)
+                            if fmt_kind == "signed_float":
+                                cells.append(fmt_signed(v, dec, ns) if is_finite(v) else ns)
+                            else:
+                                cells.append(fmt_signed(v, dec, ns) if is_finite(v) else ns)
+                    tex_lines.append(f"{latex_lbl} & " + " & ".join(cells) + r" \\")
+
+            tex_lines.append(r"\bottomrule")
+            tex_lines.append(r"\end{tabular}")
+            tex_lines.append("")
+
+        tex_lines.append("")
+
+    out_tex.write_text("\n".join(tex_lines), encoding="utf-8")
+
+    # --------------------- TXT ---------------------
     def center(s: str, w: int) -> str:
         s = str(s)
         if len(s) >= w:
@@ -489,56 +807,82 @@ def ascii_metric_matrix_tables(
         pad = w - len(s)
         return " " * (pad // 2) + s + " " * (pad - pad // 2)
 
-    lines: List[str] = []
-    for kmax in sorted(metrics_by_kmax.keys()):
-        modes = modes_by_kmax.get(kmax, [])
-        metrics = metrics_by_kmax.get(kmax, [])
-        if not modes or not metrics:
-            continue
+    txt_lines: List[str] = []
+    for view in views:
+        txt_lines.append("=" * 80)
+        txt_lines.append(f"Mode deltas (PR 8->32, SQ 2->8) | view = {view.name}")
+        txt_lines.append("=" * 80)
+        txt_lines.append("")
 
-        mode_labels = [rk_abbr(rk) for _a in arrivals_order for rk in modes]
-        arr_labels = [arrival_group_label(a, latex=False) for a in arrivals_order]
+        for kmax in sorted(kmaxs):
+            row_w = 26
+            cell_w = 14
+            n_modes = len(delta_cols)
+            total_cols = n_modes * len(arrivals_order)
+            total_w = row_w + cell_w * total_cols
+            sep = "-" * total_w
 
-        row_w = max(12, max(len(m.ascii_label) for m in metrics) + 2)
-        cell_w = 10
-        total_cols = len(mode_labels)
-        total_w = row_w + cell_w * total_cols
-        sep = "-" * total_w
+            txt_lines.append(kmax_caption(kmax, latex=False, without_default_preemption=view.without_default_preemption_caption))
+            txt_lines.append("")
 
-        lines.append(kmax_caption(kmax, latex=False, without_default_preemption=without_default_preemption))
-        lines.append("")
+            hdr1 = " " * row_w
+            for a in arrivals_order:
+                hdr1 += center(arrival_group_label(a, latex=False), cell_w * n_modes)
+            txt_lines.append(hdr1.rstrip())
 
-        hdr1 = " " * row_w
-        for al in arr_labels:
-            hdr1 += center(al, cell_w * len(modes))
-        lines.append(hdr1.rstrip())
+            hdr2 = " " * row_w
+            for _a in arrivals_order:
+                for c in delta_cols:
+                    hdr2 += center(c.abbr, cell_w)
+            txt_lines.append(hdr2.rstrip())
+            txt_lines.append(sep)
 
-        hdr2 = " " * row_w
-        for ml in mode_labels:
-            hdr2 += center(ml, cell_w)
-        lines.append(hdr2.rstrip())
-        lines.append(sep)
+            for n in nodes_order:
+                txt_lines.append(f"#nodes = {n}")
+                txt_lines.append(sep)
+                for (col, _latex_lbl, ascii_lbl, _fmt_kind, dec) in metric_specs:
+                    row = ascii_lbl.ljust(row_w)
+                    for a in arrivals_order:
+                        for c in delta_cols:
+                            v = _mode_delta_value(
+                                lookup,
+                                col=col,
+                                nodes=n,
+                                kmax=kmax,
+                                arrival_s=float(a),
+                                defpreempt=int(view.defpreempt_value),
+                                left_mode=c.left_mode,
+                                right_mode=c.right_mode,
+                                blocking=int(c.blocking),
+                            )
+                            ns = nan_str(False)
+                            cell = fmt_signed(v, dec, ns) if is_finite(v) else ns
+                            row += center(cell, cell_w)
+                    txt_lines.append(row.rstrip())
+                txt_lines.append(sep)
+                txt_lines.append("")
 
-        for n in nodes_order:
-            lines.append(f"N={n}")
-            lines.append(sep)
-            for mrow in metrics:
-                row = mrow.ascii_label.ljust(row_w)
-                for a in arrivals_order:
-                    for rk in modes:
-                        v = mrow.getter(kmax, rk, n, float(a))
-                        row += center(_fmt_metric_value(v, row=mrow, latex=False), cell_w)
-                lines.append(row.rstrip())
-            lines.append(sep)
-            lines.append("")
+            txt_lines.append("")
 
-        lines.append("")
+        txt_lines.append("")
 
-    out_path.write_text("\n".join(lines), encoding="utf-8")
+    out_txt.write_text("\n".join(txt_lines), encoding="utf-8")
 
 # =============================================================================
 # Plot helpers
 # =============================================================================
+
+def arrival_tick_label(a: float) -> str:
+    a_i = int(a) if abs(a - round(a)) < 1e-9 else a
+    return f"{a_i}s"   
+
+def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
+    base = arrival_tick_label(a)  # e.g., "8s"
+    mid = n_arr // 2
+    if xi == mid:
+        return base + "\ninter-arrival (s)"
+    return base
+
 
 YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, kmax) -> y
 
@@ -555,9 +899,11 @@ def draw_points_on_ax(
     show_yticklabels: bool,
     y_scale: str = "linear",
     symlog_linthresh: float = 1.0,
+    arrival_x_spacing: float,
+    mode_x_spacing: float,
 ) -> None:
     n_arr = len(arrivals_order)
-    step = float(PLOT_ARRIVAL_X_SPACING)
+    step = float(arrival_x_spacing)
 
     boundaries = [i * step for i in range(n_arr + 1)]
     x_base = [(i + 0.5) * step for i in range(n_arr)]
@@ -567,7 +913,7 @@ def draw_points_on_ax(
         mode_spacing = 0.0
     else:
         max_allowed = 0.45 * step
-        mode_spacing = min(PLOT_MODE_X_SPACING, (2.0 * max_allowed) / float(m - 1))
+        mode_spacing = min(float(mode_x_spacing), (2.0 * max_allowed) / float(m - 1))
 
     for i, rk in enumerate(series):
         color = rk_color(rk)
@@ -596,9 +942,7 @@ def draw_points_on_ax(
     ax.set_ylim(float(ylim[0]), float(ylim[1]))
 
     if y_scale == "linear":
-        y0 = int(math.ceil(float(ylim[0])))
-        y1 = int(math.floor(float(ylim[1])))
-        ax.set_yticks(list(range(y0, y1 + 1)))
+        set_linear_yticks(ax, ylim)
 
     ax.set_xlim(boundaries[0], boundaries[-1])
     ax.margins(x=0)
@@ -612,13 +956,17 @@ def draw_points_on_ax(
     if show_xticklabels:
         ax.set_xticklabels([""] * len(boundaries))
         for xi, a in enumerate(arrivals_order):
+            ls = 1.0
+            if xi == len(arrivals_order) // 2:
+                ls = 1.35  # a bit more space between lines
             ax.text(
-                x_base[xi], -0.05,
-                arrival_group_label(a, latex=False),
+                x_base[xi], -0.03,
+                arrival_tick_label_with_axis(a, xi, len(arrivals_order)),
                 transform=ax.get_xaxis_transform(),
                 ha="center", va="top",
                 fontsize=PLOT_TICK_FONTSIZE,
                 clip_on=False,
+                linespacing=ls,
             )
     else:
         ax.tick_params(labelbottom=False)
@@ -631,11 +979,390 @@ def draw_points_on_ax(
             continue
         ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
 
-def ycfg(view: ViewConfig, key: str) -> YAxisConfig:
+def ycfg(view: ViewConfig, key: str, *, kind: str = "all") -> YAxisConfig:
+    """
+    kind:
+      - "all"    : grid_util_latency_deletions_all_configs_*
+      - "deltas" : grid_util_latency_deletions_periodic_stable_deltas_*
+    """
+    if kind == "deltas":
+        d = PLOT_Y_DELTAS.get(view.name)
+        if not d or key not in d:
+            raise SystemExit(f"Missing PLOT_Y_DELTAS config for view={view.name} key={key}")
+        return d[key]
+
     d = PLOT_Y.get(view.name)
     if not d or key not in d:
         raise SystemExit(f"Missing PLOT_Y config for view={view.name} key={key}")
     return d[key]
+
+def make_mode_delta_series(
+    *,
+    lookup: pd.DataFrame,
+    defpreempt: int,
+    label: str,
+    left_mode: str,
+    right_mode: str,
+    blocking: int,
+) -> Tuple[str, YOfFn, YOfFn, YOfFn]:
+    """
+    Returns (legend_label, y_util, y_latency, y_deletions) where each y_* computes:
+        ΔΔ(metric) = Δ(metric)[right_mode] - Δ(metric)[left_mode]
+    for a fixed (blocking, defpreempt) and varying (nodes, kmax, arrival).
+    """
+    rk_l = RowKey(mode=canonical_mode(left_mode), blocking=int(blocking), defpreempt=int(defpreempt))
+    rk_r = RowKey(mode=canonical_mode(right_mode), blocking=int(blocking), defpreempt=int(defpreempt))
+
+    def _dd(col: str) -> YOfFn:
+        def _y(_rk_unused: RowKey, nodes: int, a: float, kmax: int) -> float:
+            vl = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk_l, col=col)
+            vr = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk_r, col=col)
+            if not is_finite(vl) or not is_finite(vr):
+                return float("nan")
+            return float(vr) - float(vl)
+        return _y
+
+    return (
+        label,
+        _dd("delta_U_pp_eff_mean"),
+        _dd("delta_L_ms_total_mean"),
+        _dd("delta_D_num_total_mean"),
+    )
+
+def x_from_left_with_pad_points(fig: plt.Figure, left: float, pad_pt: float) -> float:
+    # 72 points per inch; figure width is in inches
+    pad_frac = float(pad_pt) / (72.0 * float(fig.get_figwidth()))
+    return max(0.0, float(left) - pad_frac)
+
+def make_grid_plot(
+    *,
+    lookup: pd.DataFrame,
+    view: ViewConfig,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax_cols: List[int],
+    series: List[RowKey],
+    out_stem: str,
+    # NEW:
+    grid_left: float,
+    grid_right: float,
+    grid_bottom: float,
+    grid_top: float,
+    grid_wspace: float,
+    grid_hspace: float,
+    ylabel_pad_pt: float,
+    legend_pad: float,
+    legend_ncol: int,
+    arrival_x_spacing: float,
+    mode_x_spacing: float,
+) -> None:
+    def y_from_col(*, col: str, scale: float) -> YOfFn:
+        def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
+            v = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk, col=col)
+            return float(v) * float(scale) if is_finite(v) else float("nan")
+        return _y
+
+    present_labels = {rk_label(rk) for rk in series}
+    legend_handles: List[Line2D] = []
+    legend_labels: List[str] = []
+    for rk in series:
+        lab = rk_label(rk)
+        if lab in present_labels and lab not in legend_labels:
+            legend_labels.append(lab)
+            legend_handles.append(Line2D([0], [0], color=rk_color(rk), linewidth=1.8))
+
+    fig, axes = plt.subplots(nrows=3, ncols=2, figsize=GRID_FIGSIZE, sharex=True)
+    axes[0, 0].set_title(f"#priorities = {kmax_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 1].set_title(f"#priorities = {kmax_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
+
+    # Util
+    for col_i, k in enumerate(kmax_cols):
+        yc = ycfg(view, "util", kind="all")
+        draw_points_on_ax(
+            ax=axes[0, col_i],
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=k,
+            series=series,
+            y_of=y_from_col(col="delta_U_pp_eff_mean", scale=1.0),
+            ylim=yc.ylim,
+            show_xticklabels=False,
+            show_yticklabels=(col_i == 0),
+            y_scale=yc.scale,
+            symlog_linthresh=yc.symlog_linthresh,
+            arrival_x_spacing=arrival_x_spacing,
+            mode_x_spacing=mode_x_spacing,
+        )
+
+    # Latency
+    for col_i, k in enumerate(kmax_cols):
+        yc = ycfg(view, "latency", kind="all")
+        draw_points_on_ax(
+            ax=axes[1, col_i],
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=k,
+            series=series,
+            y_of=y_from_col(col="delta_L_ms_total_mean", scale=1.0),
+            ylim=yc.ylim,
+            show_xticklabels=False,
+            show_yticklabels=(col_i == 0),
+            y_scale=yc.scale,
+            symlog_linthresh=yc.symlog_linthresh,
+            arrival_x_spacing=arrival_x_spacing,
+            mode_x_spacing=mode_x_spacing,
+        )
+
+    # Deletions
+    for col_i, k in enumerate(kmax_cols):
+        yc = ycfg(view, "deletions", kind="all")
+        draw_points_on_ax(
+            ax=axes[2, col_i],
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax=k,
+            series=series,
+            y_of=y_from_col(col="delta_D_num_total_mean", scale=1.0),
+            ylim=yc.ylim,
+            show_xticklabels=True,
+            show_yticklabels=(col_i == 0),
+            y_scale=yc.scale,
+            symlog_linthresh=yc.symlog_linthresh,
+            arrival_x_spacing=arrival_x_spacing,
+            mode_x_spacing=mode_x_spacing,
+        )
+
+    fig.subplots_adjust(
+        left=grid_left, right=grid_right, bottom=grid_bottom, top=grid_top,
+        wspace=grid_wspace, hspace=grid_hspace,
+    )
+
+    x_text = x_from_left_with_pad_points(fig, grid_left, ylabel_pad_pt)
+
+    bbox_l = axes[0, 0].get_position()
+    bbox_r = axes[0, 1].get_position()
+    x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
+    y_top_grid = max(bbox_l.y1, bbox_r.y1)
+    legend_y = min(0.98, y_top_grid + float(legend_pad))
+
+    fig.legend(
+        legend_handles, legend_labels,
+        loc="lower center",
+        bbox_to_anchor=(x_center_grid, legend_y),
+        ncol=min(int(legend_ncol), len(legend_labels)),
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+
+    row_labels = [
+        r"$\Delta$ usage (pp)",
+        r"$\Delta$ latency (ms)",
+        r"$\Delta$ deletions (count)",
+    ]
+    for r, text in enumerate(row_labels):
+        bbox = axes[r, 0].get_position()
+        y_center = 0.5 * (bbox.y0 + bbox.y1)
+        fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
+    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
+    plt.close(fig)
+
+
+def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int = MIN_LINEAR_YTICKS) -> None:
+    ylo, yhi = float(ylim[0]), float(ylim[1])
+
+    # Prefer integer ticks when there are "enough"
+    y0 = int(math.ceil(ylo))
+    y1 = int(math.floor(yhi))
+    ticks = list(range(y0, y1 + 1))
+
+    if len(ticks) < int(min_ticks):
+        span = max(1e-12, yhi - ylo)
+        # choose a readable rounding level based on span
+        if span >= 4.0:
+            dec = 0
+        elif span >= 1.0:
+            dec = 1
+        else:
+            dec = 2
+
+        ticks = [round(float(t), dec) for t in np.linspace(ylo, yhi, int(min_ticks))]
+
+    ax.set_yticks(ticks)
+
+def make_grid_plot_custom_series(
+    *,
+    view: ViewConfig,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    kmax_cols: List[int],
+    series_labels: List[str],
+    y_utils: List[YOfFn],
+    y_lats: List[YOfFn],
+    y_dels: List[YOfFn],
+    out_stem: str,
+    figsize: Tuple[float, float] = GRID_FIGSIZE_DELTAS,
+    # NEW:
+    grid_left: float,
+    grid_right: float,
+    grid_bottom: float,
+    grid_top: float,
+    grid_wspace: float,
+    grid_hspace: float,
+    ylabel_pad_pt: float,
+    legend_pad: float,
+    legend_ncol: int,
+    arrival_x_spacing: float,
+    mode_x_spacing: float,
+) -> None:
+    # Build legend handles with deterministic colors from a colormap
+    cmap = plt.get_cmap("Set2").colors
+    legend_handles: List[Line2D] = []
+    for i, lab in enumerate(series_labels):
+        legend_handles.append(Line2D([0], [0], color=cmap[i % len(cmap)], linewidth=1.8))
+    legend_labels = series_labels
+
+    fig, axes = plt.subplots(nrows=3, ncols=2, figsize=figsize, sharex=True)
+    axes[0, 0].set_title(f"#priorities = {kmax_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 1].set_title(f"#priorities = {kmax_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
+
+    # We fake RowKeys just to reuse draw_points_on_ax spacing logic
+    fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=view.defpreempt_value) for i in range(len(series_labels))]
+
+    # Local color override (use our cmap, not rk_color)
+    def _rk_color_override(idx: int):
+        return cmap[idx % len(cmap)]
+
+    def draw_row(row: int, y_fns: List[YOfFn], key: str, show_xt: bool):
+        for col_i, k in enumerate(kmax_cols):
+            yc = ycfg(view, key, kind="deltas")
+
+            # Wrap y_of to select correct function based on series index
+            def y_of(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
+                i = int(rk.mode.replace("custom", ""))
+                return y_fns[i](rk, nodes, a, kmax)
+
+            # Monkeypatch colors by temporarily mapping rk_color via closure
+            for i, rk in enumerate(fake_series):
+                pass  # (color used inside draw_points_on_ax via rk_color)
+
+            # Inline copy of draw_points_on_ax loop so we can control colors
+            n_arr = len(arrivals_order)
+            step = float(arrival_x_spacing)
+            boundaries = [i * step for i in range(n_arr + 1)]
+            x_base = [(i + 0.5) * step for i in range(n_arr)]
+
+            m = max(1, len(fake_series))
+            if m <= 1:
+                mode_spacing = 0.0
+            else:
+                max_allowed = 0.45 * step
+                mode_spacing = min(float(mode_x_spacing), (2.0 * max_allowed) / float(m - 1))
+
+            ax = axes[row, col_i]
+            for i, rk in enumerate(fake_series):
+                color = _rk_color_override(i)
+                mode_offset = (i - (m - 1) / 2.0) * mode_spacing
+                for xi, a in enumerate(arrivals_order):
+                    x = x_base[xi] + mode_offset
+                    y0 = y_of(rk, nodes_order[0], a, k)
+                    y1 = y_of(rk, nodes_order[1], a, k)
+                    if is_finite(y0):
+                        ax.plot([x], [y0], marker="o", linestyle="None",
+                                markersize=PLOT_MARKER_SIZE, markerfacecolor=color,
+                                markeredgecolor="black", markeredgewidth=PLOT_MARKER_LINEWIDTH)
+                    if is_finite(y1):
+                        ax.plot([x], [y1], marker="s", linestyle="None",
+                                markersize=PLOT_MARKER_SIZE, markerfacecolor=color,
+                                markeredgecolor="black", markeredgewidth=PLOT_MARKER_LINEWIDTH)
+
+            if yc.scale == "symlog":
+                ax.set_yscale("symlog", base=SYMLOG_BASE, linthresh=yc.symlog_linthresh, linscale=SYMLOG_LINSCALE)
+            else:
+                ax.set_yscale("linear")
+
+            ax.axhline(0.0, linewidth=0.8, color="black", linestyle="-", alpha=0.7)
+            ax.set_ylim(float(yc.ylim[0]), float(yc.ylim[1]))
+            
+            # Match draw_points_on_ax(): linear y-ticks + horizontal gridlines
+            if yc.scale == "linear":
+                set_linear_yticks(ax, yc.ylim)
+
+            for y in ax.get_yticks():
+                if abs(y) < 1e-8:
+                    continue
+                ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
+
+            ax.set_xlim(boundaries[0], boundaries[-1])
+            ax.margins(x=0)
+            for bx in boundaries:
+                ax.axvline(bx, linewidth=0.8, color="black", linestyle="--", alpha=0.7, zorder=0)
+
+            ax.set_xticks(boundaries)
+            ax.tick_params(axis="both", which="major", labelsize=PLOT_TICK_FONTSIZE, pad=PLOT_TICK_PAD)
+
+
+            if show_xt:
+                ax.set_xticklabels([""] * len(boundaries))
+                for xi, a in enumerate(arrivals_order):
+                    ls = 1.0
+                    if xi == len(arrivals_order) // 2:
+                        ls = 1.35  # a bit more space between lines
+                    ax.text(
+                        x_base[xi], -0.03,  # was -0.05
+                        arrival_tick_label_with_axis(a, xi, len(arrivals_order)),
+                        transform=ax.get_xaxis_transform(),
+                        ha="center", va="top",
+                        fontsize=PLOT_TICK_FONTSIZE,
+                        clip_on=False,
+                        linespacing=ls,
+                    )
+            else:
+                ax.tick_params(labelbottom=False)
+
+            if col_i != 0:
+                ax.tick_params(labelleft=False)
+
+    draw_row(0, y_utils, "util", show_xt=False)
+    draw_row(1, y_lats,  "latency", show_xt=False)
+    draw_row(2, y_dels,  "deletions", show_xt=True)
+
+    fig.subplots_adjust(
+        left=grid_left, right=grid_right, bottom=grid_bottom, top=grid_top,
+        wspace=grid_wspace, hspace=grid_hspace,
+    )
+
+    bbox_l = axes[0, 0].get_position()
+    bbox_r = axes[0, 1].get_position()
+    x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
+    y_top_grid = max(bbox_l.y1, bbox_r.y1)
+    legend_y = min(0.98, y_top_grid + float(legend_pad))
+
+    fig.legend(
+        legend_handles, legend_labels,
+        loc="lower center",
+        bbox_to_anchor=(x_center_grid, legend_y),
+        ncol=min(int(legend_ncol), len(legend_labels)),
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+
+    x_text = x_from_left_with_pad_points(fig, grid_left, ylabel_pad_pt)
+    row_labels = [r"$\Delta$ usage (pp)", r"$\Delta$ latency (ms)", r"$\Delta$ deletions (count)"]
+    for r, text in enumerate(row_labels):
+        bbox = axes[r, 0].get_position()
+        y_center = 0.5 * (bbox.y0 + bbox.y1)
+        fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
+    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
+    plt.close(fig)
+
 
 # =============================================================================
 # Main
@@ -706,181 +1433,170 @@ def main() -> None:
                         scale=1.0,
                     )
                 )
-        rows.append(MetricRow("# solver runs", "# solver runs", g("solver_attempts_mean"), "unsigned_int"))
-        rows.append(MetricRow("# plan activations", "# plan activations", g("plan_activated_mean"), "unsigned_int"))
+        rows.append(MetricRow(r"\#solver runs", "#solver runs", g("solver_attempts_mean"), "unsigned_int"))
+        rows.append(MetricRow(r"\#plan activations", "#plan activations", g("plan_activated_mean"), "unsigned_int"))
         return rows
 
     metrics_map_big = {k: metrics_big(k) for k in kmaxs}
-
-    def y_from_col(*, col: str, scale: float) -> YOfFn:
-        def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
-            v = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk, col=col)
-            return float(v) * float(scale) if is_finite(v) else float("nan")
-        return _y
 
     # Build all rowkeys seen in the data once
     all_rks = [RowKey(mode=m, blocking=int(b), defpreempt=int(d))
               for (m, b, d) in df[["mode", "blocking", "defpreempt"]].drop_duplicates().itertuples(index=False, name=None)]
 
-    # Produce outputs for each view
+    produced_tables: List[Path] = []
+    produced_figs: List[Path] = []
+
+    # -------------------------------------------------------------------------
+    # 1) + 2) Tables (all configs) with/without default preemption
+    # 3) + 4) Plots  (all configs) with/without default preemption
+    # 5) + 6) Plots  (periodic+stable only) with/without default preemption
+    # -------------------------------------------------------------------------
     for view in VIEWS:
-        # -----------------------------
-        # Decide which modes to include (single point of control)
-        # -----------------------------
-        rks_view = filter_rks_for_view(all_rks, view)
-
-        # Modes per kmax for tables
-        modes_by_kmax: Dict[int, List[RowKey]] = {}
-        for k in kmaxs:
-            # Keep only rowkeys present for this kmax (avoid empty columns)
-            dff = df[(df["kmax"].astype(int) == int(k)) & (df["defpreempt"].astype(int) == int(view.defpreempt_value))]
-            present_rks = [
-                RowKey(mode=m, blocking=int(b), defpreempt=int(d))
-                for (m, b, d) in dff[["mode", "blocking", "defpreempt"]].drop_duplicates().itertuples(index=False, name=None)
-            ]
-            modes_by_kmax[k] = filter_rks_for_view(present_rks, view)
-
-        # -----------------------------
-        # Tables
-        # -----------------------------
         suffix = view_suffix(view)
 
-        latex_metric_matrix_tables(
-            out_path=OUT_TABLES_DIR / f"{view.table_stem}_{suffix}.tex",
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            modes_by_kmax=modes_by_kmax,
-            metrics_by_kmax=metrics_map_big,
-            without_default_preemption=view.without_default_preemption_caption,
-        )
-        ascii_metric_matrix_tables(
-            out_path=OUT_TABLES_DIR / f"{view.table_stem}_{suffix}.txt",
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            modes_by_kmax=modes_by_kmax,
-            metrics_by_kmax=metrics_map_big,
-            without_default_preemption=view.without_default_preemption_caption,
-        )
-
-        # -----------------------------
-        # Figures
-        # -----------------------------
-        # union series over both kmax columns (but already filtered by view)
-        series_union = sort_rks([
-            rk for rk in rks_view
-            if any(
-                is_finite(
-                    lookup_value(lookup, nodes=nodes_order[0], kmax=k, arrival_s=arrivals_order[0], rk=rk, col="delta_U_pp_eff_mean")
-                ) or True
-                for k in kmax_cols
-            )
+        # -------- Big tables (ALL configs): EXACTLY one per (view, kmax in {1,4}) --------
+        # Force consistent mode order using MODE_SPECS (even if missing -> "--")
+        modes_all = sort_rks([
+            RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(view.defpreempt_value))
+            for s in MODE_SPECS
         ])
 
-        present_labels = {rk_label(rk) for rk in series_union}
-        legend_handles: List[Line2D] = []
-        legend_labels: List[str] = []
-        for rk in series_union:
-            lab = rk_label(rk)
-            if lab in present_labels and lab not in legend_labels:
-                legend_labels.append(lab)
-                legend_handles.append(Line2D([0], [0], color=rk_color(rk), linewidth=1.8))
+        for k in kmax_cols:  # only 1 and 4 => 2 tables per view => 4 total
+            out_tex = OUT_TABLES_DIR / f"{view.table_stem}_all_configs_{suffix}__priorities={k}.tex"
+            out_txt = OUT_TABLES_DIR / f"{view.table_stem}_all_configs_{suffix}__priorities={k}.txt"
 
-        fig, axes = plt.subplots(nrows=3, ncols=2, figsize=GRID_FIGSIZE, sharex=True)
-        axes[0, 0].set_title(f"#priorities = {kmax_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
-        axes[0, 1].set_title(f"#priorities = {kmax_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
-
-        # Util
-        for col_i, k in enumerate(kmax_cols):
-            yc = ycfg(view, "util")
-            draw_points_on_ax(
-                ax=axes[0, col_i],
+            latex_metric_matrix_tables(
+                out_path=out_tex,
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
-                kmax=k,
-                series=series_union,
-                y_of=y_from_col(col="delta_U_pp_eff_mean", scale=1.0),
-                ylim=yc.ylim,
-                show_xticklabels=False,
-                show_yticklabels=(col_i == 0),
-                y_scale=yc.scale,
-                symlog_linthresh=yc.symlog_linthresh,
+                modes=modes_all,
+                metrics=metrics_map_big[int(k)],
+                kmax=int(k),
+                without_default_preemption=view.without_default_preemption_caption,
             )
-
-        # Latency
-        for col_i, k in enumerate(kmax_cols):
-            yc = ycfg(view, "latency")
-            draw_points_on_ax(
-                ax=axes[1, col_i],
+            ascii_metric_matrix_tables(
+                out_path=out_txt,
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
-                kmax=k,
-                series=series_union,
-                y_of=y_from_col(col="delta_L_ms_total_mean", scale=1.0),
-                ylim=yc.ylim,
-                show_xticklabels=False,
-                show_yticklabels=(col_i == 0),
-                y_scale=yc.scale,
-                symlog_linthresh=yc.symlog_linthresh,
+                modes=modes_all,
+                metrics=metrics_map_big[int(k)],
+                kmax=int(k),
+                without_default_preemption=view.without_default_preemption_caption,
             )
+            produced_tables.extend([out_tex, out_txt])
 
-        # Deletions
-        for col_i, k in enumerate(kmax_cols):
-            yc = ycfg(view, "deletions")
-            draw_points_on_ax(
-                ax=axes[2, col_i],
-                nodes_order=nodes_order,
-                arrivals_order=arrivals_order,
-                kmax=k,
-                series=series_union,
-                y_of=y_from_col(col="delta_D_num_total_mean", scale=1.0),
-                ylim=yc.ylim,
-                show_xticklabels=True,
-                show_yticklabels=(col_i == 0),
-                y_scale=yc.scale,
-                symlog_linthresh=yc.symlog_linthresh,
+
+        # -------- Plot (ALL configs) --------
+        rks_view_all = filter_rks_for_view(all_rks, view, INCLUDE_PLOTS_ALL)
+        series_all = sort_rks(rks_view_all)
+        out_stem_all = f"{view.figure_stem}_{suffix}"
+        make_grid_plot(
+            lookup=lookup,
+            view=view,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax_cols=kmax_cols,
+            series=series_all,
+            out_stem=out_stem_all,
+            grid_left=GRID_LEFT_ALL,
+            grid_right=GRID_RIGHT_ALL,
+            grid_bottom=GRID_BOTTOM_ALL,
+            grid_top=GRID_TOP_ALL,
+            grid_wspace=GRID_WSPACE_ALL,
+            grid_hspace=GRID_HSPACE_ALL,
+            ylabel_pad_pt=GRID_YLABEL_PAD_PT_ALL,
+            legend_pad=GRID_LEGEND_PAD_ALL,
+            legend_ncol=GRID_LEGEND_NCOL_ALL,
+            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING_ALL,
+            mode_x_spacing=PLOT_MODE_X_SPACING_ALL,
+        )
+        produced_figs.extend([
+            OUT_FIGURES_DIR / f"{out_stem_all}.png",
+            OUT_FIGURES_DIR / f"{out_stem_all}.pdf",
+        ])
+
+        # -------- Plot (PERIODIC + STABLE deltas only): exactly TWO series --------
+        labels: List[str] = []
+        y_utils: List[YOfFn] = []
+        y_lats: List[YOfFn] = []
+        y_dels: List[YOfFn] = []
+
+        # build the two ΔΔ series (uses lookup from enclosing scope)
+        for (lab, left_mode, right_mode, blocking) in PERIODIC_STABLE_DELTA_PAIRS:
+            lab2, y_u, y_l, y_d = make_mode_delta_series(
+                lookup=lookup,
+                defpreempt=int(view.defpreempt_value),
+                label=lab,
+                left_mode=left_mode,
+                right_mode=right_mode,
+                blocking=int(blocking),
             )
+            labels.append(lab2)
+            y_utils.append(y_u)
+            y_lats.append(y_l)
+            y_dels.append(y_d)
 
-        fig.subplots_adjust(
-            left=GRID_LEFT, right=GRID_RIGHT, bottom=GRID_BOTTOM, top=GRID_TOP,
-            wspace=GRID_WSPACE, hspace=GRID_HSPACE,
+        out_stem_ps = f"grid_util_latency_deletions_periodic_stable_deltas_{suffix}"
+        make_grid_plot_custom_series(
+            view=view,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            kmax_cols=kmax_cols,
+            series_labels=labels,
+            y_utils=y_utils,
+            y_lats=y_lats,
+            y_dels=y_dels,
+            out_stem=out_stem_ps,
+            figsize=GRID_FIGSIZE_DELTAS,
+            grid_left=GRID_LEFT_DELTAS,
+            grid_right=GRID_RIGHT_DELTAS,
+            grid_bottom=GRID_BOTTOM_DELTAS,
+            grid_top=GRID_TOP_DELTAS,
+            grid_wspace=GRID_WSPACE_DELTAS,
+            grid_hspace=GRID_HSPACE_DELTAS,
+            ylabel_pad_pt=GRID_YLABEL_PAD_PT_DELTAS,
+            legend_pad=GRID_LEGEND_PAD_DELTAS,
+            legend_ncol=GRID_LEGEND_NCOL_DELTAS,
+            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING_DELTAS,
+            mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
         )
 
-        bbox_l = axes[0, 0].get_position()
-        bbox_r = axes[0, 1].get_position()
-        x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
-        y_top_grid = max(bbox_l.y1, bbox_r.y1)
-        legend_y = min(0.98, y_top_grid + GRID_LEGEND_PAD)
+        produced_figs.extend([
+            OUT_FIGURES_DIR / f"{out_stem_ps}.png",
+            OUT_FIGURES_DIR / f"{out_stem_ps}.pdf",
+        ])
 
-        fig.legend(
-            legend_handles, legend_labels,
-            loc="lower center",
-            bbox_to_anchor=(x_center_grid, legend_y),
-            ncol=min(int(PLOT_LEGEND_NCOL), len(legend_labels)),
-            fontsize=PLOT_LEGEND_FONTSIZE,
-            handlelength=PLOT_LEGEND_HANDLE_LENGTH,
-            handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
-            columnspacing=PLOT_LEGEND_COLUMN_SPACING,
-        )
 
-        left_bbox = axes[0, 0].get_position()
-        x_text = max(0.0, left_bbox.x0 - GRID_YLABEL_PAD_FIG)
+    # -------------------------------------------------------------------------
+    # 7) One table: deltas between periodic (2s vs 8s) and stable-queue (2s vs 8s)
+    #    (single table file that includes BOTH views)
+    # -------------------------------------------------------------------------
+    delta_tex = OUT_TABLES_DIR / "table_periodic_stable_deltas.tex"
+    delta_txt = OUT_TABLES_DIR / "table_periodic_stable_deltas.txt"
+    write_mode_delta_table_tex_txt(
+        out_tex=delta_tex,
+        out_txt=delta_txt,
+        lookup=lookup,
+        views=VIEWS,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        kmaxs=kmax_cols,  # only 1 and 4
+    )
+    produced_tables.extend([delta_tex, delta_txt])
 
-        row_labels = [
-            r"$\Delta$ usage (pp)",
-            r"$\Delta$ latency (ms)",
-            r"$\Delta$ deletions (count)",
-        ]
-        for r, text in enumerate(row_labels):
-            bbox = axes[r, 0].get_position()
-            y_center = 0.5 * (bbox.y0 + bbox.y1)
-            fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
-
-        suffix = view_suffix(view)
-
-        fig.savefig(OUT_FIGURES_DIR / f"{view.figure_stem}_{suffix}.png", dpi=PLOT_FIGURE_DPI)
-        fig.savefig(OUT_FIGURES_DIR / f"{view.figure_stem}_{suffix}.pdf")
-        plt.close(fig)
-
+    # -------------------------------------------------------------------------
+    # Summary (always lists what the script produces)
+    # -------------------------------------------------------------------------
+    print("Produced outputs:")
+    print("")
+    print("Tables:")
+    for p in produced_tables:
+        print(f"  - {p}")
+    print("")
+    print("Figures:")
+    for p in produced_figs:
+        print(f"  - {p}")
+    print("")
     print(f"Wrote tables to:  {OUT_TABLES_DIR}")
     print(f"Wrote figures to: {OUT_FIGURES_DIR}")
 
