@@ -3,8 +3,10 @@
 """
 python -m scripts.kwok_trace_replayer.plots_and_tables
 
+NOTE: ASCII/TXT table generation has been removed. We now only write LaTeX (.tex) tables.
+
 Refactor goals:
-  - Keep the SAME logic and outputs as the previous version.
+  - Keep the SAME logic and outputs as the previous version (except removed ASCII/TXT tables).
   - Improve readability by:
       * grouping configuration
       * separating concerns (data loading, table writing, plotting, orchestration)
@@ -533,7 +535,7 @@ def filter_rks_for_view(
 
 
 # =============================================================================
-# Tables
+# Tables (LaTeX only)
 # =============================================================================
 
 MetricGetter = Callable[[int, RowKey, int, float], Any]  # (kmax, rk, nodes, arrival) -> value
@@ -542,7 +544,6 @@ MetricGetter = Callable[[int, RowKey, int, float], Any]  # (kmax, rk, nodes, arr
 @dataclass(frozen=True)
 class MetricRow:
     latex_label: str
-    ascii_label: str
     getter: MetricGetter
     fmt_kind: str  # "signed_float" | "unsigned_int" | "custom"
     decimals: int = TABLE_DECIMALS
@@ -668,77 +669,8 @@ def latex_metric_matrix_tables(
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def ascii_metric_matrix_tables(
-    *,
-    out_path: Path,
-    nodes_order: List[int],
-    arrivals_order: List[float],
-    modes: List[RowKey],
-    metrics: List[MetricRow],
-    kmax: int,
-    without_default_preemption: bool,
-) -> None:
-    def center(s: str, w: int) -> str:
-        s = str(s)
-        if len(s) >= w:
-            return s[:w]
-        pad = w - len(s)
-        return " " * (pad // 2) + s + " " * (pad - pad // 2)
-
-    def split_unit(s: str) -> Tuple[str, str]:
-        t = str(s)
-        if " (" in t and t.endswith(")"):
-            a, b = t.rsplit(" (", 1)
-            return a, "(" + b
-        return t, ""
-
-    def _ai(a: float) -> str:
-        return str(int(a)) if abs(a - round(a)) < 1e-9 else str(a)
-
-    mode_w = 30
-    cell_w = 18
-    total_w = mode_w + cell_w * len(metrics)
-    sep = "-" * total_w
-
-    hdr_top = " " * mode_w
-    hdr_bot = " " * mode_w
-    for m in metrics:
-        a, b = split_unit(m.ascii_label)
-        hdr_top += center(a, cell_w)
-        hdr_bot += center(b, cell_w)
-
-    lines: List[str] = []
-    lines.append(kmax_caption(kmax, latex=False, without_default_preemption=without_default_preemption))
-    lines.append("")
-    lines.append(hdr_top.rstrip())
-    if any(split_unit(m.ascii_label)[1] for m in metrics):
-        lines.append(hdr_bot.rstrip())
-    lines.append(sep)
-
-    first_block = True
-    for n in nodes_order:
-        for a in arrivals_order:
-            if not first_block:
-                lines.append(sep)
-            first_block = False
-
-            lines.append(f"#nodes = {int(n)}, inter-arrival = {_ai(float(a))}s")
-            lines.append(sep)
-
-            for rk in modes:
-                row = center(rk_label(rk), mode_w)
-                for mrow in metrics:
-                    v = mrow.getter(int(kmax), rk, int(n), float(a))
-                    row += center(_fmt_metric_value(v, row=mrow, latex=False), cell_w)
-                lines.append(row.rstrip())
-
-    lines.append(sep)
-    lines.append("")
-    out_path.write_text("\n".join(lines), encoding="utf-8")
-
-
 # =============================================================================
-# Mode-delta table (ONE table, contains both views)
+# Mode-delta table (ONE table, contains both views) - LaTeX only
 # =============================================================================
 
 
@@ -771,10 +703,9 @@ def _mode_delta_value(
     return float(vr) - float(vl)
 
 
-def write_mode_delta_table_tex_txt(
+def write_mode_delta_table_tex(
     *,
     out_tex: Path,
-    out_txt: Path,
     lookup: pd.DataFrame,
     views: Sequence[ViewConfig],
     nodes_order: List[int],
@@ -786,33 +717,15 @@ def write_mode_delta_table_tex_txt(
         ModeDeltaCol("SQ 2→8 (B)", "stable-queue-2s", "stable-queue-8s", blocking=1),
     ]
 
-    metric_specs = [
-        ("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", "diff. usage (%)", "signed_float", 2),
-        (
-            "delta_L_ms_total_mean",
-            r"$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$",
-            "diff. latency_total (ms)",
-            "signed_float",
-            0,
-        ),
-        (
-            "delta_D_num_total_mean",
-            r"$\Delta\ \mathrm{deletions}_{\mathrm{total}}$",
-            "diff. deletions_total",
-            "signed_float",
-            1,
-        ),
-        ("solver_attempts_mean", r"$\Delta\ \#\mathrm{solver\ runs}$", "diff. #solver runs", "signed_float", 1),
-        (
-            "plan_activated_mean",
-            r"$\Delta\ \#\mathrm{plan\ activations}$",
-            "diff. #plan activations",
-            "signed_float",
-            1,
-        ),
+    # (col, latex_label, fmt_kind, decimals)
+    metric_specs: List[Tuple[str, str, str, int]] = [
+        ("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", "signed_float", 2),
+        ("delta_L_ms_total_mean", r"$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", "signed_float", 0),
+        ("delta_D_num_total_mean", r"$\Delta\ \mathrm{deletions}_{\mathrm{total}}$", "signed_float", 1),
+        ("solver_attempts_mean", r"$\Delta\ \mathrm{solver\ runs}$", "signed_float", 1),
+        ("plan_activated_mean", r"$\Delta\ \mathrm{plan\ activations}$", "signed_float", 1),
     ]
 
-    # --------------------- TEX ---------------------
     tex_lines: List[str] = []
     for view in views:
         tex_lines.append(r"% ------------------------------------------------------------")
@@ -854,7 +767,7 @@ def write_mode_delta_table_tex_txt(
                 tex_lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {n}}} \\")
                 tex_lines.append(r"\midrule")
 
-                for (col, latex_lbl, _ascii_lbl, _fmt_kind, dec) in metric_specs:
+                for (col, latex_lbl, _fmt_kind, dec) in metric_specs:
                     cells: List[str] = []
                     for a in arrivals_order:
                         for c in delta_cols:
@@ -879,73 +792,6 @@ def write_mode_delta_table_tex_txt(
         tex_lines.append("")
 
     out_tex.write_text("\n".join(tex_lines), encoding="utf-8")
-
-    # --------------------- TXT ---------------------
-    def center(s: str, w: int) -> str:
-        s = str(s)
-        if len(s) >= w:
-            return s
-        pad = w - len(s)
-        return " " * (pad // 2) + s + " " * (pad - pad // 2)
-
-    txt_lines: List[str] = []
-    for view in views:
-        txt_lines.append("=" * 80)
-        txt_lines.append(f"Mode diffs (PR 8->32, SQ 2->8) | view = {view.name}")
-        txt_lines.append("=" * 80)
-        txt_lines.append("")
-
-        for kmax in sorted(kmaxs):
-            row_w = 26
-            cell_w = 14
-            n_modes = len(delta_cols)
-            total_cols = n_modes * len(arrivals_order)
-            total_w = row_w + cell_w * total_cols
-            sep = "-" * total_w
-
-            txt_lines.append(kmax_caption(kmax, latex=False, without_default_preemption=view.without_default_preemption_caption))
-            txt_lines.append("")
-
-            hdr1 = " " * row_w
-            for a in arrivals_order:
-                hdr1 += center(arrival_group_label(a, latex=False), cell_w * n_modes)
-            txt_lines.append(hdr1.rstrip())
-
-            hdr2 = " " * row_w
-            for _a in arrivals_order:
-                for c in delta_cols:
-                    hdr2 += center(c.abbr, cell_w)
-            txt_lines.append(hdr2.rstrip())
-            txt_lines.append(sep)
-
-            for n in nodes_order:
-                txt_lines.append(f"#nodes = {n}")
-                txt_lines.append(sep)
-                for (col, _latex_lbl, ascii_lbl, _fmt_kind, dec) in metric_specs:
-                    row = ascii_lbl.ljust(row_w)
-                    for a in arrivals_order:
-                        for c in delta_cols:
-                            v = _mode_delta_value(
-                                lookup,
-                                col=col,
-                                nodes=n,
-                                kmax=kmax,
-                                arrival_s=float(a),
-                                defpreempt=int(view.defpreempt_value),
-                                left_mode=c.left_mode,
-                                right_mode=c.right_mode,
-                                blocking=int(c.blocking),
-                            )
-                            ns = nan_str(False)
-                            cell = fmt_signed(v, dec, ns) if is_finite(v) else ns
-                            row += center(cell, cell_w)
-                    txt_lines.append(row.rstrip())
-                txt_lines.append(sep)
-                txt_lines.append("")
-            txt_lines.append("")
-        txt_lines.append("")
-
-    out_txt.write_text("\n".join(txt_lines), encoding="utf-8")
 
 
 # =============================================================================
@@ -1009,7 +855,7 @@ def nice_step(span: float, target_ticks: int) -> float:
         return 1.0
     raw = span / max(1, int(target_ticks))
     exp = math.floor(math.log10(raw)) if raw > 0 else 0
-    base = 10 ** exp
+    base = 10**exp
     candidates = [1 * base, 2 * base, 5 * base, 10 * base]
     return min(candidates, key=lambda s: abs(s - raw))
 
@@ -1394,8 +1240,8 @@ def make_grid_plot(
         r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$",
         r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$",
         r"$\mathrm{diff.}\ \mathrm{deletions}$",
-        r"$\mathrm{diff.}\ \#\mathrm{solver\ runs}$",
-        r"$\mathrm{diff.}\ \#\mathrm{plan\ activations}$",
+        r"$\mathrm{solver\ runs}$",
+        r"$\mathrm{plan\ activations}$",
     ]
     for r, text in enumerate(row_labels):
         bbox = axes[r, 0].get_position()
@@ -1644,8 +1490,8 @@ def make_grid_plot_custom_series(
         r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$",
         r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$",
         r"$\mathrm{diff.}\ \mathrm{deletions}$",
-        r"$\mathrm{diff.}\ \#\mathrm{solver\ runs}$",
-        r"$\mathrm{diff.}\ \#\mathrm{plan\ activations}$",
+        r"$\mathrm{diff.}\ \mathrm{solver\ runs}$",
+        r"$\mathrm{diff.}\ \mathrm{plan\ activations}$",
     ]
     for r, text in enumerate(row_labels):
         bbox = axes[r, 0].get_position()
@@ -1662,7 +1508,6 @@ def make_grid_plot_custom_series(
 # =============================================================================
 
 
-
 def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List[MetricRow]]:
     """
     Returns a function metrics_big(kmax) -> List[MetricRow], so we keep the
@@ -1675,18 +1520,16 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
     def metrics_big(kmax: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
             MetricRow(
-                r"$\Delta\mathrm{usage}\;(\%)$",
-                "diff. usage (%)",
-                g("delta_U_pct_eff_mean"),
-                "signed_float",
+                latex_label=r"$\Delta\mathrm{usage}\;(\%)$",
+                getter=g("delta_U_pct_eff_mean"),
+                fmt_kind="signed_float",
                 decimals=2,
                 scale=1.0,
             ),
             MetricRow(
-                r"$\Delta\mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$",
-                "diff. latency_total (ms)",
-                g("delta_L_ms_total_mean"),
-                "signed_float",
+                latex_label=r"$\Delta\mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$",
+                getter=g("delta_L_ms_total_mean"),
+                fmt_kind="signed_float",
                 decimals=0,
                 scale=1.0,
             ),
@@ -1697,10 +1540,9 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
             for p in (1, 2, 3, 4):
                 rows.append(
                     MetricRow(
-                        rf"$\Delta\mathrm{{latency}}_{{p{p}}}\;(\mathrm{{ms}})$",
-                        f"diff. latency_p{p} (ms)",
-                        g(f"delta_L_ms_p{p}_mean"),
-                        "signed_float",
+                        latex_label=rf"$\Delta\mathrm{{latency}}_{{p{p}}}\;(\mathrm{{ms}})$",
+                        getter=g(f"delta_L_ms_p{p}_mean"),
+                        fmt_kind="signed_float",
                         decimals=0,
                         scale=1.0,
                     )
@@ -1708,10 +1550,9 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
 
         rows.append(
             MetricRow(
-                r"$\Delta\mathrm{deletions}_{\mathrm{total}}$",
-                "diff. deletions_total",
-                g("delta_D_num_total_mean"),
-                "signed_float",
+                latex_label=r"$\Delta\mathrm{deletions}_{\mathrm{total}}$",
+                getter=g("delta_D_num_total_mean"),
+                fmt_kind="signed_float",
                 decimals=1,
                 scale=1.0,
             )
@@ -1721,18 +1562,17 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
             for p in (1, 2, 3, 4):
                 rows.append(
                     MetricRow(
-                        rf"$\Delta\mathrm{{deletions}}_{{p{p}}}$",
-                        f"diff. deletions_p{p}",
-                        g(f"delta_D_num_p{p}_mean"),
-                        "signed_float",
+                        latex_label=rf"$\Delta\mathrm{{deletions}}_{{p{p}}}$",
+                        getter=g(f"delta_D_num_p{p}_mean"),
+                        fmt_kind="signed_float",
                         decimals=1,
                         scale=1.0,
                     )
                 )
 
         # Plugin-only counters: absolute counts (not symmetric around 0)
-        rows.append(MetricRow(r"\#solver\\runs", "#solver runs", g("solver_attempts_mean"), "unsigned_int"))
-        rows.append(MetricRow(r"\#plan\\activations", "#plan activations", g("plan_activated_mean"), "unsigned_int"))
+        rows.append(MetricRow(latex_label=r"\#solver\\runs", getter=g("solver_attempts_mean"), fmt_kind="unsigned_int"))
+        rows.append(MetricRow(latex_label=r"\#plan\\activations", getter=g("plan_activated_mean"), fmt_kind="unsigned_int"))
         return rows
 
     return metrics_big
@@ -1841,11 +1681,12 @@ def main() -> None:
         suffix = view_suffix(view)
 
         # Big tables include ALL configs: we iterate over MODE_SPECS
-        modes_all = sort_rks([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(view.defpreempt_value)) for s in MODE_SPECS])
+        modes_all = sort_rks(
+            [RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(view.defpreempt_value)) for s in MODE_SPECS]
+        )
 
         for k in kmax_cols:
             out_tex = OUT_TABLES_DIR / f"{view.table_stem}_all_configs_{suffix}__priorities={k}.tex"
-            out_txt = OUT_TABLES_DIR / f"{view.table_stem}_all_configs_{suffix}__priorities={k}.txt"
 
             latex_metric_matrix_tables(
                 out_path=out_tex,
@@ -1856,16 +1697,7 @@ def main() -> None:
                 kmax=int(k),
                 without_default_preemption=view.without_default_preemption_caption,
             )
-            ascii_metric_matrix_tables(
-                out_path=out_txt,
-                nodes_order=nodes_order,
-                arrivals_order=arrivals_order,
-                modes=modes_all,
-                metrics=metrics_map_big[int(k)],
-                kmax=int(k),
-                without_default_preemption=view.without_default_preemption_caption,
-            )
-            produced_tables.extend([out_tex, out_txt])
+            produced_tables.append(out_tex)
 
         # Plot: all-configs subset (SF + PR8 + SQ2, both blocking variants)
         series_all = filter_rks_for_view(all_rks, view, INCLUDE_PLOTS_ALL)
@@ -1960,17 +1792,15 @@ def main() -> None:
     # One table: mode diffs periodic/stable, includes both views
     # -----------------------
     delta_tex = OUT_TABLES_DIR / "table_periodic_stable_deltas.tex"
-    delta_txt = OUT_TABLES_DIR / "table_periodic_stable_deltas.txt"
-    write_mode_delta_table_tex_txt(
+    write_mode_delta_table_tex(
         out_tex=delta_tex,
-        out_txt=delta_txt,
         lookup=lookup,
         views=VIEWS,
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
         kmaxs=kmax_cols,
     )
-    produced_tables.extend([delta_tex, delta_txt])
+    produced_tables.append(delta_tex)
 
     # -----------------------
     # Summary
