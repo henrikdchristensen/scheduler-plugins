@@ -20,17 +20,16 @@ from typing import Iterable, List, Tuple
 
 NODES = [16, 32]
 PRIOS = [1, 4]
-ARRIVALS_S = [4, 8, 16]
+ARRIVALS_S = [1, 2, 4, 8, 16]
 
 BLOCKING_VALUES = [0, 1]
 DEFPREEMPT_VALUES = [0, 1]
 
-# NEW: additional optimize-mode parameters
-PERIODIC_INTERVALS_S = [8, 32]
-STABLE_QUEUE_DELAYS_S = [2, 8]
+PERIODIC_INTERVALS_S = [8, 32, 64]
+STABLE_QUEUE_DELAYS_S = [2, 8, 16]
 
 DEFAULT_KWOKCTL_CONFIG = "data/configs-kwokctl/default.yaml"
-# NEW convention:
+# convention:
 #   data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 #   data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml
 PLUGIN_KWOKCTL_CONFIG_TEMPLATE = "data/configs-kwokctl/plugin-scheduler-defpreempt={defpreempt}.yaml"

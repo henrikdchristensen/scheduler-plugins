@@ -44,16 +44,16 @@ LATENCY_S_SCALE = 1000.0  # to milliseconds
 
 # Util scaling:
 # - internal util values are assumed in [0,1]
-# - we STORE delta_U_* in percentage points (pp) => multiply by 100
-UTIL_TO_PP = 100.0
+# - we STORE delta_U_* in percent (%) => multiply by 100
+UTIL_TO_PERCENT = 100.0
 
 PAIRED_COLS = [
     "job_name",
     "plugin_config",
     "n_seed",
     "T_end_s_mean",
-    # STORED IN pp (percentage points)
-    "delta_U_pp_cpu_mean", "delta_U_pp_mem_mean", "delta_U_pp_eff_mean",
+    # STORED IN percent (%)
+    "delta_U_pct_cpu_mean", "delta_U_pct_mem_mean", "delta_U_pct_eff_mean",
     "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
     "delta_D_num_p1_mean", "delta_D_num_p2_mean", "delta_D_num_p3_mean", "delta_D_num_p4_mean", "delta_D_num_total_mean",
     "delta_L_ms_p1_mean", "delta_L_ms_p2_mean", "delta_L_ms_p3_mean", "delta_L_ms_p4_mean", "delta_L_ms_total_mean",
@@ -541,10 +541,10 @@ def main() -> None:
             default_metrics = compute_horizon_metrics(default_general_stats, H)
             plugin_metrics = compute_horizon_metrics(plugin_general_stats, H)
 
-            # Util deltas (fraction) -> STORE IN PP
-            dU_cpu_pp = (float(plugin_metrics["U_cpu_mean"]) - float(default_metrics["U_cpu_mean"])) * UTIL_TO_PP
-            dU_mem_pp = (float(plugin_metrics["U_mem_mean"]) - float(default_metrics["U_mem_mean"])) * UTIL_TO_PP
-            dU_eff_pp = (float(plugin_metrics["U_eff_mean"]) - float(default_metrics["U_eff_mean"])) * UTIL_TO_PP
+            # Util deltas (fraction) -> STORE IN percent (%)
+            dU_cpu_pct = (float(plugin_metrics["U_cpu_mean"]) - float(default_metrics["U_cpu_mean"])) * UTIL_TO_PERCENT
+            dU_mem_pct = (float(plugin_metrics["U_mem_mean"]) - float(default_metrics["U_mem_mean"])) * UTIL_TO_PERCENT
+            dU_eff_pct = (float(plugin_metrics["U_eff_mean"]) - float(default_metrics["U_eff_mean"])) * UTIL_TO_PERCENT
 
             dR = {p: float(plugin_metrics[f"R_p{p}_mean"]) - float(default_metrics[f"R_p{p}_mean"]) for p in range(1, MAX_K_OUT + 1)}
             dD = {p: float(plugin_metrics[f"D_p{p}"]) - float(default_metrics[f"D_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
@@ -566,10 +566,10 @@ def main() -> None:
                     "seed": seed,
                     "T_end_s": H,
 
-                    # STORED IN PP (percentage points)
-                    "delta_U_pp_cpu": dU_cpu_pp,
-                    "delta_U_pp_mem": dU_mem_pp,
-                    "delta_U_pp_eff": dU_eff_pp,
+                    # STORED IN percent (%)
+                    "delta_U_pct_cpu": dU_cpu_pct,
+                    "delta_U_pct_mem": dU_mem_pct,
+                    "delta_U_pct_eff": dU_eff_pct,
 
                     "delta_R_num_p1": dR[1],
                     "delta_R_num_p2": dR[2],
@@ -610,9 +610,9 @@ def main() -> None:
 
     rename = {
         "T_end_s": "T_end_s_mean",
-        "delta_U_pp_cpu": "delta_U_pp_cpu_mean",
-        "delta_U_pp_mem": "delta_U_pp_mem_mean",
-        "delta_U_pp_eff": "delta_U_pp_eff_mean",
+        "delta_U_pct_cpu": "delta_U_pct_cpu_mean",
+        "delta_U_pct_mem": "delta_U_pct_mem_mean",
+        "delta_U_pct_eff": "delta_U_pct_eff_mean",
         "delta_R_num_p1": "delta_R_num_p1_mean",
         "delta_R_num_p2": "delta_R_num_p2_mean",
         "delta_R_num_p3": "delta_R_num_p3_mean",
