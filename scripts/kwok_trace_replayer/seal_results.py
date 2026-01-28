@@ -279,10 +279,10 @@ def parse_job_dir_name(name: str) -> Optional[str]:
     if not (m_nodes and m_prio and m_arrival):
         return None
     n = int(m_nodes.group(1))
-    kmax = int(m_prio.group(1))
+    priorities = int(m_prio.group(1))
     arrival = float(m_arrival.group(1))
     arrival_str = str(int(arrival)) if abs(arrival - round(arrival)) < 1e-9 else f"{arrival:g}"
-    return f"nodes={n}_prio={kmax}_arrival={arrival_str}s"
+    return f"nodes={n}_prio={priorities}_arrival={arrival_str}s"
 
 def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     """
@@ -300,13 +300,13 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
             kv[k.strip().lower()] = v.strip()
     try:
         n = int(kv["nodes"])
-        kmax = int(kv["prio"])
+        priorities = int(kv["prio"])
         arrival_raw = kv["arrival"]
         arrival = float(arrival_raw[:-1] if arrival_raw.endswith("s") else arrival_raw)
     except Exception:
         return None
     arrival_str = str(int(arrival)) if abs(arrival - round(arrival)) < 1e-9 else f"{arrival:g}"
-    job_name = f"nodes={n}_prio={kmax}_arrival={arrival_str}s"
+    job_name = f"nodes={n}_prio={priorities}_arrival={arrival_str}s"
 
     mode = canonicalize_mode(kv.get("mode", "unknown"))
 

@@ -2,15 +2,6 @@
 # scripts/kwok_trace_replayer/plots_and_tables.py
 """
 python -m scripts.kwok_trace_replayer.plots_and_tables
-
-NOTE: ASCII/TXT table generation has been removed. We now only write LaTeX (.tex) tables.
-
-Refactor goals:
-  - Keep the SAME logic and outputs as the previous version (except removed ASCII/TXT tables).
-  - Improve readability by:
-      * grouping configuration
-      * separating concerns (data loading, table writing, plotting, orchestration)
-      * reducing repetition with small helpers
 """
 
 from __future__ import annotations
@@ -91,7 +82,7 @@ EXPECTED_COLS = [
     "plan_activated_mean",
 ]
 
-KEY_COLS = ["nodes", "kmax", "arrival_s", "mode", "blocking", "defpreempt"]
+KEY_COLS = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
 
 # =============================================================================
 # Plot styling
@@ -100,15 +91,18 @@ KEY_COLS = ["nodes", "kmax", "arrival_s", "mode", "blocking", "defpreempt"]
 PLOT_TICK_PAD = 2.0
 PLOT_MARKER_SIZE = 4.0
 PLOT_MARKER_LINEWIDTH = 0.4
+PLOT_MIN_LINEAR_YTICKS = 5
+
+PLOT_HEIGHT = 8.3
 
 # ---- Layout for "all configs" figures ----
 GRID_LEGEND_NCOL_ALL = 3
-GRID_FIGSIZE = (5.4, 8.3)  # taller: 5 rows (util/lat/del/solver/plans)
+GRID_FIGSIZE = (5.4, PLOT_HEIGHT)
 GRID_LEGEND_PAD_ALL = 0.033
 GRID_LEFT_ALL = 0.08
 GRID_RIGHT_ALL = 0.99
-GRID_BOTTOM_ALL = 0.04
-GRID_TOP_ALL = 0.91
+GRID_BOTTOM_ALL = 0.03
+GRID_TOP_ALL = 0.925
 GRID_WSPACE_ALL = 0.10
 GRID_HSPACE_ALL = 0.10
 GRID_YLABEL_PAD_PT_ALL = 22.0
@@ -117,19 +111,10 @@ PLOT_MODE_X_SPACING_ALL = 0.05
 
 # ---- Layout for "deltas" figures ----
 GRID_LEGEND_NCOL_DELTAS = 1
-GRID_FIGSIZE_DELTAS = (2.9, 8.3)  # taller: 5 rows
-GRID_LEGEND_PAD_DELTAS = 0.033
-GRID_LEFT_DELTAS = 0.15
-GRID_RIGHT_DELTAS = 0.99
-GRID_BOTTOM_DELTAS = 0.04
-GRID_TOP_DELTAS = 0.91
-GRID_WSPACE_DELTAS = 0.10
-GRID_HSPACE_DELTAS = 0.10
-GRID_YLABEL_PAD_PT_DELTAS = 22.0
-PLOT_ARRIVAL_X_SPACING_DELTAS = 0.35
+GRID_FIGSIZE_DELTAS = (2.15, PLOT_HEIGHT)
+GRID_LEFT_DELTAS = 0.2
 PLOT_MODE_X_SPACING_DELTAS = 0.11
 
-MIN_LINEAR_YTICKS = 5
 
 # =============================================================================
 # View + modes configuration
@@ -150,15 +135,15 @@ VIEWS: List[ViewConfig] = [
         name="with_default_preemption",
         defpreempt_value=1,
         without_default_preemption_caption=False,
-        table_stem="table_util_latency_deletions_optimizations",
-        figure_stem="grid_util_latency_deletions_all_configs",
+        table_stem="table_main",
+        figure_stem="grid_main",
     ),
     ViewConfig(
         name="without_default_preemption",
         defpreempt_value=0,
         without_default_preemption_caption=True,
-        table_stem="table_util_latency_deletions_optimizations",
-        figure_stem="grid_util_latency_deletions_all_configs",
+        table_stem="table_main",
+        figure_stem="grid_main",
     ),
 ]
 
@@ -427,11 +412,11 @@ def arrival_group_label(a: float, *, latex: bool) -> str:
     return f"inter-arrival = {a_i} s"
 
 
-def kmax_caption(kmax: int, *, latex: bool, without_default_preemption: bool) -> str:
+def priority_caption(priorities: int, *, latex: bool, without_default_preemption: bool) -> str:
     if latex:
-        base = rf"\#priorities = {kmax}" + (r" (w/o priorities)" if kmax == 1 else r" (w/ priorities)")
+        base = rf"\#priorities = {priorities}" + (r" (w/o priorities)" if priorities == 1 else r" (w/ priorities)")
         return base + (r" (w/o default preemption)" if without_default_preemption else "")
-    base = f"#priorities = {kmax}" + (" (w/o priorities)" if kmax == 1 else " (w/ priorities)")
+    base = f"#priorities = {priorities}" + (" (w/o priorities)" if priorities == 1 else " (w/ priorities)")
     return base + (" (w/o default preemption)" if without_default_preemption else "")
 
 
@@ -440,7 +425,7 @@ def rk_label_tex(rk: RowKey) -> str:
 
 
 def view_suffix(view: ViewConfig) -> str:
-    return "with_defaultpreemption" if int(view.defpreempt_value) == 1 else "without_defaultpreemption"
+    return "defaultpreemption=1" if int(view.defpreempt_value) == 1 else "defaultpreemption=0"
 
 
 # =============================================================================
@@ -453,10 +438,6 @@ def load_results(results_csv: Path) -> pd.DataFrame:
         raise SystemExit(f"Not found: {results_csv}")
 
     df = pd.read_csv(results_csv)
-
-    # Back-compat: map pp -> pct if needed.
-    if "delta_U_pct_eff_mean" not in df.columns and "delta_U_pp_eff_mean" in df.columns:
-        df["delta_U_pct_eff_mean"] = df["delta_U_pp_eff_mean"]
     if "delta_U_pct_eff_mean" not in df.columns:
         raise SystemExit(
             f"{results_csv} missing usage column: expected 'delta_U_pct_eff_mean' (or legacy 'delta_U_pp_eff_mean')"
@@ -472,7 +453,7 @@ def load_results(results_csv: Path) -> pd.DataFrame:
         raise SystemExit(f"Could not parse some job_name values (examples): {bad}")
 
     df["nodes"] = parsed.map(lambda t: t[0] if t is not None else np.nan).astype(int)
-    df["kmax"] = parsed.map(lambda t: t[1] if t is not None else np.nan).astype(int)
+    df["priorities"] = parsed.map(lambda t: t[1] if t is not None else np.nan).astype(int)
     df["arrival_s"] = parsed.map(lambda t: t[2] if t is not None else np.nan).astype(float)
 
     rks = df["plugin_config"].map(RowKey.from_plugin_config)
@@ -492,12 +473,12 @@ def lookup_value(
     lookup: pd.DataFrame,
     *,
     nodes: int,
-    kmax: int,
+    priorities: int,
     arrival_s: float,
     rk: RowKey,
     col: str,
 ) -> float:
-    key = (int(nodes), int(kmax), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
+    key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
     try:
         return float(lookup.at[key, col])
     except KeyError:
@@ -538,7 +519,7 @@ def filter_rks_for_view(
 # Tables (LaTeX only)
 # =============================================================================
 
-MetricGetter = Callable[[int, RowKey, int, float], Any]  # (kmax, rk, nodes, arrival) -> value
+MetricGetter = Callable[[int, RowKey, int, float], Any]  # (priorities, rk, nodes, arrival) -> value
 
 
 @dataclass(frozen=True)
@@ -615,7 +596,7 @@ def latex_metric_matrix_tables(
     arrivals_order: List[float],
     modes: List[RowKey],
     metrics: List[MetricRow],
-    kmax: int,
+    priorities: int,
     without_default_preemption: bool,  # kept for compatibility with old signature
 ) -> None:
     """
@@ -659,7 +640,7 @@ def latex_metric_matrix_tables(
             for rk in modes:
                 cells: List[str] = []
                 for mrow in metrics:
-                    v = mrow.getter(int(kmax), rk, int(n), float(a))
+                    v = mrow.getter(int(priorities), rk, int(n), float(a))
                     cells.append(_fmt_metric_value(v, row=mrow, latex=True))
                 lines.append(f"{rk_label_tex(rk)} & " + " & ".join(cells) + r" \\")
 
@@ -687,7 +668,7 @@ def _mode_delta_value(
     *,
     col: str,
     nodes: int,
-    kmax: int,
+    priorities: int,
     arrival_s: float,
     defpreempt: int,
     left_mode: str,
@@ -696,8 +677,8 @@ def _mode_delta_value(
 ) -> float:
     rk_l = RowKey(mode=canonical_mode(left_mode), blocking=int(blocking), defpreempt=int(defpreempt))
     rk_r = RowKey(mode=canonical_mode(right_mode), blocking=int(blocking), defpreempt=int(defpreempt))
-    vl = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, rk=rk_l, col=col)
-    vr = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=arrival_s, rk=rk_r, col=col)
+    vl = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=arrival_s, rk=rk_l, col=col)
+    vr = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=arrival_s, rk=rk_r, col=col)
     if not is_finite(vl) or not is_finite(vr):
         return float("nan")
     return float(vr) - float(vl)
@@ -710,7 +691,7 @@ def write_mode_delta_table_tex(
     views: Sequence[ViewConfig],
     nodes_order: List[int],
     arrivals_order: List[float],
-    kmaxs: List[int],
+    priorities_order: List[int],
 ) -> None:
     delta_cols: List[ModeDeltaCol] = [
         ModeDeltaCol("PR 8→32 (B)", "periodic8s", "periodic32s", blocking=1),
@@ -733,7 +714,7 @@ def write_mode_delta_table_tex(
         tex_lines.append(r"% ------------------------------------------------------------")
         tex_lines.append("")
 
-        for kmax in sorted(kmaxs):
+        for priorities in sorted(priorities_order):
             n_modes = len(delta_cols)
             n_arr = len(arrivals_order)
             total_cols = 1 + n_modes * n_arr
@@ -753,7 +734,7 @@ def write_mode_delta_table_tex(
             tex_lines.append(rf"\begin{{tabular}}{{{tab_spec}}}")
             tex_lines.append(r"\toprule")
             tex_lines.append(
-                rf"\multicolumn{{{total_cols}}}{{l}}{{Mode $\Delta$ (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), {kmax_caption(kmax, latex=True, without_default_preemption=view.without_default_preemption_caption)}}} \\"
+                rf"\multicolumn{{{total_cols}}}{{l}}{{Mode $\Delta$ (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), {priority_caption(priorities, latex=True, without_default_preemption=view.without_default_preemption_caption)}}} \\"
             )
             tex_lines.append(r"\addlinespace[0.2em]")
             tex_lines.append(arrival_hdr)
@@ -775,7 +756,7 @@ def write_mode_delta_table_tex(
                                 lookup,
                                 col=col,
                                 nodes=n,
-                                kmax=kmax,
+                                priorities=priorities,
                                 arrival_s=float(a),
                                 defpreempt=int(view.defpreempt_value),
                                 left_mode=c.left_mode,
@@ -823,10 +804,10 @@ def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
     return base
 
 
-YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, kmax) -> y
+YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, priorities) -> y
 
 
-def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int = MIN_LINEAR_YTICKS) -> None:
+def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int = PLOT_MIN_LINEAR_YTICKS) -> None:
     ylo, yhi = float(ylim[0]), float(ylim[1])
 
     y0 = int(math.ceil(ylo))
@@ -858,6 +839,38 @@ def nice_step(span: float, target_ticks: int) -> float:
     base = 10**exp
     candidates = [1 * base, 2 * base, 5 * base, 10 * base]
     return min(candidates, key=lambda s: abs(s - raw))
+
+
+def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks_total: int = 7) -> None:
+    """
+    Sparse ticks symmetric around 0 for delta-count axes (can be negative).
+    Ensures negative ticks exist so horizontal grid lines also show below 0.
+    """
+    ylo, yhi = float(ylim[0]), float(ylim[1])
+    hi = max(abs(ylo), abs(yhi))
+    if hi <= 0:
+        ax.set_yticks([0])
+        return
+
+    max_ticks_total = max(3, int(max_ticks_total))
+    per_side = max(1, (max_ticks_total - 1) // 2)
+
+    step = nice_step(hi, per_side)
+    step = max(1e-12, float(step))
+
+    ticks: List[float] = [0.0]
+    for i in range(1, per_side + 1):
+        t = i * step
+        ticks.extend([-t, t])
+
+    # keep only ticks inside ylim
+    ticks = sorted([t for t in ticks if t >= ylo - 1e-9 and t <= yhi + 1e-9])
+
+    # If ticks are "integer-ish", use ints
+    if all(abs(t - round(t)) < 1e-9 for t in ticks):
+        ticks = [int(round(t)) for t in ticks]  # type: ignore[assignment]
+
+    ax.set_yticks(ticks)
 
 
 def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int = 5) -> None:
@@ -897,7 +910,7 @@ def draw_points_on_ax(
     ax: plt.Axes,
     nodes_order: List[int],
     arrivals_order: List[float],
-    kmax: int,
+    priorities: int,
     series: List[RowKey],
     y_of: YOfFn,
     ylim: Tuple[float, float],
@@ -938,8 +951,8 @@ def draw_points_on_ax(
 
         for xi, a in enumerate(arrivals_order):
             x = x_base[xi] + mode_offset
-            y0 = y_of(rk, nodes_order[0], a, kmax)
-            y1 = y_of(rk, nodes_order[1], a, kmax)
+            y0 = y_of(rk, nodes_order[0], a, priorities)
+            y1 = y_of(rk, nodes_order[1], a, priorities)
 
             if is_finite(y0):
                 ax.plot(
@@ -975,6 +988,8 @@ def draw_points_on_ax(
     if y_scale == "linear":
         if y_tick_strategy == "count_sparse":
             set_count_yticks(ax, ylim, max_ticks=5)
+        elif y_tick_strategy == "count_sparse_symmetric":
+            set_symmetric_count_yticks(ax, ylim, max_ticks_total=7)
         else:
             set_linear_yticks(ax, ylim)
 
@@ -1021,7 +1036,7 @@ def compute_nonnegative_ylim_for_col(
     lookup: pd.DataFrame,
     nodes_order: List[int],
     arrivals_order: List[float],
-    kmax_cols: List[int],
+    priorities_order: List[int],
     series: List[RowKey],
     col: str,
     pad_frac: float = 0.08,
@@ -1034,8 +1049,8 @@ def compute_nonnegative_ylim_for_col(
     for rk in series:
         for n in nodes_order:
             for a in arrivals_order:
-                for k in kmax_cols:
-                    v = lookup_value(lookup, nodes=n, kmax=k, arrival_s=a, rk=rk, col=col)
+                for k in priorities_order:
+                    v = lookup_value(lookup, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
                     if is_finite(v):
                         vals.append(float(v))
 
@@ -1048,7 +1063,7 @@ def compute_symmetric_ylim_for_yfns(
     *,
     nodes_order: List[int],
     arrivals_order: List[float],
-    kmax_cols: List[int],
+    priorities_order: List[int],
     series: List[RowKey],
     y_fns: List[YOfFn],
     pad_frac: float = 0.08,
@@ -1058,7 +1073,7 @@ def compute_symmetric_ylim_for_yfns(
         y_of = y_fns[i]
         for n in nodes_order:
             for a in arrivals_order:
-                for k in kmax_cols:
+                for k in priorities_order:
                     v = y_of(rk, n, a, k)
                     if is_finite(v):
                         vals.append(abs(float(v)))
@@ -1073,7 +1088,7 @@ def make_grid_plot(
     view: ViewConfig,
     nodes_order: List[int],
     arrivals_order: List[float],
-    kmax_cols: List[int],
+    priorities_cols: List[int],
     series: List[RowKey],
     out_stem: str,
     grid_left: float,
@@ -1091,8 +1106,8 @@ def make_grid_plot(
     ylim_plans: Tuple[float, float],
 ) -> None:
     def y_from_col(*, col: str, scale: float) -> YOfFn:
-        def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
-            v = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk, col=col)
+        def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> float:
+            v = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk, col=col)
             return float(v) * float(scale) if is_finite(v) else float("nan")
 
         return _y
@@ -1108,17 +1123,17 @@ def make_grid_plot(
             legend_handles.append(Line2D([0], [0], color=rk_color(rk), linewidth=1.8))
 
     fig, axes = plt.subplots(nrows=5, ncols=2, figsize=GRID_FIGSIZE, sharex=True)
-    axes[0, 0].set_title(f"#priorities = {kmax_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
-    axes[0, 1].set_title(f"#priorities = {kmax_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 1].set_title(f"#priorities = {priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
 
     # Row 0: Util
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         yc = ycfg(view, "util", kind="all")
         draw_points_on_ax(
             ax=axes[0, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=series,
             y_of=y_from_col(col="delta_U_pct_eff_mean", scale=1.0),
             ylim=yc.ylim,
@@ -1131,13 +1146,13 @@ def make_grid_plot(
         )
 
     # Row 1: Latency
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         yc = ycfg(view, "latency", kind="all")
         draw_points_on_ax(
             ax=axes[1, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=series,
             y_of=y_from_col(col="delta_L_ms_total_mean", scale=1.0),
             ylim=yc.ylim,
@@ -1150,13 +1165,13 @@ def make_grid_plot(
         )
 
     # Row 2: Deletions
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         yc = ycfg(view, "deletions", kind="all")
         draw_points_on_ax(
             ax=axes[2, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=series,
             y_of=y_from_col(col="delta_D_num_total_mean", scale=1.0),
             ylim=yc.ylim,
@@ -1169,12 +1184,12 @@ def make_grid_plot(
         )
 
     # Row 3: #solver runs (non-negative, sparse ticks)
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         draw_points_on_ax(
             ax=axes[3, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=series,
             y_of=y_from_col(col="solver_attempts_mean", scale=1.0),
             ylim=ylim_solver,
@@ -1188,12 +1203,12 @@ def make_grid_plot(
         )
 
     # Row 4: #plan activations (non-negative, sparse ticks, show x labels)
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         draw_points_on_ax(
             ax=axes[4, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=series,
             y_of=y_from_col(col="plan_activated_mean", scale=1.0),
             ylim=ylim_plans,
@@ -1273,9 +1288,9 @@ def make_mode_delta_series(
     rk_r = RowKey(mode=canonical_mode(right_mode), blocking=int(blocking), defpreempt=int(defpreempt))
 
     def _dd(col: str) -> YOfFn:
-        def _y(_rk_unused: RowKey, nodes: int, a: float, kmax: int) -> float:
-            vl = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk_l, col=col)
-            vr = lookup_value(lookup, nodes=nodes, kmax=kmax, arrival_s=a, rk=rk_r, col=col)
+        def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> float:
+            vl = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_l, col=col)
+            vr = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_r, col=col)
             if not is_finite(vl) or not is_finite(vr):
                 return float("nan")
             return float(vr) - float(vl)
@@ -1297,7 +1312,7 @@ def make_grid_plot_custom_series(
     view: ViewConfig,
     nodes_order: List[int],
     arrivals_order: List[float],
-    kmax_cols: List[int],
+    priorities_cols: List[int],
     series_labels: List[str],
     y_utils: List[YOfFn],
     y_lats: List[YOfFn],
@@ -1336,37 +1351,37 @@ def make_grid_plot_custom_series(
     ylim_solver = compute_symmetric_ylim_for_yfns(
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
-        kmax_cols=kmax_cols,
+        priorities_order=priorities_cols,
         series=fake_series,
         y_fns=y_solvers,
     )
     ylim_plans = compute_symmetric_ylim_for_yfns(
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
-        kmax_cols=kmax_cols,
+        priorities_order=priorities_cols,
         series=fake_series,
         y_fns=y_plans,
     )
 
     def y_of_from_list(y_list: List[YOfFn]) -> Callable[[RowKey, int, float, int], float]:
-        def _y(rk: RowKey, nodes: int, a: float, kmax: int) -> float:
+        def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> float:
             idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
-            return y_list[idx](rk, nodes, a, kmax)
+            return y_list[idx](rk, nodes, a, priorities)
 
         return _y
 
     fig, axes = plt.subplots(nrows=5, ncols=2, figsize=figsize, sharex=True)
-    axes[0, 0].set_title(f"#priorities = {kmax_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
-    axes[0, 1].set_title(f"#priorities = {kmax_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 1].set_title(f"#priorities = {priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
 
     # Rows 0..2 use configured delta y-axes
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         yc = ycfg(view, "util", kind="deltas")
         draw_points_on_ax(
             ax=axes[0, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=fake_series,
             y_of=y_of_from_list(y_utils),
             ylim=yc.ylim,
@@ -1379,13 +1394,13 @@ def make_grid_plot_custom_series(
             color_of=color_override,
         )
 
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         yc = ycfg(view, "latency", kind="deltas")
         draw_points_on_ax(
             ax=axes[1, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=fake_series,
             y_of=y_of_from_list(y_lats),
             ylim=yc.ylim,
@@ -1398,13 +1413,13 @@ def make_grid_plot_custom_series(
             color_of=color_override,
         )
 
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         yc = ycfg(view, "deletions", kind="deltas")
         draw_points_on_ax(
             ax=axes[2, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=fake_series,
             y_of=y_of_from_list(y_dels),
             ylim=yc.ylim,
@@ -1418,12 +1433,12 @@ def make_grid_plot_custom_series(
         )
 
     # Rows 3..4 use dynamic symmetric y-lims (linear + sparse ticks)
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         draw_points_on_ax(
             ax=axes[3, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=fake_series,
             y_of=y_of_from_list(y_solvers),
             ylim=ylim_solver,
@@ -1433,16 +1448,16 @@ def make_grid_plot_custom_series(
             symlog_linthresh=1.0,
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
-            y_tick_strategy="count_sparse",
+            y_tick_strategy="count_sparse_symmetric",
             color_of=color_override,
         )
 
-    for col_i, k in enumerate(kmax_cols):
+    for col_i, k in enumerate(priorities_cols):
         draw_points_on_ax(
             ax=axes[4, col_i],
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax=k,
+            priorities=k,
             series=fake_series,
             y_of=y_of_from_list(y_plans),
             ylim=ylim_plans,
@@ -1452,7 +1467,7 @@ def make_grid_plot_custom_series(
             symlog_linthresh=1.0,
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
-            y_tick_strategy="count_sparse",
+            y_tick_strategy="count_sparse_symmetric",
             color_of=color_override,
         )
 
@@ -1510,14 +1525,14 @@ def make_grid_plot_custom_series(
 
 def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List[MetricRow]]:
     """
-    Returns a function metrics_big(kmax) -> List[MetricRow], so we keep the
+    Returns a function metrics_big(priorities) -> List[MetricRow], so we keep the
     exact logic while making main() cleaner.
     """
 
     def g(col: str) -> MetricGetter:
-        return lambda kmax, rk, n, a: lookup_value(lookup, nodes=n, kmax=kmax, arrival_s=a, rk=rk, col=col)
+        return lambda priorities, rk, n, a: lookup_value(lookup, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=col)
 
-    def metrics_big(kmax: int) -> List[MetricRow]:
+    def metrics_big(priorities: int) -> List[MetricRow]:
         rows: List[MetricRow] = [
             MetricRow(
                 latex_label=r"$\Delta\mathrm{usage}\;(\%)$",
@@ -1535,8 +1550,8 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
             ),
         ]
 
-        # One column per priority (only meaningful for kmax != 1)
-        if kmax != 1:
+        # One column per priority (only meaningful for priorities != 1)
+        if priorities != 1:
             for p in (1, 2, 3, 4):
                 rows.append(
                     MetricRow(
@@ -1558,7 +1573,7 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
             )
         )
 
-        if kmax != 1:
+        if priorities != 1:
             for p in (1, 2, 3, 4):
                 rows.append(
                     MetricRow(
@@ -1586,8 +1601,8 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame) -> Callable[[int], List
 def infer_orders(df: pd.DataFrame) -> Tuple[List[int], List[float], List[int]]:
     nodes_order = sorted(df["nodes"].dropna().astype(int).unique().tolist())
     arrivals_order = sorted(df["arrival_s"].dropna().astype(float).unique().tolist())
-    kmaxs = sorted(df["kmax"].dropna().astype(int).unique().tolist())
-    return nodes_order, arrivals_order, kmaxs
+    priorities_order = sorted(df["priorities"].dropna().astype(int).unique().tolist())
+    return nodes_order, arrivals_order, priorities_order
 
 
 def compute_shared_counter_ylims(
@@ -1596,7 +1611,7 @@ def compute_shared_counter_ylims(
     df: pd.DataFrame,
     nodes_order: List[int],
     arrivals_order: List[float],
-    kmax_cols: List[int],
+    priorities_order: List[int],
 ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
     all_rks = [
         RowKey(mode=m, blocking=int(b), defpreempt=int(d))
@@ -1613,7 +1628,7 @@ def compute_shared_counter_ylims(
         lookup=lookup,
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
-        kmax_cols=kmax_cols,
+        priorities_order=priorities_order,
         series=series_counters_both,
         col="solver_attempts_mean",
     )
@@ -1621,7 +1636,7 @@ def compute_shared_counter_ylims(
         lookup=lookup,
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
-        kmax_cols=kmax_cols,
+        priorities_order=priorities_order,
         series=series_counters_both,
         col="plan_activated_mean",
     )
@@ -1640,21 +1655,21 @@ def main() -> None:
 
     df = load_results(IN_RESULTS)
     lookup = build_lookup(df)
-    nodes_order, arrivals_order, kmaxs = infer_orders(df)
+    nodes_order, arrivals_order, priorities_order = infer_orders(df)
 
     if len(nodes_order) != 2:
         raise SystemExit(f"Expected exactly 2 node values for plots; found {nodes_order}")
     if not arrivals_order:
         raise SystemExit("No arrivals inferred from results_paired.csv")
-    if not kmaxs:
-        raise SystemExit("No kmax values found")
+    if not priorities_order:
+        raise SystemExit("No priority values found")
 
-    kmax_cols = [k for k in (1, 4) if k in kmaxs]
-    if len(kmax_cols) != 2:
-        raise SystemExit(f"Expected kmax values [1,4] for the 2 columns; found kmaxs={kmaxs}")
+    priorities_cols = [k for k in (1, 4) if k in priorities_order]
+    if len(priorities_cols) != 2:
+        raise SystemExit(f"Expected priorities [1,4] for the 2 columns; found priorities={priorities_order}")
 
     metrics_big_fn = build_metrics_for_big_table(lookup=lookup)
-    metrics_map_big = {k: metrics_big_fn(k) for k in kmaxs}
+    metrics_map_big = {k: metrics_big_fn(k) for k in priorities_order}
 
     # All RK variants present in the dataset
     all_rks = [
@@ -1668,7 +1683,7 @@ def main() -> None:
         df=df,
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
-        kmax_cols=kmax_cols,
+        priorities_order=priorities_cols,
     )
 
     produced_tables: List[Path] = []
@@ -1685,8 +1700,8 @@ def main() -> None:
             [RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(view.defpreempt_value)) for s in MODE_SPECS]
         )
 
-        for k in kmax_cols:
-            out_tex = OUT_TABLES_DIR / f"{view.table_stem}_all_configs_{suffix}__priorities={k}.tex"
+        for k in priorities_cols:
+            out_tex = OUT_TABLES_DIR / f"{view.table_stem}_{suffix}_priorities={k}.tex"
 
             latex_metric_matrix_tables(
                 out_path=out_tex,
@@ -1694,7 +1709,7 @@ def main() -> None:
                 arrivals_order=arrivals_order,
                 modes=modes_all,
                 metrics=metrics_map_big[int(k)],
-                kmax=int(k),
+                priorities=int(k),
                 without_default_preemption=view.without_default_preemption_caption,
             )
             produced_tables.append(out_tex)
@@ -1707,7 +1722,7 @@ def main() -> None:
             view=view,
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax_cols=kmax_cols,
+            priorities_cols=priorities_cols,
             series=series_all,
             out_stem=out_stem_all,
             grid_left=GRID_LEFT_ALL,
@@ -1755,12 +1770,12 @@ def main() -> None:
             y_solvers.append(y_s)
             y_plans.append(y_p)
 
-        out_stem_ps = f"grid_util_latency_deletions_periodic_stable_deltas_{suffix}"
+        out_stem_ps = f"grid_periodic_vs_stable_{suffix}"
         make_grid_plot_custom_series(
             view=view,
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
-            kmax_cols=kmax_cols,
+            priorities_cols=priorities_cols,
             series_labels=labels,
             y_utils=y_utils,
             y_lats=y_lats,
@@ -1770,15 +1785,15 @@ def main() -> None:
             out_stem=out_stem_ps,
             figsize=GRID_FIGSIZE_DELTAS,
             grid_left=GRID_LEFT_DELTAS,
-            grid_right=GRID_RIGHT_DELTAS,
-            grid_bottom=GRID_BOTTOM_DELTAS,
-            grid_top=GRID_TOP_DELTAS,
-            grid_wspace=GRID_WSPACE_DELTAS,
-            grid_hspace=GRID_HSPACE_DELTAS,
-            ylabel_pad_pt=GRID_YLABEL_PAD_PT_DELTAS,
-            legend_pad=GRID_LEGEND_PAD_DELTAS,
+            grid_right=GRID_RIGHT_ALL,
+            grid_bottom=GRID_BOTTOM_ALL,
+            grid_top=GRID_TOP_ALL,
+            grid_wspace=GRID_WSPACE_ALL,
+            grid_hspace=GRID_HSPACE_ALL,
+            ylabel_pad_pt=GRID_YLABEL_PAD_PT_ALL,
+            legend_pad=GRID_LEGEND_PAD_ALL,
             legend_ncol=GRID_LEGEND_NCOL_DELTAS,
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING_DELTAS,
+            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING_ALL,
             mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
         )
         produced_figs.extend(
@@ -1791,16 +1806,17 @@ def main() -> None:
     # -----------------------
     # One table: mode diffs periodic/stable, includes both views
     # -----------------------
-    delta_tex = OUT_TABLES_DIR / "table_periodic_stable_deltas.tex"
-    write_mode_delta_table_tex(
-        out_tex=delta_tex,
-        lookup=lookup,
-        views=VIEWS,
-        nodes_order=nodes_order,
-        arrivals_order=arrivals_order,
-        kmaxs=kmax_cols,
-    )
-    produced_tables.append(delta_tex)
+    for k in priorities_cols:
+        out_tex = OUT_TABLES_DIR / f"table_periodic_vs_stable_priorities={k}.tex"
+        write_mode_delta_table_tex(
+            out_tex=out_tex,
+            lookup=lookup,
+            views=VIEWS,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            priorities_order=[k],
+        )
+        produced_tables.append(out_tex)
 
     # -----------------------
     # Summary
