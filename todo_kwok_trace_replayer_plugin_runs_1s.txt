@@ -1,0 +1,5 @@
+
+
+Hent Resultater:
+- 2026-01-28-02: results/plugin/mode=stablequeue16s_blocking=0_defpreempt=1_nodes=16_prio=4_arrival=4s
+- 2026-01-29-01
