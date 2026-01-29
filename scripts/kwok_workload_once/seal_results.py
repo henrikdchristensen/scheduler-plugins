@@ -368,7 +368,7 @@ def build_argparser() -> argparse.ArgumentParser:
         default=Path("analysis/kwok_workload_once"),
         help="Root folder containing the solver/default results trees. Can be outside repo directory.",
     )
-    ap.add_argument("--solver-dir", default="plugin-scheduler", help="Subfolder under --results-root holding solver runs")
+    ap.add_argument("--solver-dir", default="plugin", help="Subfolder under --results-root holding solver runs")
     ap.add_argument("--default-dir", default="default", help="Subfolder under --results-root holding default runs")
     ap.add_argument("--results-csv", default="results.csv", help="Results CSV filename in each run directory")
     ap.add_argument("--out-dir", type=Path, default=Path("analysis/kwok_workload_once"), help="Output directory for aggregated CSV")

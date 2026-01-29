@@ -313,7 +313,7 @@ All the test jobs used previously to evaluate the plugin can be found under `dat
 workload-config-file: data/configs-workload/base.yaml
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 seed-file: data/seeds/kwok_workload_once/nodes4_pods16_prio4_util095.txt
-output-dir: results/plugin-scheduler/nodes4_pods16_prio4_util095_timeout10
+output-dir: results/plugin/nodes4_pods16_prio4_util095_timeout10
 save-scheduler-logs: true
 save-solver-stats: true
 solver-trigger: true
@@ -413,7 +413,7 @@ results/
 │   │   └── seeds-not-all-running.txt    (if applicable)
 │   ├── ...
 │   └── nodes32_pods256_prio4_util105/
-└── plugin-scheduler/
+└── plugin/
     ├── nodes4_pods16_prio1_util090_timeout01/
     │   ├── results.csv
     │   ├── info.yaml

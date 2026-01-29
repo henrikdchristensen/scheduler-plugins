@@ -47,7 +47,7 @@ PLOT_TIMEOUTS   = [1, 10, 20]
 EPS = 1e-9
 
 # fonts
-ANNOT_FS  = 4
+ANNOT_FS  = 3.5
 mpl.rcParams.update({
     "axes.titlesize": PLOT_TITLE_FONTSIZE,
     "axes.labelsize": PLOT_AXIS_LABEL_FONTSIZE,
