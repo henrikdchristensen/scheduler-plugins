@@ -1,11 +1,11 @@
 \begin{table*}[t]
 \tiny
 \setlength{\tabcolsep}{3.5pt}
-\renewcommand{\arraystretch}{0.95}
+\renewcommand{\arraystretch}{0.8}
 \centering
 \begin{tabular}{r r r r r r r r r}
 \toprule
-\multicolumn{9}{l}{$k_{\max}=2$} \\
+\multicolumn{9}{l}{\#priorities=2} \\
 \addlinespace[0.2em]
 Util & No Calls (\%) & KWOK Opt. (\%) & Better (\%) & \makecell{Better\&Opt.\\(\%)} & Fail (\%) & \makecell{Solver\\duration (ms)} & $\Delta U_{\mathrm{cpu}}$ & $\Delta U_{\mathrm{mem}}$ \\
 \midrule
@@ -124,5 +124,5 @@ Util & No Calls (\%) & KWOK Opt. (\%) & Better (\%) & \makecell{Better\&Opt.\\(\
 \bottomrule
 \end{tabular}
 \caption{Per-combination outcomes grouped by $(N,\mathrm{ppn},t)$ (filtered by TABLE\_* settings). Shares are in percent of seeds; solver duration is mean over solver-called seeds.}
-\label{tab:kwok-workload-once-kmax2}
+\label{tab:kwok-workload-once-prio2}
 \end{table*}

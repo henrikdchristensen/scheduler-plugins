@@ -34,9 +34,6 @@ OUT_DIR = Path("analysis/kwok_workload_once")
 OUT_FIGURES_DIR = OUT_DIR / "figures"
 OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-OUT_TABLES_DIR = OUT_DIR / "tables"
-OUT_TABLES_DIR.mkdir(parents=True, exist_ok=True)
-
 #################################################################
 # Global plotting settings
 #################################################################
@@ -87,18 +84,6 @@ CATEGORIES = [
     {"key": "default_all",       "label": "No Calls",       "col": "default_all_running_rate", "color": set3[11]},
     {"key": "solver_failed",     "label": "Failures",       "col": "solver_failed_rate",       "color": set2[7]},
 ]
-
-#################################################################
-# Global table settings
-#################################################################
-TABLE_PPNS       = [4, 8]
-TABLE_UTILS      = [90.0, 95.0, 100.0, 105.0]
-TABLE_NODES      = [4, 8, 16, 32]
-TABLE_TIMEOUTS   = [1, 10]
-TABLE_DECIMALS   = 1
-
-# We generate ONE table per priorities value found / allowed:
-TABLE_PRIORITIES_ALLOW = [1, 2, 4]  # set to None to allow all priorities found
 
 #################################################################
 # Plotting helpers
@@ -182,7 +167,11 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
                 ax.axis("off")
                 continue
 
-            panel = panel.groupby(["nodes", "timeout_s"], as_index=False)[[s["col"] for s in CATEGORIES if s["col"].endswith("_rate")]].mean()
+            panel = panel.groupby(
+                ["nodes", "timeout_s"],
+                as_index=False
+            )[[s["col"] for s in CATEGORIES if s["col"].endswith("_rate")]].mean()
+
             nodes_vals = sorted(panel["nodes"].unique().tolist())
             ts = sorted(panel["timeout_s"].unique().tolist())
             bars_per_group = max(1, len(ts))
@@ -206,7 +195,8 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
                         seen_keys.add(category["key"])
 
                 for xi, top in zip(xj, bar_height):
-                    ax.text(float(xi), float(top) + 1.0, f"{int(timeout)}s", ha="center", va="bottom", fontsize=ANNOT_FS)
+                    ax.text(float(xi), float(top) + 1.0, f"{int(timeout)}s",
+                            ha="center", va="bottom", fontsize=ANNOT_FS)
 
             ax.set_xticks(x)
             ax.set_xticklabels([str(n) for n in nodes_vals], fontsize=PLOT_TICK_FONTSIZE)
@@ -216,7 +206,7 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
             ax.tick_params(axis='y', labelsize=PLOT_TICK_FONTSIZE)
 
             if r == 0:
-                ax.set_title(rf"$k_{{\max}}={prio}$", fontsize=PLOT_TITLE_FONTSIZE)
+                ax.set_title(rf"#priorities={prio}", fontsize=PLOT_TITLE_FONTSIZE)
 
             if c == 0:
                 if nrows % 2 == 1 and r == nrows // 2:
@@ -355,215 +345,14 @@ def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path):
 for ppn in PLOT_PPNS:
     for prio in PLOT_PRIORITIES:
         for t in PLOT_TIMEOUTS:
-            sub = df_per_combo[(df_per_combo["pods_per_node"] == ppn) & (df_per_combo["priorities"] == prio) & (df_per_combo["timeout_s"] == t)]
+            sub = df_per_combo[
+                (df_per_combo["pods_per_node"] == ppn)
+                & (df_per_combo["priorities"] == prio)
+                & (df_per_combo["timeout_s"] == t)
+            ]
             if sub.empty:
                 print(f"[skip] no per-combo rows for ppn={ppn}, prio={prio}, t={t}")
                 continue
-            title = rf"{PODS_PER_NODE_LABEL}={ppn}, $k_{{\max}}$={prio}, timeout={t}s"
+            title = rf"{PODS_PER_NODE_LABEL}={ppn}, #priorities={prio}, timeout={t}s"
             out_file = OUT_FIGURES_DIR / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
             plot_3d_ppn_prio_timeout(sub, title, out_file)
-
-###############################################################
-# TABLES (one per priorities=kmax):
-# Fixed header columns (metrics), and the body is grouped by a
-# spanning row per (nodes, ppn, timeout). Under each group we list
-# util rows.
-###############################################################
-def _fmt_pct(x: float, decimals: int = 1) -> str:
-    if pd.isna(x):
-        return "—"
-    return f"{100.0 * float(x):.{decimals}f}"
-
-def _fmt_num(x: float, decimals: int = 2) -> str:
-    if pd.isna(x):
-        return "—"
-    return f"{float(x):.{decimals}f}"
-
-def _fmt_util_ratio(util_pct: float, decimals: int = 2) -> str:
-    # util stored as percent-like (90.0, 95.0, ...) -> ratio (0.90, 0.95, ...)
-    if pd.isna(util_pct):
-        return "—"
-    return f"{float(util_pct) / 100.0:.{decimals}f}"
-
-def _latex_two_line_header(s: str, max_len: int = 14) -> str:
-    """
-    Split a header string into two lines if it exceeds max_len.
-    """
-    plain = s
-    # Don't split math headers like $...$
-    if "$" in plain or len(plain) <= max_len:
-        return plain
-
-    # Prefer splitting at a space closest to the middle
-    mid = len(plain) // 2
-    split_at = None
-    for i in range(mid, 0, -1):
-        if plain[i] == " ":
-            split_at = i
-            break
-    for i in range(mid, len(plain)):
-        if split_at is None and plain[i] == " ":
-            split_at = i
-            break
-
-    if split_at is None:
-        return plain
-
-    a = plain[:split_at].strip()
-    b = plain[split_at + 1 :].strip()
-    return rf"\makecell{{{a}\\{b}}}"
-
-
-
-def _filter_table_df(df: pd.DataFrame) -> pd.DataFrame:
-    sub = df.copy()
-    sub = sub[sub["pods_per_node"].isin(TABLE_PPNS)]
-    sub = sub[sub["util"].isin(TABLE_UTILS)]
-    sub = sub[sub["nodes"].isin(TABLE_NODES)]
-    sub = sub[sub["timeout_s"].isin(TABLE_TIMEOUTS)]
-    if TABLE_PRIORITIES_ALLOW is not None:
-        sub = sub[sub["priorities"].isin(TABLE_PRIORITIES_ALLOW)]
-    return sub
-
-def write_tables_grouped_by_combo(df: pd.DataFrame, out_dir: Path):
-    sub_all = _filter_table_df(df)
-    if sub_all.empty:
-        print("[warn] tables: no rows after filtering TABLE_* settings")
-        return
-
-    prios = sorted(int(x) for x in sub_all["priorities"].unique().tolist())
-
-    # Metrics/columns in the fixed header (in order)
-    # NOTE: first element is used for plaintext; second is LaTeX header.
-    METRIC_COLS = [
-        ("No Calls (%)",         r"No Calls (\%)",                 "default_all_running_rate", ("pct", TABLE_DECIMALS)),
-        ("KWOK Opt. (%)",        r"KWOK Opt. (\%)",                "default_optimal_rate",     ("pct", TABLE_DECIMALS)),
-        ("Better (%)",           r"Better (\%)",                   "solver_feasible_rate",     ("pct", TABLE_DECIMALS)),
-        ("Better&Opt. (%)",      r"Better\&Opt. (\%)",             "solver_optimal_rate",      ("pct", TABLE_DECIMALS)),
-        ("Fail (%)",             r"Fail (\%)",                     "solver_failed_rate",       ("pct", TABLE_DECIMALS)),
-        ("Solver duration (ms)", r"Solver duration (ms)",          "solver_duration_ms_mean",  ("num", 0)),
-        ("ΔU_CPU",               r"$\Delta U_{\mathrm{cpu}}$",     "cpu_delta_mean",           ("num", 4)),
-        ("ΔU_mem",               r"$\Delta U_{\mathrm{mem}}$",     "mem_delta_mean",           ("num", 4)),
-    ]
-
-
-    def format_cell(val, kind_dec):
-        kind, dec = kind_dec
-        if kind == "pct":
-            return _fmt_pct(val, dec)
-        return _fmt_num(val, dec)
-
-    # Sort combos in a stable, readable way
-    def combo_key(tup):
-        n, p, t = tup
-        return (int(n), int(p), int(t))
-
-    for prio in prios:
-        sub = sub_all[sub_all["priorities"] == prio].copy()
-        if sub.empty:
-            continue
-
-        # We expect one row per (util, nodes, ppn, timeout, priorities)
-        idx_cols = ["util", "nodes", "pods_per_node", "timeout_s"]
-        sub_idx = sub.set_index(idx_cols)
-
-        combos = sorted(
-            {(int(r["nodes"]), int(r["pods_per_node"]), int(r["timeout_s"])) for _, r in sub.iterrows()},
-            key=combo_key,
-        )
-        utils = sorted(float(u) for u in sub["util"].unique().tolist())
-
-        # ----------------
-        # Plaintext output
-        # ----------------
-        txt_lines = []
-        hdr = ["Util"] + [m[0] for m in METRIC_COLS]
-        txt_lines.append(f"kmax={prio}")
-        txt_lines.append(" ".join(f"{h:>18}" for h in hdr))
-
-        for (nodes, ppn, t) in combos:
-            txt_lines.append("")
-            txt_lines.append(f"[nodes={nodes}, ppn={ppn}, timeout={t}s]".center(18 * len(hdr)))
-
-            for util in utils:
-                row_vals = []
-                # util cell (ratio)
-                row_vals.append(f"{_fmt_util_ratio(util):>18}")
-
-                # metric cells
-                for _, _, col, kind_dec in METRIC_COLS:
-                    try:
-                        r = sub_idx.loc[(util, nodes, ppn, t)]
-                        val = r[col]
-                    except KeyError:
-                        val = np.nan
-                    row_vals.append(f"{format_cell(val, kind_dec):>18}")
-
-                txt_lines.append(" ".join(row_vals))
-
-
-        # ------------
-        # LaTeX output
-        # ------------
-        out_tex = out_dir / f"table_per_combo_kmax{prio}.tex"
-        n_cols = 1 + len(METRIC_COLS)  # util + metrics
-        colspec = "r " + ("r " * len(METRIC_COLS)).strip()
-
-        lines = []
-        lines.append(r"\begin{table*}[t]")
-        lines.append(r"\tiny")
-        lines.append(r"\setlength{\tabcolsep}{3.5pt}")
-        lines.append(r"\renewcommand{\arraystretch}{0.8}")
-        lines.append(r"\centering")
-        lines.append(rf"\begin{{tabular}}{{{colspec}}}")
-        lines.append(r"\toprule")
-        lines.append(rf"\multicolumn{{{n_cols}}}{{l}}{{$k_{{\max}}={prio}$}} \\")
-        lines.append(r"\addlinespace[0.2em]")
-
-        # Header row (IMPORTANT: use the LaTeX header strings m[1], not plaintext m[0])
-        lines.append(
-            "Util & "
-            + " & ".join(_latex_two_line_header(m[1]) for m in METRIC_COLS)
-            + r" \\"
-        )
-        lines.append(r"\midrule")
-
-        for (nodes, ppn, t) in combos:
-            # Spanning row describing the upcoming block (all in math mode where needed)
-            block_title = rf"$N={nodes}$, $\mathrm{{ppn}}={ppn}$, $t={t}\,\mathrm{{s}}$"
-            lines.append(rf"\multicolumn{{{n_cols}}}{{l}}{{{block_title}}} \\")
-            lines.append(r"\midrule")
-
-            for util in utils:
-                cells = [_fmt_util_ratio(util)]
-                for _, _, col, kind_dec in METRIC_COLS:
-                    try:
-                        r = sub_idx.loc[(util, nodes, ppn, t)]
-                        val = r[col]
-                    except KeyError:
-                        val = np.nan
-                    cells.append(format_cell(val, kind_dec))
-
-                # Actual data row
-                lines.append(" & ".join(cells) + r" \\")
-
-            lines.append(r"\addlinespace[0.35em]")
-
-        lines.append(r"\bottomrule")
-        lines.append(r"\end{tabular}")
-        lines.append(
-            r"\caption{Per-combination outcomes grouped by $(N,\mathrm{ppn},t)$ "
-            r"(filtered by TABLE\_* settings). Shares are in percent of seeds; "
-            r"solver duration is mean over solver-called seeds.}"
-        )
-        lines.append(rf"\label{{tab:kwok-workload-once-kmax{prio}}}")
-        lines.append(r"\end{table*}")
-
-        out_tex.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"[ok] wrote table: {out_tex}")
-
-
-write_tables_grouped_by_combo(
-    df=df_per_combo,
-    out_dir=OUT_TABLES_DIR,
-)

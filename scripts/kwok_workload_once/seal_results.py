@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # seal_results.py
+"""
+python -m scripts.kwok_workload_once.seal_results
+"""
 
 import argparse
 import json
@@ -362,7 +365,7 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--results-root",
         type=Path,
-        default=Path("/mnt/g/My Drive/Datalogi/MSc - SDU/Master Thesis/Results/results"),
+        default=Path("analysis/kwok_workload_once"),
         help="Root folder containing the solver/default results trees. Can be outside repo directory.",
     )
     ap.add_argument("--solver-dir", default="plugin-scheduler", help="Subfolder under --results-root holding solver runs")
