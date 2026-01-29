@@ -2,8 +2,6 @@
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 seed-file: data/seeds/kwok_workload_once/seeds_100.txt
 output-dir: results/plugin-scheduler/nodes64_pods512_prio2_util100_timeout10
-save-scheduler-logs: true
-save-solver-stats: true
 solver-trigger: true
 override-workload-config:
   num_nodes: 64
