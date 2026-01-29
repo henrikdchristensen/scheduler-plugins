@@ -2,6 +2,19 @@
 \toprule
  & \makecell{$\Delta\mathrm{usage}$\\$(\%)$} & \makecell{$\Delta\mathrm{latency}_{\mathrm{total}}$\\$(\mathrm{ms})$} & \makecell{$\Delta\mathrm{deletions}_{\mathrm{total}}$} & \makecell{\#solver\\runs} & \makecell{\#plan\\activations} \\
 \midrule
+\multicolumn{6}{l}{\#nodes = 16, inter-arrival = 2\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & -0.12 & +2375 & -1468.3 & 322 & 201 \\
+\makecell[l]{Scheduling-failure (non-blocking)} & -0.15 & +2370 & -1490.3 & 312 & 196 \\
+\makecell[l]{Periodic (blocking), 8s interval} & +1.03 & +54 & -78.0 & 39 & 31 \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & +1.01 & -1 & -42.3 & 38 & 27 \\
+\makecell[l]{Periodic (blocking), 32s interval} & +0.32 & +6 & -94.3 & 6 & 5 \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & +0.41 & +41 & -68.7 & 7 & 6 \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & +1.26 & -18 & +63.0 & 304 & 75 \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & +1.31 & -113 & +48.0 & 298 & 68 \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & +0.90 & -24 & -27.0 & 50 & 25 \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & +1.03 & +54 & -40.0 & 51 & 26 \\
+\midrule
 \multicolumn{6}{l}{\#nodes = 16, inter-arrival = 4\,s} \\
 \midrule
 \makecell[l]{Scheduling-failure (blocking)} & +1.52 & +2220 & -433.7 & 220 & 142 \\
@@ -40,6 +53,19 @@
 \makecell[l]{Stable-queue (non-blocking), 2s delay} & +3.49 & -2924 & +69.7 & 175 & 39 \\
 \makecell[l]{Stable-queue (blocking), 8s delay} & +3.38 & -2460 & +16.3 & 81 & 28 \\
 \makecell[l]{Stable-queue (non-blocking), 8s delay} & +3.47 & -2899 & +26.3 & 88 & 28 \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 32, inter-arrival = 2\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & +0.07 & +3087 & -1509.3 & 266 & 168 \\
+\makecell[l]{Scheduling-failure (non-blocking)} & -0.17 & +3608 & -1716.7 & 272 & 158 \\
+\makecell[l]{Periodic (blocking), 8s interval} & +0.81 & -156 & -24.3 & 51 & 32 \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & +0.75 & -71 & -4.0 & 48 & 30 \\
+\makecell[l]{Periodic (blocking), 32s interval} & +0.28 & +3 & +9.3 & 7 & 5 \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & +0.15 & +29 & +15.0 & 8 & 6 \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & +0.80 & -144 & +73.0 & 346 & 38 \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & +0.84 & -219 & +90.7 & 340 & 40 \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & +0.69 & -73 & +17.0 & 92 & 22 \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & +0.62 & -145 & +24.7 & 86 & 22 \\
 \midrule
 \multicolumn{6}{l}{\#nodes = 32, inter-arrival = 4\,s} \\
 \midrule

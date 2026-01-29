@@ -143,6 +143,73 @@ class CombineResultsAnalyzer:
     def _solver_called_count(not_all_running: pd.DataFrame) -> int:
         return int(not_all_running["solver_called"].sum())
 
+
+    @staticmethod
+    def _std(series: pd.Series) -> float:
+        # ddof=1 is standard sample std; if n<2 -> NaN
+        s = pd.to_numeric(series, errors="coerce")
+        return float(s.std(ddof=1))
+
+    @staticmethod
+    def _build_per_seed_category_flags(per_seed_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Returns a DataFrame with per-seed 0/1 indicators for the mutually exclusive categories:
+        - default_all
+        - default_optimal
+        - solver_optimal
+        - solver_feasible
+        - solver_failed
+        - other
+        And also solver_called (not mutually exclusive with categories but useful).
+        """
+        df = per_seed_df.copy()
+
+        # Base masks
+        default_all = df["default_all_running"].astype(bool)
+
+        # Only meaningful when not default_all
+        not_all = ~default_all
+        status = df.loc[not_all, "solver_status"].astype(str)
+        is_optimal = status.eq("OPTIMAL")
+        is_feasible = status.eq("FEASIBLE")
+        is_ok = is_optimal | is_feasible
+
+        placed_cmp = pd.to_numeric(df.loc[not_all, "placed_cmp"], errors="coerce").fillna(0.0)
+        placed_equal = placed_cmp.eq(0)
+        placed_better = placed_cmp.gt(0)
+        placed_worse = placed_cmp.lt(0)
+
+        default_optimal = pd.Series(False, index=df.index)
+        solver_optimal  = pd.Series(False, index=df.index)
+        solver_feasible = pd.Series(False, index=df.index)
+        solver_failed   = pd.Series(False, index=df.index)
+
+        # Match the same category logic you already aggregate
+        default_optimal.loc[not_all] = (is_optimal & placed_equal).values
+        solver_optimal.loc[not_all]  = (is_optimal & placed_better).values
+        solver_feasible.loc[not_all] = (is_feasible & placed_better).values
+
+        # "failed" bucket (same as your count)
+        solver_failed.loc[not_all] = (
+            ((~is_ok) | (is_feasible & ~placed_better) | (is_optimal & placed_worse)).values
+        )
+
+        # "other" = everything else when not_all
+        other = pd.Series(False, index=df.index)
+        other.loc[not_all] = ~(default_optimal.loc[not_all] | solver_optimal.loc[not_all] | solver_feasible.loc[not_all] | solver_failed.loc[not_all])
+
+        out = pd.DataFrame({
+            "default_all": default_all.astype(int),
+            "default_optimal": default_optimal.astype(int),
+            "solver_optimal": solver_optimal.astype(int),
+            "solver_feasible": solver_feasible.astype(int),
+            "solver_failed": solver_failed.astype(int),
+            "other": other.astype(int),
+            "solver_called": pd.to_numeric(df["solver_called"], errors="coerce").fillna(0).astype(int),
+        }, index=df.index)
+
+        return out
+
     @staticmethod
     def _compute_category_counts(per_seed_df: pd.DataFrame) -> CategoryCounts:
         mask_default_all, not_all_running = CombineResultsAnalyzer._split_default_all_running(per_seed_df)
@@ -203,7 +270,7 @@ class CombineResultsAnalyzer:
             return None
 
         per_seed_df = default_vs_solver_per_seed(solver_csv, default_csv, solver_dir.name)
-        _, not_all_running = self._split_default_all_running(per_seed_df)
+        mask_default_all, not_all_running = self._split_default_all_running(per_seed_df)
         counts = self._compute_category_counts(per_seed_df)
 
         # Sanity warnings (keep behavior)
@@ -227,6 +294,23 @@ class CombineResultsAnalyzer:
         cpu_delta_sum = float(not_all_running["cpu_delta"].sum())
         mem_delta_sum = float(not_all_running["mem_delta"].sum())
 
+        # --- NEW: stds (seed-to-seed) ---
+        # Category-rate stds computed from per-seed indicators
+        flags = self._build_per_seed_category_flags(per_seed_df)
+
+        default_all_rate_std = self._std(flags["default_all"])
+        solver_called_rate_std = self._std(flags["solver_called"])
+        solver_failed_rate_std = self._std(flags["solver_failed"])
+        default_optimal_rate_std = self._std(flags["default_optimal"])
+        solver_optimal_rate_std = self._std(flags["solver_optimal"])
+        solver_feasible_rate_std = self._std(flags["solver_feasible"])
+        other_rate_std = self._std(flags["other"])
+
+        # For these, std should match your mean definition (over not_all_running)
+        solver_duration_ms_mean_std = self._std(not_all_running["solver_duration_ms"])
+        cpu_delta_mean_std = self._std(not_all_running["cpu_delta"])
+        mem_delta_mean_std = self._std(not_all_running["mem_delta"])
+
         count_sum = (
             counts.n_default_all_running
             + counts.n_default_optimal
@@ -238,7 +322,9 @@ class CombineResultsAnalyzer:
             print(f"[warn] {solver_dir.name}: category counts sum={count_sum} != joined={len(per_seed_df)}")
 
         decimals = self.args.decimals
-        return {
+
+        # --- Mean-only row (unchanged keys/behavior) ---
+        base = {
             "util": meta["util"],
             "nodes": meta["nodes"],
             "pods": meta["pods"],
@@ -246,31 +332,61 @@ class CombineResultsAnalyzer:
             "priorities": meta["priorities"],
             "timeout_s": meta["timeout"],
             "config_dir": solver_dir.name,
+
             "n_seeds": int(len(per_seed_df)),
             "n_seeds_not_all_running": int(len(not_all_running)),
+
             "n_default_all_running": counts.n_default_all_running,
             "default_all_running_rate": self._format_num(counts.default_all_running_rate, decimals),
+
             "n_solver_called": counts.n_solver_called,
             "solver_called_rate": self._format_num(counts.solver_called_rate, decimals),
+
             "n_solver_failed": counts.n_solver_failed,
             "solver_failed_rate": self._format_num(counts.solver_failed_rate, decimals),
+
             "n_default_optimal": counts.n_default_optimal,
             "default_optimal_rate": self._format_num(counts.default_optimal_rate, decimals),
+
             "n_solver_optimal": counts.n_solver_optimal,
             "solver_optimal_rate": self._format_num(counts.solver_optimal_rate, decimals),
+
             "n_solver_feasible": counts.n_solver_feasible,
             "solver_feasible_rate": self._format_num(counts.solver_feasible_rate, decimals),
+
             "n_solver_improve": counts.n_solver_improve,
             "solver_improve_rate": self._format_num(counts.solver_improve_rate, decimals),
+
             "n_other": counts.n_other,
             "other_rate": self._format_num(counts.other_rate, decimals),
+
             "solver_duration_ms_sum": self._format_num(t_sum, decimals),
             "solver_duration_ms_mean": self._format_num(float(t_mean) if t_mean == t_mean else float("nan"), decimals),
+
             "cpu_delta_sum": self._format_num(cpu_delta_sum, decimals),
             "mem_delta_sum": self._format_num(mem_delta_sum, decimals),
             "cpu_delta_mean": self._format_num(float(cpu_delta_mean) if cpu_delta_mean == cpu_delta_mean else float("nan"), decimals),
             "mem_delta_mean": self._format_num(float(mem_delta_mean) if mem_delta_mean == mem_delta_mean else float("nan"), decimals),
         }
+
+        # --- NEW: std columns (unformatted numeric; we’ll format when writing the with_std file) ---
+        stds = {
+            "default_all_running_rate_std": default_all_rate_std,
+            "solver_called_rate_std": solver_called_rate_std,
+            "solver_failed_rate_std": solver_failed_rate_std,
+            "default_optimal_rate_std": default_optimal_rate_std,
+            "solver_optimal_rate_std": solver_optimal_rate_std,
+            "solver_feasible_rate_std": solver_feasible_rate_std,
+            "other_rate_std": other_rate_std,
+            "solver_duration_ms_mean_std": solver_duration_ms_mean_std,
+            "cpu_delta_mean_std": cpu_delta_mean_std,
+            "mem_delta_mean_std": mem_delta_mean_std,
+        }
+
+        # Return both; run() will decide where to write them
+        out = dict(base)
+        out.update(stds)
+        return out
 
     def run(self) -> None:
         solver_root = (self.args.results_root / self.args.solver_dir).resolve()
@@ -291,8 +407,10 @@ class CombineResultsAnalyzer:
                 per_combo_rows.append(row)
 
         per_combo_df = pd.DataFrame(per_combo_rows)
-        for c in [
+        # numeric conversion (include std columns too)
+        num_cols = [
             "n_seeds",
+            "n_seeds_not_all_running",
             "n_default_all_running",
             "n_solver_called",
             "n_solver_failed",
@@ -307,12 +425,48 @@ class CombineResultsAnalyzer:
             "mem_delta_sum",
             "solver_duration_ms_sum",
             "solver_duration_ms_mean",
-        ]:
+            # std cols
+            "default_all_running_rate_std",
+            "solver_called_rate_std",
+            "solver_failed_rate_std",
+            "default_optimal_rate_std",
+            "solver_optimal_rate_std",
+            "solver_feasible_rate_std",
+            "other_rate_std",
+            "solver_duration_ms_mean_std",
+            "cpu_delta_mean_std",
+            "mem_delta_mean_std",
+        ]
+        for c in num_cols:
             if c in per_combo_df.columns:
                 per_combo_df[c] = pd.to_numeric(per_combo_df[c], errors="coerce")
+
+        sort_keys = ["util", "nodes", "pods_per_node", "priorities", "timeout_s", "config_dir"]
+        per_combo_df = per_combo_df.sort_values(sort_keys)
+
+        # 1) OLD file (mean-only): keep exactly the same columns as before
+        old_cols = [
+            "util","nodes","pods","pods_per_node","priorities","timeout_s","config_dir",
+            "n_seeds","n_seeds_not_all_running",
+            "n_default_all_running","default_all_running_rate",
+            "n_solver_called","solver_called_rate",
+            "n_solver_failed","solver_failed_rate",
+            "n_default_optimal","default_optimal_rate",
+            "n_solver_optimal","solver_optimal_rate",
+            "n_solver_feasible","solver_feasible_rate",
+            "n_solver_improve","solver_improve_rate",
+            "n_other","other_rate",
+            "solver_duration_ms_sum","solver_duration_ms_mean",
+            "cpu_delta_sum","mem_delta_sum","cpu_delta_mean","mem_delta_mean",
+        ]
         out_per_combo = out_dir / "per_combo_results.csv"
-        per_combo_df.sort_values(["util", "nodes", "pods_per_node", "priorities", "timeout_s", "config_dir"]).to_csv(out_per_combo, index=False)
+        per_combo_df[old_cols].to_csv(out_per_combo, index=False)
         print(f"[ok] wrote {out_per_combo} (rows={len(per_combo_df)})")
+
+        # 2) NEW file (with std)
+        out_per_combo_std = out_dir / "per_combo_results_with_std.csv"
+        per_combo_df.to_csv(out_per_combo_std, index=False)
+        print(f"[ok] wrote {out_per_combo_std} (rows={len(per_combo_df)})")
 
 def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: str) -> pd.DataFrame:
     df_s = load_csv(solver_csv)

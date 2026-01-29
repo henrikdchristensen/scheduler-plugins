@@ -2,6 +2,11 @@
 # scripts/kwok_trace_replayer/seal_results.py
 """
 python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer
+
+Seals KWOK trace replayer outputs into results_paired.csv.
+
+This version keeps the existing *_mean columns and additionally computes
+seed-to-seed variability as standard deviation columns *_std for each metric.
 """
 
 import argparse, json, math, re
@@ -47,7 +52,9 @@ LATENCY_S_SCALE = 1000.0  # to milliseconds
 # - we STORE delta_U_* in percent (%) => multiply by 100
 UTIL_TO_PERCENT = 100.0
 
-PAIRED_COLS = [
+
+# ---- Output schema (paired / aggregated) ----
+PAIRED_MEAN_COLS = [
     "job_name",
     "plugin_config",
     "n_seed",
@@ -60,6 +67,18 @@ PAIRED_COLS = [
     "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean", "solver_failed_mean",
     "plan_not_applicable_mean", "plan_activated_mean",
 ]
+
+PAIRED_STD_COLS = [
+    "T_end_s_std",
+    "delta_U_pct_cpu_std", "delta_U_pct_mem_std", "delta_U_pct_eff_std",
+    "delta_R_num_p1_std", "delta_R_num_p2_std", "delta_R_num_p3_std", "delta_R_num_p4_std", "delta_R_num_total_std",
+    "delta_D_num_p1_std", "delta_D_num_p2_std", "delta_D_num_p3_std", "delta_D_num_p4_std", "delta_D_num_total_std",
+    "delta_L_ms_p1_std", "delta_L_ms_p2_std", "delta_L_ms_p3_std", "delta_L_ms_p4_std", "delta_L_ms_total_std",
+    "solver_attempts_std", "solver_optimal_std", "solver_feasible_std", "solver_failed_std",
+    "plan_not_applicable_std", "plan_activated_std",
+]
+
+PAIRED_COLS = PAIRED_MEAN_COLS + PAIRED_STD_COLS
 
 OPT_TOTAL_KEYS = {
     "solver_attempts_total": "solver_attempts",
@@ -605,10 +624,22 @@ def main() -> None:
         return
 
     grp = df_seed.groupby(["job_name", "plugin_config"], dropna=False)
-    agg = grp.mean(numeric_only=True).reset_index()
+
+    # Mean + std across seeds
+    agg_mean = grp.mean(numeric_only=True)
+    agg_std = grp.std(numeric_only=True)
+
+    agg = agg_mean.reset_index()
     agg.insert(2, "n_seed", grp.size().to_numpy())
 
-    rename = {
+    # Attach std columns
+    std_reset = agg_std.reset_index()
+    std_cols = [c for c in std_reset.columns if c not in {"job_name", "plugin_config"}]
+    for c in std_cols:
+        agg[f"{c}_std"] = std_reset[c].to_numpy()
+
+    # Rename mean columns to *_mean
+    rename_mean = {
         "T_end_s": "T_end_s_mean",
         "delta_U_pct_cpu": "delta_U_pct_cpu_mean",
         "delta_U_pct_mem": "delta_U_pct_mem_mean",
@@ -635,8 +666,39 @@ def main() -> None:
         "plan_not_applicable": "plan_not_applicable_mean",
         "plan_activated": "plan_activated_mean",
     }
-    agg = agg.rename(columns=rename)
+    agg = agg.rename(columns=rename_mean)
 
+    # Rename std columns to match *_std naming (we created <raw>_std above)
+    rename_std = {
+        "T_end_s_std": "T_end_s_std",
+        "delta_U_pct_cpu_std": "delta_U_pct_cpu_std",
+        "delta_U_pct_mem_std": "delta_U_pct_mem_std",
+        "delta_U_pct_eff_std": "delta_U_pct_eff_std",
+        "delta_R_num_p1_std": "delta_R_num_p1_std",
+        "delta_R_num_p2_std": "delta_R_num_p2_std",
+        "delta_R_num_p3_std": "delta_R_num_p3_std",
+        "delta_R_num_p4_std": "delta_R_num_p4_std",
+        "delta_R_num_total_std": "delta_R_num_total_std",
+        "delta_D_num_p1_std": "delta_D_num_p1_std",
+        "delta_D_num_p2_std": "delta_D_num_p2_std",
+        "delta_D_num_p3_std": "delta_D_num_p3_std",
+        "delta_D_num_p4_std": "delta_D_num_p4_std",
+        "delta_D_num_total_std": "delta_D_num_total_std",
+        "delta_L_ms_p1_std": "delta_L_ms_p1_std",
+        "delta_L_ms_p2_std": "delta_L_ms_p2_std",
+        "delta_L_ms_p3_std": "delta_L_ms_p3_std",
+        "delta_L_ms_p4_std": "delta_L_ms_p4_std",
+        "delta_L_ms_total_std": "delta_L_ms_total_std",
+        "solver_attempts_std": "solver_attempts_std",
+        "solver_optimal_std": "solver_optimal_std",
+        "solver_feasible_std": "solver_feasible_std",
+        "solver_failed_std": "solver_failed_std",
+        "plan_not_applicable_std": "plan_not_applicable_std",
+        "plan_activated_std": "plan_activated_std",
+    }
+    agg = agg.rename(columns=rename_std)
+
+    # Ensure all expected output columns exist (means + stds)
     for c in PAIRED_COLS:
         if c not in agg.columns:
             agg[c] = np.nan
