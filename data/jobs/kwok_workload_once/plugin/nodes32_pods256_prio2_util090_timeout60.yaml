@@ -1,7 +1,7 @@
 ﻿workload-config-file: data/configs-workload/base.yaml
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 seed-file: data/seeds/kwok_workload_once/nodes32_pods256_prio2_util090.txt
-output-dir: results/plugin/nodes32_pods256_prio2_util090_timeout20
+output-dir: results/plugin/nodes32_pods256_prio2_util090_timeout60
 solver-trigger: true
 override-workload-config:
   num_nodes: 32
