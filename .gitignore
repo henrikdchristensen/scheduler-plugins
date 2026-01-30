@@ -33,7 +33,6 @@ output/
 results/
 /trace/
 eta*
-results.csv
 *.log
 /tmp/
 *.coverage
