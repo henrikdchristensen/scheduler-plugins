@@ -623,6 +623,61 @@ def main() -> None:
         print(f"Wrote outputs to: {out_dir}")
         return
 
+    # ------------------------------------------------------------
+    # NEW: write per-seed results for --plot-seeds in plots script
+    # ------------------------------------------------------------
+    mean_rename_seed = {
+        "T_end_s": "T_end_s_mean",
+        "delta_U_pct_cpu": "delta_U_pct_cpu_mean",
+        "delta_U_pct_mem": "delta_U_pct_mem_mean",
+        "delta_U_pct_eff": "delta_U_pct_eff_mean",
+        "delta_R_num_p1": "delta_R_num_p1_mean",
+        "delta_R_num_p2": "delta_R_num_p2_mean",
+        "delta_R_num_p3": "delta_R_num_p3_mean",
+        "delta_R_num_p4": "delta_R_num_p4_mean",
+        "delta_R_num_total": "delta_R_num_total_mean",
+        "delta_D_num_p1": "delta_D_num_p1_mean",
+        "delta_D_num_p2": "delta_D_num_p2_mean",
+        "delta_D_num_p3": "delta_D_num_p3_mean",
+        "delta_D_num_p4": "delta_D_num_p4_mean",
+        "delta_D_num_total": "delta_D_num_total_mean",
+        "delta_L_ms_p1": "delta_L_ms_p1_mean",
+        "delta_L_ms_p2": "delta_L_ms_p2_mean",
+        "delta_L_ms_p3": "delta_L_ms_p3_mean",
+        "delta_L_ms_p4": "delta_L_ms_p4_mean",
+        "delta_L_ms_total": "delta_L_ms_total_mean",
+        "solver_attempts": "solver_attempts_mean",
+        "solver_optimal": "solver_optimal_mean",
+        "solver_feasible": "solver_feasible_mean",
+        "solver_failed": "solver_failed_mean",
+        "plan_not_applicable": "plan_not_applicable_mean",
+        "plan_activated": "plan_activated_mean",
+    }
+
+    df_seeds_out = df_seed.rename(columns=mean_rename_seed).copy()
+
+    # Column order: keep consistent with plotting expectations
+    seed_out_cols = [
+        "job_name",
+        "plugin_config",
+        "seed",
+        "T_end_s_mean",
+        "delta_U_pct_cpu_mean", "delta_U_pct_mem_mean", "delta_U_pct_eff_mean",
+        "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
+        "delta_D_num_p1_mean", "delta_D_num_p2_mean", "delta_D_num_p3_mean", "delta_D_num_p4_mean", "delta_D_num_total_mean",
+        "delta_L_ms_p1_mean", "delta_L_ms_p2_mean", "delta_L_ms_p3_mean", "delta_L_ms_p4_mean", "delta_L_ms_total_mean",
+        "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean", "solver_failed_mean",
+        "plan_not_applicable_mean", "plan_activated_mean",
+    ]
+    for c in seed_out_cols:
+        if c not in df_seeds_out.columns:
+            df_seeds_out[c] = np.nan
+    df_seeds_out = df_seeds_out[seed_out_cols]
+
+    round_numeric_df(df_seeds_out, exclude=["job_name", "plugin_config", "seed"])
+    df_seeds_out.to_csv(out_dir / "results_seeds.csv", index=False)
+
+
     grp = df_seed.groupby(["job_name", "plugin_config"], dropna=False)
 
     # Mean + std across seeds

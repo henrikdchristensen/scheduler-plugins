@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import re
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
@@ -41,6 +42,9 @@ from scripts.config.plot_config import (
     PLOT_TICK_FONTSIZE,
     PLOT_TITLE_FONTSIZE,
 )
+
+DEFAULT_SEED_COL = "seed"
+DEFAULT_SEED_JITTER_FRAC = 0.12  # jitter as fraction of mode_spacing
 
 # =============================================================================
 # Paths
@@ -844,7 +848,35 @@ def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
     return base
 
 
-YOfFn = Callable[[RowKey, int, float, int], float]  # (rk, nodes, arrival_s, priorities) -> y
+from typing import Union
+
+YVal = Union[float, Sequence[float]]
+YOfFn = Callable[[RowKey, int, float, int], YVal]  # scalar (mean) OR list of per-seed values
+
+
+def _as_finite_list(v: object) -> List[float]:
+    """
+    Normalize scalar/iterable -> list of finite floats.
+    """
+    if v is None:
+        return []
+    # Treat numpy scalar as scalar
+    try:
+        if np.isscalar(v):  # type: ignore[attr-defined]
+            return [float(v)] if is_finite(v) else []
+    except Exception:
+        pass
+
+    if isinstance(v, (list, tuple, np.ndarray)):
+        out: List[float] = []
+        for x in v:
+            if is_finite(x):
+                out.append(float(x))
+        return out
+
+    # Fallback scalar
+    return [float(v)] if is_finite(v) else []
+
 
 
 def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int = PLOT_MIN_LINEAR_YTICKS) -> None:
@@ -960,6 +992,7 @@ def draw_points_on_ax(
     mode_x_spacing: float,
     y_tick_strategy: str = "auto",
     color_of: Optional[Callable[[RowKey], Any]] = None,
+    seed_jitter_frac: float = DEFAULT_SEED_JITTER_FRAC,
 ) -> None:
     """
     Shared point plotting logic.
@@ -988,32 +1021,40 @@ def draw_points_on_ax(
         mode_offset = (i - (m - 1) / 2.0) * mode_spacing
 
         for xi, a in enumerate(arrivals_order):
-            x = x_base[xi] + mode_offset
-            y0 = y_of(rk, nodes_order[0], a, priorities)
-            y1 = y_of(rk, nodes_order[1], a, priorities)
+            x_center = x_base[xi] + mode_offset
 
-            if is_finite(y0):
-                ax.plot(
-                    [x],
-                    [y0],
-                    marker="o",
-                    linestyle="None",
-                    markersize=PLOT_MARKER_SIZE,
-                    markerfacecolor=color,
-                    markeredgecolor="black",
-                    markeredgewidth=PLOT_MARKER_LINEWIDTH,
-                )
-            if is_finite(y1):
-                ax.plot(
-                    [x],
-                    [y1],
-                    marker="s",
-                    linestyle="None",
-                    markersize=PLOT_MARKER_SIZE,
-                    markerfacecolor=color,
-                    markeredgecolor="black",
-                    markeredgewidth=PLOT_MARKER_LINEWIDTH,
-                )
+            # y_of may return scalar (combined mean) or list (per-seed)
+            y0_list = _as_finite_list(y_of(rk, nodes_order[0], a, priorities))
+            y1_list = _as_finite_list(y_of(rk, nodes_order[1], a, priorities))
+
+            # If one side returns scalar and the other returns multiple, still plot what exists.
+            # Jitter points horizontally so seeds don't overlap.
+            def _plot_many(xs_center: float, ys: List[float], marker: str) -> None:
+                if not ys:
+                    return
+                if len(ys) == 1:
+                    xs = [xs_center]
+                else:
+                    # jitter relative to mode spacing so it scales nicely
+                    j = max(0.001, float(seed_jitter_frac) * max(0.001, mode_spacing))
+                    offsets = np.linspace(-j, j, len(ys))
+                    xs = [xs_center + float(o) for o in offsets]
+
+                for x, y in zip(xs, ys):
+                    ax.plot(
+                        [x],
+                        [y],
+                        marker=marker,
+                        linestyle="None",
+                        markersize=PLOT_MARKER_SIZE,
+                        markerfacecolor=color,
+                        markeredgecolor="black",
+                        markeredgewidth=PLOT_MARKER_LINEWIDTH,
+                    )
+
+            _plot_many(x_center, y0_list, marker="o")  # nodes_order[0]
+            _plot_many(x_center, y1_list, marker="s")  # nodes_order[1]
+
 
     if y_scale == "symlog":
         ax.set_yscale("symlog", base=SYMLOG_BASE, linthresh=symlog_linthresh, linscale=SYMLOG_LINSCALE)
@@ -1069,6 +1110,49 @@ def draw_points_on_ax(
         ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
 
 
+def values_from_df(
+    df: pd.DataFrame,
+    *,
+    nodes: int,
+    priorities: int,
+    arrival_s: float,
+    rk: RowKey,
+    col: str,
+    seed_col: str,
+) -> List[float]:
+    """
+    Return all finite values for `col` for the given key, one per seed row.
+    Requires `seed_col` to exist in df. Sorting by seed makes stable jitter ordering.
+    """
+    key_mask = (
+        (df["nodes"].astype(int) == int(nodes))
+        & (df["priorities"].astype(int) == int(priorities))
+        & (df["arrival_s"].astype(float) == float(arrival_s))
+        & (df["mode"].astype(str) == str(rk.mode))
+        & (df["blocking"].astype(int) == int(rk.blocking))
+        & (df["defpreempt"].astype(int) == int(rk.defpreempt))
+    )
+    if seed_col in df.columns:
+        sub = df.loc[key_mask, [seed_col, col]].copy()
+        if sub.empty:
+            return []
+        sub = sub.sort_values(seed_col)  # stable order by seed
+        vals = sub[col].tolist()
+    else:
+        # Aggregated input (e.g., results_paired.csv): no per-seed rows available.
+        # Fall back to returning whatever rows exist (typically a single mean row).
+        sub = df.loc[key_mask, [col]].copy()
+        if sub.empty:
+            return []
+        vals = sub[col].tolist()
+
+    out: List[float] = []
+    for v in vals:
+        if is_finite(v):
+            out.append(float(v))
+    return out
+
+
 def compute_nonnegative_ylim_for_col(
     *,
     lookup: pd.DataFrame,
@@ -1118,6 +1202,11 @@ def compute_symmetric_ylim_for_yfns(
 def make_grid_plot(
     *,
     lookup: pd.DataFrame,
+    df: pd.DataFrame,
+    plot_seeds: bool,
+    out_figures_dir: Path, 
+    seed_col: str,
+    seed_jitter_frac: float,
     view: ViewConfig,
     nodes_order: List[int],
     arrivals_order: List[float],
@@ -1139,10 +1228,25 @@ def make_grid_plot(
     ylim_plans: Tuple[float, float],
 ) -> None:
     def y_from_col(*, col: str, scale: float) -> YOfFn:
-        def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> float:
-            v = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk, col=col)
-            return float(v) * float(scale) if is_finite(v) else float("nan")
-        return _y
+        if plot_seeds:
+            def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
+                vals = values_from_df(
+                    df,
+                    nodes=nodes,
+                    priorities=priorities,
+                    arrival_s=a,
+                    rk=rk,
+                    col=col,
+                    seed_col=seed_col,
+                )
+                return [float(v) * float(scale) for v in vals if is_finite(v)]
+            return _y
+        else:
+            def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> float:
+                v = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk, col=col)
+                return float(v) * float(scale) if is_finite(v) else float("nan")
+            return _y
+
 
     present_labels = {rk_label(rk) for rk in series}
     legend_handles: List[Line2D] = []
@@ -1173,6 +1277,7 @@ def make_grid_plot(
             symlog_linthresh=yc.symlog_linthresh,
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1191,6 +1296,7 @@ def make_grid_plot(
             symlog_linthresh=yc.symlog_linthresh,
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1209,6 +1315,7 @@ def make_grid_plot(
             symlog_linthresh=yc.symlog_linthresh,
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1227,6 +1334,7 @@ def make_grid_plot(
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
             y_tick_strategy="count_sparse",
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1245,6 +1353,7 @@ def make_grid_plot(
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
             y_tick_strategy="count_sparse",
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     fig.subplots_adjust(
@@ -1287,14 +1396,17 @@ def make_grid_plot(
         y_center = 0.5 * (bbox.y0 + bbox.y1)
         fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
+    fig.savefig(out_figures_dir / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)  # CHANGED
+    fig.savefig(out_figures_dir / f"{out_stem}.pdf")                       # CHANGED
     plt.close(fig)
 
 
 def make_mode_delta_series(
     *,
     lookup: pd.DataFrame,
+    df: pd.DataFrame,
+    plot_seeds: bool,
+    seed_col: str,
     defpreempt: int,
     label: str,
     left_mode: str,
@@ -1305,13 +1417,38 @@ def make_mode_delta_series(
     rk_r = RowKey(mode=canonical_mode(right_mode), blocking=int(blocking), defpreempt=int(defpreempt))
 
     def _dd(col: str) -> YOfFn:
-        def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> float:
-            vl = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_l, col=col)
-            vr = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_r, col=col)
-            if not is_finite(vl) or not is_finite(vr):
-                return float("nan")
-            return float(vr) - float(vl)
-        return _y
+        if plot_seeds:
+            def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
+                left = values_from_df(
+                    df,
+                    nodes=nodes,
+                    priorities=priorities,
+                    arrival_s=a,
+                    rk=rk_l,
+                    col=col,
+                    seed_col=seed_col,
+                )
+                right = values_from_df(
+                    df,
+                    nodes=nodes,
+                    priorities=priorities,
+                    arrival_s=a,
+                    rk=rk_r,
+                    col=col,
+                    seed_col=seed_col,
+                )
+                # Pair by index after sorting by seed (values_from_df sorts by seed)
+                m = min(len(left), len(right))
+                return [right[i] - left[i] for i in range(m)]
+            return _y
+        else:
+            def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> float:
+                vl = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_l, col=col)
+                vr = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_r, col=col)
+                if not is_finite(vl) or not is_finite(vr):
+                    return float("nan")
+                return float(vr) - float(vl)
+            return _y
 
     return (
         label,
@@ -1323,8 +1460,13 @@ def make_mode_delta_series(
     )
 
 
+
 def make_grid_plot_custom_series(
     *,
+    df: pd.DataFrame,
+    plot_seeds: bool,
+    seed_col: str,
+    seed_jitter_frac: float,
     view: ViewConfig,
     nodes_order: List[int],
     arrivals_order: List[float],
@@ -1377,7 +1519,7 @@ def make_grid_plot_custom_series(
         y_fns=y_plans,
     )
 
-    def y_of_from_list(y_list: List[YOfFn]) -> Callable[[RowKey, int, float, int], float]:
+    def y_of_from_list(y_list: List[YOfFn]) -> Callable[[RowKey, int, float, int], YVal]:
         def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> float:
             idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
             return y_list[idx](rk, nodes, a, priorities)
@@ -1404,6 +1546,7 @@ def make_grid_plot_custom_series(
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
             color_of=color_override,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1423,6 +1566,7 @@ def make_grid_plot_custom_series(
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
             color_of=color_override,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1442,6 +1586,7 @@ def make_grid_plot_custom_series(
             arrival_x_spacing=arrival_x_spacing,
             mode_x_spacing=mode_x_spacing,
             color_of=color_override,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1461,6 +1606,7 @@ def make_grid_plot_custom_series(
             mode_x_spacing=mode_x_spacing,
             y_tick_strategy="count_sparse_symmetric",
             color_of=color_override,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     for col_i, k in enumerate(priorities_cols):
@@ -1480,6 +1626,7 @@ def make_grid_plot_custom_series(
             mode_x_spacing=mode_x_spacing,
             y_tick_strategy="count_sparse_symmetric",
             color_of=color_override,
+            seed_jitter_frac=seed_jitter_frac,
         )
 
     fig.subplots_adjust(
@@ -1745,11 +1892,23 @@ def compute_shared_counter_ylims(
 
 
 def main() -> None:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    OUT_TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--in-results", type=Path, default=IN_RESULTS)
+    ap.add_argument("--out-dir", type=Path, default=OUT_DIR)
+    ap.add_argument("--plot-seeds", action="store_true", help="Plot one point per seed (requires a 'seed' column).")
+    ap.add_argument("--seed-col", default=DEFAULT_SEED_COL)
+    ap.add_argument("--seed-jitter-frac", type=float, default=DEFAULT_SEED_JITTER_FRAC)
+    args = ap.parse_args()
+    in_results = args.in_results
+    out_dir = args.out_dir
+    out_tables_dir = out_dir / "tables"
+    out_figures_dir = out_dir / "figures"
 
-    df = load_results(IN_RESULTS)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_tables_dir.mkdir(parents=True, exist_ok=True)
+    out_figures_dir.mkdir(parents=True, exist_ok=True)
+
+    df = load_results(in_results)
     lookup = build_lookup(df)
     nodes_order, arrivals_order, priorities_order = infer_orders(df)
 
@@ -1805,7 +1964,7 @@ def main() -> None:
 
         for k in priorities_cols:
             # 1) Existing table (mean only) — keep identical filename
-            out_tex_mean = OUT_TABLES_DIR / f"{view.table_stem}_{suffix}_priorities={k}.tex"
+            out_tex_mean = out_tables_dir / f"{view.table_stem}_{suffix}_priorities={k}.tex"
             latex_metric_matrix_tables(
                 out_path=out_tex_mean,
                 nodes_order=nodes_order,
@@ -1835,6 +1994,11 @@ def main() -> None:
         out_stem_all = f"{view.figure_stem}_{suffix}"
         make_grid_plot(
             lookup=lookup,
+            df=df,
+            out_figures_dir=out_figures_dir,
+            plot_seeds=args.plot_seeds,
+            seed_col=args.seed_col,
+            seed_jitter_frac=args.seed_jitter_frac,
             view=view,
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
@@ -1867,6 +2031,9 @@ def main() -> None:
         for (lab, left_mode, right_mode, blocking) in PERIODIC_STABLE_DELTA_PAIRS:
             lab2, y_u, y_l, y_d, y_s, y_p = make_mode_delta_series(
                 lookup=lookup,
+                df=df,
+                plot_seeds=args.plot_seeds,
+                seed_col=args.seed_col,
                 defpreempt=int(view.defpreempt_value),
                 label=lab,
                 left_mode=left_mode,
@@ -1882,6 +2049,10 @@ def main() -> None:
 
         out_stem_ps = f"grid_periodic_vs_stable_{suffix}"
         make_grid_plot_custom_series(
+            df=df,
+            plot_seeds=args.plot_seeds,
+            seed_col=args.seed_col,
+            seed_jitter_frac=args.seed_jitter_frac,
             view=view,
             nodes_order=nodes_order,
             arrivals_order=arrivals_order,
