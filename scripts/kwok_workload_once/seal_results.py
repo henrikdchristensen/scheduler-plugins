@@ -1,33 +1,50 @@
 #!/usr/bin/env python3
-# seal_results.py
+# scripts/kwok_workload_once/seal_results.py
 """
 python -m scripts.kwok_workload_once.seal_results
 """
 
-import argparse
-import json
-import re
+import json, re
 from dataclasses import dataclass
 from pathlib import Path
-import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+import pandas as pd
 
 from scripts.helpers.general_helpers import (
     cmp_placed_by_prio_row,
     parse_json_cell,
 )
 
+# ============================================================
+# CONFIG (constants instead of argparse)
+# ============================================================
 
-# Matching directory names
-DIR_RE_SOLVER = re.compile(r"^nodes(?P<nodes>\d+)_pods(?P<pods>\d+)_prio(?P<prio>\d+)_util(?P<util>\d{3})_timeout(?P<timeout>\d{2})$")
+RESULTS_ROOT: Path = Path("analysis/kwok_workload_once")
+SOLVER_DIRNAME: str = "plugin"
+DEFAULT_DIRNAME: str = "default"
+RESULTS_CSV_NAME: str = "results.csv"
+OUT_DIR: Path = Path("analysis/kwok_workload_once")
 
-############################################################
+# If None: keep raw floats, else format with decimals
+DECIMALS: Optional[int] = 4  # set to None to disable formatting
+
+# Matching directory names:
+# nodes16_pods128_prio4_util090_timeout10
+DIR_RE_SOLVER = re.compile(
+    r"^nodes(?P<nodes>\d+)_pods(?P<pods>\d+)_prio(?P<prio>\d+)_util(?P<util>\d{3})_timeout(?P<timeout>\d{2})$"
+)
+
+# ============================================================
 # Helpers
-############################################################
-def rate(num, den):
+# ============================================================
+
+
+def rate(num: float, den: float) -> float:
     return (num / den) if den and den > 0 else float("nan")
 
-def parse_solver_dirname(name: str) -> Optional[Dict]:
+
+def parse_solver_dirname(name: str) -> Optional[Dict[str, Any]]:
     m = DIR_RE_SOLVER.match(name)
     if not m:
         return None
@@ -51,8 +68,10 @@ def parse_solver_dirname(name: str) -> Optional[Dict]:
 def load_csv(csv_path: Path) -> pd.DataFrame:
     if not csv_path.exists():
         raise FileNotFoundError(f"results.csv not found: {csv_path}")
+
     df = pd.read_csv(csv_path, dtype=str).fillna("")
     cols = {c.lower(): c for c in df.columns}
+
     rename_map = {
         "seed": "seed",
         "util_run_cpu_now": "util_run_cpu",
@@ -65,16 +84,82 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
         "best_solver_duration_ms": "solver_duration_ms",
         "best_solver_score": "solver_score",
     }
-    df = df.rename(columns={cols[k]: v for k, v in rename_map.items() if cols[k] != v})
+
+    df = df.rename(columns={cols[k]: v for k, v in rename_map.items() if k in cols and cols[k] != v})
+
     # minimal conversions
     df["seed"] = df["seed"].astype(str).str.strip()
     df["util_run_cpu"] = pd.to_numeric(df["util_run_cpu"].astype(str), errors="coerce")
     df["util_run_mem"] = pd.to_numeric(df["util_run_mem"].astype(str), errors="coerce")
-    df["solver_duration_ms"] = pd.to_numeric(df["solver_duration_ms"].astype(str), errors="coerce")
-    df["solver_status"] = df["solver_status"].astype(str).str.strip().str.upper()
-    # NOTE: placed_by_prio using what is actual running - for solver this could be changed to score from the solver so it doesn't get affected by post-processing
-    df["placed_by_prio"] = df.apply(lambda r: json.dumps(parse_json_cell(r.get("placed_by_prio_running", "")), separators=(",", ":")), axis=1)
+    df["solver_duration_ms"] = pd.to_numeric(df.get("solver_duration_ms", "").astype(str), errors="coerce")
+    df["solver_status"] = df.get("solver_status", "").astype(str).str.strip().str.upper()
+
+    # placed_by_prio: use what is actually running (as you had)
+    df["placed_by_prio"] = df.apply(
+        lambda r: json.dumps(parse_json_cell(r.get("placed_by_prio_running", "")), separators=(",", ":")),
+        axis=1,
+    )
     return df
+
+
+def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: str) -> pd.DataFrame:
+    df_s = load_csv(solver_csv)
+    df_d = load_csv(default_csv)
+
+    joined = df_s[
+        [
+            "seed",
+            "util_run_cpu",
+            "util_run_mem",
+            "placed_by_prio",
+            "unscheduled_cnt",
+            "error",
+            "solver_status",
+            "solver_name",
+            "solver_duration_ms",
+        ]
+    ].rename(
+        columns={
+            "util_run_cpu": "util_cpu_solver",
+            "util_run_mem": "util_mem_solver",
+            "placed_by_prio": "placed_by_prio_solver",
+            "unscheduled_cnt": "unscheduled_cnt_solver",
+        }
+    ).merge(
+        df_d[["seed", "util_run_cpu", "util_run_mem", "placed_by_prio", "unscheduled_cnt"]].rename(
+            columns={
+                "util_run_cpu": "util_cpu_default",
+                "util_run_mem": "util_mem_default",
+                "placed_by_prio": "placed_by_prio_default",
+                "unscheduled_cnt": "unscheduled_cnt_default",
+            }
+        ),
+        on="seed",
+        how="inner",
+        validate="one_to_one",
+    )
+
+    # default_all_scheduled: both have 0 unscheduled
+    no_pending_default = pd.to_numeric(joined["unscheduled_cnt_default"], errors="coerce").eq(0)
+    no_pending_solver = pd.to_numeric(joined["unscheduled_cnt_solver"], errors="coerce").eq(0)
+    joined["default_all_running"] = no_pending_default & no_pending_solver
+
+    # solver_called: any of status/name/duration present
+    joined["solver_called"] = (
+        joined["solver_status"].astype(str).str.strip().ne("")
+        | joined["solver_name"].astype(str).str.strip().ne("")
+        | pd.to_numeric(joined["solver_duration_ms"], errors="coerce").notna()
+    ).astype(int)
+
+    # compare placements
+    joined["placed_cmp"] = joined.apply(cmp_placed_by_prio_row, axis=1)
+
+    # deltas for resource utilization
+    joined["cpu_delta"] = joined["util_cpu_solver"] - joined["util_cpu_default"]
+    joined["mem_delta"] = joined["util_mem_solver"] - joined["util_mem_default"]
+
+    return joined
+
 
 @dataclass(frozen=True)
 class CombineResultsArgs:
@@ -154,8 +239,10 @@ class CombineResultsAnalyzer:
         n_default_optimal = int((is_optimal & placed_equal).sum())
         n_solver_optimal = int((is_optimal & placed_better).sum())
         n_solver_feasible = int((is_feasible & placed_better).sum())
+
         n_solver_failed = int(((~is_ok) | (is_feasible & ~placed_better) | (is_optimal & placed_worse)).sum())
         n_solver_better = n_solver_optimal + n_solver_feasible
+
         n_other = len(not_all_running) - (n_default_optimal + n_solver_optimal + n_solver_feasible + n_solver_failed)
 
         n_seeds = max(1, len(per_seed_df))
@@ -166,7 +253,15 @@ class CombineResultsAnalyzer:
         solver_optimal_rate = rate(n_solver_optimal, n_seeds)
         solver_feasible_rate = rate(n_solver_feasible, n_seeds)
         solver_improve_rate = rate(n_solver_better, n_seeds)
-        other_rate = 1.0 - (default_all_rate + default_optimal_rate + solver_optimal_rate + solver_feasible_rate + solver_failed_rate)
+
+        # Keep existing behavior (even though you also compute n_other above):
+        other_rate = 1.0 - (
+            default_all_rate
+            + default_optimal_rate
+            + solver_optimal_rate
+            + solver_feasible_rate
+            + solver_failed_rate
+        )
 
         return CategoryCounts(
             n_seeds=n_seeds,
@@ -178,20 +273,21 @@ class CombineResultsAnalyzer:
             n_solver_feasible=n_solver_feasible,
             n_solver_failed=n_solver_failed,
             n_solver_improve=n_solver_better,
-            n_other=n_other,
-            default_all_running_rate=default_all_rate,
-            solver_called_rate=solver_called_rate,
-            default_optimal_rate=default_optimal_rate,
-            solver_optimal_rate=solver_optimal_rate,
-            solver_feasible_rate=solver_feasible_rate,
-            solver_failed_rate=solver_failed_rate,
-            solver_improve_rate=solver_improve_rate,
-            other_rate=other_rate,
+            n_other=int(n_other),
+            default_all_running_rate=float(default_all_rate),
+            solver_called_rate=float(solver_called_rate),
+            default_optimal_rate=float(default_optimal_rate),
+            solver_optimal_rate=float(solver_optimal_rate),
+            solver_feasible_rate=float(solver_feasible_rate),
+            solver_failed_rate=float(solver_failed_rate),
+            solver_improve_rate=float(solver_improve_rate),
+            other_rate=float(other_rate),
         )
 
     def analyze_combo(self, *, solver_dir: Path, default_dir: Path, meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         solver_csv = solver_dir / self.args.results_csv
         default_csv = default_dir / self.args.results_csv
+
         if not default_dir.exists():
             print(f"[skip] default folder missing: {default_dir.name}")
             return None
@@ -213,11 +309,12 @@ class CombineResultsAnalyzer:
             + counts.solver_optimal_rate
             + counts.solver_feasible_rate
             + counts.solver_failed_rate
+            + counts.other_rate
         )
-        if rate_sum > 1.00:
-            print(f"[warn] {solver_dir.name}: rates sum > 1.00")
-        if rate_sum < 0.00:
-            print(f"[warn] {solver_dir.name}: rates sum < 0.00")
+        if rate_sum > 1.00 + 1e-6:
+            print(f"[warn] {solver_dir.name}: rates sum > 1.00 (sum={rate_sum:.4f})")
+        if rate_sum < 0.00 - 1e-6:
+            print(f"[warn] {solver_dir.name}: rates sum < 0.00 (sum={rate_sum:.4f})")
 
         # Durations & deltas (keep behavior)
         t_sum = float(not_all_running["solver_duration_ms"].sum())
@@ -233,6 +330,7 @@ class CombineResultsAnalyzer:
             + counts.n_solver_optimal
             + counts.n_solver_feasible
             + counts.n_solver_failed
+            + counts.n_other
         )
         if count_sum != len(per_seed_df):
             print(f"[warn] {solver_dir.name}: category counts sum={count_sum} != joined={len(per_seed_df)}")
@@ -268,8 +366,12 @@ class CombineResultsAnalyzer:
             "solver_duration_ms_mean": self._format_num(float(t_mean) if t_mean == t_mean else float("nan"), decimals),
             "cpu_delta_sum": self._format_num(cpu_delta_sum, decimals),
             "mem_delta_sum": self._format_num(mem_delta_sum, decimals),
-            "cpu_delta_mean": self._format_num(float(cpu_delta_mean) if cpu_delta_mean == cpu_delta_mean else float("nan"), decimals),
-            "mem_delta_mean": self._format_num(float(mem_delta_mean) if mem_delta_mean == mem_delta_mean else float("nan"), decimals),
+            "cpu_delta_mean": self._format_num(
+                float(cpu_delta_mean) if cpu_delta_mean == cpu_delta_mean else float("nan"), decimals
+            ),
+            "mem_delta_mean": self._format_num(
+                float(mem_delta_mean) if mem_delta_mean == mem_delta_mean else float("nan"), decimals
+            ),
         }
 
     def run(self) -> None:
@@ -280,6 +382,7 @@ class CombineResultsAnalyzer:
 
         per_combo_rows: List[Dict[str, Any]] = []
         solver_combos = sorted([p for p in solver_root.iterdir() if p.is_dir()])
+
         for solver_dir in solver_combos:
             meta = parse_solver_dirname(solver_dir.name)
             if not meta:
@@ -291,7 +394,8 @@ class CombineResultsAnalyzer:
                 per_combo_rows.append(row)
 
         per_combo_df = pd.DataFrame(per_combo_rows)
-        for c in [
+
+        numeric_cols = [
             "n_seeds",
             "n_default_all_running",
             "n_solver_called",
@@ -307,91 +411,29 @@ class CombineResultsAnalyzer:
             "mem_delta_sum",
             "solver_duration_ms_sum",
             "solver_duration_ms_mean",
-        ]:
+        ]
+        for c in numeric_cols:
             if c in per_combo_df.columns:
                 per_combo_df[c] = pd.to_numeric(per_combo_df[c], errors="coerce")
+
         out_per_combo = out_dir / "per_combo_results.csv"
-        per_combo_df.sort_values(["util", "nodes", "pods_per_node", "priorities", "timeout_s", "config_dir"]).to_csv(out_per_combo, index=False)
+        per_combo_df.sort_values(
+            ["util", "nodes", "pods_per_node", "priorities", "timeout_s", "config_dir"]
+        ).to_csv(out_per_combo, index=False)
         print(f"[ok] wrote {out_per_combo} (rows={len(per_combo_df)})")
 
-def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: str) -> pd.DataFrame:
-    df_s = load_csv(solver_csv)
-    df_d = load_csv(default_csv)
-    
-    # join result from solver and default on seed
-    joined = df_s[["seed", "util_run_cpu", "util_run_mem", "placed_by_prio", "unscheduled_cnt", "error", "solver_status", "solver_name", "solver_duration_ms"]].rename(
-        columns={
-            "util_run_cpu": "util_cpu_solver",
-            "util_run_mem": "util_mem_solver",
-            "placed_by_prio": "placed_by_prio_solver",
-            "unscheduled_cnt": "unscheduled_cnt_solver",
-        }
-    ).merge(
-        df_d[["seed", "util_run_cpu", "util_run_mem", "placed_by_prio", "unscheduled_cnt"]].rename(
-            columns={
-                "util_run_cpu": "util_cpu_default",
-                "util_run_mem": "util_mem_default",
-                "placed_by_prio": "placed_by_prio_default",
-                "unscheduled_cnt": "unscheduled_cnt_default",
-            }
-        ),
-        on="seed", how="inner", validate="one_to_one",
+
+def main() -> None:
+    args = CombineResultsArgs(
+        results_root=RESULTS_ROOT,
+        solver_dir=SOLVER_DIRNAME,
+        default_dir=DEFAULT_DIRNAME,
+        results_csv=RESULTS_CSV_NAME,
+        out_dir=OUT_DIR,
+        decimals=DECIMALS,
     )
+    CombineResultsAnalyzer(args).run()
 
-    # default_all_scheduled: both have 0 unscheduled
-    no_pending_default = pd.to_numeric(joined["unscheduled_cnt_default"], errors="coerce").eq(0)
-    no_pending_solver = pd.to_numeric(joined["unscheduled_cnt_solver"], errors="coerce").eq(0)
-    joined["default_all_running"] = no_pending_default & no_pending_solver
-
-    # solver_called: any of status/name/duration present
-    joined["solver_called"] = (
-        joined["solver_status"].astype(str).str.strip().ne("")
-        | joined["solver_name"].astype(str).str.strip().ne("")
-        | pd.to_numeric(joined["solver_duration_ms"], errors="coerce").notna()
-    ).astype(int)
-
-    # compare placements
-    joined["placed_cmp"] = joined.apply(cmp_placed_by_prio_row, axis=1)
-
-    # deltas for resource utilization
-    joined["cpu_delta"] = joined["util_cpu_solver"] - joined["util_cpu_default"]
-    joined["mem_delta"] = joined["util_mem_solver"] - joined["util_mem_default"]
-
-    return joined
-
-
-def build_argparser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Combine solver/default results into a per-combination CSV")
-    ap.add_argument(
-        "--results-root",
-        type=Path,
-        default=Path("analysis/kwok_workload_once"),
-        help="Root folder containing the solver/default results trees. Can be outside repo directory.",
-    )
-    ap.add_argument("--solver-dir", default="plugin", help="Subfolder under --results-root holding solver runs")
-    ap.add_argument("--default-dir", default="default", help="Subfolder under --results-root holding default runs")
-    ap.add_argument("--results-csv", default="results.csv", help="Results CSV filename in each run directory")
-    ap.add_argument("--out-dir", type=Path, default=Path("analysis/kwok_workload_once"), help="Output directory for aggregated CSV")
-    ap.add_argument(
-        "--decimals",
-        type=int,
-        default=4,
-        help="Decimal places for formatted numeric columns. Use -1 to disable formatting.",
-    )
-    return ap
-
-def main(argv: Optional[List[str]] = None) -> None:
-    args = build_argparser().parse_args(argv)
-    decimals = None if args.decimals is None or int(args.decimals) < 0 else int(args.decimals)
-    cr_args = CombineResultsArgs(
-        results_root=Path(args.results_root),
-        solver_dir=str(args.solver_dir),
-        default_dir=str(args.default_dir),
-        results_csv=str(args.results_csv),
-        out_dir=Path(args.out_dir),
-        decimals=decimals,
-    )
-    CombineResultsAnalyzer(cr_args).run()
 
 if __name__ == "__main__":
     main()

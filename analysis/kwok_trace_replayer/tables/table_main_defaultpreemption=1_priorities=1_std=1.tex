@@ -1,0 +1,135 @@
+\begin{tabular}{l c c c c c}
+\toprule
+ & \makecell{$\Delta\mathrm{usage}$\\$(\%)$} & \makecell{$\Delta\mathrm{latency}_{\mathrm{total}}$\\$(\mathrm{ms})$} & \makecell{$\Delta\mathrm{deletions}_{\mathrm{total}}$} & \makecell{\#solver\\runs} & \makecell{\#plan\\activations} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 16, inter-arrival = 1\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{-2.39\,\pm\,0.27} & \ensuremath{+2283\,\pm\,280} & \ensuremath{-3864.7\,\pm\,282.4} & \ensuremath{446\,\pm\,49.2} & \ensuremath{297\,\pm\,64.9} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{-2.58\,\pm\,0.25} & \ensuremath{+2361\,\pm\,435} & \ensuremath{-3916.3\,\pm\,361.1} & \ensuremath{434\,\pm\,30.5} & \ensuremath{278\,\pm\,50.1} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+0.09\,\pm\,0.28} & \ensuremath{+9\,\pm\,41} & \ensuremath{-66.7\,\pm\,6.5} & \ensuremath{21\,\pm\,2.6} & \ensuremath{18\,\pm\,3.2} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+0.18\,\pm\,0.40} & \ensuremath{+72\,\pm\,39} & \ensuremath{-163.3\,\pm\,150.3} & \ensuremath{20\,\pm\,2.6} & \ensuremath{16\,\pm\,1.7} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{-0.10\,\pm\,0.13} & \ensuremath{+30\,\pm\,25} & \ensuremath{-20.0\,\pm\,68.5} & \ensuremath{2\,\pm\,0.6} & \ensuremath{2\,\pm\,0.6} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{-0.10\,\pm\,0.23} & \ensuremath{+25\,\pm\,15} & \ensuremath{-15.7\,\pm\,35.6} & \ensuremath{3\,\pm\,1.0} & \ensuremath{3\,\pm\,1.2} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+0.38\,\pm\,0.30} & \ensuremath{+38\,\pm\,19} & \ensuremath{-17.7\,\pm\,88.7} & \ensuremath{295\,\pm\,23.1} & \ensuremath{62\,\pm\,4.5} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+0.45\,\pm\,0.31} & \ensuremath{+29\,\pm\,13} & \ensuremath{-12.7\,\pm\,63.6} & \ensuremath{288\,\pm\,27.5} & \ensuremath{56\,\pm\,1.5} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{-0.01\,\pm\,0.20} & \ensuremath{+15\,\pm\,12} & \ensuremath{-72.7\,\pm\,83.3} & \ensuremath{30\,\pm\,4.0} & \ensuremath{15\,\pm\,0.6} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+0.03\,\pm\,0.27} & \ensuremath{+9\,\pm\,33} & \ensuremath{-114.7\,\pm\,36.9} & \ensuremath{31\,\pm\,5.7} & \ensuremath{12\,\pm\,4.6} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 16, inter-arrival = 2\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{-0.17\,\pm\,0.51} & \ensuremath{+2551\,\pm\,840} & \ensuremath{-1512.3\,\pm\,133.3} & \ensuremath{322\,\pm\,3.1} & \ensuremath{204\,\pm\,39.3} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{-0.18\,\pm\,0.40} & \ensuremath{+2457\,\pm\,567} & \ensuremath{-1496.7\,\pm\,205.5} & \ensuremath{329\,\pm\,10.6} & \ensuremath{214\,\pm\,44.4} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+1.00\,\pm\,0.38} & \ensuremath{+27\,\pm\,273} & \ensuremath{-47.0\,\pm\,82.6} & \ensuremath{36\,\pm\,2.5} & \ensuremath{29\,\pm\,2.9} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+1.01\,\pm\,0.27} & \ensuremath{+35\,\pm\,194} & \ensuremath{-44.0\,\pm\,104.8} & \ensuremath{40\,\pm\,1.7} & \ensuremath{31\,\pm\,3.2} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+0.22\,\pm\,0.28} & \ensuremath{+14\,\pm\,326} & \ensuremath{-82.3\,\pm\,26.1} & \ensuremath{7\,\pm\,2.1} & \ensuremath{5\,\pm\,2.0} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+0.42\,\pm\,0.37} & \ensuremath{+38\,\pm\,323} & \ensuremath{-114.0\,\pm\,29.9} & \ensuremath{6\,\pm\,3.8} & \ensuremath{5\,\pm\,4.4} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+1.27\,\pm\,0.36} & \ensuremath{-40\,\pm\,316} & \ensuremath{+40.7\,\pm\,132.9} & \ensuremath{303\,\pm\,21.0} & \ensuremath{69\,\pm\,4.5} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+1.29\,\pm\,0.28} & \ensuremath{-95\,\pm\,291} & \ensuremath{+104.7\,\pm\,190.6} & \ensuremath{307\,\pm\,31.0} & \ensuremath{73\,\pm\,5.6} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+1.01\,\pm\,0.38} & \ensuremath{-6\,\pm\,303} & \ensuremath{-41.3\,\pm\,85.4} & \ensuremath{46\,\pm\,13.1} & \ensuremath{22\,\pm\,3.2} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+0.96\,\pm\,0.29} & \ensuremath{+39\,\pm\,320} & \ensuremath{-25.3\,\pm\,99.6} & \ensuremath{48\,\pm\,10.0} & \ensuremath{24\,\pm\,0.6} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 16, inter-arrival = 4\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{+1.34\,\pm\,0.89} & \ensuremath{+2579\,\pm\,812} & \ensuremath{-487.0\,\pm\,27.1} & \ensuremath{221\,\pm\,7.0} & \ensuremath{134\,\pm\,22.2} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{+2.26\,\pm\,1.64} & \ensuremath{+3048\,\pm\,2204} & \ensuremath{-555.0\,\pm\,259.5} & \ensuremath{230\,\pm\,24.0} & \ensuremath{135\,\pm\,23.9} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+1.69\,\pm\,0.63} & \ensuremath{+214\,\pm\,557} & \ensuremath{-59.3\,\pm\,78.1} & \ensuremath{47\,\pm\,3.6} & \ensuremath{32\,\pm\,2.9} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+1.81\,\pm\,0.81} & \ensuremath{-44\,\pm\,387} & \ensuremath{-9.0\,\pm\,97.0} & \ensuremath{44\,\pm\,7.9} & \ensuremath{30\,\pm\,4.4} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+1.14\,\pm\,1.02} & \ensuremath{+237\,\pm\,438} & \ensuremath{-37.3\,\pm\,36.7} & \ensuremath{11\,\pm\,3.1} & \ensuremath{9\,\pm\,1.2} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+1.20\,\pm\,0.82} & \ensuremath{+289\,\pm\,457} & \ensuremath{-56.7\,\pm\,55.0} & \ensuremath{11\,\pm\,2.1} & \ensuremath{7\,\pm\,1.5} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+2.12\,\pm\,0.83} & \ensuremath{+17\,\pm\,352} & \ensuremath{+75.7\,\pm\,98.9} & \ensuremath{246\,\pm\,18.0} & \ensuremath{62\,\pm\,3.6} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+1.97\,\pm\,0.74} & \ensuremath{-7\,\pm\,413} & \ensuremath{+68.7\,\pm\,37.5} & \ensuremath{249\,\pm\,15.9} & \ensuremath{54\,\pm\,8.2} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+1.88\,\pm\,0.75} & \ensuremath{-23\,\pm\,396} & \ensuremath{-29.7\,\pm\,97.8} & \ensuremath{62\,\pm\,0.6} & \ensuremath{26\,\pm\,2.0} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+1.72\,\pm\,0.85} & \ensuremath{+60\,\pm\,531} & \ensuremath{-25.3\,\pm\,67.3} & \ensuremath{67\,\pm\,6.7} & \ensuremath{27\,\pm\,7.1} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 16, inter-arrival = 8\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{+1.87\,\pm\,1.46} & \ensuremath{+3107\,\pm\,1448} & \ensuremath{-88.3\,\pm\,49.3} & \ensuremath{157\,\pm\,7.1} & \ensuremath{88\,\pm\,20.3} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{+1.97\,\pm\,1.47} & \ensuremath{+2908\,\pm\,964} & \ensuremath{-91.7\,\pm\,28.0} & \ensuremath{164\,\pm\,6.0} & \ensuremath{95\,\pm\,19.6} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+2.12\,\pm\,1.52} & \ensuremath{+354\,\pm\,514} & \ensuremath{+32.7\,\pm\,77.8} & \ensuremath{43\,\pm\,3.2} & \ensuremath{28\,\pm\,1.7} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+2.21\,\pm\,1.53} & \ensuremath{-44\,\pm\,791} & \ensuremath{+23.0\,\pm\,63.5} & \ensuremath{43\,\pm\,4.9} & \ensuremath{30\,\pm\,2.6} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+1.57\,\pm\,1.36} & \ensuremath{+482\,\pm\,1143} & \ensuremath{-9.7\,\pm\,51.6} & \ensuremath{15\,\pm\,2.5} & \ensuremath{10\,\pm\,1.5} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+1.48\,\pm\,1.34} & \ensuremath{+668\,\pm\,1153} & \ensuremath{-20.7\,\pm\,38.2} & \ensuremath{14\,\pm\,1.0} & \ensuremath{10\,\pm\,3.8} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+2.38\,\pm\,1.50} & \ensuremath{-251\,\pm\,455} & \ensuremath{+106.7\,\pm\,28.9} & \ensuremath{190\,\pm\,11.3} & \ensuremath{50\,\pm\,6.4} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+2.35\,\pm\,1.54} & \ensuremath{-49\,\pm\,343} & \ensuremath{+83.0\,\pm\,40.0} & \ensuremath{195\,\pm\,5.6} & \ensuremath{51\,\pm\,5.0} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+2.14\,\pm\,1.57} & \ensuremath{+315\,\pm\,775} & \ensuremath{+13.7\,\pm\,66.9} & \ensuremath{54\,\pm\,7.8} & \ensuremath{24\,\pm\,4.6} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+2.21\,\pm\,1.51} & \ensuremath{-14\,\pm\,359} & \ensuremath{+32.7\,\pm\,50.7} & \ensuremath{56\,\pm\,7.5} & \ensuremath{26\,\pm\,3.5} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 16, inter-arrival = 16\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{+3.25\,\pm\,0.75} & \ensuremath{+57\,\pm\,2732} & \ensuremath{-17.7\,\pm\,30.0} & \ensuremath{118\,\pm\,26.2} & \ensuremath{62\,\pm\,13.5} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{+3.34\,\pm\,0.80} & \ensuremath{+33\,\pm\,871} & \ensuremath{-13.0\,\pm\,8.7} & \ensuremath{125\,\pm\,27.0} & \ensuremath{68\,\pm\,20.8} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+3.40\,\pm\,0.73} & \ensuremath{-2845\,\pm\,1649} & \ensuremath{+35.0\,\pm\,16.5} & \ensuremath{54\,\pm\,18.0} & \ensuremath{30\,\pm\,5.6} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+3.33\,\pm\,0.72} & \ensuremath{-2134\,\pm\,1436} & \ensuremath{+27.3\,\pm\,20.6} & \ensuremath{54\,\pm\,11.0} & \ensuremath{27\,\pm\,4.2} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+2.81\,\pm\,0.57} & \ensuremath{-643\,\pm\,2761} & \ensuremath{-23.0\,\pm\,20.8} & \ensuremath{17\,\pm\,5.1} & \ensuremath{11\,\pm\,2.6} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+2.91\,\pm\,0.70} & \ensuremath{-1762\,\pm\,3291} & \ensuremath{-25.0\,\pm\,25.5} & \ensuremath{17\,\pm\,4.0} & \ensuremath{10\,\pm\,1.7} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+3.53\,\pm\,0.80} & \ensuremath{-2552\,\pm\,1639} & \ensuremath{+50.3\,\pm\,5.1} & \ensuremath{161\,\pm\,47.2} & \ensuremath{40\,\pm\,8.2} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+3.42\,\pm\,0.73} & \ensuremath{-2463\,\pm\,1676} & \ensuremath{+52.7\,\pm\,8.3} & \ensuremath{155\,\pm\,31.6} & \ensuremath{40\,\pm\,6.1} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+3.33\,\pm\,0.81} & \ensuremath{-2236\,\pm\,1634} & \ensuremath{+15.0\,\pm\,27.6} & \ensuremath{80\,\pm\,22.5} & \ensuremath{24\,\pm\,0.0} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+3.23\,\pm\,0.43} & \ensuremath{-2485\,\pm\,1645} & \ensuremath{+36.7\,\pm\,19.3} & \ensuremath{69\,\pm\,12.5} & \ensuremath{26\,\pm\,5.1} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 32, inter-arrival = 1\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{-1.37\,\pm\,0.39} & \ensuremath{+3386\,\pm\,888} & \ensuremath{-4470.7\,\pm\,538.9} & \ensuremath{371\,\pm\,18.0} & \ensuremath{239\,\pm\,22.3} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{-1.50\,\pm\,0.52} & \ensuremath{+3563\,\pm\,1001} & \ensuremath{-4526.3\,\pm\,334.0} & \ensuremath{376\,\pm\,20.0} & \ensuremath{230\,\pm\,12.5} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+0.41\,\pm\,0.16} & \ensuremath{-80\,\pm\,71} & \ensuremath{+33.0\,\pm\,18.7} & \ensuremath{34\,\pm\,5.5} & \ensuremath{24\,\pm\,4.2} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+0.45\,\pm\,0.25} & \ensuremath{-63\,\pm\,74} & \ensuremath{+7.0\,\pm\,8.0} & \ensuremath{33\,\pm\,3.2} & \ensuremath{27\,\pm\,2.1} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+0.20\,\pm\,0.22} & \ensuremath{-67\,\pm\,87} & \ensuremath{-22.0\,\pm\,34.4} & \ensuremath{5\,\pm\,2.1} & \ensuremath{5\,\pm\,1.5} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+0.17\,\pm\,0.24} & \ensuremath{-54\,\pm\,80} & \ensuremath{-60.7\,\pm\,93.5} & \ensuremath{6\,\pm\,2.5} & \ensuremath{5\,\pm\,2.1} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+0.47\,\pm\,0.22} & \ensuremath{-97\,\pm\,93} & \ensuremath{-9.0\,\pm\,45.8} & \ensuremath{409\,\pm\,49.8} & \ensuremath{33\,\pm\,4.0} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+0.49\,\pm\,0.19} & \ensuremath{-95\,\pm\,104} & \ensuremath{+10.3\,\pm\,46.7} & \ensuremath{439\,\pm\,35.2} & \ensuremath{34\,\pm\,3.5} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+0.26\,\pm\,0.20} & \ensuremath{-79\,\pm\,105} & \ensuremath{-62.7\,\pm\,19.5} & \ensuremath{72\,\pm\,10.6} & \ensuremath{13\,\pm\,1.7} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+0.23\,\pm\,0.11} & \ensuremath{-73\,\pm\,58} & \ensuremath{+46.3\,\pm\,49.4} & \ensuremath{71\,\pm\,18.6} & \ensuremath{14\,\pm\,4.2} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 32, inter-arrival = 2\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{-0.08\,\pm\,0.45} & \ensuremath{+3851\,\pm\,1302} & \ensuremath{-1771.3\,\pm\,279.0} & \ensuremath{271\,\pm\,21.2} & \ensuremath{151\,\pm\,4.4} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{-0.17\,\pm\,0.32} & \ensuremath{+3659\,\pm\,1533} & \ensuremath{-1698.3\,\pm\,206.3} & \ensuremath{267\,\pm\,11.9} & \ensuremath{151\,\pm\,13.5} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+0.68\,\pm\,0.16} & \ensuremath{-173\,\pm\,163} & \ensuremath{-14.7\,\pm\,70.7} & \ensuremath{51\,\pm\,13.5} & \ensuremath{31\,\pm\,6.8} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+0.71\,\pm\,0.25} & \ensuremath{-35\,\pm\,222} & \ensuremath{-20.0\,\pm\,64.6} & \ensuremath{48\,\pm\,6.7} & \ensuremath{33\,\pm\,2.3} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+0.30\,\pm\,0.08} & \ensuremath{-52\,\pm\,48} & \ensuremath{-5.7\,\pm\,60.1} & \ensuremath{9\,\pm\,0.6} & \ensuremath{8\,\pm\,1.5} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+0.31\,\pm\,0.04} & \ensuremath{+45\,\pm\,186} & \ensuremath{-61.3\,\pm\,54.0} & \ensuremath{9\,\pm\,1.0} & \ensuremath{8\,\pm\,0.0} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+0.79\,\pm\,0.15} & \ensuremath{-105\,\pm\,242} & \ensuremath{+83.0\,\pm\,44.4} & \ensuremath{363\,\pm\,48.8} & \ensuremath{42\,\pm\,6.6} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+0.83\,\pm\,0.11} & \ensuremath{-167\,\pm\,105} & \ensuremath{+52.7\,\pm\,85.6} & \ensuremath{351\,\pm\,48.6} & \ensuremath{45\,\pm\,5.5} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+0.52\,\pm\,0.22} & \ensuremath{-93\,\pm\,132} & \ensuremath{-6.3\,\pm\,41.6} & \ensuremath{83\,\pm\,8.6} & \ensuremath{21\,\pm\,6.5} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+0.51\,\pm\,0.15} & \ensuremath{-152\,\pm\,129} & \ensuremath{+5.7\,\pm\,66.0} & \ensuremath{90\,\pm\,4.9} & \ensuremath{20\,\pm\,1.5} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 32, inter-arrival = 4\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{+1.13\,\pm\,0.50} & \ensuremath{+2696\,\pm\,1082} & \ensuremath{-553.3\,\pm\,18.7} & \ensuremath{192\,\pm\,26.0} & \ensuremath{99\,\pm\,8.4} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{+1.16\,\pm\,0.32} & \ensuremath{+2541\,\pm\,1731} & \ensuremath{-535.3\,\pm\,29.3} & \ensuremath{190\,\pm\,24.7} & \ensuremath{98\,\pm\,4.6} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+1.35\,\pm\,0.28} & \ensuremath{-1249\,\pm\,1106} & \ensuremath{+63.7\,\pm\,43.7} & \ensuremath{65\,\pm\,12.7} & \ensuremath{33\,\pm\,4.9} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+1.50\,\pm\,0.40} & \ensuremath{-1487\,\pm\,953} & \ensuremath{+75.7\,\pm\,42.4} & \ensuremath{60\,\pm\,9.2} & \ensuremath{34\,\pm\,7.2} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+1.05\,\pm\,0.30} & \ensuremath{-1021\,\pm\,1109} & \ensuremath{+9.7\,\pm\,15.5} & \ensuremath{11\,\pm\,1.7} & \ensuremath{8\,\pm\,2.5} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+1.20\,\pm\,0.39} & \ensuremath{-1218\,\pm\,1268} & \ensuremath{+17.3\,\pm\,31.5} & \ensuremath{12\,\pm\,3.1} & \ensuremath{8\,\pm\,2.5} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+1.51\,\pm\,0.33} & \ensuremath{-1257\,\pm\,1121} & \ensuremath{+89.7\,\pm\,27.2} & \ensuremath{272\,\pm\,38.6} & \ensuremath{40\,\pm\,2.1} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+1.51\,\pm\,0.40} & \ensuremath{-1351\,\pm\,1045} & \ensuremath{+101.3\,\pm\,41.1} & \ensuremath{271\,\pm\,43.6} & \ensuremath{38\,\pm\,4.0} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+1.43\,\pm\,0.46} & \ensuremath{-1486\,\pm\,1131} & \ensuremath{+59.0\,\pm\,33.0} & \ensuremath{95\,\pm\,13.1} & \ensuremath{23\,\pm\,5.9} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+1.39\,\pm\,0.35} & \ensuremath{-1341\,\pm\,1122} & \ensuremath{+55.7\,\pm\,43.3} & \ensuremath{102\,\pm\,19.0} & \ensuremath{22\,\pm\,2.6} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 32, inter-arrival = 8\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{+1.17\,\pm\,0.89} & \ensuremath{+5589\,\pm\,2510} & \ensuremath{-196.7\,\pm\,54.2} & \ensuremath{149\,\pm\,4.4} & \ensuremath{55\,\pm\,13.6} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{+1.01\,\pm\,0.87} & \ensuremath{+7210\,\pm\,2717} & \ensuremath{-214.7\,\pm\,52.3} & \ensuremath{154\,\pm\,12.5} & \ensuremath{54\,\pm\,11.4} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+1.29\,\pm\,1.21} & \ensuremath{-334\,\pm\,1883} & \ensuremath{+55.7\,\pm\,5.5} & \ensuremath{68\,\pm\,6.0} & \ensuremath{19\,\pm\,4.5} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+1.22\,\pm\,1.19} & \ensuremath{+134\,\pm\,2167} & \ensuremath{+66.3\,\pm\,10.0} & \ensuremath{74\,\pm\,5.3} & \ensuremath{23\,\pm\,6.6} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+1.04\,\pm\,1.17} & \ensuremath{+208\,\pm\,1959} & \ensuremath{+24.0\,\pm\,7.5} & \ensuremath{27\,\pm\,2.6} & \ensuremath{10\,\pm\,2.3} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+1.03\,\pm\,1.21} & \ensuremath{+46\,\pm\,1892} & \ensuremath{+24.7\,\pm\,20.4} & \ensuremath{28\,\pm\,4.0} & \ensuremath{8\,\pm\,5.7} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+1.47\,\pm\,1.13} & \ensuremath{-1057\,\pm\,1168} & \ensuremath{+71.3\,\pm\,7.5} & \ensuremath{216\,\pm\,3.8} & \ensuremath{27\,\pm\,4.2} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+1.41\,\pm\,1.31} & \ensuremath{-376\,\pm\,1938} & \ensuremath{+67.7\,\pm\,6.1} & \ensuremath{213\,\pm\,17.7} & \ensuremath{24\,\pm\,4.9} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+1.48\,\pm\,1.07} & \ensuremath{-401\,\pm\,1251} & \ensuremath{+39.3\,\pm\,25.4} & \ensuremath{102\,\pm\,15.6} & \ensuremath{18\,\pm\,2.1} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+1.54\,\pm\,1.09} & \ensuremath{-767\,\pm\,1113} & \ensuremath{+51.0\,\pm\,34.7} & \ensuremath{100\,\pm\,8.0} & \ensuremath{18\,\pm\,4.0} \\
+\midrule
+\multicolumn{6}{l}{\#nodes = 32, inter-arrival = 16\,s} \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & \ensuremath{+2.74\,\pm\,1.45} & \ensuremath{+1652\,\pm\,4465} & \ensuremath{-81.7\,\pm\,46.9} & \ensuremath{111\,\pm\,14.5} & \ensuremath{35\,\pm\,5.2} \\
+\makecell[l]{Scheduling-failure (non-blocking)} & \ensuremath{+2.72\,\pm\,1.41} & \ensuremath{+1695\,\pm\,5142} & \ensuremath{-86.3\,\pm\,47.2} & \ensuremath{118\,\pm\,13.2} & \ensuremath{36\,\pm\,12.7} \\
+\makecell[l]{Periodic (blocking), 8s interval} & \ensuremath{+2.77\,\pm\,1.45} & \ensuremath{-3984\,\pm\,4342} & \ensuremath{+1.0\,\pm\,29.9} & \ensuremath{69\,\pm\,5.2} & \ensuremath{19\,\pm\,5.0} \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & \ensuremath{+2.45\,\pm\,1.64} & \ensuremath{-2448\,\pm\,3058} & \ensuremath{+23.0\,\pm\,14.9} & \ensuremath{75\,\pm\,13.8} & \ensuremath{18\,\pm\,5.0} \\
+\makecell[l]{Periodic (blocking), 32s interval} & \ensuremath{+2.19\,\pm\,1.46} & \ensuremath{+369\,\pm\,6133} & \ensuremath{+6.7\,\pm\,16.0} & \ensuremath{36\,\pm\,5.2} & \ensuremath{11\,\pm\,6.4} \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & \ensuremath{+2.65\,\pm\,1.57} & \ensuremath{-2933\,\pm\,5574} & \ensuremath{-25.3\,\pm\,27.0} & \ensuremath{29\,\pm\,6.6} & \ensuremath{12\,\pm\,3.2} \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & \ensuremath{+2.89\,\pm\,1.43} & \ensuremath{-4840\,\pm\,4744} & \ensuremath{+23.7\,\pm\,45.8} & \ensuremath{151\,\pm\,24.2} & \ensuremath{20\,\pm\,7.5} \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & \ensuremath{+2.82\,\pm\,1.49} & \ensuremath{-4727\,\pm\,3899} & \ensuremath{+23.3\,\pm\,19.1} & \ensuremath{160\,\pm\,21.0} & \ensuremath{21\,\pm\,4.5} \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & \ensuremath{+2.77\,\pm\,1.54} & \ensuremath{-3840\,\pm\,5018} & \ensuremath{+11.0\,\pm\,19.0} & \ensuremath{102\,\pm\,17.4} & \ensuremath{17\,\pm\,5.8} \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & \ensuremath{+2.94\,\pm\,1.41} & \ensuremath{-5108\,\pm\,4588} & \ensuremath{+6.3\,\pm\,37.6} & \ensuremath{87\,\pm\,2.5} & \ensuremath{17\,\pm\,8.9} \\
+\bottomrule
+\end{tabular}
