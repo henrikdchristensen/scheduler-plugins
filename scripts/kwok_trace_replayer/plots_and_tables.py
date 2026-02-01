@@ -1,12 +1,16 @@
+# scripts/kwok_trace_replayer/plots_and_tables.py
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/plots_and_tables.py
 """
 python -m scripts.kwok_trace_replayer.plots_and_tables
 
-Update:
-- Supports results_paired.csv that includes *_std columns (seed-to-seed std).
-- Big LaTeX tables now print "mean ± std" when std columns are present.
-- Plots remain based on *_mean (unchanged).
+Input:
+  - results_seeds.csv  (ONE file; one row per seed)
+
+Behavior:
+  - Default: plot ALL seed runs (one point per seed).
+  - If you want a single point per configuration (mean over seeds), pass:
+      --mean-seeds
 """
 
 from __future__ import annotations
@@ -50,7 +54,6 @@ DEFAULT_SEED_JITTER_FRAC = 0.12  # jitter as fraction of mode_spacing
 # Paths
 # =============================================================================
 
-IN_RESULTS = Path("analysis/kwok_trace_replayer/results_paired.csv")
 IN_RESULTS_SEEDS = Path("analysis/kwok_trace_replayer/results_seeds.csv")
 OUT_DIR = Path("analysis/kwok_trace_replayer")
 OUT_TABLES_DIR = OUT_DIR / "tables"
@@ -69,7 +72,7 @@ SYMLOG_LINTHRESH_LAT_MS: float = 1.0
 SYMLOG_LINTHRESH_DELETIONS: float = 1.0
 SYMLOG_LINSCALE: float = 1.0
 
-# Columns we expect in results_paired.csv (means)
+# Columns we expect in results_seeds.csv (per-seed rows)
 EXPECTED_COLS = [
     "job_name",
     "plugin_config",
@@ -125,11 +128,9 @@ GRID_FIGSIZE_DELTAS = (2.15, PLOT_HEIGHT)
 GRID_LEFT_DELTAS = 0.2
 PLOT_MODE_X_SPACING_DELTAS = 0.11
 
-
 # =============================================================================
 # View + modes configuration
 # =============================================================================
-
 
 @dataclass(frozen=True)
 class ViewConfig:
@@ -138,7 +139,6 @@ class ViewConfig:
     without_default_preemption_caption: bool
     table_stem: str
     figure_stem: str
-
 
 VIEWS: List[ViewConfig] = [
     ViewConfig(
@@ -157,7 +157,6 @@ VIEWS: List[ViewConfig] = [
     ),
 ]
 
-
 @dataclass(frozen=True)
 class ModeSpec:
     mode: str
@@ -167,7 +166,6 @@ class ModeSpec:
     rank: int
     palette: str  # "set2" or "set3"
     color_idx: int
-
 
 MODE_SPECS: List[ModeSpec] = [
     # Scheduling-failure (both variants)
@@ -193,7 +191,7 @@ INCLUDE_TABLES_ALL: Dict[str, Optional[List[Tuple[str, int]]]] = {
     "without_default_preemption": None,
 }
 
-# Plots (all configs): still only show subset (both blocking variants)
+# Plots (all configs): still only show subset
 INCLUDE_PLOTS_ALL: Dict[str, Optional[List[Tuple[str, int]]]] = {
     "with_default_preemption": [
         ("schedulingfailure", 1),
@@ -223,20 +221,17 @@ PERIODIC_STABLE_DELTA_PAIRS = [
 # Plot y-axis configuration
 # =============================================================================
 
-
 @dataclass(frozen=True)
 class YAxisConfig:
     scale: str  # "linear" or "symlog"
     ylim: Tuple[float, float]
     symlog_linthresh: float = 1.0  # only used for symlog
 
-
 PLOT_Y: Dict[str, Dict[str, YAxisConfig]] = {
     "with_default_preemption": {
         "util": YAxisConfig(scale="linear", ylim=(-5.0, 5.0)),
         "latency": YAxisConfig(scale="symlog", ylim=(-1e5 - 1.0, 1e5 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
         "deletions": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
-        # solver/plans configured dynamically (non-negative, not symmetric)
     },
     "without_default_preemption": {
         "util": YAxisConfig(scale="linear", ylim=(-5.0, 5.0)),
@@ -250,7 +245,6 @@ PLOT_Y_DELTAS: Dict[str, Dict[str, YAxisConfig]] = {
         "util": YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
         "latency": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
         "deletions": YAxisConfig(scale="symlog", ylim=(-1e3 - 1.0, 1e3 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
-        # solver/plans deltas configured dynamically (symmetric around 0)
     },
     "without_default_preemption": {
         "util": YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
@@ -263,13 +257,11 @@ PLOT_Y_DELTAS: Dict[str, Dict[str, YAxisConfig]] = {
 # Parsing helpers
 # =============================================================================
 
-
 def parse_job(job_name: str) -> Optional[Tuple[int, int, float]]:
     m = JOB_RE.fullmatch(str(job_name).strip())
     if not m:
         return None
     return int(m.group(1)), int(m.group(2)), float(m.group(3))
-
 
 def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
     kv: Dict[str, str] = {}
@@ -278,7 +270,6 @@ def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
             k, v = tok.split("=", 1)
             kv[k.strip().lower()] = v.strip()
     return kv
-
 
 def canonical_mode(mode: str) -> str:
     s = str(mode).strip().lower()
@@ -296,11 +287,9 @@ def canonical_mode(mode: str) -> str:
 
     return s
 
-
 # =============================================================================
 # RowKey + style derived from MODE_SPECS
 # =============================================================================
-
 
 @dataclass(frozen=True)
 class RowKey:
@@ -319,24 +308,19 @@ class RowKey:
             defpreempt = 0
         return RowKey(mode=mode, blocking=blocking, defpreempt=defpreempt)
 
-
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
-
 
 def rk_rank(rk: RowKey) -> int:
     spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
     return int(spec.rank) if spec else 10_000
 
-
 def rk_abbr(rk: RowKey) -> str:
     spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
     return spec.abbr if spec else f"{rk.mode}:{int(rk.blocking)}"
 
-
 def rk_label(rk: RowKey) -> str:
     spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
     return spec.label if spec else rk_abbr(rk)
-
 
 def rk_color(rk: RowKey):
     set2 = plt.get_cmap("Set2").colors
@@ -347,15 +331,12 @@ def rk_color(rk: RowKey):
     palette = set2 if spec.palette == "set2" else set3
     return palette[int(spec.color_idx) % len(palette)]
 
-
 def sort_rks(rks: Iterable[RowKey]) -> List[RowKey]:
     return sorted(set(rks), key=lambda r: (rk_rank(r), r.mode, int(r.blocking), int(r.defpreempt)))
-
 
 # =============================================================================
 # Formatting helpers
 # =============================================================================
-
 
 def is_finite(x: object) -> bool:
     try:
@@ -363,10 +344,8 @@ def is_finite(x: object) -> bool:
     except Exception:
         return False
 
-
 def nan_str(latex: bool) -> str:
     return (r"\text{--}" if latex else "--")
-
 
 def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
     if not is_finite(x):
@@ -376,21 +355,10 @@ def fmt_signed(x: object, decimals: int, nan_s: str) -> str:
         v = 0.0
     return f"{v:+.{decimals}f}"
 
-
 def fmt_unsigned_int(x: object, nan_s: str) -> str:
     if not is_finite(x):
         return nan_s
     return f"{int(round(float(x))):d}"
-
-
-def fmt_unsigned_float(x: object, decimals: int, nan_s: str) -> str:
-    if not is_finite(x):
-        return nan_s
-    v = round(float(x), int(decimals))
-    if v == 0.0:
-        v = 0.0
-    return f"{v:.{decimals}f}"
-
 
 def fmt_pm(
     mean_v: object,
@@ -403,13 +371,11 @@ def fmt_pm(
 ) -> str:
     ns = nan_str(latex)
 
-    # If mean missing -> missing
     if not is_finite(mean_v):
         return ns
 
     m_val = float(mean_v)
 
-    # If std missing, print mean only (no ±)
     if not is_finite(std_v):
         m = f"{m_val:+.{mean_dec}f}" if mean_signed else f"{m_val:.{mean_dec}f}"
         return rf"\ensuremath{{{m}}}" if latex else m
@@ -420,15 +386,11 @@ def fmt_pm(
     s = f"{s_val:.{std_dec}f}"
     return rf"\ensuremath{{{m}\,\pm\,{s}}}" if latex else f"{m} ± {s}"
 
-
-
-
 def arrival_group_label(a: float, *, latex: bool) -> str:
     a_i = int(a) if abs(a - round(a)) < 1e-9 else a
     if latex:
         return rf"inter-arrival = {a_i}\,s"
     return f"inter-arrival = {a_i} s"
-
 
 def priority_caption(priorities: int, *, latex: bool, without_default_preemption: bool) -> str:
     if latex:
@@ -437,27 +399,21 @@ def priority_caption(priorities: int, *, latex: bool, without_default_preemption
     base = f"#priorities = {priorities}" + (" (w/o priorities)" if priorities == 1 else " (w/ priorities)")
     return base + (" (w/o default preemption)" if without_default_preemption else "")
 
-
 def rk_label_tex(rk: RowKey) -> str:
     return rf"\makecell[l]{{{rk_label(rk)}}}"
 
-
 def view_suffix(view: ViewConfig) -> str:
     return "defaultpreemption=1" if int(view.defpreempt_value) == 1 else "defaultpreemption=0"
-
 
 # =============================================================================
 # Data access
 # =============================================================================
 
-
 def has_any_std_cols(df: pd.DataFrame) -> bool:
     return any(str(c).endswith("_std") for c in df.columns)
 
-
 def std_col_of(mean_col: str) -> str:
     return mean_col[:-5] + "_std" if mean_col.endswith("_mean") else mean_col + "_std"
-
 
 def load_results(results_csv: Path) -> pd.DataFrame:
     if not results_csv.exists():
@@ -466,9 +422,7 @@ def load_results(results_csv: Path) -> pd.DataFrame:
     df = pd.read_csv(results_csv)
 
     if "delta_U_pct_eff_mean" not in df.columns:
-        raise SystemExit(
-            f"{results_csv} missing usage column: expected 'delta_U_pct_eff_mean'"
-        )
+        raise SystemExit(f"{results_csv} missing usage column: expected 'delta_U_pct_eff_mean'")
 
     missing = [c for c in EXPECTED_COLS if c not in df.columns]
     if missing:
@@ -490,11 +444,45 @@ def load_results(results_csv: Path) -> pd.DataFrame:
 
     return df
 
+def aggregate_over_seeds(df_seeds: pd.DataFrame, *, seed_col: str) -> pd.DataFrame:
+    """
+    Build an aggregated dataframe with one row per configuration:
+      - keeps *_mean columns as mean across seeds
+      - adds corresponding *_std columns
+      - adds n_seed
+    """
+    group_cols = ["job_name", "plugin_config", "nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
+
+    numeric_cols: List[str] = []
+    for c in df_seeds.columns:
+        if c in group_cols:
+            continue
+        if c == seed_col:
+            continue
+        if pd.api.types.is_numeric_dtype(df_seeds[c]):
+            numeric_cols.append(c)
+
+    grp = df_seeds.groupby(group_cols, dropna=False)
+
+    mean_df = grp[numeric_cols].mean(numeric_only=True)
+    std_df = grp[numeric_cols].std(numeric_only=True)
+    n_seed = grp.size()
+
+    out = mean_df.reset_index()
+    out.insert(len(group_cols), "n_seed", n_seed.to_numpy())
+
+    std_reset = std_df.reset_index()
+
+    # attach std columns
+    for c in numeric_cols:
+        std_name = std_col_of(c) if str(c).endswith("_mean") else f"{c}_std"
+        out[std_name] = std_reset[c].to_numpy()
+
+    return out
 
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
     d = df.drop_duplicates(subset=KEY_COLS, keep="first").copy()
     return d.set_index(KEY_COLS).sort_index()
-
 
 def lookup_value(
     lookup: pd.DataFrame,
@@ -510,7 +498,6 @@ def lookup_value(
         return float(lookup.at[key, col])
     except KeyError:
         return float("nan")
-
 
 def lookup_mean_std(
     lookup: pd.DataFrame,
@@ -529,11 +516,9 @@ def lookup_mean_std(
         s = float("nan")
     return m, s
 
-
 # =============================================================================
 # Inclusion helpers
 # =============================================================================
-
 
 def included_pairs_for_view(
     view: ViewConfig, include_map: Dict[str, Optional[List[Tuple[str, int]]]]
@@ -542,7 +527,6 @@ def included_pairs_for_view(
     if items is None:
         return None
     return {(canonical_mode(m), int(b)) for (m, b) in items}
-
 
 def filter_rks_for_view(
     rks: Iterable[RowKey],
@@ -559,13 +543,11 @@ def filter_rks_for_view(
         out.append(rk)
     return sort_rks(out)
 
-
 # =============================================================================
-# Tables (LaTeX only)
+# Tables (LaTeX only)  (unchanged, still produced from aggregated lookup)
 # =============================================================================
 
 MetricGetter = Callable[[int, RowKey, int, float], Any]  # (priorities, rk, nodes, arrival) -> value
-
 
 @dataclass(frozen=True)
 class MetricRow:
@@ -575,7 +557,6 @@ class MetricRow:
     decimals: int = TABLE_DECIMALS
     scale: float = 1.0
     formatter: Optional[Callable[[Any, bool], str]] = None  # (value, latex) -> str
-
 
 def _fmt_metric_value(v: Any, *, row: MetricRow, latex: bool) -> str:
     ns = nan_str(latex)
@@ -596,27 +577,19 @@ def _fmt_metric_value(v: Any, *, row: MetricRow, latex: bool) -> str:
         return fmt_unsigned_int(vv, ns)
     return fmt_signed(vv, row.decimals, ns)
 
-
 def metric_header_tex(label: str) -> str:
-    """
-    Use makecell to allow controlled line breaks (and keep top-aligned headers).
-    IMPORTANT: when splitting math, restart math mode on each line.
-    """
     s = str(label).strip()
 
     def _split_core(core: str) -> Optional[Tuple[str, str]]:
         core = core.strip()
-        # LaTeX style: "... \;(\mathrm{ms})"
         if r"\;(" in core:
             left, right = core.split(r"\;(", 1)
             return left.strip(), ("(" + right.strip())
-        # Plain text style: "... (ms)"
         if " (" in core and core.endswith(")"):
             left, right = core.rsplit(" (", 1)
             return left.strip(), ("(" + right.strip())
         return None
 
-    # Math-wrapped: $ ... $
     if s.startswith("$") and s.endswith("$") and len(s) >= 2:
         core = s[1:-1].strip()
         parts = _split_core(core)
@@ -625,14 +598,12 @@ def metric_header_tex(label: str) -> str:
         left, right = parts
         return rf"\makecell{{${left}$\\${right}$}}"
 
-    # Plain text
     parts = _split_core(s)
     if parts is None:
         return rf"\makecell{{{s}}}"
 
     left, right = parts
     return rf"\makecell{{{left}\\{right}}}"
-
 
 def latex_metric_matrix_tables(
     *,
@@ -642,14 +613,9 @@ def latex_metric_matrix_tables(
     modes: List[RowKey],
     metrics: List[MetricRow],
     priorities: int,
-    without_default_preemption: bool,  # kept for compatibility with old signature
+    without_default_preemption: bool,
 ) -> None:
-    """
-    Columns: (empty) | metric1 | metric2 | ...
-    Rows: mode1..modeM
-    Blocks stacked for each (#nodes, inter-arrival).
-    """
-    _ = without_default_preemption  # intentionally unused; kept to preserve "logic surface"
+    _ = without_default_preemption
 
     n_metrics = len(metrics)
     total_cols = 1 + n_metrics
@@ -694,11 +660,9 @@ def latex_metric_matrix_tables(
     lines.append("")
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
-
 # =============================================================================
 # Mode-delta table (ONE table, contains both views) - LaTeX only
 # =============================================================================
-
 
 @dataclass(frozen=True)
 class ModeDeltaCol:
@@ -706,7 +670,6 @@ class ModeDeltaCol:
     left_mode: str
     right_mode: str
     blocking: int
-
 
 def _mode_delta_value(
     lookup: pd.DataFrame,
@@ -728,7 +691,6 @@ def _mode_delta_value(
         return float("nan")
     return float(vr) - float(vl)
 
-
 def write_mode_delta_table_tex(
     *,
     out_tex: Path,
@@ -743,7 +705,6 @@ def write_mode_delta_table_tex(
         ModeDeltaCol("SQ 2→8 (B)", "stable-queue-2s", "stable-queue-8s", blocking=1),
     ]
 
-    # (col, latex_label, fmt_kind, decimals)
     metric_specs: List[Tuple[str, str, str, int]] = [
         ("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", "signed_float", 2),
         ("delta_L_ms_total_mean", r"$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", "signed_float", 0),
@@ -819,7 +780,6 @@ def write_mode_delta_table_tex(
 
     out_tex.write_text("\n".join(tex_lines), encoding="utf-8")
 
-
 # =============================================================================
 # Plot helpers
 # =============================================================================
@@ -835,11 +795,9 @@ def ycfg(view: ViewConfig, key: str, *, kind: str = "all") -> YAxisConfig:
         raise SystemExit(f"Missing PLOT_Y config for view={view.name} key={key}")
     return d[key]
 
-
 def arrival_tick_label(a: float) -> str:
     a_i = int(a) if abs(a - round(a)) < 1e-9 else a
     return f"{a_i}s"
-
 
 def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
     base = arrival_tick_label(a)
@@ -848,22 +806,15 @@ def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
         return base + "\ninter-arrival (s)"
     return base
 
-
 from typing import Union
-
 YVal = Union[float, Sequence[float]]
 YOfFn = Callable[[RowKey, int, float, int], YVal]  # scalar (mean) OR list of per-seed values
 
-
 def _as_finite_list(v: object) -> List[float]:
-    """
-    Normalize scalar/iterable -> list of finite floats.
-    """
     if v is None:
         return []
-    # Treat numpy scalar as scalar
     try:
-        if np.isscalar(v):  # type: ignore[attr-defined]
+        if np.isscalar(v):
             return [float(v)] if is_finite(v) else []
     except Exception:
         pass
@@ -875,10 +826,7 @@ def _as_finite_list(v: object) -> List[float]:
                 out.append(float(x))
         return out
 
-    # Fallback scalar
     return [float(v)] if is_finite(v) else []
-
-
 
 def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int = PLOT_MIN_LINEAR_YTICKS) -> None:
     ylo, yhi = float(ylim[0]), float(ylim[1])
@@ -899,11 +847,7 @@ def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int
 
     ax.set_yticks(ticks)
 
-
 def nice_step(span: float, target_ticks: int) -> float:
-    """
-    Pick a 'nice' step size ~ span/target_ticks from {1,2,5} * 10^k.
-    """
     span = float(span)
     if span <= 0:
         return 1.0
@@ -913,12 +857,7 @@ def nice_step(span: float, target_ticks: int) -> float:
     candidates = [1 * base, 2 * base, 5 * base, 10 * base]
     return min(candidates, key=lambda s: abs(s - raw))
 
-
 def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks_total: int = 7) -> None:
-    """
-    Sparse ticks symmetric around 0 for delta-count axes (can be negative).
-    Ensures negative ticks exist so horizontal grid lines also show below 0.
-    """
     ylo, yhi = float(ylim[0]), float(ylim[1])
     hi = max(abs(ylo), abs(yhi))
     if hi <= 0:
@@ -939,15 +878,11 @@ def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_t
     ticks = sorted([t for t in ticks if t >= ylo - 1e-9 and t <= yhi + 1e-9])
 
     if all(abs(t - round(t)) < 1e-9 for t in ticks):
-        ticks = [int(round(t)) for t in ticks]  # type: ignore[assignment]
+        ticks = [int(round(t)) for t in ticks]
 
     ax.set_yticks(ticks)
 
-
 def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int = 5) -> None:
-    """
-    Sparse, integer-ish ticks for non-negative count axes.
-    """
     ylo, yhi = float(ylim[0]), float(ylim[1])
     ylo = max(0.0, ylo)
     if yhi <= 0:
@@ -966,15 +901,13 @@ def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int 
             break
 
     if abs(step - round(step)) < 1e-9:
-        ticks = [int(round(x)) for x in ticks]  # type: ignore[assignment]
+        ticks = [int(round(x)) for x in ticks]
 
     ax.set_yticks(ticks)
-
 
 def x_from_left_with_pad_points(fig: plt.Figure, left: float, pad_pt: float) -> float:
     pad_frac = float(pad_pt) / (72.0 * float(fig.get_figwidth()))
     return max(0.0, float(left) - pad_frac)
-
 
 def draw_points_on_ax(
     *,
@@ -995,13 +928,6 @@ def draw_points_on_ax(
     color_of: Optional[Callable[[RowKey], Any]] = None,
     seed_jitter_frac: float = DEFAULT_SEED_JITTER_FRAC,
 ) -> None:
-    """
-    Shared point plotting logic.
-
-    - Two node counts are plotted with different markers:
-        nodes_order[0] -> circles
-        nodes_order[1] -> squares
-    """
     n_arr = len(arrivals_order)
     step = float(arrival_x_spacing)
 
@@ -1024,19 +950,15 @@ def draw_points_on_ax(
         for xi, a in enumerate(arrivals_order):
             x_center = x_base[xi] + mode_offset
 
-            # y_of may return scalar (combined mean) or list (per-seed)
             y0_list = _as_finite_list(y_of(rk, nodes_order[0], a, priorities))
             y1_list = _as_finite_list(y_of(rk, nodes_order[1], a, priorities))
 
-            # If one side returns scalar and the other returns multiple, still plot what exists.
-            # Jitter points horizontally so seeds don't overlap.
             def _plot_many(xs_center: float, ys: List[float], marker: str) -> None:
                 if not ys:
                     return
                 if len(ys) == 1:
                     xs = [xs_center]
                 else:
-                    # jitter relative to mode spacing so it scales nicely
                     j = max(0.001, float(seed_jitter_frac) * max(0.001, mode_spacing))
                     offsets = np.linspace(-j, j, len(ys))
                     xs = [xs_center + float(o) for o in offsets]
@@ -1053,9 +975,8 @@ def draw_points_on_ax(
                         markeredgewidth=PLOT_MARKER_LINEWIDTH,
                     )
 
-            _plot_many(x_center, y0_list, marker="o")  # nodes_order[0]
-            _plot_many(x_center, y1_list, marker="s")  # nodes_order[1]
-
+            _plot_many(x_center, y0_list, marker="o")
+            _plot_many(x_center, y1_list, marker="s")
 
     if y_scale == "symlog":
         ax.set_yscale("symlog", base=SYMLOG_BASE, linthresh=symlog_linthresh, linscale=SYMLOG_LINSCALE)
@@ -1110,7 +1031,6 @@ def draw_points_on_ax(
             continue
         ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
 
-
 def values_from_df(
     df: pd.DataFrame,
     *,
@@ -1121,10 +1041,6 @@ def values_from_df(
     col: str,
     seed_col: str,
 ) -> List[float]:
-    """
-    Return all finite values for `col` for the given key, one per seed row.
-    Requires `seed_col` to exist in df. Sorting by seed makes stable jitter ordering.
-    """
     key_mask = (
         (df["nodes"].astype(int) == int(nodes))
         & (df["priorities"].astype(int) == int(priorities))
@@ -1133,26 +1049,20 @@ def values_from_df(
         & (df["blocking"].astype(int) == int(rk.blocking))
         & (df["defpreempt"].astype(int) == int(rk.defpreempt))
     )
-    if seed_col in df.columns:
-        sub = df.loc[key_mask, [seed_col, col]].copy()
-        if sub.empty:
-            return []
-        sub = sub.sort_values(seed_col)  # stable order by seed
-        vals = sub[col].tolist()
-    else:
-        # Aggregated input (e.g., results_paired.csv): no per-seed rows available.
-        # Fall back to returning whatever rows exist (typically a single mean row).
-        sub = df.loc[key_mask, [col]].copy()
-        if sub.empty:
-            return []
-        vals = sub[col].tolist()
 
+    sub = df.loc[key_mask, [seed_col, col]].copy() if seed_col in df.columns else df.loc[key_mask, [col]].copy()
+    if sub.empty:
+        return []
+
+    if seed_col in sub.columns:
+        sub = sub.sort_values(seed_col)
+
+    vals = sub[col].tolist()
     out: List[float] = []
     for v in vals:
         if is_finite(v):
             out.append(float(v))
     return out
-
 
 def compute_nonnegative_ylim_for_col(
     *,
@@ -1175,7 +1085,6 @@ def compute_nonnegative_ylim_for_col(
     m = max(vals) if vals else 0.0
     hi = float(m) * (1.0 + float(pad_frac)) if m > 0.0 else 1.0
     return (0.0, hi)
-
 
 def values_by_seed(
     df: pd.DataFrame,
@@ -1208,7 +1117,6 @@ def values_by_seed(
             out[s] = float(v)
     return out
 
-
 def compute_symmetric_ylim_for_yfns(
     *,
     nodes_order: List[int],
@@ -1225,20 +1133,19 @@ def compute_symmetric_ylim_for_yfns(
             for a in arrivals_order:
                 for k in priorities_order:
                     v = y_of(rk, n, a, k)
-                    for x in _as_finite_list(v):   # <-- vigtig ændring
+                    for x in _as_finite_list(v):
                         vals.append(abs(float(x)))
 
     m = max(vals) if vals else 0.0
     hi = float(m) * (1.0 + float(pad_frac)) if m > 0.0 else 1.0
     return (-hi, hi)
 
-
 def make_grid_plot(
     *,
     lookup: pd.DataFrame,
     df: pd.DataFrame,
     plot_seeds: bool,
-    out_figures_dir: Path, 
+    out_figures_dir: Path,
     seed_col: str,
     seed_jitter_frac: float,
     view: ViewConfig,
@@ -1280,7 +1187,6 @@ def make_grid_plot(
                 v = lookup_value(lookup, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk, col=col)
                 return float(v) * float(scale) if is_finite(v) else float("nan")
             return _y
-
 
     present_labels = {rk_label(rk) for rk in series}
     legend_handles: List[Line2D] = []
@@ -1430,10 +1336,9 @@ def make_grid_plot(
         y_center = 0.5 * (bbox.y0 + bbox.y1)
         fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
-    fig.savefig(out_figures_dir / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)  # CHANGED
-    fig.savefig(out_figures_dir / f"{out_stem}.pdf")                       # CHANGED
+    fig.savefig(out_figures_dir / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
+    fig.savefig(out_figures_dir / f"{out_stem}.pdf")
     plt.close(fig)
-
 
 def make_mode_delta_series(
     *,
@@ -1453,12 +1358,8 @@ def make_mode_delta_series(
     def _dd(col: str) -> YOfFn:
         if plot_seeds:
             def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
-                left_m = values_by_seed(
-                    df, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_l, col=col, seed_col=seed_col
-                )
-                right_m = values_by_seed(
-                    df, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_r, col=col, seed_col=seed_col
-                )
+                left_m = values_by_seed(df, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_l, col=col, seed_col=seed_col)
+                right_m = values_by_seed(df, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_r, col=col, seed_col=seed_col)
                 common = sorted(set(left_m.keys()) & set(right_m.keys()))
                 return [right_m[s] - left_m[s] for s in common]
             return _y
@@ -1480,8 +1381,6 @@ def make_mode_delta_series(
         _dd("plan_activated_mean"),
     )
 
-
-
 def make_grid_plot_custom_series(
     *,
     df: pd.DataFrame,
@@ -1499,7 +1398,7 @@ def make_grid_plot_custom_series(
     y_solvers: List[YOfFn],
     y_plans: List[YOfFn],
     out_stem: str,
-    out_figures_dir: Path,   # <-- NY
+    out_figures_dir: Path,
     figsize: Tuple[float, float],
     grid_left: float,
     grid_right: float,
@@ -1526,6 +1425,7 @@ def make_grid_plot_custom_series(
         idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
         return cmap[idx % len(cmap)]
 
+    # For custom series, we compute symmetric ylims for counter deltas
     ylim_solver = compute_symmetric_ylim_for_yfns(
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
@@ -1542,7 +1442,7 @@ def make_grid_plot_custom_series(
     )
 
     def y_of_from_list(y_list: List[YOfFn]) -> Callable[[RowKey, int, float, int], YVal]:
-        def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> float:
+        def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> YVal:
             idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
             return y_list[idx](rk, nodes, a, priorities)
         return _y
@@ -1695,20 +1595,11 @@ def make_grid_plot_custom_series(
     fig.savefig(out_figures_dir / f"{out_stem}.pdf")
     plt.close(fig)
 
-
 # =============================================================================
 # Metric builders (big tables)
 # =============================================================================
 
-
 def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Callable[[int], List[MetricRow]]:
-    """
-    Returns metrics_big(priorities) -> List[MetricRow].
-
-    If has_std=True, prints "mean ± std" using corresponding *_std columns
-    (when present); otherwise prints the mean only.
-    """
-
     def g_mean(col_mean: str) -> MetricGetter:
         return lambda priorities, rk, n, a: lookup_value(lookup, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=col_mean)
 
@@ -1726,7 +1617,6 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Calla
     def metrics_big(priorities: int) -> List[MetricRow]:
         rows: List[MetricRow] = []
 
-        # usage
         if has_std:
             rows.append(
                 MetricRow(
@@ -1746,7 +1636,6 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Calla
                 )
             )
 
-        # latency total
         if has_std:
             rows.append(
                 MetricRow(
@@ -1766,7 +1655,6 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Calla
                 )
             )
 
-        # latency per priority
         if priorities != 1:
             for p in (1, 2, 3, 4):
                 col = f"delta_L_ms_p{p}_mean"
@@ -1789,7 +1677,6 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Calla
                         )
                     )
 
-        # deletions total
         if has_std:
             rows.append(
                 MetricRow(
@@ -1809,7 +1696,6 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Calla
                 )
             )
 
-        # deletions per priority
         if priorities != 1:
             for p in (1, 2, 3, 4):
                 col = f"delta_D_num_p{p}_mean"
@@ -1832,7 +1718,6 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Calla
                         )
                     )
 
-        # plugin-only counters (non-negative; show mean ± std if available)
         if has_std:
             rows.append(
                 MetricRow(
@@ -1858,18 +1743,15 @@ def build_metrics_for_big_table(*, lookup: pd.DataFrame, has_std: bool) -> Calla
 
     return metrics_big
 
-
 # =============================================================================
 # Orchestration helpers
 # =============================================================================
-
 
 def infer_orders(df: pd.DataFrame) -> Tuple[List[int], List[float], List[int]]:
     nodes_order = sorted(df["nodes"].dropna().astype(int).unique().tolist())
     arrivals_order = sorted(df["arrival_s"].dropna().astype(float).unique().tolist())
     priorities_order = sorted(df["priorities"].dropna().astype(int).unique().tolist())
     return nodes_order, arrivals_order, priorities_order
-
 
 def compute_shared_counter_ylims(
     *,
@@ -1907,21 +1789,19 @@ def compute_shared_counter_ylims(
     )
     return ylim_solver_shared, ylim_plans_shared
 
-
 # =============================================================================
 # Main
 # =============================================================================
 
-
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in-results", type=Path, default=IN_RESULTS)
+    ap.add_argument("--in-results", type=Path, default=IN_RESULTS_SEEDS, help="Input results file (per-seed): results_seeds.csv")
     ap.add_argument("--out-dir", type=Path, default=OUT_DIR)
-    ap.add_argument("--plot-seeds", action="store_true", help="Plot one point per seed (reads results_seeds.csv unless --in-seeds is set).")
-    ap.add_argument("--in-seeds", type=Path, default=None, help="Optional per-seed CSV (defaults to <in-results>/results_seeds.csv).")
+    ap.add_argument("--mean-seeds", action="store_true", help="Plot a single point per config (mean over seeds). Default plots all seeds.")
     ap.add_argument("--seed-col", default=DEFAULT_SEED_COL)
     ap.add_argument("--seed-jitter-frac", type=float, default=DEFAULT_SEED_JITTER_FRAC)
     args = ap.parse_args()
+
     in_results = args.in_results
     out_dir = args.out_dir
     out_tables_dir = out_dir / "tables"
@@ -1931,23 +1811,19 @@ def main() -> None:
     out_tables_dir.mkdir(parents=True, exist_ok=True)
     out_figures_dir.mkdir(parents=True, exist_ok=True)
 
-    df_paired = load_results(in_results)
-    lookup = build_lookup(df_paired)
-    nodes_order, arrivals_order, priorities_order = infer_orders(df_paired)
+    # Load per-seed rows
+    df_seeds = load_results(in_results)
 
-    # If plotting per-seed points, load the per-seed file for plotting only.
-    df_plot = df_paired
-    if args.plot_seeds:
-        seeds_path = args.in_seeds
-        if seeds_path is None:
-            # default: sibling file results_seeds.csv next to results_paired.csv
-            seeds_path = in_results.with_name("results_seeds.csv")
-        df_plot = load_results(seeds_path)
+    # Build aggregated (mean+std) from seeds for lookup + tables + mean plotting
+    df_paired = aggregate_over_seeds(df_seeds, seed_col=args.seed_col)
+    lookup = build_lookup(df_paired)
+
+    nodes_order, arrivals_order, priorities_order = infer_orders(df_paired)
 
     if len(nodes_order) != 2:
         raise SystemExit(f"Expected exactly 2 node values for plots; found {nodes_order}")
     if not arrivals_order:
-        raise SystemExit("No arrivals inferred from results_paired.csv")
+        raise SystemExit("No arrivals inferred from results")
     if not priorities_order:
         raise SystemExit("No priority values found")
 
@@ -1955,14 +1831,19 @@ def main() -> None:
     if len(priorities_cols) != 2:
         raise SystemExit(f"Expected priorities [1,4] for the 2 columns; found priorities={priorities_order}")
 
+    # Default: plot seeds. With --mean-seeds: plot aggregated.
+    plot_seeds = (not args.mean_seeds)
+    df_plot = df_seeds if plot_seeds else df_paired
 
-    has_std = has_any_std_cols(df_paired)
+    # Std detection: only meaningful if any group has n_seed>=2
+    has_std = bool((df_paired.get("n_seed", pd.Series([0])).fillna(0).max() >= 2))
 
-    # Always produce the existing tables: mean-only (do NOT change filenames/format)
+    # Tables:
+    #  - always write mean-only (same filenames)
+    #  - write mean±std only if has_std
     metrics_big_mean_fn = build_metrics_for_big_table(lookup=lookup, has_std=False)
     metrics_map_big_mean = {k: metrics_big_mean_fn(k) for k in priorities_order}
 
-    # Optionally produce new tables: mean ± std (new filenames)
     metrics_map_big_pm: Dict[int, List[MetricRow]] = {}
     if has_std:
         metrics_big_pm_fn = build_metrics_for_big_table(lookup=lookup, has_std=True)
@@ -1997,7 +1878,6 @@ def main() -> None:
         )
 
         for k in priorities_cols:
-            # 1) Existing table (mean only) — keep identical filename
             out_tex_mean = out_tables_dir / f"{view.table_stem}_{suffix}_priorities={k}.tex"
             latex_metric_matrix_tables(
                 out_path=out_tex_mean,
@@ -2010,7 +1890,6 @@ def main() -> None:
             )
             produced_tables.append(out_tex_mean)
 
-            # 2) New table (mean ± std) — NEW filename, only if std columns exist
             if has_std:
                 out_tex_pm = out_tables_dir / f"{view.table_stem}_{suffix}_priorities={k}_with_std.tex"
                 latex_metric_matrix_tables(
@@ -2030,7 +1909,7 @@ def main() -> None:
             lookup=lookup,
             df=df_plot,
             out_figures_dir=out_figures_dir,
-            plot_seeds=args.plot_seeds,
+            plot_seeds=plot_seeds,
             seed_col=args.seed_col,
             seed_jitter_frac=args.seed_jitter_frac,
             view=view,
@@ -2066,7 +1945,7 @@ def main() -> None:
             lab2, y_u, y_l, y_d, y_s, y_p = make_mode_delta_series(
                 lookup=lookup,
                 df=df_plot,
-                plot_seeds=args.plot_seeds,
+                plot_seeds=plot_seeds,
                 seed_col=args.seed_col,
                 defpreempt=int(view.defpreempt_value),
                 label=lab,
@@ -2084,7 +1963,7 @@ def main() -> None:
         out_stem_ps = f"grid_periodic_vs_stable_{suffix}"
         make_grid_plot_custom_series(
             df=df_plot,
-            plot_seeds=args.plot_seeds,
+            plot_seeds=plot_seeds,
             seed_col=args.seed_col,
             seed_jitter_frac=args.seed_jitter_frac,
             view=view,
@@ -2142,10 +2021,11 @@ def main() -> None:
     print("")
     print(f"Wrote tables to:  {out_tables_dir}")
     print(f"Wrote figures to: {out_figures_dir}")
-    print(f"Std columns detected: {has_std}")
+    print(f"Input: {in_results}")
+    print(f"Plotting mode: {'ALL SEEDS (default)' if plot_seeds else 'MEAN OVER SEEDS (--mean-seeds)'}")
+    print(f"Std columns available: {has_std}")
     if has_std:
         print("Also wrote additional tables with suffix: _with_std.tex")
-
 
 if __name__ == "__main__":
     main()

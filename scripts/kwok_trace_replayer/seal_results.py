@@ -1,15 +1,22 @@
+# scripts/kwok_trace_replayer/seal_results.py
 #!/usr/bin/env python3
 # scripts/kwok_trace_replayer/seal_results.py
 """
 python -m scripts.kwok_trace_replayer.seal_results --root analysis/kwok_trace_replayer --out-dir analysis/kwok_trace_replayer
 
-Seals KWOK trace replayer outputs into results_paired.csv.
+Seals KWOK trace replayer outputs into ONE file:
+  - results_seeds.csv   (one row per (job_name, plugin_config, seed) with *_mean columns)
 
-This version keeps the existing *_mean columns and additionally computes
-seed-to-seed variability as standard deviation columns *_std for each metric.
+Notes:
+  - We compute per-seed metrics over the common horizon H = min(T_end_default, T_end_plugin).
+  - Latency is computed for "first-batch" pods and stored in milliseconds (ms).
+  - Util deltas are stored in percent (%).
 """
 
-import argparse, json, math, re
+import argparse
+import json
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -52,12 +59,14 @@ LATENCY_S_SCALE = 1000.0  # to milliseconds
 # - we STORE delta_U_* in percent (%) => multiply by 100
 UTIL_TO_PERCENT = 100.0
 
+# Output file (only one)
+OUT_SEEDS_FILENAME = "results_seeds.csv"
 
-# ---- Output schema (paired / aggregated) ----
-PAIRED_MEAN_COLS = [
+# Seed output columns (kept compatible with plotting expectations)
+SEED_OUT_COLS = [
     "job_name",
     "plugin_config",
-    "n_seed",
+    "seed",
     "T_end_s_mean",
     "delta_U_pct_cpu_mean", "delta_U_pct_mem_mean", "delta_U_pct_eff_mean",
     "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
@@ -66,18 +75,6 @@ PAIRED_MEAN_COLS = [
     "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean", "solver_failed_mean",
     "plan_not_applicable_mean", "plan_activated_mean",
 ]
-
-PAIRED_STD_COLS = [
-    "T_end_s_std",
-    "delta_U_pct_cpu_std", "delta_U_pct_mem_std", "delta_U_pct_eff_std",
-    "delta_R_num_p1_std", "delta_R_num_p2_std", "delta_R_num_p3_std", "delta_R_num_p4_std", "delta_R_num_total_std",
-    "delta_D_num_p1_std", "delta_D_num_p2_std", "delta_D_num_p3_std", "delta_D_num_p4_std", "delta_D_num_total_std",
-    "delta_L_ms_p1_std", "delta_L_ms_p2_std", "delta_L_ms_p3_std", "delta_L_ms_p4_std", "delta_L_ms_total_std",
-    "solver_attempts_std", "solver_optimal_std", "solver_feasible_std", "solver_failed_std",
-    "plan_not_applicable_std", "plan_activated_std",
-]
-
-PAIRED_COLS = PAIRED_MEAN_COLS + PAIRED_STD_COLS
 
 OPT_TOTAL_KEYS = {
     "solver_attempts_total": "solver_attempts",
@@ -93,7 +90,7 @@ OPT_TOTAL_KEYS = {
 # -----------------------------
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Seal KWOK trace replayer outputs into results_paired.csv (fast path).")
+    p = argparse.ArgumentParser(description="Seal KWOK trace replayer outputs into results_seeds.csv (fast path).")
     p.add_argument("--root", required=True, help="Root dir containing 'default/' and 'plugin/' subfolders.")
     p.add_argument("--out-dir", default=None, help="Output directory (default: <root>/sealed).")
     p.add_argument("--eps-s", type=float, default=1.0, help="First-batch epsilon window in seconds (default: 1.0).")
@@ -496,7 +493,7 @@ def main() -> None:
 
     eps_s = float(args.eps_s)
 
-    print("Sealing results...")
+    print("Sealing results (writing only results_seeds.csv)...")
 
     default_idx: Dict[Tuple[str, str], Tuple[Path, Path]] = {}
     default_seeds_by_job: Dict[str, set[str]] = {}
@@ -552,6 +549,7 @@ def main() -> None:
                 continue
             if default_general_stats.T_end <= 0.0 or plugin_general_stats.T_end <= 0.0:
                 continue
+
             H = float(min(default_general_stats.T_end, plugin_general_stats.T_end))
             if H <= 0.0:
                 continue
@@ -582,186 +580,54 @@ def main() -> None:
                     "job_name": job_name,
                     "plugin_config": plugin_config,
                     "seed": seed,
-                    "T_end_s": H,
+                    "T_end_s_mean": H,
 
                     # STORED IN percent (%)
-                    "delta_U_pct_cpu": dU_cpu_pct,
-                    "delta_U_pct_mem": dU_mem_pct,
-                    "delta_U_pct_eff": dU_eff_pct,
+                    "delta_U_pct_cpu_mean": dU_cpu_pct,
+                    "delta_U_pct_mem_mean": dU_mem_pct,
+                    "delta_U_pct_eff_mean": dU_eff_pct,
 
-                    "delta_R_num_p1": dR[1],
-                    "delta_R_num_p2": dR[2],
-                    "delta_R_num_p3": dR[3],
-                    "delta_R_num_p4": dR[4],
-                    "delta_R_num_total": dR_total,
+                    "delta_R_num_p1_mean": dR[1],
+                    "delta_R_num_p2_mean": dR[2],
+                    "delta_R_num_p3_mean": dR[3],
+                    "delta_R_num_p4_mean": dR[4],
+                    "delta_R_num_total_mean": dR_total,
 
-                    "delta_D_num_p1": dD[1],
-                    "delta_D_num_p2": dD[2],
-                    "delta_D_num_p3": dD[3],
-                    "delta_D_num_p4": dD[4],
-                    "delta_D_num_total": dD_total,
+                    "delta_D_num_p1_mean": dD[1],
+                    "delta_D_num_p2_mean": dD[2],
+                    "delta_D_num_p3_mean": dD[3],
+                    "delta_D_num_p4_mean": dD[4],
+                    "delta_D_num_total_mean": dD_total,
 
-                    "delta_L_ms_p1": dL_prio[1],
-                    "delta_L_ms_p2": dL_prio[2],
-                    "delta_L_ms_p3": dL_prio[3],
-                    "delta_L_ms_p4": dL_prio[4],
-                    "delta_L_ms_total": dL_total,
+                    "delta_L_ms_p1_mean": dL_prio[1],
+                    "delta_L_ms_p2_mean": dL_prio[2],
+                    "delta_L_ms_p3_mean": dL_prio[3],
+                    "delta_L_ms_p4_mean": dL_prio[4],
+                    "delta_L_ms_total_mean": dL_total,
 
-                    "solver_attempts": float(opt_totals["solver_attempts"]),
-                    "solver_optimal": float(opt_totals["solver_optimal"]),
-                    "solver_feasible": float(opt_totals["solver_feasible"]),
-                    "solver_failed": float(opt_totals["solver_failed"]),
-                    "plan_not_applicable": float(opt_totals["plan_not_applicable"]),
-                    "plan_activated": float(opt_totals["plan_activated"]),
+                    "solver_attempts_mean": float(opt_totals["solver_attempts"]),
+                    "solver_optimal_mean": float(opt_totals["solver_optimal"]),
+                    "solver_feasible_mean": float(opt_totals["solver_feasible"]),
+                    "solver_failed_mean": float(opt_totals["solver_failed"]),
+                    "plan_not_applicable_mean": float(opt_totals["plan_not_applicable"]),
+                    "plan_activated_mean": float(opt_totals["plan_activated"]),
                 }
             )
 
-    df_seed = pd.DataFrame(seed_rows)
-    if df_seed.empty:
-        pd.DataFrame(columns=PAIRED_COLS).to_csv(out_dir / "results_paired.csv", index=False)
-        print(f"Wrote outputs to: {out_dir}")
-        return
+    df_seeds_out = pd.DataFrame(seed_rows)
 
-    # ------------------------------------------------------------
-    # NEW: write per-seed results for --plot-seeds in plots script
-    # ------------------------------------------------------------
-    mean_rename_seed = {
-        "T_end_s": "T_end_s_mean",
-        "delta_U_pct_cpu": "delta_U_pct_cpu_mean",
-        "delta_U_pct_mem": "delta_U_pct_mem_mean",
-        "delta_U_pct_eff": "delta_U_pct_eff_mean",
-        "delta_R_num_p1": "delta_R_num_p1_mean",
-        "delta_R_num_p2": "delta_R_num_p2_mean",
-        "delta_R_num_p3": "delta_R_num_p3_mean",
-        "delta_R_num_p4": "delta_R_num_p4_mean",
-        "delta_R_num_total": "delta_R_num_total_mean",
-        "delta_D_num_p1": "delta_D_num_p1_mean",
-        "delta_D_num_p2": "delta_D_num_p2_mean",
-        "delta_D_num_p3": "delta_D_num_p3_mean",
-        "delta_D_num_p4": "delta_D_num_p4_mean",
-        "delta_D_num_total": "delta_D_num_total_mean",
-        "delta_L_ms_p1": "delta_L_ms_p1_mean",
-        "delta_L_ms_p2": "delta_L_ms_p2_mean",
-        "delta_L_ms_p3": "delta_L_ms_p3_mean",
-        "delta_L_ms_p4": "delta_L_ms_p4_mean",
-        "delta_L_ms_total": "delta_L_ms_total_mean",
-        "solver_attempts": "solver_attempts_mean",
-        "solver_optimal": "solver_optimal_mean",
-        "solver_feasible": "solver_feasible_mean",
-        "solver_failed": "solver_failed_mean",
-        "plan_not_applicable": "plan_not_applicable_mean",
-        "plan_activated": "plan_activated_mean",
-    }
-
-    df_seeds_out = df_seed.rename(columns=mean_rename_seed).copy()
-
-    # Column order: keep consistent with plotting expectations
-    seed_out_cols = [
-        "job_name",
-        "plugin_config",
-        "seed",
-        "T_end_s_mean",
-        "delta_U_pct_cpu_mean", "delta_U_pct_mem_mean", "delta_U_pct_eff_mean",
-        "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
-        "delta_D_num_p1_mean", "delta_D_num_p2_mean", "delta_D_num_p3_mean", "delta_D_num_p4_mean", "delta_D_num_total_mean",
-        "delta_L_ms_p1_mean", "delta_L_ms_p2_mean", "delta_L_ms_p3_mean", "delta_L_ms_p4_mean", "delta_L_ms_total_mean",
-        "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean", "solver_failed_mean",
-        "plan_not_applicable_mean", "plan_activated_mean",
-    ]
-    for c in seed_out_cols:
+    # Ensure schema even when empty
+    for c in SEED_OUT_COLS:
         if c not in df_seeds_out.columns:
             df_seeds_out[c] = np.nan
-    df_seeds_out = df_seeds_out[seed_out_cols]
+    df_seeds_out = df_seeds_out[SEED_OUT_COLS]
 
     round_numeric_df(df_seeds_out, exclude=["job_name", "plugin_config", "seed"])
-    df_seeds_out.to_csv(out_dir / "results_seeds.csv", index=False)
 
+    out_path = out_dir / OUT_SEEDS_FILENAME
+    df_seeds_out.to_csv(out_path, index=False)
 
-    grp = df_seed.groupby(["job_name", "plugin_config"], dropna=False)
-
-    # Mean + std across seeds
-    agg_mean = grp.mean(numeric_only=True)
-    agg_std = grp.std(numeric_only=True)
-
-    agg = agg_mean.reset_index()
-    agg.insert(2, "n_seed", grp.size().to_numpy())
-
-    # Attach std columns
-    std_reset = agg_std.reset_index()
-    std_cols = [c for c in std_reset.columns if c not in {"job_name", "plugin_config"}]
-    for c in std_cols:
-        agg[f"{c}_std"] = std_reset[c].to_numpy()
-
-    # Rename mean columns to *_mean
-    rename_mean = {
-        "T_end_s": "T_end_s_mean",
-        "delta_U_pct_cpu": "delta_U_pct_cpu_mean",
-        "delta_U_pct_mem": "delta_U_pct_mem_mean",
-        "delta_U_pct_eff": "delta_U_pct_eff_mean",
-        "delta_R_num_p1": "delta_R_num_p1_mean",
-        "delta_R_num_p2": "delta_R_num_p2_mean",
-        "delta_R_num_p3": "delta_R_num_p3_mean",
-        "delta_R_num_p4": "delta_R_num_p4_mean",
-        "delta_R_num_total": "delta_R_num_total_mean",
-        "delta_D_num_p1": "delta_D_num_p1_mean",
-        "delta_D_num_p2": "delta_D_num_p2_mean",
-        "delta_D_num_p3": "delta_D_num_p3_mean",
-        "delta_D_num_p4": "delta_D_num_p4_mean",
-        "delta_D_num_total": "delta_D_num_total_mean",
-        "delta_L_ms_p1": "delta_L_ms_p1_mean",
-        "delta_L_ms_p2": "delta_L_ms_p2_mean",
-        "delta_L_ms_p3": "delta_L_ms_p3_mean",
-        "delta_L_ms_p4": "delta_L_ms_p4_mean",
-        "delta_L_ms_total": "delta_L_ms_total_mean",
-        "solver_attempts": "solver_attempts_mean",
-        "solver_optimal": "solver_optimal_mean",
-        "solver_feasible": "solver_feasible_mean",
-        "solver_failed": "solver_failed_mean",
-        "plan_not_applicable": "plan_not_applicable_mean",
-        "plan_activated": "plan_activated_mean",
-    }
-    agg = agg.rename(columns=rename_mean)
-
-    # Rename std columns to match *_std naming (we created <raw>_std above)
-    rename_std = {
-        "T_end_s_std": "T_end_s_std",
-        "delta_U_pct_cpu_std": "delta_U_pct_cpu_std",
-        "delta_U_pct_mem_std": "delta_U_pct_mem_std",
-        "delta_U_pct_eff_std": "delta_U_pct_eff_std",
-        "delta_R_num_p1_std": "delta_R_num_p1_std",
-        "delta_R_num_p2_std": "delta_R_num_p2_std",
-        "delta_R_num_p3_std": "delta_R_num_p3_std",
-        "delta_R_num_p4_std": "delta_R_num_p4_std",
-        "delta_R_num_total_std": "delta_R_num_total_std",
-        "delta_D_num_p1_std": "delta_D_num_p1_std",
-        "delta_D_num_p2_std": "delta_D_num_p2_std",
-        "delta_D_num_p3_std": "delta_D_num_p3_std",
-        "delta_D_num_p4_std": "delta_D_num_p4_std",
-        "delta_D_num_total_std": "delta_D_num_total_std",
-        "delta_L_ms_p1_std": "delta_L_ms_p1_std",
-        "delta_L_ms_p2_std": "delta_L_ms_p2_std",
-        "delta_L_ms_p3_std": "delta_L_ms_p3_std",
-        "delta_L_ms_p4_std": "delta_L_ms_p4_std",
-        "delta_L_ms_total_std": "delta_L_ms_total_std",
-        "solver_attempts_std": "solver_attempts_std",
-        "solver_optimal_std": "solver_optimal_std",
-        "solver_feasible_std": "solver_feasible_std",
-        "solver_failed_std": "solver_failed_std",
-        "plan_not_applicable_std": "plan_not_applicable_std",
-        "plan_activated_std": "plan_activated_std",
-    }
-    agg = agg.rename(columns=rename_std)
-
-    # Ensure all expected output columns exist (means + stds)
-    for c in PAIRED_COLS:
-        if c not in agg.columns:
-            agg[c] = np.nan
-    agg = agg[PAIRED_COLS]
-
-    round_numeric_df(agg, exclude=["job_name", "plugin_config", "n_seed"])
-    agg.to_csv(out_dir / "results_paired.csv", index=False)
-
-    print(f"Wrote outputs to: {out_dir}")
+    print(f"Wrote: {out_path}")
 
 if __name__ == "__main__":
     main()
