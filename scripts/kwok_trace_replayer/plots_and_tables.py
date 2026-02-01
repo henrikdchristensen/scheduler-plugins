@@ -205,6 +205,17 @@ DELTA_SERIES: List[Tuple[str, str, str, int]] = [
     ("SQ 2→8 (B)", "stable-queue-2s", "stable-queue-8s", 1),
 ]
 
+DELTA_NAMES = [d[0] for d in DELTA_SERIES]
+
+# Metric columns used in delta computations
+DELTA_METRIC_COLS = [
+    "delta_U_pct_eff_mean",
+    "delta_L_ms_total_mean",
+    "delta_D_num_total_mean",
+    "solver_attempts_mean",
+    "plan_activated_mean",
+]
+
 # =============================================================================
 # Plot styling / layout
 # =============================================================================
@@ -440,22 +451,31 @@ def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
     return _generic_aggregate_mean_std(df_seeds, group_cols)
 
 
+def _build_lookup_from_df(df: pd.DataFrame, key_cols: List[str]) -> pd.DataFrame:
+    """Build a lookup DataFrame indexed by key columns."""
+    return df.drop_duplicates(subset=key_cols, keep="first").set_index(key_cols).sort_index()
+
+
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
-    return df.drop_duplicates(subset=KEY_COLS_MAIN, keep="first").set_index(KEY_COLS_MAIN).sort_index()
+    return _build_lookup_from_df(df, KEY_COLS_MAIN)
 
 
-def lookup_val(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str) -> float:
-    key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
+def _safe_lookup(lookup: pd.DataFrame, key: Tuple, col: str) -> float:
+    """Safely lookup a value from a DataFrame index, returning NaN if not found."""
     try:
         return float(lookup.at[key, col])
     except KeyError:
         return float("nan")
 
 
+def lookup_val(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str) -> float:
+    key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
+    return _safe_lookup(lookup, key, col)
+
+
 def lookup_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col_mean: str) -> Tuple[float, float]:
-    m = lookup_val(lookup, nodes=nodes, priorities=priorities, arrival_s=arrival_s, rk=rk, col=col_mean)
-    s = lookup_val(lookup, nodes=nodes, priorities=priorities, arrival_s=arrival_s, rk=rk, col=f"{col_mean}_std")
-    return m, s
+    key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
+    return _safe_lookup(lookup, key, col_mean), _safe_lookup(lookup, key, f"{col_mean}_std")
 
 
 # =============================================================================
@@ -471,14 +491,6 @@ def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
     Output rows:
       nodes, priorities, arrival_s, defpreempt, seed, delta_name, <metric cols>
     """
-    metric_cols = [
-        "delta_U_pct_eff_mean",
-        "delta_L_ms_total_mean",
-        "delta_D_num_total_mean",
-        "solver_attempts_mean",
-        "plan_activated_mean",
-    ]
-
     out_rows: List[pd.DataFrame] = []
 
     base_cols = ["nodes", "priorities", "arrival_s", "defpreempt", SEED_COL]
@@ -487,8 +499,8 @@ def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
         left = df_seeds[(df_seeds["mode"] == canonical_mode(left_mode)) & (df_seeds["blocking"] == int(blocking))].copy()
         right = df_seeds[(df_seeds["mode"] == canonical_mode(right_mode)) & (df_seeds["blocking"] == int(blocking))].copy()
 
-        left = left[base_cols + metric_cols].rename(columns={c: f"{c}_L" for c in metric_cols})
-        right = right[base_cols + metric_cols].rename(columns={c: f"{c}_R" for c in metric_cols})
+        left = left[base_cols + DELTA_METRIC_COLS].rename(columns={c: f"{c}_L" for c in DELTA_METRIC_COLS})
+        right = right[base_cols + DELTA_METRIC_COLS].rename(columns={c: f"{c}_R" for c in DELTA_METRIC_COLS})
 
         merged = right.merge(left, on=base_cols, how="inner")
         if merged.empty:
@@ -496,7 +508,7 @@ def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
 
         d = merged[base_cols].copy()
         d["delta_name"] = delta_name
-        for c in metric_cols:
+        for c in DELTA_METRIC_COLS:
             d[c] = merged[f"{c}_R"] - merged[f"{c}_L"]
 
         out_rows.append(d)
@@ -516,20 +528,12 @@ def aggregate_delta_mean_std(df_delta_seeds: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_lookup_deltas(df_delta_meanstd: pd.DataFrame) -> pd.DataFrame:
-    return df_delta_meanstd.drop_duplicates(subset=DELTA_KEY_COLS, keep="first").set_index(DELTA_KEY_COLS).sort_index()
+    return _build_lookup_from_df(df_delta_meanstd, DELTA_KEY_COLS)
 
 
 def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, defpreempt: int, delta_name: str, col_mean: str) -> Tuple[float, float]:
     key = (int(nodes), int(priorities), float(arrival_s), int(defpreempt), str(delta_name))
-    try:
-        m = float(lookup.at[key, col_mean])
-    except KeyError:
-        m = float("nan")
-    try:
-        s = float(lookup.at[key, f"{col_mean}_std"])
-    except KeyError:
-        s = float("nan")
-    return m, s
+    return _safe_lookup(lookup, key, col_mean), _safe_lookup(lookup, key, f"{col_mean}_std")
 
 
 # =============================================================================
@@ -756,26 +760,23 @@ def values_from_df_seeds(
     return vals
 
 
+def _compute_scaled_ylim(max_val: float, symmetric: bool = False, scale_factor: float = 1.08) -> Tuple[float, float]:
+    """Compute y-axis limits with scaling."""
+    hi = max_val * scale_factor if max_val > 0 else 1.0
+    return (-float(hi), float(hi)) if symmetric else (0.0, float(hi))
+
+
 def compute_nonnegative_ylim_main(lookup_main: pd.DataFrame, *, series_all: List[RowKey], nodes_order: List[int], arrivals_order: List[float], priorities_cols: List[int], col: str) -> Tuple[float, float]:
-    vals: List[float] = []
-    for rk in series_all:
-        for n in nodes_order:
-            for a in arrivals_order:
-                for k in priorities_cols:
-                    v = lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
-                    if is_finite(v):
-                        vals.append(float(v))
-    m = max(vals) if vals else 0.0
-    hi = m * 1.08 if m > 0 else 1.0
-    return (0.0, float(hi))
+    vals = [lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
+            for rk in series_all for n in nodes_order for a in arrivals_order for k in priorities_cols
+            if is_finite(lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col))]
+    return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=False)
 
 
 def compute_symmetric_ylim_deltas(df_delta_meanstd: pd.DataFrame, *, priorities_cols: List[int], col: str) -> Tuple[float, float]:
     sub = df_delta_meanstd[df_delta_meanstd["priorities"].isin(priorities_cols)]
     vals = [abs(float(v)) for v in sub[col].tolist() if is_finite(v)]
-    m = max(vals) if vals else 0.0
-    hi = m * 1.08 if m > 0 else 1.0
-    return (-float(hi), float(hi))
+    return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=True)
 
 
 # =============================================================================
@@ -940,11 +941,10 @@ def make_grid_periodic_vs_stable(
     ylim_plans: Tuple[float, float],
     out_stem: str,
 ) -> None:
-    delta_names = [d[0] for d in DELTA_SERIES]
     cmap = plt.get_cmap("Set2").colors
 
     # Create fake series for coloring
-    fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(delta_names))]
+    fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(DELTA_NAMES))]
 
     def color_override(rk: RowKey) -> Any:
         idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
@@ -952,50 +952,32 @@ def make_grid_periodic_vs_stable(
 
     def y_function_factory(col: str) -> YOfFn:
         """Creates y-value function for deltas that dispatches based on RowKey."""
-        # Build individual delta functions
-        delta_fns = []
-        for delta_name in delta_names:
+        # Build individual delta functions with cleaner closure handling
+        def make_delta_fn(delta_name: str):
             if plot_seeds:
-                def make_seed_fn(dn=delta_name):  # Capture delta_name
-                    def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
-                        sub = df_delta_seeds[
-                            (df_delta_seeds["defpreempt"] == int(defpreempt))
-                            & (df_delta_seeds["nodes"] == int(nodes))
-                            & (df_delta_seeds["priorities"] == int(priorities))
-                            & (df_delta_seeds["arrival_s"] == float(a))
-                            & (df_delta_seeds["delta_name"] == str(dn))
-                        ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
-                        return [float(v) for v in sub[col].tolist() if is_finite(v)]
-                    return _y
-                delta_fns.append(make_seed_fn())
+                def _y(_rk: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
+                    sub = df_delta_seeds[
+                        (df_delta_seeds["defpreempt"] == defpreempt) &
+                        (df_delta_seeds["nodes"] == nodes) &
+                        (df_delta_seeds["priorities"] == priorities) &
+                        (df_delta_seeds["arrival_s"] == a) &
+                        (df_delta_seeds["delta_name"] == delta_name)
+                    ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
+                    return [float(v) for v in sub[col].tolist() if is_finite(v)]
             else:
-                def make_mean_fn(dn=delta_name):  # Capture delta_name
-                    def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> float:
-                        m, _s = lookup_delta_mean_std(
-                            lookup_deltas,
-                            nodes=nodes,
-                            priorities=priorities,
-                            arrival_s=a,
-                            defpreempt=defpreempt,
-                            delta_name=dn,
-                            col_mean=col,
-                        )
-                        return float(m)
-                    return _y
-                delta_fns.append(make_mean_fn())
-
-        # Return dispatcher function
-        def _dispatcher(rk: RowKey, nodes: int, a: float, priorities: int) -> YVal:
-            idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
-            return delta_fns[idx](rk, nodes, a, priorities)
-
-        return _dispatcher
+                def _y(_rk: RowKey, nodes: int, a: float, priorities: int) -> float:
+                    m, _s = lookup_delta_mean_std(lookup_deltas, nodes=nodes, priorities=priorities, arrival_s=a, defpreempt=defpreempt, delta_name=delta_name, col_mean=col)
+                    return float(m)
+            return _y
+        
+        delta_fns = {i: make_delta_fn(dn) for i, dn in enumerate(DELTA_NAMES)}
+        return lambda rk, nodes, a, priorities: delta_fns[int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0](rk, nodes, a, priorities)
 
     _make_grid_unified(
         y_function_factory=y_function_factory,
         series=fake_series,
         color_override=color_override,
-        legend_labels=delta_names,
+        legend_labels=DELTA_NAMES,
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
         priorities_cols=priorities_cols,
@@ -1129,8 +1111,7 @@ def latex_table_periodic_vs_stable(
     arrivals_order: List[float],
 ) -> None:
     # Two delta columns per arrival
-    delta_cols = [d[0] for d in DELTA_SERIES]
-    n_modes = len(delta_cols)
+    n_modes = len(DELTA_NAMES)
     n_arr = len(arrivals_order)
     total_cols = 1 + n_modes * n_arr
     tab_spec = "l" + " c" * (total_cols - 1)
@@ -1154,7 +1135,7 @@ def latex_table_periodic_vs_stable(
         tex_lines.append(r"\addlinespace[0.2em]")
         tex_lines.append(" & " + " & ".join([rf"\multicolumn{{{n_modes}}}{{c}}{{inter-arrival = {fmt_arrival_value(a)}\,s}}" for a in arrivals_order]) + r" \\")
         tex_lines.append("".join(cmid))
-        tex_lines.append(" & " + " & ".join([c for _a in arrivals_order for c in delta_cols]) + r" \\")
+        tex_lines.append(" & " + " & ".join([c for _a in arrivals_order for c in DELTA_NAMES]) + r" \\")
         tex_lines.append(r"\midrule")
 
         for ni, n in enumerate(nodes_order):
@@ -1166,7 +1147,7 @@ def latex_table_periodic_vs_stable(
             for ms in METRICS_DELTAS:
                 cells: List[str] = []
                 for a in arrivals_order:
-                    for name in delta_cols:
+                    for name in DELTA_NAMES:
                         m, sd = lookup_delta_mean_std(
                             lookup_deltas,
                             nodes=n,
@@ -1230,80 +1211,33 @@ def main() -> None:
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
 
-    # -------------------------
-    # MAIN tables (always 8)
-    # -------------------------
+    # Generate all tables
     for defpreempt in (1, 0):
         for k in PRIORITIES_TO_SHOW:
             for std in (0, 1):
                 out_tex = OUT_TABLES_DIR / f"table_main_defaultpreemption={defpreempt}_priorities={k}_std={std}.tex"
-                latex_table_main(
-                    out_path=out_tex,
-                    lookup_main=lookup_main,
-                    defpreempt=defpreempt,
-                    priorities=k,
-                    std=std,
-                    nodes_order=nodes_order,
-                    arrivals_order=arrivals_order,
-                )
+                latex_table_main(out_path=out_tex, lookup_main=lookup_main, defpreempt=defpreempt, priorities=k, std=std, nodes_order=nodes_order, arrivals_order=arrivals_order)
                 produced_tables.append(out_tex)
-
-    # ------------------------------------------
-    # PERIODIC vs STABLE tables (always 4)
-    # ------------------------------------------
+    
     for k in PRIORITIES_TO_SHOW:
         for std in (0, 1):
             out_tex = OUT_TABLES_DIR / f"table_periodic_vs_stable_priorities={k}_std={std}.tex"
-            latex_table_periodic_vs_stable(
-                out_path=out_tex,
-                lookup_deltas=lookup_deltas,
-                priorities=k,
-                std=std,
-                nodes_order=nodes_order,
-                arrivals_order=arrivals_order,
-            )
+            latex_table_periodic_vs_stable(out_path=out_tex, lookup_deltas=lookup_deltas, priorities=k, std=std, nodes_order=nodes_order, arrivals_order=arrivals_order)
             produced_tables.append(out_tex)
 
-    # -------------------------
-    # MAIN figures (always 8 stems -> png/pdf)
-    # -------------------------
+    # Generate all figures
     for defpreempt in (1, 0):
         for plot_seeds in (False, True):
             seeds_flag = 1 if plot_seeds else 0
             out_stem = f"grid_main_defaultpreemption={defpreempt}_seeds={seeds_flag}"
-            make_grid_main(
-                df_seeds=df_seeds,
-                lookup_main=lookup_main,
-                plot_seeds=plot_seeds,
-                defpreempt=defpreempt,
-                nodes_order=nodes_order,
-                arrivals_order=arrivals_order,
-                priorities_cols=PRIORITIES_TO_SHOW,
-                ylim_solver=ylim_solver_main,
-                ylim_plans=ylim_plans_main,
-                out_stem=out_stem,
-            )
+            make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=plot_seeds, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=out_stem)
             produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.png", OUT_FIGURES_DIR / f"{out_stem}.pdf"])
-
-    # -------------------------
-    # PERIODIC vs STABLE figures (always 8 stems -> png/pdf)
-    # -------------------------
+    
     for defpreempt in (1, 0):
         for plot_seeds in (False, True):
             seeds_flag = 1 if plot_seeds else 0
             out_stem = f"grid_periodic_vs_stable_defaultpreemption={defpreempt}_seeds={seeds_flag}"
-            make_grid_periodic_vs_stable(
-                df_delta_seeds=df_delta_seeds,
-                lookup_deltas=lookup_deltas,
-                plot_seeds=plot_seeds,
-                defpreempt=defpreempt,
-                nodes_order=nodes_order,
-                arrivals_order=arrivals_order,
-                priorities_cols=PRIORITIES_TO_SHOW,
-                ylim_solver=ylim_solver_deltas,
-                ylim_plans=ylim_plans_deltas,
-                out_stem=out_stem,
-            )
+            make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=plot_seeds, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=out_stem)
             produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.png", OUT_FIGURES_DIR / f"{out_stem}.pdf"])
 
     # Summary
@@ -1313,7 +1247,6 @@ def main() -> None:
     print("\nFigures:")
     for p in produced_figs:
         print(f"  - {p}")
-
 
 if __name__ == "__main__":
     main()
