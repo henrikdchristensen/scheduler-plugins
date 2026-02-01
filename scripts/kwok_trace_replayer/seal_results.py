@@ -19,22 +19,31 @@ from scripts.kwok_trace_replayer.trace_helpers import rs_prefix_from_pod_name
 # =============================================================================
 
 ROOT_DIR = Path("analysis/kwok_trace_replayer")
-OUT_DIR = ROOT_DIR  # results_seeds.csv will be written here
+DEFAULT_ROOT = ROOT_DIR / "default"
+PLUGIN_ROOT = ROOT_DIR / "plugin"
+
+OUT_DIR = ROOT_DIR
+OUT_FILENAME = "results_seeds.csv"
 
 # First-batch epsilon window (seconds)
+# eps_s=1.0 means: include pods with apply_time <= t0 + 1.0s,
+# where t0 = min(apply_time) for the rs_prefix.
 EPS_S = 1.0
 
-# Rounding for numeric output
+# Number of decimals for float rounding in output CSV
 FLOAT_DECIMALS = 4
 
 # =============================================================================
 # Filenames / columns
 # =============================================================================
 
+JOB_RE = re.compile(r"nodes=?(\d+).*prio=?(\d+).*arrival=?([0-9.]+)s?", re.IGNORECASE)
+
 GENERAL_STATS_FILENAME = "general_stats.csv"
 POD_STATS_FILENAME = "pod_stats.csv"
 OPT_STATS_FILENAME = "optimization_stats.json"
 
+# Columns in replayer CSVs
 TIME_COL = "time_s"
 CPU_RUN_COL = "cpu_run_util"
 MEM_RUN_COL = "mem_run_util"
@@ -47,14 +56,14 @@ POD_UID_COL = "pod_uid"
 POD_PRIO_COL = "priority"
 POD_TIME_COL = "time_s"
 
-MAX_K_OUT = 4
+MAX_PRIORITIES = 4
 
+# Conversion factors
 LATENCY_S_TO_MS = 1000.0
 UTIL_TO_PERCENT = 100.0
 
-OUT_SEEDS_FILENAME = "results_seeds.csv"
-
-SEED_OUT_COLS = [
+# Output columns
+OUT_COLS = [
     "job_name",
     "plugin_config",
     "seed",
@@ -67,6 +76,7 @@ SEED_OUT_COLS = [
     "plan_not_applicable_mean","plan_activated_mean",
 ]
 
+# Optimization stats keys mapping
 OPT_TOTAL_KEYS = {
     "solver_attempts_total": "solver_attempts",
     "best_solver_optimal_total": "solver_optimal",
@@ -80,7 +90,6 @@ OPT_TOTAL_KEYS = {
 # Types
 # =============================================================================
 
-
 @dataclass(frozen=True)
 class GeneralData:
     t: np.ndarray  # normalized time (starts at 0)
@@ -88,48 +97,36 @@ class GeneralData:
     cpu_util: np.ndarray
     mem_util: np.ndarray
     eff_util: np.ndarray
-    pods_running: np.ndarray  # (n, MAX_K_OUT)
-    pods_deleted: np.ndarray  # (n, MAX_K_OUT)
+    pods_running: np.ndarray
+    pods_deleted: np.ndarray
     cum_cpu_util: np.ndarray
     cum_mem_util: np.ndarray
     cum_eff_util: np.ndarray
-    cum_pods_running: np.ndarray  # (n, MAX_K_OUT)
+    cum_pods_running: np.ndarray
 
 
 # =============================================================================
-# Parsing helpers (directory names)
+# Parsing helpers
 # =============================================================================
 
-_JOB_RE = re.compile(r"nodes=?(\d+).*prio=?(\d+).*arrival=?([0-9.]+)s?", re.IGNORECASE)
-
-
-def _arrival_str(arrival: float) -> str:
+def arrival_str(arrival: float) -> str:
+    """
+    Format arrival time as string, removing trailing .0 if integer.
+    """
     return str(int(arrival)) if abs(arrival - round(arrival)) < 1e-9 else f"{arrival:g}"
-
 
 def parse_job_dir_name(name: str) -> Optional[str]:
     """
+    Parse job dir name into canonical job name.
     Example: nodes=16_prio=2_arrival=10s  -> nodes=16_prio=2_arrival=10s
     """
-    m = _JOB_RE.search(str(name))
+    m = JOB_RE.search(str(name))
     if not m:
         return None
-    n = int(m.group(1))
-    pr = int(m.group(2))
-    a = float(m.group(3))
-    return f"nodes={n}_prio={pr}_arrival={_arrival_str(a)}s"
-
-
-def canonicalize_mode(mode: str) -> str:
-    """
-    Only canonicalize scheduling-failure to: schedulingfailure
-    """
-    s = str(mode).strip().lower()
-    s_compact = s.replace("-", "").replace("_", "")
-    if s_compact in {"schedulingfailure", "schedfailure", "scheduingfailure"}:
-        return "schedulingfailure"
-    return s
-
+    nodes = int(m.group(1))
+    priorities = int(m.group(2))
+    arrival = float(m.group(3))
+    return f"nodes={nodes}_prio={priorities}_arrival={arrival_str(arrival)}s"
 
 def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     """
@@ -153,9 +150,8 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     except Exception:
         return None
 
-    job_name = f"nodes={n}_prio={pr}_arrival={_arrival_str(a)}s"
-
-    mode = canonicalize_mode(kv.get("mode", "unknown"))
+    job_name = f"nodes={n}_prio={pr}_arrival={arrival_str(a)}s"
+    mode = kv.get("mode", "unknown").strip().lower()
     blocking = 1 if kv.get("blocking", "0").strip().lower() in {"1", "true", "yes"} else 0
     defpreempt = int(str(kv.get("defpreempt", "0")).strip()) if "defpreempt" in kv else 0
 
@@ -269,7 +265,7 @@ def value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
 
 def read_general_data(general_csv: Path) -> GeneralData:
     cols_needed = {TIME_COL, CPU_RUN_COL, MEM_RUN_COL}
-    for p in range(1, MAX_K_OUT + 1):
+    for p in range(1, MAX_PRIORITIES + 1):
         cols_needed.add(f"{RUNNING_PREFIX}{p}")
         cols_needed.add(f"{DELETIONS_CUM_PREFIX}{p}")
 
@@ -283,12 +279,12 @@ def read_general_data(general_csv: Path) -> GeneralData:
             cpu_util=np.array([], dtype=float),
             mem_util=np.array([], dtype=float),
             eff_util=np.array([], dtype=float),
-            pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
-            pods_deleted=np.zeros((0, MAX_K_OUT), dtype=float),
+            pods_running=np.zeros((0, MAX_PRIORITIES), dtype=float),
+            pods_deleted=np.zeros((0, MAX_PRIORITIES), dtype=float),
             cum_cpu_util=np.array([], dtype=float),
             cum_mem_util=np.array([], dtype=float),
             cum_eff_util=np.array([], dtype=float),
-            cum_pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
+            cum_pods_running=np.zeros((0, MAX_PRIORITIES), dtype=float),
         )
 
     df = df.sort_values(TIME_COL, kind="mergesort")
@@ -304,22 +300,22 @@ def read_general_data(general_csv: Path) -> GeneralData:
             cpu_util=np.array([], dtype=float),
             mem_util=np.array([], dtype=float),
             eff_util=np.array([], dtype=float),
-            pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
-            pods_deleted=np.zeros((0, MAX_K_OUT), dtype=float),
+            pods_running=np.zeros((0, MAX_PRIORITIES), dtype=float),
+            pods_deleted=np.zeros((0, MAX_PRIORITIES), dtype=float),
             cum_cpu_util=np.array([], dtype=float),
             cum_mem_util=np.array([], dtype=float),
             cum_eff_util=np.array([], dtype=float),
-            cum_pods_running=np.zeros((0, MAX_K_OUT), dtype=float),
+            cum_pods_running=np.zeros((0, MAX_PRIORITIES), dtype=float),
         )
 
     cpu = pd.to_numeric(df.get(CPU_RUN_COL, 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float)
     mem = pd.to_numeric(df.get(MEM_RUN_COL, 0.0), errors="coerce").fillna(0.0).to_numpy(dtype=float)
     eff = np.maximum(cpu, mem)
 
-    pods_running = np.zeros((t.size, MAX_K_OUT), dtype=float)
-    pods_deleted = np.full((t.size, MAX_K_OUT), np.nan, dtype=float)
+    pods_running = np.zeros((t.size, MAX_PRIORITIES), dtype=float)
+    pods_deleted = np.full((t.size, MAX_PRIORITIES), np.nan, dtype=float)
 
-    for i, p in enumerate(range(1, MAX_K_OUT + 1)):
+    for i, p in enumerate(range(1, MAX_PRIORITIES + 1)):
         rc = f"{RUNNING_PREFIX}{p}"
         dc = f"{DELETIONS_CUM_PREFIX}{p}"
         if rc in df.columns:
@@ -349,12 +345,12 @@ def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
         "U_mem_mean": mean_over_horizon(t, g.mem_util, g.cum_mem_util, H),
         "U_eff_mean": mean_over_horizon(t, g.eff_util, g.cum_eff_util, H),
     }
-    for i, p in enumerate(range(1, MAX_K_OUT + 1)):
+    for i, p in enumerate(range(1, MAX_PRIORITIES + 1)):
         out[f"R_p{p}_mean"] = mean_over_horizon(t, g.pods_running[:, i], g.cum_pods_running[:, i], H)
         out[f"D_p{p}"] = value_at_horizon(t, g.pods_deleted[:, i], H)
 
-    out["R_total_mean"] = float(np.nansum([out[f"R_p{p}_mean"] for p in range(1, MAX_K_OUT + 1)]))
-    out["D_total"] = float(np.nansum([out[f"D_p{p}"] for p in range(1, MAX_K_OUT + 1)]))
+    out["R_total_mean"] = float(np.nansum([out[f"R_p{p}_mean"] for p in range(1, MAX_PRIORITIES + 1)]))
+    out["D_total"] = float(np.nansum([out[f"D_p{p}"] for p in range(1, MAX_PRIORITIES + 1)]))
     return out
 
 
@@ -370,7 +366,7 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
 
     First-batch: for each rs_prefix, take t0=min(apply), include apply times within eps_s of t0.
     """
-    nan_out = {**{f"L_ms_p{p}": float("nan") for p in range(1, MAX_K_OUT + 1)}, "L_ms_total": float("nan")}
+    nan_out = {**{f"L_ms_p{p}": float("nan") for p in range(1, MAX_PRIORITIES + 1)}, "L_ms_total": float("nan")}
 
     pod_df = read_pod(pod_csv).dropna(subset=[POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL])
     if pod_df.empty:
@@ -414,7 +410,7 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
 
     prios = batch[POD_PRIO_COL].to_numpy(dtype=float)
     lat = batch["latency_ms"].to_numpy(dtype=float)
-    for p in range(1, MAX_K_OUT + 1):
+    for p in range(1, MAX_PRIORITIES + 1):
         mask = prios == float(p)
         out[f"L_ms_p{p}"] = float(np.nanmean(lat[mask])) if np.any(mask) else float("nan")
 
@@ -440,22 +436,20 @@ def round_numeric_df(df: pd.DataFrame, exclude: Optional[List[str]] = None) -> p
 
 
 def main() -> None:
-    default_root = ROOT_DIR / "default"
-    plugin_root = ROOT_DIR / "plugin"
 
-    if not default_root.exists():
-        raise SystemExit(f"Not found: {default_root}")
-    if not plugin_root.exists():
-        raise SystemExit(f"Not found: {plugin_root}")
+    if not DEFAULT_ROOT.exists():
+        raise SystemExit(f"Not found: {DEFAULT_ROOT}")
+    if not PLUGIN_ROOT.exists():
+        raise SystemExit(f"Not found: {PLUGIN_ROOT}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / OUT_SEEDS_FILENAME
+    out_path = OUT_DIR / OUT_FILENAME
 
     # Index default runs by (job_name, seed) -> (general_csv, pod_csv)
     default_idx: Dict[Tuple[str, str], Tuple[Path, Path]] = {}
     default_seeds_by_job: Dict[str, set[str]] = {}
 
-    for job_dir in sorted(default_root.iterdir()):
+    for job_dir in sorted(DEFAULT_ROOT.iterdir()):
         if not job_dir.is_dir():
             continue
         job_name = parse_job_dir_name(job_dir.name)
@@ -470,7 +464,7 @@ def main() -> None:
 
     rows: List[Dict[str, object]] = []
 
-    for run_dir in sorted(plugin_root.iterdir()):
+    for run_dir in sorted(PLUGIN_ROOT.iterdir()):
         if not run_dir.is_dir():
             continue
         parsed = parse_plugin_run_dir(run_dir.name)
@@ -515,15 +509,15 @@ def main() -> None:
             dU_mem_pct = (float(plugin_m["U_mem_mean"]) - float(default_m["U_mem_mean"])) * UTIL_TO_PERCENT
             dU_eff_pct = (float(plugin_m["U_eff_mean"]) - float(default_m["U_eff_mean"])) * UTIL_TO_PERCENT
 
-            dR = {p: float(plugin_m[f"R_p{p}_mean"]) - float(default_m[f"R_p{p}_mean"]) for p in range(1, MAX_K_OUT + 1)}
-            dD = {p: float(plugin_m[f"D_p{p}"]) - float(default_m[f"D_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
+            dR = {p: float(plugin_m[f"R_p{p}_mean"]) - float(default_m[f"R_p{p}_mean"]) for p in range(1, MAX_PRIORITIES + 1)}
+            dD = {p: float(plugin_m[f"D_p{p}"]) - float(default_m[f"D_p{p}"]) for p in range(1, MAX_PRIORITIES + 1)}
             dR_total = float(np.nansum(list(dR.values())))
             dD_total = float(np.nansum(list(dD.values())))
 
             default_L = latency_means_first_batch_ms(default_pod_csv, eps_s=EPS_S)
             plugin_L = latency_means_first_batch_ms(plugin_pod_csv, eps_s=EPS_S)
             dL_total = float(plugin_L["L_ms_total"]) - float(default_L["L_ms_total"])
-            dL_prio = {p: float(plugin_L[f"L_ms_p{p}"]) - float(default_L[f"L_ms_p{p}"]) for p in range(1, MAX_K_OUT + 1)}
+            dL_prio = {p: float(plugin_L[f"L_ms_p{p}"]) - float(default_L[f"L_ms_p{p}"]) for p in range(1, MAX_PRIORITIES + 1)}
 
             opt = read_optimization_stats(plugin_opt_json)
 
@@ -563,10 +557,10 @@ def main() -> None:
     df = pd.DataFrame(rows)
 
     # Ensure schema even when empty
-    for c in SEED_OUT_COLS:
+    for c in OUT_COLS:
         if c not in df.columns:
             df[c] = np.nan
-    df = df[SEED_OUT_COLS]
+    df = df[OUT_COLS]
 
     round_numeric_df(df, exclude=["job_name", "plugin_config", "seed"])
     df.to_csv(out_path, index=False)

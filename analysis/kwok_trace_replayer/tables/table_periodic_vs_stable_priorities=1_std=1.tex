@@ -2,29 +2,29 @@
 % periodic vs stable, defpreempt=1
 % ------------------------------------------------------------
 
-\begin{tabular}{l c c c c c c c c c c}
+\begin{tabular}{l c c c c c c c c}
 \toprule
-\multicolumn{11}{l}{Mode $\Delta$ (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), \#priorities = 1, defaultpreemption = 1} \\
+\multicolumn{9}{l}{Mode $\Delta$ (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), \#priorities = 1, defaultpreemption = 1} \\
 \addlinespace[0.2em]
- & \multicolumn{2}{c}{inter-arrival = 1\,s} & \multicolumn{2}{c}{inter-arrival = 2\,s} & \multicolumn{2}{c}{inter-arrival = 4\,s} & \multicolumn{2}{c}{inter-arrival = 8\,s} & \multicolumn{2}{c}{inter-arrival = 16\,s} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(lr){10-11}
- & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) \\
+ & \multicolumn{2}{c}{inter-arrival = 2\,s} & \multicolumn{2}{c}{inter-arrival = 4\,s} & \multicolumn{2}{c}{inter-arrival = 8\,s} & \multicolumn{2}{c}{inter-arrival = 16\,s} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+ & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) \\
 \midrule
-\multicolumn{11}{l}{\#nodes = 16} \\
+\multicolumn{9}{l}{\#nodes = 16} \\
 \midrule
-$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.20\,\pm\,0.17} & \ensuremath{-0.39\,\pm\,0.11} & \ensuremath{-0.78\,\pm\,0.11} & \ensuremath{-0.26\,\pm\,0.17} & \ensuremath{-0.55\,\pm\,0.42} & \ensuremath{-0.23\,\pm\,0.08} & \ensuremath{-0.55\,\pm\,0.18} & \ensuremath{-0.24\,\pm\,0.09} & \ensuremath{-0.60\,\pm\,0.17} & \ensuremath{-0.20\,\pm\,0.04} \\
-$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{+21\,\pm\,65} & \ensuremath{-24\,\pm\,21} & \ensuremath{-14\,\pm\,78} & \ensuremath{+34\,\pm\,24} & \ensuremath{+23\,\pm\,486} & \ensuremath{-41\,\pm\,105} & \ensuremath{+128\,\pm\,660} & \ensuremath{+565\,\pm\,380} & \ensuremath{+2202\,\pm\,1214} & \ensuremath{+316\,\pm\,678} \\
-$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{+46.7\,\pm\,74.1} & \ensuremath{-55.0\,\pm\,22.1} & \ensuremath{-35.3\,\pm\,59.5} & \ensuremath{-82.0\,\pm\,69.1} & \ensuremath{+22.0\,\pm\,97.5} & \ensuremath{-105.3\,\pm\,28.4} & \ensuremath{-42.3\,\pm\,37.4} & \ensuremath{-93.0\,\pm\,38.2} & \ensuremath{-58.0\,\pm\,4.4} & \ensuremath{-35.3\,\pm\,23.3} \\
-$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-18.7\,\pm\,2.5} & \ensuremath{-265.3\,\pm\,19.0} & \ensuremath{-29.0\,\pm\,4.6} & \ensuremath{-256.7\,\pm\,33.2} & \ensuremath{-36.3\,\pm\,4.9} & \ensuremath{-184.7\,\pm\,18.5} & \ensuremath{-27.3\,\pm\,5.7} & \ensuremath{-135.7\,\pm\,4.5} & \ensuremath{-37.3\,\pm\,16.2} & \ensuremath{-80.7\,\pm\,26.3} \\
-$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-16.0\,\pm\,3.5} & \ensuremath{-47.7\,\pm\,5.0} & \ensuremath{-23.7\,\pm\,4.7} & \ensuremath{-47.0\,\pm\,1.7} & \ensuremath{-23.0\,\pm\,3.6} & \ensuremath{-36.0\,\pm\,2.6} & \ensuremath{-18.3\,\pm\,3.1} & \ensuremath{-25.7\,\pm\,10.6} & \ensuremath{-19.0\,\pm\,6.1} & \ensuremath{-16.0\,\pm\,8.2} \\
+$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.78\,\pm\,0.11} & \ensuremath{-0.26\,\pm\,0.17} & \ensuremath{-0.55\,\pm\,0.42} & \ensuremath{-0.23\,\pm\,0.08} & \ensuremath{-0.55\,\pm\,0.18} & \ensuremath{-0.24\,\pm\,0.09} & \ensuremath{-0.60\,\pm\,0.17} & \ensuremath{-0.20\,\pm\,0.04} \\
+$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{-14\,\pm\,78} & \ensuremath{+34\,\pm\,24} & \ensuremath{+23\,\pm\,486} & \ensuremath{-41\,\pm\,105} & \ensuremath{+128\,\pm\,660} & \ensuremath{+565\,\pm\,380} & \ensuremath{+2202\,\pm\,1214} & \ensuremath{+316\,\pm\,678} \\
+$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{-35.3\,\pm\,59.5} & \ensuremath{-82.0\,\pm\,69.1} & \ensuremath{+22.0\,\pm\,97.5} & \ensuremath{-105.3\,\pm\,28.4} & \ensuremath{-42.3\,\pm\,37.4} & \ensuremath{-93.0\,\pm\,38.2} & \ensuremath{-58.0\,\pm\,4.4} & \ensuremath{-35.3\,\pm\,23.3} \\
+$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-29.0\,\pm\,4.6} & \ensuremath{-256.7\,\pm\,33.2} & \ensuremath{-36.3\,\pm\,4.9} & \ensuremath{-184.7\,\pm\,18.5} & \ensuremath{-27.3\,\pm\,5.7} & \ensuremath{-135.7\,\pm\,4.5} & \ensuremath{-37.3\,\pm\,16.2} & \ensuremath{-80.7\,\pm\,26.3} \\
+$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-23.7\,\pm\,4.7} & \ensuremath{-47.0\,\pm\,1.7} & \ensuremath{-23.0\,\pm\,3.6} & \ensuremath{-36.0\,\pm\,2.6} & \ensuremath{-18.3\,\pm\,3.1} & \ensuremath{-25.7\,\pm\,10.6} & \ensuremath{-19.0\,\pm\,6.1} & \ensuremath{-16.0\,\pm\,8.2} \\
 \midrule
-\multicolumn{11}{l}{\#nodes = 32} \\
+\multicolumn{9}{l}{\#nodes = 32} \\
 \midrule
-$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.20\,\pm\,0.11} & \ensuremath{-0.21\,\pm\,0.07} & \ensuremath{-0.38\,\pm\,0.10} & \ensuremath{-0.27\,\pm\,0.08} & \ensuremath{-0.30\,\pm\,0.10} & \ensuremath{-0.08\,\pm\,0.13} & \ensuremath{-0.25\,\pm\,0.06} & \ensuremath{+0.01\,\pm\,0.13} & \ensuremath{-0.58\,\pm\,0.19} & \ensuremath{-0.11\,\pm\,0.20} \\
-$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{+13\,\pm\,30} & \ensuremath{+18\,\pm\,46} & \ensuremath{+120\,\pm\,115} & \ensuremath{+13\,\pm\,116} & \ensuremath{+229\,\pm\,91} & \ensuremath{-229\,\pm\,18} & \ensuremath{+542\,\pm\,730} & \ensuremath{+656\,\pm\,284} & \ensuremath{+4353\,\pm\,1815} & \ensuremath{+999\,\pm\,947} \\
-$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{-55.0\,\pm\,38.9} & \ensuremath{-53.7\,\pm\,48.7} & \ensuremath{+9.0\,\pm\,54.3} & \ensuremath{-89.3\,\pm\,40.9} & \ensuremath{-54.0\,\pm\,28.2} & \ensuremath{-30.7\,\pm\,21.2} & \ensuremath{-31.7\,\pm\,3.8} & \ensuremath{-32.0\,\pm\,20.8} & \ensuremath{+5.7\,\pm\,19.2} & \ensuremath{-12.7\,\pm\,26.8} \\
-$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-28.3\,\pm\,4.5} & \ensuremath{-336.3\,\pm\,55.6} & \ensuremath{-41.3\,\pm\,14.0} & \ensuremath{-280.3\,\pm\,44.6} & \ensuremath{-53.7\,\pm\,13.6} & \ensuremath{-177.3\,\pm\,27.2} & \ensuremath{-41.3\,\pm\,3.8} & \ensuremath{-114.7\,\pm\,12.5} & \ensuremath{-33.0\,\pm\,0.0} & \ensuremath{-48.7\,\pm\,32.5} \\
-$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-19.7\,\pm\,2.9} & \ensuremath{-20.3\,\pm\,3.5} & \ensuremath{-23.0\,\pm\,6.9} & \ensuremath{-21.3\,\pm\,6.0} & \ensuremath{-24.3\,\pm\,5.5} & \ensuremath{-17.0\,\pm\,4.4} & \ensuremath{-9.7\,\pm\,2.9} & \ensuremath{-8.3\,\pm\,4.7} & \ensuremath{-7.7\,\pm\,2.5} & \ensuremath{-3.0\,\pm\,3.6} \\
+$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.38\,\pm\,0.10} & \ensuremath{-0.27\,\pm\,0.08} & \ensuremath{-0.30\,\pm\,0.10} & \ensuremath{-0.08\,\pm\,0.13} & \ensuremath{-0.25\,\pm\,0.06} & \ensuremath{+0.01\,\pm\,0.13} & \ensuremath{-0.58\,\pm\,0.19} & \ensuremath{-0.11\,\pm\,0.20} \\
+$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{+120\,\pm\,115} & \ensuremath{+13\,\pm\,116} & \ensuremath{+229\,\pm\,91} & \ensuremath{-229\,\pm\,18} & \ensuremath{+542\,\pm\,730} & \ensuremath{+656\,\pm\,284} & \ensuremath{+4353\,\pm\,1815} & \ensuremath{+999\,\pm\,947} \\
+$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{+9.0\,\pm\,54.3} & \ensuremath{-89.3\,\pm\,40.9} & \ensuremath{-54.0\,\pm\,28.2} & \ensuremath{-30.7\,\pm\,21.2} & \ensuremath{-31.7\,\pm\,3.8} & \ensuremath{-32.0\,\pm\,20.8} & \ensuremath{+5.7\,\pm\,19.2} & \ensuremath{-12.7\,\pm\,26.8} \\
+$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-41.3\,\pm\,14.0} & \ensuremath{-280.3\,\pm\,44.6} & \ensuremath{-53.7\,\pm\,13.6} & \ensuremath{-177.3\,\pm\,27.2} & \ensuremath{-41.3\,\pm\,3.8} & \ensuremath{-114.7\,\pm\,12.5} & \ensuremath{-33.0\,\pm\,0.0} & \ensuremath{-48.7\,\pm\,32.5} \\
+$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-23.0\,\pm\,6.9} & \ensuremath{-21.3\,\pm\,6.0} & \ensuremath{-24.3\,\pm\,5.5} & \ensuremath{-17.0\,\pm\,4.4} & \ensuremath{-9.7\,\pm\,2.9} & \ensuremath{-8.3\,\pm\,4.7} & \ensuremath{-7.7\,\pm\,2.5} & \ensuremath{-3.0\,\pm\,3.6} \\
 \bottomrule
 \end{tabular}
 
@@ -33,29 +33,29 @@ $\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-19.7\,\pm\,2.9} & \ensuremat
 % periodic vs stable, defpreempt=0
 % ------------------------------------------------------------
 
-\begin{tabular}{l c c c c c c c c c c}
+\begin{tabular}{l c c c c c c c c}
 \toprule
-\multicolumn{11}{l}{Mode $\Delta$ (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), \#priorities = 1, defaultpreemption = 0} \\
+\multicolumn{9}{l}{Mode $\Delta$ (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), \#priorities = 1, defaultpreemption = 0} \\
 \addlinespace[0.2em]
- & \multicolumn{2}{c}{inter-arrival = 1\,s} & \multicolumn{2}{c}{inter-arrival = 2\,s} & \multicolumn{2}{c}{inter-arrival = 4\,s} & \multicolumn{2}{c}{inter-arrival = 8\,s} & \multicolumn{2}{c}{inter-arrival = 16\,s} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(lr){10-11}
- & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) \\
+ & \multicolumn{2}{c}{inter-arrival = 2\,s} & \multicolumn{2}{c}{inter-arrival = 4\,s} & \multicolumn{2}{c}{inter-arrival = 8\,s} & \multicolumn{2}{c}{inter-arrival = 16\,s} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+ & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) & PR 8→32 (B) & SQ 2→8 (B) \\
 \midrule
-\multicolumn{11}{l}{\#nodes = 16} \\
+\multicolumn{9}{l}{\#nodes = 16} \\
 \midrule
-$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.42\,\pm\,0.21} & \ensuremath{-0.34\,\pm\,0.08} & \ensuremath{-0.70\,\pm\,0.13} & \ensuremath{-0.36\,\pm\,0.16} & \ensuremath{-0.59\,\pm\,0.16} & \ensuremath{-0.30\,\pm\,0.07} & \ensuremath{-0.41\,\pm\,0.06} & \ensuremath{-0.17\,\pm\,0.10} & \ensuremath{-0.50\,\pm\,0.28} & \ensuremath{-0.16\,\pm\,0.08} \\
-$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{+50\,\pm\,61} & \ensuremath{-42\,\pm\,38} & \ensuremath{-48\,\pm\,38} & \ensuremath{-7\,\pm\,30} & \ensuremath{+75\,\pm\,126} & \ensuremath{-6\,\pm\,147} & \ensuremath{+316\,\pm\,508} & \ensuremath{+314\,\pm\,593} & \ensuremath{+700\,\pm\,939} & \ensuremath{+949\,\pm\,686} \\
-$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{+49.0\,\pm\,49.1} & \ensuremath{-28.0\,\pm\,35.2} & \ensuremath{-16.3\,\pm\,61.4} & \ensuremath{-90.0\,\pm\,92.1} & \ensuremath{-12.3\,\pm\,43.5} & \ensuremath{-61.3\,\pm\,37.9} & \ensuremath{-44.3\,\pm\,32.5} & \ensuremath{-78.3\,\pm\,10.2} & \ensuremath{-42.0\,\pm\,30.0} & \ensuremath{-48.7\,\pm\,20.4} \\
-$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-19.0\,\pm\,3.6} & \ensuremath{-267.0\,\pm\,23.9} & \ensuremath{-32.7\,\pm\,2.1} & \ensuremath{-253.3\,\pm\,17.2} & \ensuremath{-33.0\,\pm\,5.0} & \ensuremath{-175.0\,\pm\,11.3} & \ensuremath{-33.0\,\pm\,6.2} & \ensuremath{-143.7\,\pm\,17.5} & \ensuremath{-36.0\,\pm\,14.8} & \ensuremath{-66.3\,\pm\,18.2} \\
-$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-15.7\,\pm\,4.7} & \ensuremath{-53.7\,\pm\,8.1} & \ensuremath{-26.0\,\pm\,3.6} & \ensuremath{-50.3\,\pm\,6.7} & \ensuremath{-21.0\,\pm\,7.0} & \ensuremath{-29.7\,\pm\,4.7} & \ensuremath{-19.3\,\pm\,3.8} & \ensuremath{-28.7\,\pm\,12.5} & \ensuremath{-16.7\,\pm\,6.0} & \ensuremath{-9.0\,\pm\,7.0} \\
+$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.70\,\pm\,0.13} & \ensuremath{-0.36\,\pm\,0.16} & \ensuremath{-0.59\,\pm\,0.16} & \ensuremath{-0.30\,\pm\,0.07} & \ensuremath{-0.41\,\pm\,0.06} & \ensuremath{-0.17\,\pm\,0.10} & \ensuremath{-0.50\,\pm\,0.28} & \ensuremath{-0.16\,\pm\,0.08} \\
+$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{-48\,\pm\,38} & \ensuremath{-7\,\pm\,30} & \ensuremath{+75\,\pm\,126} & \ensuremath{-6\,\pm\,147} & \ensuremath{+316\,\pm\,508} & \ensuremath{+314\,\pm\,593} & \ensuremath{+700\,\pm\,939} & \ensuremath{+949\,\pm\,686} \\
+$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{-16.3\,\pm\,61.4} & \ensuremath{-90.0\,\pm\,92.1} & \ensuremath{-12.3\,\pm\,43.5} & \ensuremath{-61.3\,\pm\,37.9} & \ensuremath{-44.3\,\pm\,32.5} & \ensuremath{-78.3\,\pm\,10.2} & \ensuremath{-42.0\,\pm\,30.0} & \ensuremath{-48.7\,\pm\,20.4} \\
+$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-32.7\,\pm\,2.1} & \ensuremath{-253.3\,\pm\,17.2} & \ensuremath{-33.0\,\pm\,5.0} & \ensuremath{-175.0\,\pm\,11.3} & \ensuremath{-33.0\,\pm\,6.2} & \ensuremath{-143.7\,\pm\,17.5} & \ensuremath{-36.0\,\pm\,14.8} & \ensuremath{-66.3\,\pm\,18.2} \\
+$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-26.0\,\pm\,3.6} & \ensuremath{-50.3\,\pm\,6.7} & \ensuremath{-21.0\,\pm\,7.0} & \ensuremath{-29.7\,\pm\,4.7} & \ensuremath{-19.3\,\pm\,3.8} & \ensuremath{-28.7\,\pm\,12.5} & \ensuremath{-16.7\,\pm\,6.0} & \ensuremath{-9.0\,\pm\,7.0} \\
 \midrule
-\multicolumn{11}{l}{\#nodes = 32} \\
+\multicolumn{9}{l}{\#nodes = 32} \\
 \midrule
-$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.28\,\pm\,0.12} & \ensuremath{-0.23\,\pm\,0.10} & \ensuremath{-0.53\,\pm\,0.22} & \ensuremath{-0.11\,\pm\,0.09} & \ensuremath{-0.51\,\pm\,0.25} & \ensuremath{-0.10\,\pm\,0.11} & \ensuremath{+0.04\,\pm\,0.50} & \ensuremath{-0.40\,\pm\,0.10} & \ensuremath{-0.29\,\pm\,0.08} & \ensuremath{-0.05\,\pm\,0.56} \\
-$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{+39\,\pm\,14} & \ensuremath{+67\,\pm\,105} & \ensuremath{+159\,\pm\,136} & \ensuremath{+71\,\pm\,49} & \ensuremath{+476\,\pm\,721} & \ensuremath{-32\,\pm\,34} & \ensuremath{-714\,\pm\,1168} & \ensuremath{+1188\,\pm\,551} & \ensuremath{+2980\,\pm\,943} & \ensuremath{+1013\,\pm\,2056} \\
-$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{+26.7\,\pm\,80.4} & \ensuremath{-61.7\,\pm\,61.6} & \ensuremath{+33.7\,\pm\,21.1} & \ensuremath{-56.0\,\pm\,44.2} & \ensuremath{-63.3\,\pm\,11.2} & \ensuremath{-41.3\,\pm\,17.9} & \ensuremath{-33.0\,\pm\,34.4} & \ensuremath{-13.7\,\pm\,9.5} & \ensuremath{-18.0\,\pm\,12.3} & \ensuremath{+9.0\,\pm\,15.7} \\
-$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-29.3\,\pm\,2.5} & \ensuremath{-353.0\,\pm\,45.7} & \ensuremath{-44.0\,\pm\,10.5} & \ensuremath{-254.7\,\pm\,27.5} & \ensuremath{-41.7\,\pm\,5.8} & \ensuremath{-183.3\,\pm\,30.1} & \ensuremath{-51.0\,\pm\,10.1} & \ensuremath{-104.3\,\pm\,1.2} & \ensuremath{-32.0\,\pm\,3.5} & \ensuremath{-69.3\,\pm\,30.6} \\
-$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-22.0\,\pm\,3.0} & \ensuremath{-23.7\,\pm\,2.9} & \ensuremath{-26.7\,\pm\,6.4} & \ensuremath{-15.7\,\pm\,2.9} & \ensuremath{-24.7\,\pm\,4.0} & \ensuremath{-20.0\,\pm\,3.5} & \ensuremath{-10.7\,\pm\,2.1} & \ensuremath{-8.7\,\pm\,4.6} & \ensuremath{-9.0\,\pm\,4.0} & \ensuremath{-3.7\,\pm\,3.8} \\
+$\Delta\ \mathrm{usage}\;(\%)$ & \ensuremath{-0.53\,\pm\,0.22} & \ensuremath{-0.11\,\pm\,0.09} & \ensuremath{-0.51\,\pm\,0.25} & \ensuremath{-0.10\,\pm\,0.11} & \ensuremath{+0.04\,\pm\,0.50} & \ensuremath{-0.40\,\pm\,0.10} & \ensuremath{-0.29\,\pm\,0.08} & \ensuremath{-0.05\,\pm\,0.56} \\
+$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$ & \ensuremath{+159\,\pm\,136} & \ensuremath{+71\,\pm\,49} & \ensuremath{+476\,\pm\,721} & \ensuremath{-32\,\pm\,34} & \ensuremath{-714\,\pm\,1168} & \ensuremath{+1188\,\pm\,551} & \ensuremath{+2980\,\pm\,943} & \ensuremath{+1013\,\pm\,2056} \\
+$\Delta\ \mathrm{deletions}_{\mathrm{total}}$ & \ensuremath{+33.7\,\pm\,21.1} & \ensuremath{-56.0\,\pm\,44.2} & \ensuremath{-63.3\,\pm\,11.2} & \ensuremath{-41.3\,\pm\,17.9} & \ensuremath{-33.0\,\pm\,34.4} & \ensuremath{-13.7\,\pm\,9.5} & \ensuremath{-18.0\,\pm\,12.3} & \ensuremath{+9.0\,\pm\,15.7} \\
+$\Delta\ \mathrm{solver\ runs}$ & \ensuremath{-44.0\,\pm\,10.5} & \ensuremath{-254.7\,\pm\,27.5} & \ensuremath{-41.7\,\pm\,5.8} & \ensuremath{-183.3\,\pm\,30.1} & \ensuremath{-51.0\,\pm\,10.1} & \ensuremath{-104.3\,\pm\,1.2} & \ensuremath{-32.0\,\pm\,3.5} & \ensuremath{-69.3\,\pm\,30.6} \\
+$\Delta\ \mathrm{plan\ activations}$ & \ensuremath{-26.7\,\pm\,6.4} & \ensuremath{-15.7\,\pm\,2.9} & \ensuremath{-24.7\,\pm\,4.0} & \ensuremath{-20.0\,\pm\,3.5} & \ensuremath{-10.7\,\pm\,2.1} & \ensuremath{-8.7\,\pm\,4.6} & \ensuremath{-9.0\,\pm\,4.0} & \ensuremath{-3.7\,\pm\,3.8} \\
 \bottomrule
 \end{tabular}
 

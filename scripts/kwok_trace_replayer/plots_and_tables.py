@@ -39,8 +39,8 @@ OUT_FIGURES_DIR = OUT_DIR / "figures"
 SEED_COL = "seed"
 SEED_JITTER_FRAC = 0.12  # jitter as fraction of mode_spacing
 
-# Only these two priorities are plotted in the 2-column grids / table set
-PRIORITIES_COLS = [1, 4]
+PRIORITIES_TO_SHOW = [1, 4]
+INTER_ARRIVALS_TO_SHOW = [2.0, 4.0, 8.0, 16.0]
 
 # =============================================================================
 # Expected schema from seal_results.py (no backward compatibility)
@@ -51,30 +51,12 @@ SEED_OUT_COLS = [
     "plugin_config",
     "seed",
     "T_end_s_mean",
-    "delta_U_pct_cpu_mean",
-    "delta_U_pct_mem_mean",
-    "delta_U_pct_eff_mean",
-    "delta_R_num_p1_mean",
-    "delta_R_num_p2_mean",
-    "delta_R_num_p3_mean",
-    "delta_R_num_p4_mean",
-    "delta_R_num_total_mean",
-    "delta_D_num_p1_mean",
-    "delta_D_num_p2_mean",
-    "delta_D_num_p3_mean",
-    "delta_D_num_p4_mean",
-    "delta_D_num_total_mean",
-    "delta_L_ms_p1_mean",
-    "delta_L_ms_p2_mean",
-    "delta_L_ms_p3_mean",
-    "delta_L_ms_p4_mean",
-    "delta_L_ms_total_mean",
-    "solver_attempts_mean",
-    "solver_optimal_mean",
-    "solver_feasible_mean",
-    "solver_failed_mean",
-    "plan_not_applicable_mean",
-    "plan_activated_mean",
+    "delta_U_pct_cpu_mean","delta_U_pct_mem_mean","delta_U_pct_eff_mean",
+    "delta_R_num_p1_mean","delta_R_num_p2_mean","delta_R_num_p3_mean","delta_R_num_p4_mean","delta_R_num_total_mean",
+    "delta_D_num_p1_mean","delta_D_num_p2_mean","delta_D_num_p3_mean","delta_D_num_p4_mean","delta_D_num_total_mean",
+    "delta_L_ms_p1_mean","delta_L_ms_p2_mean","delta_L_ms_p3_mean","delta_L_ms_p4_mean","delta_L_ms_total_mean",
+    "solver_attempts_mean","solver_optimal_mean","solver_feasible_mean","solver_failed_mean",
+    "plan_not_applicable_mean","plan_activated_mean",
 ]
 
 # =============================================================================
@@ -190,6 +172,22 @@ def sort_rks(rks: Iterable[RowKey]) -> List[RowKey]:
 # =============================================================================
 # Plot selection (fixed)
 # =============================================================================
+
+def select_arrivals_order(all_arrivals: List[float]) -> List[float]:
+    all_sorted = sorted(set(float(a) for a in all_arrivals))
+    if INTER_ARRIVALS_TO_SHOW is None:
+        return all_sorted
+
+    wanted = [float(a) for a in INTER_ARRIVALS_TO_SHOW]
+    wanted_set = set(wanted)
+
+    missing = [a for a in wanted if a not in set(all_sorted)]
+    if missing:
+        raise SystemExit(f"INTER_ARRIVALS_TO_SHOW_S contains values not in data: {missing}. Available: {all_sorted}")
+
+    # Preserve the order provided in INTER_ARRIVALS_TO_SHOW_S (don’t re-sort unless you want to)
+    return [a for a in wanted if a in wanted_set]
+
 
 # Main grids show only a subset (but tables include ALL MODE_SPECS)
 MAIN_PLOT_MODES: List[Tuple[str, int]] = [
@@ -1285,13 +1283,14 @@ def main() -> None:
     lookup_main = build_lookup(df_meanstd)
 
     nodes_order = sorted(df_meanstd["nodes"].unique().tolist())
-    arrivals_order = sorted(df_meanstd["arrival_s"].unique().tolist())
+    arrivals_order_all = df_meanstd["arrival_s"].unique().tolist()
+    arrivals_order = select_arrivals_order(arrivals_order_all)
     priorities_order = sorted(df_meanstd["priorities"].unique().tolist())
 
     if len(nodes_order) != 2:
         raise SystemExit(f"Expected exactly 2 node values for plots; found {nodes_order}")
-    if any(k not in priorities_order for k in PRIORITIES_COLS):
-        raise SystemExit(f"Expected priorities {PRIORITIES_COLS}; found {priorities_order}")
+    if any(k not in priorities_order for k in PRIORITIES_TO_SHOW):
+        raise SystemExit(f"Expected priorities {PRIORITIES_TO_SHOW}; found {priorities_order}")
 
     # Build delta datasets (seed-level + mean/std)
     df_delta_seeds = build_delta_seeds(df_seeds)
@@ -1300,12 +1299,12 @@ def main() -> None:
 
     # Shared y-lims (main counters) across defpreempt=0/1
     series_all_for_limits = sort_rks([RowKey(mode=m, blocking=b, defpreempt=d) for d in (0, 1) for (m, b) in MAIN_PLOT_MODES])
-    ylim_solver_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_COLS, col="solver_attempts_mean")
-    ylim_plans_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_COLS, col="plan_activated_mean")
+    ylim_solver_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean")
+    ylim_plans_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean")
 
     # Shared y-lims (delta counters) across defpreempt=0/1 (symmetric)
-    ylim_solver_deltas = compute_symmetric_ylim_deltas(df_delta_meanstd, priorities_cols=PRIORITIES_COLS, col="solver_attempts_mean") if not df_delta_meanstd.empty else (-1.0, 1.0)
-    ylim_plans_deltas = compute_symmetric_ylim_deltas(df_delta_meanstd, priorities_cols=PRIORITIES_COLS, col="plan_activated_mean") if not df_delta_meanstd.empty else (-1.0, 1.0)
+    ylim_solver_deltas = compute_symmetric_ylim_deltas(df_delta_meanstd, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean") if not df_delta_meanstd.empty else (-1.0, 1.0)
+    ylim_plans_deltas = compute_symmetric_ylim_deltas(df_delta_meanstd, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean") if not df_delta_meanstd.empty else (-1.0, 1.0)
 
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
@@ -1314,7 +1313,7 @@ def main() -> None:
     # MAIN tables (always 8)
     # -------------------------
     for defpreempt in (1, 0):
-        for k in PRIORITIES_COLS:
+        for k in PRIORITIES_TO_SHOW:
             for std in (0, 1):
                 out_tex = OUT_TABLES_DIR / f"table_main_defaultpreemption={defpreempt}_priorities={k}_std={std}.tex"
                 latex_table_main(
@@ -1331,7 +1330,7 @@ def main() -> None:
     # ------------------------------------------
     # PERIODIC vs STABLE tables (always 4)
     # ------------------------------------------
-    for k in PRIORITIES_COLS:
+    for k in PRIORITIES_TO_SHOW:
         for std in (0, 1):
             out_tex = OUT_TABLES_DIR / f"table_periodic_vs_stable_priorities={k}_std={std}.tex"
             latex_table_periodic_vs_stable(
@@ -1358,7 +1357,7 @@ def main() -> None:
                 defpreempt=defpreempt,
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
-                priorities_cols=PRIORITIES_COLS,
+                priorities_cols=PRIORITIES_TO_SHOW,
                 ylim_solver=ylim_solver_main,
                 ylim_plans=ylim_plans_main,
                 out_stem=out_stem,
@@ -1379,7 +1378,7 @@ def main() -> None:
                 defpreempt=defpreempt,
                 nodes_order=nodes_order,
                 arrivals_order=arrivals_order,
-                priorities_cols=PRIORITIES_COLS,
+                priorities_cols=PRIORITIES_TO_SHOW,
                 ylim_solver=ylim_solver_deltas,
                 ylim_plans=ylim_plans_deltas,
                 out_stem=out_stem,
