@@ -767,9 +767,14 @@ def _compute_scaled_ylim(max_val: float, symmetric: bool = False, scale_factor: 
 
 
 def compute_nonnegative_ylim_main(lookup_main: pd.DataFrame, *, series_all: List[RowKey], nodes_order: List[int], arrivals_order: List[float], priorities_cols: List[int], col: str) -> Tuple[float, float]:
-    vals = [lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
-            for rk in series_all for n in nodes_order for a in arrivals_order for k in priorities_cols
-            if is_finite(lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col))]
+    vals = []
+    for rk in series_all:
+        for n in nodes_order:
+            for a in arrivals_order:
+                for k in priorities_cols:
+                    v = lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
+                    if is_finite(v):
+                        vals.append(v)
     return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=False)
 
 
@@ -946,9 +951,12 @@ def make_grid_periodic_vs_stable(
     # Create fake series for coloring
     fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(DELTA_NAMES))]
 
+    def _extract_custom_index(rk: RowKey) -> int:
+        """Extract index from custom RowKey mode."""
+        return int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
+
     def color_override(rk: RowKey) -> Any:
-        idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
-        return cmap[idx % len(cmap)]
+        return cmap[_extract_custom_index(rk) % len(cmap)]
 
     def y_function_factory(col: str) -> YOfFn:
         """Creates y-value function for deltas that dispatches based on RowKey."""
@@ -971,7 +979,7 @@ def make_grid_periodic_vs_stable(
             return _y
         
         delta_fns = {i: make_delta_fn(dn) for i, dn in enumerate(DELTA_NAMES)}
-        return lambda rk, nodes, a, priorities: delta_fns[int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0](rk, nodes, a, priorities)
+        return lambda rk, nodes, a, priorities: delta_fns[_extract_custom_index(rk)](rk, nodes, a, priorities)
 
     _make_grid_unified(
         y_function_factory=y_function_factory,
