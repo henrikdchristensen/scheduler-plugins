@@ -552,7 +552,7 @@ def main() -> None:
             df[c] = np.nan
     df = df[OUT_COLS]
 
-    round_numeric_df(df, FLOAT_DECIMALS, exclude=["job_name", "plugin_config", "seed"])
+    round_numeric_df(df, decimals=FLOAT_DECIMALS, exclude=["job_name", "plugin_config", "seed"])
     df.to_csv(out_path, index=False)
 
     print(f"Wrote: {out_path}")

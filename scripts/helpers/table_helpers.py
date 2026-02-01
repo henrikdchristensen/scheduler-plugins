@@ -4,7 +4,7 @@
 Shared LaTeX table formatting helper functions for kwok_workload_once and kwok_trace_replayer.
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from scripts.helpers.data_helpers import is_finite
 
@@ -107,7 +107,7 @@ def metric_header_tex(label: str) -> str:
     """
     s = str(label).strip()
 
-    def split_core(core: str) -> tuple[str, str] | None:
+    def split_core(core: str) -> Optional[Tuple[str, str]]:
         core = core.strip()
         if r"\;(" in core:
             left, right = core.split(r"\;(", 1)
