@@ -4,9 +4,7 @@
 python -m scripts.kwok_trace_replayer.seal_results
 """
 
-import json
-import math
-import re
+import json, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -107,7 +105,6 @@ class GeneralData:
     cum_eff_util: np.ndarray
     cum_pods_running: np.ndarray
 
-
 # =============================================================================
 # Parsing helpers
 # =============================================================================
@@ -133,18 +130,14 @@ def parse_job_dir_name(name: str) -> Optional[str]:
 
 def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     """
-    Example:
-      mode=schedulingfailure_blocking=0_defpreempt=0_nodes=32_prio=1_arrival=4s
-
-    Returns: (job_name, plugin_config)
-      plugin_config: mode=<mode>_blocking=<0/1>_defpreempt=<0/1>
+    Parse plugin run dir name into (job_name, plugin_config).
+    Example: mode=schedulingfailure_blocking=0_defpreempt=0_nodes=32_prio=1_arrival=4s
     """
     kv: Dict[str, str] = {}
     for tok in str(name).split("_"):
         if "=" in tok:
             k, v = tok.split("=", 1)
             kv[k.strip().lower()] = v.strip()
-
     try:
         n = int(kv["nodes"])
         pr = int(kv["prio"])
@@ -161,7 +154,6 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     plugin_config = f"mode={mode}_blocking={blocking}_defpreempt={defpreempt}"
     return job_name, plugin_config
 
-
 def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
     """
     Yields (seed, seed_dir) for dirs that contain the expected files.
@@ -174,11 +166,9 @@ def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
         if (d / GENERAL_STATS_FILENAME).exists() and (d / POD_STATS_FILENAME).exists():
             yield d.name, d
 
-
 # =============================================================================
 # I/O helpers
 # =============================================================================
-
 
 def read_optimization_stats(opt_json: Path) -> Dict[str, float]:
     out = {v: float("nan") for v in OPT_TOTAL_KEYS.values()}
@@ -192,7 +182,6 @@ def read_optimization_stats(opt_json: Path) -> Dict[str, float]:
             except Exception:
                 out[dst] = float("nan")
     return out
-
 
 def read_pod(pod_csv: Path) -> pd.DataFrame:
     df = pd.read_csv(
@@ -209,11 +198,9 @@ def read_pod(pod_csv: Path) -> pd.DataFrame:
     df[POD_PRIO_COL] = pd.to_numeric(df[POD_PRIO_COL], errors="coerce")
     return df
 
-
 # =============================================================================
 # Math helpers
 # =============================================================================
-
 
 def cumulative_integral_step(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
@@ -239,7 +226,6 @@ def cumulative_integral_step(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     out2[1:, :] = np.cumsum(y[:-1, :] * dt[:, None], axis=0)
     return out2
 
-
 def mean_over_horizon(t: np.ndarray, y: np.ndarray, cum: np.ndarray, H: float) -> float:
     if not (math.isfinite(H) and H > 0.0) or t.size == 0:
         return float("nan")
@@ -250,7 +236,6 @@ def mean_over_horizon(t: np.ndarray, y: np.ndarray, cum: np.ndarray, H: float) -
     tail = float(y[idx]) * float(Hc - t[idx])
     return float((base + tail) / Hc) if Hc > 0 else float("nan")
 
-
 def value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
     if t.size == 0 or not math.isfinite(H):
         return float("nan")
@@ -260,11 +245,9 @@ def value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
     v = float(y[idx])
     return v if math.isfinite(v) else float("nan")
 
-
 # =============================================================================
 # General stats reading + horizon metrics
 # =============================================================================
-
 
 def read_general_data(general_csv: Path) -> GeneralData:
     cols_needed = {TIME_COL, CPU_RUN_COL, MEM_RUN_COL}
@@ -340,7 +323,6 @@ def read_general_data(general_csv: Path) -> GeneralData:
         cum_pods_running=cumulative_integral_step(t, pods_running),
     )
 
-
 def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
     t = g.t
     out: Dict[str, float] = {
@@ -356,7 +338,6 @@ def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
     out["D_total"] = float(np.nansum([out[f"D_p{p}"] for p in range(1, MAX_PRIORITIES + 1)]))
     return out
 
-
 # =============================================================================
 # Latency (first-batch) in ms
 # =============================================================================
@@ -366,7 +347,6 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
     """
     Mean latency (running - apply) for first-batch pods, overall and per priority p1..p4.
     Returned in MILLISECONDS (ms).
-
     First-batch: for each rs_prefix, take t0=min(apply), include apply times within eps_s of t0.
     """
     nan_out = {**{f"L_ms_p{p}": float("nan") for p in range(1, MAX_PRIORITIES + 1)}, "L_ms_total": float("nan")}
@@ -419,14 +399,11 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
 
     return out
 
-
 # =============================================================================
 # Main
 # =============================================================================
 
-
 def main() -> None:
-
     if not DEFAULT_ROOT.exists():
         raise SystemExit(f"Not found: {DEFAULT_ROOT}")
     if not PLUGIN_ROOT.exists():
@@ -556,7 +533,6 @@ def main() -> None:
     df.to_csv(out_path, index=False)
 
     print(f"Wrote: {out_path}")
-
 
 if __name__ == "__main__":
     main()

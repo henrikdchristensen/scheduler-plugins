@@ -4,8 +4,7 @@
 python -m scripts.kwok_workload_once.seal_results
 """
 
-import json
-import re
+import json, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,7 +18,7 @@ from scripts.helpers.general_helpers import (
 )
 
 # ============================================================
-# CONFIG (constants instead of argparse)
+# CONFIG
 # ============================================================
 
 RESULTS_ROOT: Path = Path("analysis/kwok_workload_once")
@@ -41,7 +40,6 @@ DIR_RE_SOLVER = re.compile(
 # Helpers
 # ============================================================
 
-
 def parse_solver_dirname(name: str) -> Optional[Dict[str, Any]]:
     m = DIR_RE_SOLVER.match(name)
     if not m:
@@ -61,7 +59,6 @@ def parse_solver_dirname(name: str) -> Optional[Dict[str, Any]]:
         "pods_per_node": int(pods / nodes),
         "default_dirname": f"nodes{nodes}_pods{pods}_prio{priorities}_util{d['util']}",
     }
-
 
 def load_csv(csv_path: Path) -> pd.DataFrame:
     if not csv_path.exists():
@@ -98,7 +95,6 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
         axis=1,
     )
     return df
-
 
 def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: str) -> pd.DataFrame:
     df_s = load_csv(solver_csv)
@@ -158,7 +154,6 @@ def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: st
 
     return joined
 
-
 @dataclass(frozen=True)
 class CombineResultsArgs:
     results_root: Path
@@ -167,7 +162,6 @@ class CombineResultsArgs:
     results_csv: str
     out_dir: Path
     decimals: Optional[int]
-
 
 @dataclass(frozen=True)
 class CategoryCounts:
@@ -189,7 +183,6 @@ class CategoryCounts:
     solver_failed_rate: float
     solver_improve_rate: float
     other_rate: float
-
 
 class CombineResultsAnalyzer:
     def __init__(self, args: CombineResultsArgs) -> None:
@@ -414,7 +407,6 @@ class CombineResultsAnalyzer:
         ).to_csv(out_per_combo, index=False)
         print(f"[ok] wrote {out_per_combo} (rows={len(per_combo_df)})")
 
-
 def main() -> None:
     args = CombineResultsArgs(
         results_root=RESULTS_ROOT,
@@ -425,7 +417,6 @@ def main() -> None:
         decimals=DECIMALS,
     )
     CombineResultsAnalyzer(args).run()
-
 
 if __name__ == "__main__":
     main()

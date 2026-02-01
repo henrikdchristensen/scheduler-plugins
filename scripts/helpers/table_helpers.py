@@ -8,22 +8,13 @@ from typing import Optional, Tuple
 
 from scripts.helpers.data_helpers import is_finite
 
-
 def nan_str() -> str:
     """Return LaTeX representation for NaN/missing values."""
     return r"\text{--}"
 
-
 def fmt_pct(x: object, decimals: int = 1) -> str:
     """
     Format a value as a percentage string for LaTeX tables.
-
-    Args:
-        x: The value to format.
-        decimals: Number of decimal places.
-
-    Returns:
-        Formatted string, or nan_str() if value is not finite.
     """
     if not is_finite(x):
         return nan_str()
@@ -32,38 +23,22 @@ def fmt_pct(x: object, decimals: int = 1) -> str:
         v = 0.0
     return f"{v:.{decimals}f}"
 
-
 def fmt_signed(x: object, decimals: int) -> str:
     """
     Format a signed float with explicit + or - prefix.
-
-    Args:
-        x: The value to format.
-        decimals: Number of decimal places.
-
-    Returns:
-        Formatted string with sign, or nan_str() if value is not finite.
     """
     if not is_finite(x):
         return nan_str()
     v = round(float(x), int(decimals))
     return f"{(0.0 if v == 0.0 else v):+.{decimals}f}"
 
-
 def fmt_unsigned_int(x: object) -> str:
     """
     Format an unsigned integer value.
-
-    Args:
-        x: The value to format.
-
-    Returns:
-        Formatted integer string, or nan_str() if value is not finite.
     """
     if not is_finite(x):
         return nan_str()
     return f"{int(round(float(x))):d}"
-
 
 def fmt_pm(
     mean_v: object,
@@ -75,16 +50,6 @@ def fmt_pm(
 ) -> str:
     """
     Format a mean ± std value for LaTeX.
-
-    Args:
-        mean_v: Mean value.
-        std_v: Standard deviation value.
-        mean_signed: Whether to include sign prefix for mean.
-        mean_dec: Decimal places for mean.
-        std_dec: Decimal places for std.
-
-    Returns:
-        LaTeX formatted string with ensuremath, or nan_str() if mean is not finite.
     """
     if not is_finite(mean_v):
         return nan_str()
@@ -93,17 +58,9 @@ def fmt_pm(
         return rf"\ensuremath{{{m}}}"
     return rf"\ensuremath{{{m}\,\pm\,{abs(float(std_v)):.{std_dec}f}}}"
 
-
 def metric_header_tex(label: str) -> str:
     """
     Create a LaTeX makecell header from a metric label.
-    Splits "... (unit)" or "...\\;(unit)" into two-line makecell header.
-
-    Args:
-        label: The metric label, optionally with unit in parentheses.
-
-    Returns:
-        LaTeX makecell formatted string.
     """
     s = str(label).strip()
 

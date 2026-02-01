@@ -4,8 +4,7 @@
 python -m scripts.kwok_trace_replayer.plots_and_tables
 """
 
-import math
-import re
+import math, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -31,7 +30,6 @@ from scripts.helpers.table_helpers import (
     fmt_signed,
     fmt_unsigned_int,
     metric_header_tex,
-    nan_str,
 )
 
 # =============================================================================
@@ -51,7 +49,7 @@ PRIORITIES_TO_SHOW = [1, 4]
 INTER_ARRIVALS_TO_SHOW = [2.0, 4.0, 8.0, 16.0]
 
 # =============================================================================
-# Expected schema from seal_results.py (no backward compatibility)
+# Expected schema from seal_results.py
 # =============================================================================
 
 SEED_OUT_COLS = [
@@ -73,13 +71,11 @@ SEED_OUT_COLS = [
 
 JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
 
-
 def parse_job(job_name: str) -> Tuple[int, int, float]:
     m = JOB_RE.fullmatch(str(job_name).strip())
     if not m:
         raise ValueError(f"Invalid job_name: {job_name}")
     return int(m.group(1)), int(m.group(2)), float(m.group(3))
-
 
 def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
     kv: Dict[str, str] = {}
@@ -89,23 +85,15 @@ def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
             kv[k.strip().lower()] = v.strip()
     return kv
 
-
 def canonical_mode(mode: str) -> str:
     s = str(mode).strip().lower()
-    s_compact = s.replace("-", "").replace("_", "")
-    if s_compact in {"schedulingfailure", "schedfailure"}:
-        return "schedulingfailure"
-
     m = re.fullmatch(r"periodic-?([0-9.]+)s", s)
     if m:
         return f"periodic{m.group(1)}s"
-
     m = re.fullmatch(r"(?:stable-queue|stablequeue)-?([0-9.]+)s", s)
     if m:
         return f"stable-queue-{m.group(1)}s"
-
     return s
-
 
 @dataclass(frozen=True)
 class RowKey:
@@ -121,7 +109,6 @@ class RowKey:
         defpreempt = int(str(kv.get("defpreempt", "0"))) if "defpreempt" in kv else 0
         return RowKey(mode=mode, blocking=blocking, defpreempt=defpreempt)
 
-
 # =============================================================================
 # Modes (rows in main tables, styling in plots)
 # =============================================================================
@@ -135,7 +122,6 @@ class ModeSpec:
     rank: int
     palette: str  # "set2" or "set3"
     color_idx: int
-
 
 MODE_SPECS: List[ModeSpec] = [
     ModeSpec("schedulingfailure", 1, "SF-B", "Scheduling-failure (blocking)", 0, "set2", 0),
@@ -152,16 +138,13 @@ MODE_SPECS: List[ModeSpec] = [
 
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
 
-
 def rk_rank(rk: RowKey) -> int:
     spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
     return int(spec.rank) if spec else 10_000
 
-
 def rk_label(rk: RowKey) -> str:
     spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
     return spec.label if spec else f"{rk.mode}:{rk.blocking}"
-
 
 def rk_color(rk: RowKey):
     set2 = plt.get_cmap("Set2").colors
@@ -172,13 +155,11 @@ def rk_color(rk: RowKey):
     palette = set2 if spec.palette == "set2" else set3
     return palette[int(spec.color_idx) % len(palette)]
 
-
 def sort_rks(rks: Iterable[RowKey]) -> List[RowKey]:
     return sorted(set(rks), key=lambda r: (rk_rank(r), r.mode, int(r.blocking), int(r.defpreempt)))
 
-
 # =============================================================================
-# Plot selection (fixed)
+# Plot selection
 # =============================================================================
 
 def select_arrivals_order(all_arrivals: List[float]) -> List[float]:
@@ -195,7 +176,6 @@ def select_arrivals_order(all_arrivals: List[float]) -> List[float]:
 
     # Preserve the order provided in INTER_ARRIVALS_TO_SHOW_S (don’t re-sort unless you want to)
     return [a for a in wanted if a in wanted_set]
-
 
 # Main grids show only a subset (but tables include ALL MODE_SPECS)
 MAIN_PLOT_MODES: List[Tuple[str, int]] = [
@@ -265,13 +245,11 @@ SYMLOG_LINSCALE = 1.0
 SYMLOG_LINTHRESH_LAT_MS = 1.0
 SYMLOG_LINTHRESH_DELETIONS = 1.0
 
-
 @dataclass(frozen=True)
 class YAxisCfg:
     scale: str  # "linear" | "symlog"
     ylim: Tuple[float, float]
     symlog_linthresh: float = 1.0
-
 
 Y_MAIN: Dict[str, YAxisCfg] = {
     "util": YAxisCfg("linear", (-5.0, 5.0)),
@@ -285,9 +263,8 @@ Y_DELTAS: Dict[str, YAxisCfg] = {
     "deletions": YAxisCfg("symlog", (-1e3 - 1.0, 1e3 + 1.0), SYMLOG_LINTHRESH_DELETIONS),
 }
 
-
 # =============================================================================
-# Grid row configuration (for unified grid function)
+# Grid row configuration
 # =============================================================================
 
 @dataclass(frozen=True)
@@ -315,22 +292,18 @@ GRID_ROW_SPECS = [
 
 TABLE_DECIMALS = 1
 
-
 def fmt_arrival_value(a: float) -> Union[int, float]:
     """Convert arrival to int if close to integer, otherwise keep as float."""
     return int(a) if abs(a - round(a)) < 1e-9 else a
 
-
 def rk_label_tex(rk: RowKey) -> str:
     return rf"\makecell[l]{{{rk_label(rk)}}}"
-
 
 # =============================================================================
 # Data loading + aggregation
 # =============================================================================
 
 KEY_COLS_MAIN = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
-
 
 def load_results_seeds(path: Path) -> pd.DataFrame:
     if not path.exists():
@@ -351,7 +324,6 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
 
     return df
 
-
 def _generic_aggregate_mean_std(df: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
     """
     Generic aggregation: compute mean+std across seeds for numeric columns.
@@ -371,7 +343,6 @@ def _generic_aggregate_mean_std(df: pd.DataFrame, group_cols: List[str]) -> pd.D
 
     return out
 
-
 def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
     """
     One row per configuration. Produces:
@@ -381,15 +352,12 @@ def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
     group_cols = ["job_name", "plugin_config"] + KEY_COLS_MAIN
     return _generic_aggregate_mean_std(df_seeds, group_cols)
 
-
 def _build_lookup_from_df(df: pd.DataFrame, key_cols: List[str]) -> pd.DataFrame:
     """Build a lookup DataFrame indexed by key columns."""
     return df.drop_duplicates(subset=key_cols, keep="first").set_index(key_cols).sort_index()
 
-
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
     return _build_lookup_from_df(df, KEY_COLS_MAIN)
-
 
 def _safe_lookup(lookup: pd.DataFrame, key: Tuple, col: str) -> float:
     """Safely lookup a value from a DataFrame index, returning NaN if not found."""
@@ -398,23 +366,19 @@ def _safe_lookup(lookup: pd.DataFrame, key: Tuple, col: str) -> float:
     except KeyError:
         return float("nan")
 
-
 def lookup_val(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str) -> float:
     key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
     return _safe_lookup(lookup, key, col)
 
-
 def lookup_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col_mean: str) -> Tuple[float, float]:
     key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
     return _safe_lookup(lookup, key, col_mean), _safe_lookup(lookup, key, f"{col_mean}_std")
-
 
 # =============================================================================
 # Delta data (periodic vs stable) - computed from seed rows
 # =============================================================================
 
 DELTA_KEY_COLS = ["nodes", "priorities", "arrival_s", "defpreempt", "delta_name"]
-
 
 def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
     """
@@ -449,7 +413,6 @@ def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
 
     return pd.concat(out_rows, ignore_index=True)
 
-
 def aggregate_delta_mean_std(df_delta_seeds: pd.DataFrame) -> pd.DataFrame:
     """
     Aggregate delta-by-seed to mean+std per configuration and delta_name.
@@ -457,15 +420,12 @@ def aggregate_delta_mean_std(df_delta_seeds: pd.DataFrame) -> pd.DataFrame:
     """
     return _generic_aggregate_mean_std(df_delta_seeds, DELTA_KEY_COLS)
 
-
 def build_lookup_deltas(df_delta_meanstd: pd.DataFrame) -> pd.DataFrame:
     return _build_lookup_from_df(df_delta_meanstd, DELTA_KEY_COLS)
-
 
 def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, defpreempt: int, delta_name: str, col_mean: str) -> Tuple[float, float]:
     key = (int(nodes), int(priorities), float(arrival_s), int(defpreempt), str(delta_name))
     return _safe_lookup(lookup, key, col_mean), _safe_lookup(lookup, key, f"{col_mean}_std")
-
 
 # =============================================================================
 # Plot helpers
@@ -473,7 +433,6 @@ def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, 
 
 YVal = Union[float, Sequence[float]]
 YOfFn = Callable[[RowKey, int, float, int], YVal]  # scalar or list (seeds)
-
 
 def _as_finite_list(v: object) -> List[float]:
     if v is None:
@@ -487,7 +446,6 @@ def _as_finite_list(v: object) -> List[float]:
         return [float(x) for x in v if is_finite(x)]
     return [float(v)] if is_finite(v) else []
 
-
 def nice_step(span: float, target_ticks: int) -> float:
     if span <= 0:
         return 1.0
@@ -497,7 +455,6 @@ def nice_step(span: float, target_ticks: int) -> float:
     candidates = [1 * base, 2 * base, 5 * base, 10 * base]
     return min(candidates, key=lambda s: abs(s - raw))
 
-
 def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int = PLOT_MIN_LINEAR_YTICKS) -> None:
     ylo, yhi = float(ylim[0]), float(ylim[1])
     y0 = int(math.ceil(ylo))
@@ -506,7 +463,6 @@ def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int
     if len(ticks) < int(min_ticks):
         ticks = [round(float(t), 2) for t in np.linspace(ylo, yhi, int(min_ticks))]
     ax.set_yticks(ticks)
-
 
 def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int = 5) -> None:
     ylo, yhi = float(ylim[0]), float(ylim[1])
@@ -526,7 +482,6 @@ def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int 
         ticks = [int(round(x)) for x in ticks]
     ax.set_yticks(ticks)
 
-
 def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks_total: int = 7) -> None:
     ylo, yhi = float(ylim[0]), float(ylim[1])
     hi = max(abs(ylo), abs(yhi))
@@ -545,21 +500,17 @@ def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_t
         ticks = [int(round(t)) for t in ticks]
     ax.set_yticks(ticks)
 
-
 def arrival_tick_label(a: float) -> str:
     a_i = fmt_arrival_value(a)
     return f"{a_i}s"
-
 
 def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
     base = arrival_tick_label(a)
     return base + ("\ninter-arrival (s)" if xi == n_arr // 2 else "")
 
-
 def x_from_left_with_pad_points(fig: plt.Figure, left: float, pad_pt: float) -> float:
     pad_frac = float(pad_pt) / (72.0 * float(fig.get_figwidth()))
     return max(0.0, float(left) - pad_frac)
-
 
 def draw_points_on_ax(
     *,
@@ -674,7 +625,6 @@ def draw_points_on_ax(
             continue
         ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
 
-
 def values_from_df_seeds(
     df_seeds: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str
 ) -> List[float]:
@@ -690,12 +640,10 @@ def values_from_df_seeds(
     vals = [float(v) for v in sub[col].tolist() if is_finite(v)]
     return vals
 
-
 def _compute_scaled_ylim(max_val: float, symmetric: bool = False, scale_factor: float = 1.08) -> Tuple[float, float]:
     """Compute y-axis limits with scaling."""
     hi = max_val * scale_factor if max_val > 0 else 1.0
     return (-float(hi), float(hi)) if symmetric else (0.0, float(hi))
-
 
 def compute_nonnegative_ylim_main(lookup_main: pd.DataFrame, *, series_all: List[RowKey], nodes_order: List[int], arrivals_order: List[float], priorities_cols: List[int], col: str) -> Tuple[float, float]:
     vals = []
@@ -708,12 +656,10 @@ def compute_nonnegative_ylim_main(lookup_main: pd.DataFrame, *, series_all: List
                         vals.append(v)
     return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=False)
 
-
 def compute_symmetric_ylim_deltas(df_delta_meanstd: pd.DataFrame, *, priorities_cols: List[int], col: str) -> Tuple[float, float]:
     sub = df_delta_meanstd[df_delta_meanstd["priorities"].isin(priorities_cols)]
     vals = [abs(float(v)) for v in sub[col].tolist() if is_finite(v)]
     return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=True)
-
 
 # =============================================================================
 # Plots (main + deltas)
@@ -821,7 +767,6 @@ def _make_grid_unified(
     fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
     plt.close(fig)
 
-
 def make_grid_main(
     *,
     df_seeds: pd.DataFrame,
@@ -862,7 +807,6 @@ def make_grid_main(
         legend_ncol=GRID_LEGEND_NCOL_MAIN,
         y_tick_symmetric=False,
     )
-
 
 def make_grid_periodic_vs_stable(
     *,
@@ -931,7 +875,6 @@ def make_grid_periodic_vs_stable(
         y_tick_symmetric=True,
     )
 
-
 # =============================================================================
 # Tables (LaTeX)
 # =============================================================================
@@ -958,7 +901,6 @@ class MetricSpec:
             else:
                 return fmt_signed(mean_val, self.mean_dec)
 
-
 # Metric specs used for periodic vs stable delta tables
 METRICS_DELTAS: List[MetricSpec] = [
     MetricSpec("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", True, 2, 2, "signed"),
@@ -968,13 +910,11 @@ METRICS_DELTAS: List[MetricSpec] = [
     MetricSpec("plan_activated_mean", r"$\Delta\ \mathrm{plan\ activations}$", True, 1, 1, "signed"),
 ]
 
-
 def metrics_main(priorities: int) -> List[MetricSpec]:
     out: List[MetricSpec] = [
         MetricSpec("delta_U_pct_eff_mean", r"$\Delta\mathrm{usage}\;(\%)$", True, 2, 2, "signed"),
         MetricSpec("delta_L_ms_total_mean", r"$\Delta\mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", True, 0, 0, "signed"),
     ]
-
     if priorities != 1:
         for p in (1, 2, 3, 4):
             out.append(MetricSpec(f"delta_L_ms_p{p}_mean", rf"$\Delta\mathrm{{latency}}_{{p{p}}}\;(\mathrm{{ms}})$", True, 0, 0, "signed"))
@@ -988,7 +928,6 @@ def metrics_main(priorities: int) -> List[MetricSpec]:
     out.append(MetricSpec("solver_attempts_mean", r"\#solver\\runs", False, 0, 1, "unsigned_int"))
     out.append(MetricSpec("plan_activated_mean", r"\#plan\\activations", False, 0, 1, "unsigned_int"))
     return out
-
 
 def latex_table_main(
     *,
@@ -1031,7 +970,6 @@ def latex_table_main(
     lines.append(r"\end{tabular}")
     lines.append("")
     out_path.write_text("\n".join(lines), encoding="utf-8")
-
 
 def latex_table_periodic_vs_stable(
     *,
@@ -1086,7 +1024,6 @@ def latex_table_periodic_vs_stable(
         tex_lines.append("")
 
     out_path.write_text("\n".join(tex_lines), encoding="utf-8")
-
 
 # =============================================================================
 # Main

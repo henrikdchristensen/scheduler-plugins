@@ -154,15 +154,17 @@ def get_running_and_unscheduled(
         # "unscheduled" == created pods that are not Running
         unschedulable = sorted([n for n in created if n not in running_names])
 
-        # Keep "success" logic identical to before (just using Running instead of events)
+        # All expected pods are running
         if len(running_pairs) >= expected:
             return "all_running", running_pairs, []
 
-        # Created enough pods to decide, and some won't run
+        # Some pods are unschedulable
         if (len(running_pairs) + len(unschedulable)) >= expected and len(unschedulable) > 0:
             return "some_unschedulable", running_pairs, unschedulable
 
+        # Check for timeout
         if timeout is not None and (time.time() - start) >= timeout:
             return "timeout", running_pairs, unschedulable
 
+        # Wait before polling again
         time.sleep(interval)

@@ -4,8 +4,6 @@
 python -m scripts.kwok_workload_once.plots_and_tables
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import List, Tuple
 
@@ -25,7 +23,7 @@ from scripts.config.plot_config import (
     PLOT_LEGEND_HANDLE_TEXT_PAD,
 )
 from scripts.helpers.data_helpers import is_finite, safe_div
-from scripts.helpers.plotting_helpers import configure_matplotlib, save_figure
+from scripts.helpers.plot_helpers import configure_matplotlib, save_figure
 from scripts.helpers.table_helpers import fmt_pct
 
 #################################################################
@@ -89,7 +87,6 @@ CATEGORIES = [
 # Aggregation helpers
 #################################################################
 
-
 def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> pd.DataFrame:
     """
     Aggregate by `keys` (sum counts/sums) and compute rate columns.
@@ -132,22 +129,20 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
     return g.copy()
 
-
 def aggregate_over_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
     # Used by plots: util is aggregated away (unchanged behavior)
     keys = ["pods_per_node", "priorities", "timeout_s", "nodes"]
     return _aggregate_counts_to_rates(per_combo_df, keys)
-
 
 def aggregate_keep_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
     # Used by tables: keep util so breaker can show (timeout, util)
     keys = ["util", "pods_per_node", "priorities", "timeout_s", "nodes"]
     return _aggregate_counts_to_rates(per_combo_df, keys)
 
-
 #################################################################
 # Tables
 #################################################################
+
 OUTCOME_ROWS: List[Tuple[str, str]] = [
     ("Failures", "solver_failed_rate"),
     ("No Calls", "default_all_running_rate"),
@@ -156,7 +151,6 @@ OUTCOME_ROWS: List[Tuple[str, str]] = [
     ("Better\\&Optimal", "solver_optimal_rate"),
     ("Other", "other_rate"),
 ]
-
 
 def _infer_orders_for_table(
     df_table: pd.DataFrame,
@@ -181,7 +175,6 @@ def _infer_orders_for_table(
     util_order = sorted(int(u) for u in util_vals)
 
     return nodes_order, ppn_order, timeout_order, util_order
-
 
 def write_outcome_breakdown_table_tex(
     *,
@@ -235,8 +228,6 @@ def write_outcome_breakdown_table_tex(
     colspec = "l" + (" " + "c" * data_cols if data_cols > 0 else "")
     lines: List[str] = []
     lines.append("% Values are percent of instances (%).")
-    lines.append("% Breaker: (timeout, util).")
-    lines.append("% Note: sums may differ slightly from 100% due to rounding and/or classification edge cases.")
     lines.append(r"\begin{tabular}{" + colspec + "}")
     lines.append(r"\toprule")
 
@@ -294,10 +285,10 @@ def write_outcome_breakdown_table_tex(
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"[ok] wrote table: {out_path}")
 
+#################################################################
+# Plots
+#################################################################
 
-#################################################################
-# Plots (UNCHANGED)
-#################################################################
 def plot_2d_grid_ppn_prio_with_aggregated_util(
     df_util_agg: pd.DataFrame,
     ppns: list[int],
@@ -424,7 +415,6 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
 
     save_figure(fig, out_path)
 
-
 def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path) -> None:
     utils = sorted(df["util"].unique().tolist())
     nodes = sorted(int(n) for n in df["nodes"].unique().tolist())
@@ -525,10 +515,10 @@ def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path) -> No
 
     save_figure(fig, out_path)
 
-
 #################################################################
 # main
 #################################################################
+
 def main() -> None:
     configure_matplotlib()
 
@@ -551,7 +541,7 @@ def main() -> None:
             decimals=1,
         )
 
-    # --- PLOTS: unchanged (aggregate away util for 2D, and 3D uses per-combo)
+    # --- PLOTS (aggregate away util for 2D, and 3D uses per-combo)
     df_util_agg = aggregate_over_util(df_per_combo)
 
     plot_2d_grid_ppn_prio_with_aggregated_util(
@@ -576,7 +566,6 @@ def main() -> None:
                 title = rf"{PODS_PER_NODE_LABEL}={ppn}, #priorities={prio}, timeout={t}s"
                 out_file = OUT_FIGURES_DIR / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
                 plot_3d_ppn_prio_timeout(sub, title, out_file)
-
 
 if __name__ == "__main__":
     main()

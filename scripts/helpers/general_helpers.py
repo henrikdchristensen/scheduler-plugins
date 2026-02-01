@@ -24,6 +24,7 @@ MEM_UNIT_TABLE = {
 ##############################################
 # ------------ Time helpers ------------------
 ##############################################
+
 def get_timestamp() -> str:
     """
     Get the current timestamp as a string.
@@ -88,8 +89,8 @@ def make_header_footer(msg: str, width: int = 100, border: str = "=") -> Tuple[s
     >>> print(h, " ... stuff ... ", f, sep="")
     """
     msg = str(msg).strip().replace("\n", " ")
-    inner = f" {msg} "                       # space padding around the message
-    w = max(width, len(inner))               # ensure width fits the message
+    inner = f" {msg} "
+    w = max(width, len(inner))
     left = (w - len(inner)) // 2
     right = w - len(inner) - left
     header = f"{border * left}{inner}{border * right}"
@@ -164,7 +165,7 @@ def write_info_file(
         p = Path(out_path)
         p.parent.mkdir(parents=True, exist_ok=True)
 
-        from scripts.helpers.general_helpers import get_git_info, get_timestamp  # if not in same file, adjust
+        from scripts.helpers.general_helpers import get_git_info, get_timestamp
 
         git_info = get_git_info(Path.cwd())
         meta = {
@@ -228,8 +229,9 @@ def log_args_block(logger, args, *, title="ARGS", include=None, exclude=None, so
     log_kv_block(logger, title, fields)
 
 ##############################################
-# ------------ Parser helpers----------------
+# ------------ Parser helpers-----------------
 ##############################################
+
 def normalize_interval(doc: Dict[str, Any], key_combo: Tuple[str, str, str], *, allow_none: bool = True) -> Optional[str]:
     """
     Normalize a (single) or (lo, hi) interval from the document.
@@ -379,8 +381,9 @@ def get_str_from_dict(doc: Dict[str, Any], key: str, default: Optional[str]) -> 
     return s if s else default
 
 ##############################################
-# ------------ Quantity helpers----------------
+# ------------ Quantity helpers---------------
 ##############################################
+
 def qty_to_mcpu_int(token: str) -> int:
     """
     Convert any CPU quantity to millicores.
@@ -433,6 +436,7 @@ def qty_to_bytes_str(b: int) -> str:
 ##############################################
 # ------------ CSV helpers----------------
 ##############################################
+
 def csv_read_header(path: Path) -> list[str] | None:
     """Return the header row for a CSV file, or None if unreadable/empty."""
     try:
@@ -477,6 +481,7 @@ def csv_append_row(
 ######################################################
 # ---------- Seed helpers --------------
 ######################################################
+
 def derive_seed(base_seed: int, *labels: object, nbytes: int = 16) -> int:
     """
     Deterministically derive a child seed from a base seed and a sequence of labels.

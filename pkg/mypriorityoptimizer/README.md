@@ -22,7 +22,6 @@
         - [Using Vagrant for bootstrap script development](#using-vagrant-for-bootstrap-script-development)
       - [Result replication and running test jobs](#result-replication-and-running-test-jobs)
       - [Expected folder structure after running all jobs](#expected-folder-structure-after-running-all-jobs)
-      - [Estimate time to complete all jobs in UCloud](#estimate-time-to-complete-all-jobs-in-ucloud)
       - [Analysis](#analysis)
     - [Trace Replayer](#trace-replayer)
     - [Unit and Integration Tests](#unit-and-integration-tests)
@@ -438,14 +437,6 @@ results/
 ```
 
 The `results.csv` file contains the scheduling results for the job, while the `info.yaml` file contains the job configuration used. If applicable, the `seeds-all-running.txt` and `seeds-not-all-running.txt` files contain the seeds where all pods were running and where not all pods were running, respectively. For the plugin jobs, the `scheduler-logs/` folder contains the saved kube-scheduler logs for each seed, while the `solver-stats/` folder contains the saved solver statistics for each seed.
-
-#### Estimate time to complete all jobs in UCloud
-
-Use `scripts/helpers/jobs_eta.py` to list ETAs for running jobs. It recursively scans for `eta_*` files, extracts recorded ETA and seed progress and prints a sorted summary.
-
-```bash
-python -m scripts.helpers.jobs_eta
-```
 
 #### Analysis
 
