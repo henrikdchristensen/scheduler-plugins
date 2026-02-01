@@ -629,7 +629,7 @@ def test_run_writes_per_combo_csv_and_skips_bad_folder(tmp_path: Path, capsys):
     assert "bad folder name" in out
     assert "wrote" in out
 
-    out_csv = tmp_path / "analysis" / "per_combo_results.csv"
+    out_csv = tmp_path / "analysis" / "results_per_combo.csv"
     assert out_csv.exists()
     text = out_csv.read_text(encoding="utf-8")
     assert "config_dir" in text

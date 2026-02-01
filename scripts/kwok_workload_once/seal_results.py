@@ -4,7 +4,7 @@
 python -m scripts.kwok_workload_once.seal_results
 """
 
-import json, re
+import argparse, json, re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -407,14 +407,27 @@ class CombineResultsAnalyzer:
         ).to_csv(out_per_combo, index=False)
         print(f"[ok] wrote {out_per_combo} (rows={len(per_combo_df)})")
 
-def main() -> None:
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = argparse.ArgumentParser(description="Combine scheduler results")
+    parser.add_argument("--results-root", type=Path, default=RESULTS_ROOT, help="Root directory for results")
+    parser.add_argument("--solver-dir", type=str, default=SOLVER_DIRNAME, help="Solver directory name")
+    parser.add_argument("--default-dir", type=str, default=DEFAULT_DIRNAME, help="Default directory name")
+    parser.add_argument("--out-dir", type=Path, default=OUT_DIR, help="Output directory")
+    parser.add_argument("--results-csv", type=str, default=RESULTS_CSV_NAME, help="Results CSV filename")
+    parser.add_argument("--decimals", type=int, default=DECIMALS, help="Number of decimal places to format (-1 to disable)")
+    
+    parsed_args = parser.parse_args(argv)
+    
+    # Convert -1 to None for decimals
+    decimals = parsed_args.decimals if parsed_args.decimals >= 0 else None
+    
     args = CombineResultsArgs(
-        results_root=RESULTS_ROOT,
-        solver_dir=SOLVER_DIRNAME,
-        default_dir=DEFAULT_DIRNAME,
-        results_csv=RESULTS_CSV_NAME,
-        out_dir=OUT_DIR,
-        decimals=DECIMALS,
+        results_root=parsed_args.results_root,
+        solver_dir=parsed_args.solver_dir,
+        default_dir=parsed_args.default_dir,
+        results_csv=parsed_args.results_csv,
+        out_dir=parsed_args.out_dir,
+        decimals=decimals,
     )
     CombineResultsAnalyzer(args).run()
 
