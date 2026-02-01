@@ -247,15 +247,15 @@ PLOT_Y: Dict[str, Dict[str, YAxisConfig]] = {
 
 PLOT_Y_DELTAS: Dict[str, Dict[str, YAxisConfig]] = {
     "with_default_preemption": {
-        "util": YAxisConfig(scale="linear", ylim=(-5.0, 5.0)),
-        "latency": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
-        "deletions": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
+        "util": YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
+        "latency": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
+        "deletions": YAxisConfig(scale="symlog", ylim=(-1e3 - 1.0, 1e3 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
         # solver/plans deltas configured dynamically (symmetric around 0)
     },
     "without_default_preemption": {
-        "util": YAxisConfig(scale="linear", ylim=(-10.0, 10.0)),
-        "latency": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
-        "deletions": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
+        "util": YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
+        "latency": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
+        "deletions": YAxisConfig(scale="symlog", ylim=(-1e3 - 1.0, 1e3 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
     },
 }
 
@@ -1177,6 +1177,38 @@ def compute_nonnegative_ylim_for_col(
     return (0.0, hi)
 
 
+def values_by_seed(
+    df: pd.DataFrame,
+    *,
+    nodes: int,
+    priorities: int,
+    arrival_s: float,
+    rk: RowKey,
+    col: str,
+    seed_col: str,
+) -> Dict[object, float]:
+    key_mask = (
+        (df["nodes"].astype(int) == int(nodes))
+        & (df["priorities"].astype(int) == int(priorities))
+        & (df["arrival_s"].astype(float) == float(arrival_s))
+        & (df["mode"].astype(str) == str(rk.mode))
+        & (df["blocking"].astype(int) == int(rk.blocking))
+        & (df["defpreempt"].astype(int) == int(rk.defpreempt))
+    )
+    if seed_col not in df.columns:
+        return {}
+
+    sub = df.loc[key_mask, [seed_col, col]].copy()
+    if sub.empty:
+        return {}
+
+    out: Dict[object, float] = {}
+    for s, v in sub.itertuples(index=False, name=None):
+        if is_finite(v):
+            out[s] = float(v)
+    return out
+
+
 def compute_symmetric_ylim_for_yfns(
     *,
     nodes_order: List[int],
@@ -1193,8 +1225,9 @@ def compute_symmetric_ylim_for_yfns(
             for a in arrivals_order:
                 for k in priorities_order:
                     v = y_of(rk, n, a, k)
-                    if is_finite(v):
-                        vals.append(abs(float(v)))
+                    for x in _as_finite_list(v):   # <-- vigtig ændring
+                        vals.append(abs(float(x)))
+
     m = max(vals) if vals else 0.0
     hi = float(m) * (1.0 + float(pad_frac)) if m > 0.0 else 1.0
     return (-hi, hi)
@@ -1420,27 +1453,14 @@ def make_mode_delta_series(
     def _dd(col: str) -> YOfFn:
         if plot_seeds:
             def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
-                left = values_from_df(
-                    df,
-                    nodes=nodes,
-                    priorities=priorities,
-                    arrival_s=a,
-                    rk=rk_l,
-                    col=col,
-                    seed_col=seed_col,
+                left_m = values_by_seed(
+                    df, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_l, col=col, seed_col=seed_col
                 )
-                right = values_from_df(
-                    df,
-                    nodes=nodes,
-                    priorities=priorities,
-                    arrival_s=a,
-                    rk=rk_r,
-                    col=col,
-                    seed_col=seed_col,
+                right_m = values_by_seed(
+                    df, nodes=nodes, priorities=priorities, arrival_s=a, rk=rk_r, col=col, seed_col=seed_col
                 )
-                # Pair by index after sorting by seed (values_from_df sorts by seed)
-                m = min(len(left), len(right))
-                return [right[i] - left[i] for i in range(m)]
+                common = sorted(set(left_m.keys()) & set(right_m.keys()))
+                return [right_m[s] - left_m[s] for s in common]
             return _y
         else:
             def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> float:
