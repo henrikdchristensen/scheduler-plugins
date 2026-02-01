@@ -4,13 +4,15 @@
 python -m scripts.kwok_workload_once.seal_results
 """
 
-import json, re
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from scripts.helpers.data_helpers import format_num, rate
 from scripts.helpers.general_helpers import (
     cmp_placed_by_prio_row,
     parse_json_cell,
@@ -38,10 +40,6 @@ DIR_RE_SOLVER = re.compile(
 # ============================================================
 # Helpers
 # ============================================================
-
-
-def rate(num: float, den: float) -> float:
-    return (num / den) if den and den > 0 else float("nan")
 
 
 def parse_solver_dirname(name: str) -> Optional[Dict[str, Any]]:
@@ -198,12 +196,6 @@ class CombineResultsAnalyzer:
         self.args = args
 
     @staticmethod
-    def _format_num(value: float, decimals: Optional[int]) -> Union[float, str]:
-        if decimals is None:
-            return value
-        return f"{value:.{decimals}f}"
-
-    @staticmethod
     def _split_default_all_running(per_seed_df: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
         mask_default_all = per_seed_df["default_all_running"]
         not_all_running = per_seed_df[~mask_default_all].copy()
@@ -347,29 +339,29 @@ class CombineResultsAnalyzer:
             "n_seeds": int(len(per_seed_df)),
             "n_seeds_not_all_running": int(len(not_all_running)),
             "n_default_all_running": counts.n_default_all_running,
-            "default_all_running_rate": self._format_num(counts.default_all_running_rate, decimals),
+            "default_all_running_rate": format_num(counts.default_all_running_rate, decimals),
             "n_solver_called": counts.n_solver_called,
-            "solver_called_rate": self._format_num(counts.solver_called_rate, decimals),
+            "solver_called_rate": format_num(counts.solver_called_rate, decimals),
             "n_solver_failed": counts.n_solver_failed,
-            "solver_failed_rate": self._format_num(counts.solver_failed_rate, decimals),
+            "solver_failed_rate": format_num(counts.solver_failed_rate, decimals),
             "n_default_optimal": counts.n_default_optimal,
-            "default_optimal_rate": self._format_num(counts.default_optimal_rate, decimals),
+            "default_optimal_rate": format_num(counts.default_optimal_rate, decimals),
             "n_solver_optimal": counts.n_solver_optimal,
-            "solver_optimal_rate": self._format_num(counts.solver_optimal_rate, decimals),
+            "solver_optimal_rate": format_num(counts.solver_optimal_rate, decimals),
             "n_solver_feasible": counts.n_solver_feasible,
-            "solver_feasible_rate": self._format_num(counts.solver_feasible_rate, decimals),
+            "solver_feasible_rate": format_num(counts.solver_feasible_rate, decimals),
             "n_solver_improve": counts.n_solver_improve,
-            "solver_improve_rate": self._format_num(counts.solver_improve_rate, decimals),
+            "solver_improve_rate": format_num(counts.solver_improve_rate, decimals),
             "n_other": counts.n_other,
-            "other_rate": self._format_num(counts.other_rate, decimals),
-            "solver_duration_ms_sum": self._format_num(t_sum, decimals),
-            "solver_duration_ms_mean": self._format_num(float(t_mean) if t_mean == t_mean else float("nan"), decimals),
-            "cpu_delta_sum": self._format_num(cpu_delta_sum, decimals),
-            "mem_delta_sum": self._format_num(mem_delta_sum, decimals),
-            "cpu_delta_mean": self._format_num(
+            "other_rate": format_num(counts.other_rate, decimals),
+            "solver_duration_ms_sum": format_num(t_sum, decimals),
+            "solver_duration_ms_mean": format_num(float(t_mean) if t_mean == t_mean else float("nan"), decimals),
+            "cpu_delta_sum": format_num(cpu_delta_sum, decimals),
+            "mem_delta_sum": format_num(mem_delta_sum, decimals),
+            "cpu_delta_mean": format_num(
                 float(cpu_delta_mean) if cpu_delta_mean == cpu_delta_mean else float("nan"), decimals
             ),
-            "mem_delta_mean": self._format_num(
+            "mem_delta_mean": format_num(
                 float(mem_delta_mean) if mem_delta_mean == mem_delta_mean else float("nan"), decimals
             ),
         }

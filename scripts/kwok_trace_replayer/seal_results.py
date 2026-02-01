@@ -4,7 +4,9 @@
 python -m scripts.kwok_trace_replayer.seal_results
 """
 
-import json, math, re
+import json
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -12,6 +14,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from scripts.helpers.data_helpers import round_numeric_df
 from scripts.kwok_trace_replayer.trace_helpers import rs_prefix_from_pod_name
 
 # =============================================================================
@@ -418,19 +421,6 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
 
 
 # =============================================================================
-# Output helpers
-# =============================================================================
-
-
-def round_numeric_df(df: pd.DataFrame, exclude: Optional[List[str]] = None) -> pd.DataFrame:
-    exclude = exclude or []
-    num_cols = [c for c in df.columns if c not in set(exclude) and pd.api.types.is_numeric_dtype(df[c])]
-    if num_cols:
-        df[num_cols] = df[num_cols].round(FLOAT_DECIMALS)
-    return df
-
-
-# =============================================================================
 # Main
 # =============================================================================
 
@@ -562,7 +552,7 @@ def main() -> None:
             df[c] = np.nan
     df = df[OUT_COLS]
 
-    round_numeric_df(df, exclude=["job_name", "plugin_config", "seed"])
+    round_numeric_df(df, decimals=FLOAT_DECIMALS, exclude=["job_name", "plugin_config", "seed"])
     df.to_csv(out_path, index=False)
 
     print(f"Wrote: {out_path}")

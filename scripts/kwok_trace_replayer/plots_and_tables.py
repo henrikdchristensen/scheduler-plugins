@@ -25,6 +25,14 @@ from scripts.config.plot_config import (
     PLOT_TICK_FONTSIZE,
     PLOT_TITLE_FONTSIZE,
 )
+from scripts.helpers.data_helpers import is_finite
+from scripts.helpers.table_helpers import (
+    fmt_pm,
+    fmt_signed,
+    fmt_unsigned_int,
+    metric_header_tex,
+    nan_str,
+)
 
 # =============================================================================
 # CONFIG (edit here)
@@ -308,68 +316,9 @@ GRID_ROW_SPECS = [
 TABLE_DECIMALS = 1
 
 
-def is_finite(x: object) -> bool:
-    try:
-        return math.isfinite(float(x))
-    except Exception:
-        return False
-
-
-def nan_str() -> str:
-    return r"\text{--}"
-
-
 def fmt_arrival_value(a: float) -> Union[int, float]:
     """Convert arrival to int if close to integer, otherwise keep as float."""
     return int(a) if abs(a - round(a)) < 1e-9 else a
-
-
-def fmt_signed(x: object, decimals: int) -> str:
-    if not is_finite(x): return nan_str()
-    v = round(float(x), int(decimals))
-    return f"{(0.0 if v == 0.0 else v):+.{decimals}f}"
-
-
-def fmt_unsigned_int(x: object) -> str:
-    return f"{int(round(float(x))):d}" if is_finite(x) else nan_str()
-
-
-def fmt_pm(mean_v: object, std_v: object, *, mean_signed: bool, mean_dec: int, std_dec: int) -> str:
-    if not is_finite(mean_v): return nan_str()
-    m = f"{float(mean_v):+.{mean_dec}f}" if mean_signed else f"{float(mean_v):.{mean_dec}f}"
-    if not is_finite(std_v): return rf"\ensuremath{{{m}}}"
-    return rf"\ensuremath{{{m}\,\pm\,{abs(float(std_v)):.{std_dec}f}}}"
-
-
-def metric_header_tex(label: str) -> str:
-    """
-    Splits "... (unit)" or "...\\;(unit)" into two-line makecell header.
-    """
-    s = str(label).strip()
-
-    def split_core(core: str) -> Optional[Tuple[str, str]]:
-        core = core.strip()
-        if r"\;(" in core:
-            left, right = core.split(r"\;(", 1)
-            return left.strip(), "(" + right.strip()
-        if " (" in core and core.endswith(")"):
-            left, right = core.rsplit(" (", 1)
-            return left.strip(), "(" + right.strip()
-        return None
-
-    if s.startswith("$") and s.endswith("$") and len(s) >= 2:
-        core = s[1:-1].strip()
-        parts = split_core(core)
-        if parts is None:
-            return rf"\makecell{{${core}$}}"
-        left, right = parts
-        return rf"\makecell{{${left}$\\${right}$}}"
-
-    parts = split_core(s)
-    if parts is None:
-        return rf"\makecell{{{s}}}"
-    left, right = parts
-    return rf"\makecell{{{left}\\{right}}}"
 
 
 def rk_label_tex(rk: RowKey) -> str:
