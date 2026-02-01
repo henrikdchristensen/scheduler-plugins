@@ -59,7 +59,6 @@ PAIRED_MEAN_COLS = [
     "plugin_config",
     "n_seed",
     "T_end_s_mean",
-    # STORED IN percent (%)
     "delta_U_pct_cpu_mean", "delta_U_pct_mem_mean", "delta_U_pct_eff_mean",
     "delta_R_num_p1_mean", "delta_R_num_p2_mean", "delta_R_num_p3_mean", "delta_R_num_p4_mean", "delta_R_num_total_mean",
     "delta_D_num_p1_mean", "delta_D_num_p2_mean", "delta_D_num_p3_mean", "delta_D_num_p4_mean", "delta_D_num_total_mean",

@@ -51,6 +51,7 @@ DEFAULT_SEED_JITTER_FRAC = 0.12  # jitter as fraction of mode_spacing
 # =============================================================================
 
 IN_RESULTS = Path("analysis/kwok_trace_replayer/results_paired.csv")
+IN_RESULTS_SEEDS = Path("analysis/kwok_trace_replayer/results_seeds.csv")
 OUT_DIR = Path("analysis/kwok_trace_replayer")
 OUT_TABLES_DIR = OUT_DIR / "tables"
 OUT_FIGURES_DIR = OUT_DIR / "figures"
@@ -98,7 +99,7 @@ KEY_COLS = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"
 # =============================================================================
 
 PLOT_TICK_PAD = 2.0
-PLOT_MARKER_SIZE = 4.0
+PLOT_MARKER_SIZE = 2.5
 PLOT_MARKER_LINEWIDTH = 0.4
 PLOT_MIN_LINEAR_YTICKS = 5
 
@@ -232,13 +233,13 @@ class YAxisConfig:
 
 PLOT_Y: Dict[str, Dict[str, YAxisConfig]] = {
     "with_default_preemption": {
-        "util": YAxisConfig(scale="linear", ylim=(-4.0, 4.0)),
+        "util": YAxisConfig(scale="linear", ylim=(-5.0, 5.0)),
         "latency": YAxisConfig(scale="symlog", ylim=(-1e5 - 1.0, 1e5 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
         "deletions": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
         # solver/plans configured dynamically (non-negative, not symmetric)
     },
     "without_default_preemption": {
-        "util": YAxisConfig(scale="linear", ylim=(-4.0, 4.0)),
+        "util": YAxisConfig(scale="linear", ylim=(-5.0, 5.0)),
         "latency": YAxisConfig(scale="symlog", ylim=(-1e5 - 1.0, 1e5 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
         "deletions": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
     },
@@ -246,15 +247,15 @@ PLOT_Y: Dict[str, Dict[str, YAxisConfig]] = {
 
 PLOT_Y_DELTAS: Dict[str, Dict[str, YAxisConfig]] = {
     "with_default_preemption": {
-        "util": YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
-        "latency": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
-        "deletions": YAxisConfig(scale="symlog", ylim=(-1e3 - 1.0, 1e3 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
+        "util": YAxisConfig(scale="linear", ylim=(-5.0, 5.0)),
+        "latency": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
+        "deletions": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
         # solver/plans deltas configured dynamically (symmetric around 0)
     },
     "without_default_preemption": {
-        "util": YAxisConfig(scale="linear", ylim=(-1.0, 1.0)),
-        "latency": YAxisConfig(scale="symlog", ylim=(-1e4 - 1.0, 1e4 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
-        "deletions": YAxisConfig(scale="symlog", ylim=(-1e3 - 1.0, 1e3 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
+        "util": YAxisConfig(scale="linear", ylim=(-10.0, 10.0)),
+        "latency": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_LAT_MS),
+        "deletions": YAxisConfig(scale="symlog", ylim=(-1e10 - 1.0, 1e10 + 1.0), symlog_linthresh=SYMLOG_LINTHRESH_DELETIONS),
     },
 }
 
@@ -1478,6 +1479,7 @@ def make_grid_plot_custom_series(
     y_solvers: List[YOfFn],
     y_plans: List[YOfFn],
     out_stem: str,
+    out_figures_dir: Path,   # <-- NY
     figsize: Tuple[float, float],
     grid_left: float,
     grid_right: float,
@@ -1669,8 +1671,8 @@ def make_grid_plot_custom_series(
         y_center = 0.5 * (bbox.y0 + bbox.y1)
         fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
+    fig.savefig(out_figures_dir / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
+    fig.savefig(out_figures_dir / f"{out_stem}.pdf")
     plt.close(fig)
 
 
@@ -1895,7 +1897,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in-results", type=Path, default=IN_RESULTS)
     ap.add_argument("--out-dir", type=Path, default=OUT_DIR)
-    ap.add_argument("--plot-seeds", action="store_true", help="Plot one point per seed (requires a 'seed' column).")
+    ap.add_argument("--plot-seeds", action="store_true", help="Plot one point per seed (reads results_seeds.csv unless --in-seeds is set).")
+    ap.add_argument("--in-seeds", type=Path, default=None, help="Optional per-seed CSV (defaults to <in-results>/results_seeds.csv).")
     ap.add_argument("--seed-col", default=DEFAULT_SEED_COL)
     ap.add_argument("--seed-jitter-frac", type=float, default=DEFAULT_SEED_JITTER_FRAC)
     args = ap.parse_args()
@@ -1908,9 +1911,18 @@ def main() -> None:
     out_tables_dir.mkdir(parents=True, exist_ok=True)
     out_figures_dir.mkdir(parents=True, exist_ok=True)
 
-    df = load_results(in_results)
-    lookup = build_lookup(df)
-    nodes_order, arrivals_order, priorities_order = infer_orders(df)
+    df_paired = load_results(in_results)
+    lookup = build_lookup(df_paired)
+    nodes_order, arrivals_order, priorities_order = infer_orders(df_paired)
+
+    # If plotting per-seed points, load the per-seed file for plotting only.
+    df_plot = df_paired
+    if args.plot_seeds:
+        seeds_path = args.in_seeds
+        if seeds_path is None:
+            # default: sibling file results_seeds.csv next to results_paired.csv
+            seeds_path = in_results.with_name("results_seeds.csv")
+        df_plot = load_results(seeds_path)
 
     if len(nodes_order) != 2:
         raise SystemExit(f"Expected exactly 2 node values for plots; found {nodes_order}")
@@ -1924,7 +1936,7 @@ def main() -> None:
         raise SystemExit(f"Expected priorities [1,4] for the 2 columns; found priorities={priorities_order}")
 
 
-    has_std = has_any_std_cols(df)
+    has_std = has_any_std_cols(df_paired)
 
     # Always produce the existing tables: mean-only (do NOT change filenames/format)
     metrics_big_mean_fn = build_metrics_for_big_table(lookup=lookup, has_std=False)
@@ -1938,12 +1950,14 @@ def main() -> None:
 
     all_rks = [
         RowKey(mode=m, blocking=int(b), defpreempt=int(d))
-        for (m, b, d) in df[["mode", "blocking", "defpreempt"]].drop_duplicates().itertuples(index=False, name=None)
+        for (m, b, d) in df_paired[["mode", "blocking", "defpreempt"]]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
     ]
 
     ylim_solver_shared, ylim_plans_shared = compute_shared_counter_ylims(
         lookup=lookup,
-        df=df,
+        df=df_paired,
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
         priorities_order=priorities_cols,
@@ -1978,7 +1992,7 @@ def main() -> None:
 
             # 2) New table (mean ± std) — NEW filename, only if std columns exist
             if has_std:
-                out_tex_pm = OUT_TABLES_DIR / f"{view.table_stem}_{suffix}_priorities={k}_with_std.tex"
+                out_tex_pm = out_tables_dir / f"{view.table_stem}_{suffix}_priorities={k}_with_std.tex"
                 latex_metric_matrix_tables(
                     out_path=out_tex_pm,
                     nodes_order=nodes_order,
@@ -1994,7 +2008,7 @@ def main() -> None:
         out_stem_all = f"{view.figure_stem}_{suffix}"
         make_grid_plot(
             lookup=lookup,
-            df=df,
+            df=df_plot,
             out_figures_dir=out_figures_dir,
             plot_seeds=args.plot_seeds,
             seed_col=args.seed_col,
@@ -2019,7 +2033,7 @@ def main() -> None:
             ylim_solver=ylim_solver_shared,
             ylim_plans=ylim_plans_shared,
         )
-        produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem_all}.png", OUT_FIGURES_DIR / f"{out_stem_all}.pdf"])
+        produced_figs.extend([out_figures_dir / f"{out_stem_all}.png", out_figures_dir / f"{out_stem_all}.pdf"])
 
         labels: List[str] = []
         y_utils: List[YOfFn] = []
@@ -2031,7 +2045,7 @@ def main() -> None:
         for (lab, left_mode, right_mode, blocking) in PERIODIC_STABLE_DELTA_PAIRS:
             lab2, y_u, y_l, y_d, y_s, y_p = make_mode_delta_series(
                 lookup=lookup,
-                df=df,
+                df=df_plot,
                 plot_seeds=args.plot_seeds,
                 seed_col=args.seed_col,
                 defpreempt=int(view.defpreempt_value),
@@ -2049,7 +2063,7 @@ def main() -> None:
 
         out_stem_ps = f"grid_periodic_vs_stable_{suffix}"
         make_grid_plot_custom_series(
-            df=df,
+            df=df_plot,
             plot_seeds=args.plot_seeds,
             seed_col=args.seed_col,
             seed_jitter_frac=args.seed_jitter_frac,
@@ -2076,14 +2090,15 @@ def main() -> None:
             legend_ncol=GRID_LEGEND_NCOL_DELTAS,
             arrival_x_spacing=PLOT_ARRIVAL_X_SPACING_ALL,
             mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
+            out_figures_dir=out_figures_dir,
         )
-        produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem_ps}.png", OUT_FIGURES_DIR / f"{out_stem_ps}.pdf"])
+        produced_figs.extend([out_figures_dir / f"{out_stem_ps}.png", out_figures_dir / f"{out_stem_ps}.pdf"])
 
     # -----------------------
     # One table: mode diffs periodic/stable, includes both views
     # -----------------------
     for k in priorities_cols:
-        out_tex = OUT_TABLES_DIR / f"table_periodic_vs_stable_priorities={k}.tex"
+        out_tex = out_tables_dir / f"table_periodic_vs_stable_priorities={k}.tex"
         write_mode_delta_table_tex(
             out_tex=out_tex,
             lookup=lookup,
@@ -2105,8 +2120,8 @@ def main() -> None:
     for p in produced_figs:
         print(f"  - {p}")
     print("")
-    print(f"Wrote tables to:  {OUT_TABLES_DIR}")
-    print(f"Wrote figures to: {OUT_FIGURES_DIR}")
+    print(f"Wrote tables to:  {out_tables_dir}")
+    print(f"Wrote figures to: {out_figures_dir}")
     print(f"Std columns detected: {has_std}")
     if has_std:
         print("Also wrote additional tables with suffix: _with_std.tex")
