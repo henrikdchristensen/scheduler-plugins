@@ -10,7 +10,7 @@ from typing import List
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from scripts.config.plot_config import (
+from scripts.helpers.plot_config import (
     PLOT_FIGURE_DPI,
     PLOT_TITLE_FONTSIZE,
     PLOT_AXIS_LABEL_FONTSIZE,

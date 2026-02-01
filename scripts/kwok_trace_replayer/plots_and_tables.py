@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
-from scripts.config.plot_config import (
+from scripts.helpers.plot_config import (
     PLOT_AXIS_LABEL_FONTSIZE,
     PLOT_FIGURE_DPI,
     PLOT_LEGEND_COLUMN_SPACING,

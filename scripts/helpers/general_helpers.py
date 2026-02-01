@@ -84,9 +84,6 @@ def make_header_footer(msg: str, width: int = 100, border: str = "=") -> Tuple[s
     """
     Build a centered header line with `msg` between border chars and a matching-width footer line.
     If `msg` is longer than `width`, the width expands to fit it.
-    Example:
-    >>> h, f = get_header_footer("Running tests")
-    >>> print(h, " ... stuff ... ", f, sep="")
     """
     msg = str(msg).strip().replace("\n", " ")
     inner = f" {msg} "
@@ -150,16 +147,6 @@ def write_info_file(
 ) -> None:
     """
     Generic helper to write an info YAML bundle.
-    Structure:
-      meta:
-        timestamp: ...
-        git: ...
-        ...meta_extra...
-      inputs:  (optional)
-        ...inputs...
-    - out_path: target YAML path.
-    - meta_extra: additional keys to merge into 'meta'.
-    - inputs: dictionary to be stored under 'inputs'.
     """
     try:
         p = Path(out_path)
@@ -236,7 +223,6 @@ def normalize_interval(doc: Dict[str, Any], key_combo: Tuple[str, str, str], *, 
     """
     Normalize a (single) or (lo, hi) interval from the document.
     It first checks for 'single' key; if not found, it looks for 'lo_key' and 'hi_key'.
-    Returns "lo,hi" or "" if not found (or None if allow_none and not found).
     """
     single, lo_key, hi_key = key_combo
     if single in doc and doc[single] is not None:
@@ -405,7 +391,6 @@ def qty_to_mcpu_int(token: str) -> int:
     return max(1, int(milli))
 
 def qty_to_bytes_int(token: str) -> int:
-    
     """
     Convert any Kubernetes-like memory quantity to integer bytes.
     Accepts: '1536Mi', '1.5Gi', '500MB', '4G', '1024', '42 kib', etc.
@@ -438,7 +423,9 @@ def qty_to_bytes_str(b: int) -> str:
 ##############################################
 
 def csv_read_header(path: Path) -> list[str] | None:
-    """Return the header row for a CSV file, or None if unreadable/empty."""
+    """
+    Return the header row for a CSV file, or None if unreadable/empty.
+    """
     try:
         with open(path, "r", encoding="utf-8", newline="") as fh:
             rdr = csv.reader(fh)
@@ -457,10 +444,6 @@ def csv_append_row(
 ) -> None:
     """
     Append a row to CSV, writing the header if the file is new.
-    Rules:
-      - Reject if 'row' contains any keys not in 'header'.
-      - Missing header fields are written as empty strings.
-      - File column order always follows 'header' (incoming row order ignored).
     """
     p = Path(file_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -501,15 +484,9 @@ def seeded_random(base_seed: int, *labels: object) -> random.Random:
     """
     return random.Random(derive_seed(base_seed, *labels))
 
-
 def read_seeds_file(path: str | Path, *, logger: logging.Logger | None = None) -> list[int]:
     """
-    Read seeds from a txt file. Format:
-      - One integer per line (whitespace allowed).
-      - Empty lines and lines starting with '#' are ignored.
-      - Non-integer lines are skipped (logged at DEBUG).
-
-    Returns an order-preserving de-duplicated list of positive ints.
+    Read seeds from a txt file.
     """
     log = logger
     seeds: list[int] = []
@@ -548,11 +525,6 @@ def read_seeds_file(path: str | Path, *, logger: logging.Logger | None = None) -
 def generate_seeds(gen_seeds_to_file: Optional[List[str]]) -> None:
     """
     Generate random seeds and if requested, write them to one or multiple files.
-    Modes:
-    --generate-seeds-to-file PATH NUM
-    --generate-seeds-to-file PATH NUM PARTS
-    If PARTS provided and PATH contains '{i}', substitute it with 1..PARTS.
-    Else, create PATH_part-<i>(.ext)
     """
     argsv = gen_seeds_to_file
     if not argsv or len(argsv) not in (2, 3):
@@ -725,13 +697,11 @@ class Clock(Protocol):
     def time(self) -> float: ...
     def sleep(self, seconds: float) -> None: ...
 
-
 class SystemClock:
     def time(self) -> float:
         return time.time()
 
     def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
-
 
 Runner = Callable[..., subprocess.CompletedProcess]

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mtick
 
-from scripts.config.plot_config import (
+from scripts.helpers.plot_config import (
     PLOT_TITLE_FONTSIZE,
     PLOT_AXIS_LABEL_FONTSIZE,
     PLOT_TICK_FONTSIZE,

@@ -7,7 +7,7 @@ import numpy as np
 from scipy.stats import pareto as pareto_dist
 
 # -------------------------------------------------------------------
-# Plot configuration (single source of truth)
+# Plot configuration
 # -------------------------------------------------------------------
 
 AXIS_LABEL_FONTSIZE = 5.5
@@ -29,13 +29,11 @@ class TraceRecord:
     priority: int
     replicas: int = 1
 
-
 # -------------------------------------------------------------------
 # Pod naming helpers
 # -------------------------------------------------------------------
 
 RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
-
 
 def rs_prefix_from_pod_name(pod_name: str) -> str:
     """Extract the ReplicaSet prefix (e.g. "rs-000001") from a pod name."""

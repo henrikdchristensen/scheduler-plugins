@@ -241,7 +241,7 @@ stage_test() {
 
     export PATH='${CONTENT_DIR}/bin':\"\$PATH\"
 
-    # Debug: prove root can see shipped tools
+    # Debug
     echo '[dbg] root id:' \$(id)
     echo '[dbg] root PATH:' \"\$PATH\"
     command -v kwokctl >/dev/null 2>&1 || { echo '[dbg] kwokctl not in PATH'; ls -la '${CONTENT_DIR}/bin' || true; exit 1; }

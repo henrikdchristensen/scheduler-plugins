@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+# scripts/helpers/list_filenames.py
+"""
+python -m scripts.helpers.list_filenames --dir <directory> --out <output_file> [--recursive] [--absolute]
+"""
 import argparse
 from pathlib import Path
 
