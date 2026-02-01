@@ -325,34 +325,20 @@ def fmt_arrival_value(a: float) -> Union[int, float]:
 
 
 def fmt_signed(x: object, decimals: int) -> str:
-    if not is_finite(x):
-        return nan_str()
+    if not is_finite(x): return nan_str()
     v = round(float(x), int(decimals))
-    if v == 0.0:
-        v = 0.0
-    return f"{v:+.{decimals}f}"
+    return f"{(0.0 if v == 0.0 else v):+.{decimals}f}"
 
 
 def fmt_unsigned_int(x: object) -> str:
-    if not is_finite(x):
-        return nan_str()
-    return f"{int(round(float(x))):d}"
+    return f"{int(round(float(x))):d}" if is_finite(x) else nan_str()
 
 
 def fmt_pm(mean_v: object, std_v: object, *, mean_signed: bool, mean_dec: int, std_dec: int) -> str:
-    if not is_finite(mean_v):
-        return nan_str()
-    m_val = float(mean_v)
-
-    # If std missing/NaN -> print mean only (still valid for std=1 outputs)
-    if not is_finite(std_v):
-        m = f"{m_val:+.{mean_dec}f}" if mean_signed else f"{m_val:.{mean_dec}f}"
-        return rf"\ensuremath{{{m}}}"
-
-    s_val = abs(float(std_v))
-    m = f"{m_val:+.{mean_dec}f}" if mean_signed else f"{m_val:.{mean_dec}f}"
-    s = f"{s_val:.{std_dec}f}"
-    return rf"\ensuremath{{{m}\,\pm\,{s}}}"
+    if not is_finite(mean_v): return nan_str()
+    m = f"{float(mean_v):+.{mean_dec}f}" if mean_signed else f"{float(mean_v):.{mean_dec}f}"
+    if not is_finite(std_v): return rf"\ensuremath{{{m}}}"
+    return rf"\ensuremath{{{m}\,\pm\,{abs(float(std_v)):.{std_dec}f}}}"
 
 
 def metric_header_tex(label: str) -> str:
@@ -408,15 +394,11 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
 
     # Parse job_name
     parsed = df["job_name"].map(parse_job)
-    df["nodes"] = parsed.map(lambda t: t[0]).astype(int)
-    df["priorities"] = parsed.map(lambda t: t[1]).astype(int)
-    df["arrival_s"] = parsed.map(lambda t: t[2]).astype(float)
+    df[["nodes", "priorities", "arrival_s"]] = pd.DataFrame(parsed.tolist(), index=df.index, columns=["nodes", "priorities", "arrival_s"])
 
     # Parse plugin_config into mode/blocking/defpreempt
     rks = df["plugin_config"].map(RowKey.from_plugin_config)
-    df["mode"] = rks.map(lambda r: r.mode).astype(str)
-    df["blocking"] = rks.map(lambda r: r.blocking).astype(int)
-    df["defpreempt"] = rks.map(lambda r: r.defpreempt).astype(int)
+    df[["mode", "blocking", "defpreempt"]] = pd.DataFrame([(r.mode, r.blocking, r.defpreempt) for r in rks], index=df.index, columns=["mode", "blocking", "defpreempt"])
 
     return df
 
@@ -1093,14 +1075,7 @@ def latex_table_main(
             lines.append(r"\midrule")
 
             for rk in modes:
-                cells: List[str] = []
-                for s in specs:
-                    if std == 1:
-                        m, sd = lookup_mean_std(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col_mean=s.col_mean)
-                        cells.append(s.format_cell(m, sd, include_std=True))
-                    else:
-                        v = lookup_val(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=s.col_mean)
-                        cells.append(s.format_cell(v, None, include_std=False))
+                cells = [s.format_cell(*(lookup_mean_std(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col_mean=s.col_mean) if std else (lookup_val(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=s.col_mean), None)), include_std=bool(std)) for s in specs]
                 lines.append(f"{rk_label_tex(rk)} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
@@ -1153,19 +1128,7 @@ def latex_table_periodic_vs_stable(
             tex_lines.append(r"\midrule")
 
             for ms in METRICS_DELTAS:
-                cells: List[str] = []
-                for a in arrivals_order:
-                    for name in DELTA_NAMES:
-                        m, sd = lookup_delta_mean_std(
-                            lookup_deltas,
-                            nodes=n,
-                            priorities=priorities,
-                            arrival_s=float(a),
-                            defpreempt=int(defpreempt),
-                            delta_name=str(name),
-                            col_mean=ms.col_mean,
-                        )
-                        cells.append(ms.format_cell(m, sd, include_std=(std == 1)))
+                cells = [ms.format_cell(*lookup_delta_mean_std(lookup_deltas, nodes=n, priorities=priorities, arrival_s=float(a), defpreempt=int(defpreempt), delta_name=str(name), col_mean=ms.col_mean), include_std=(std == 1)) for a in arrivals_order for name in DELTA_NAMES]
                 tex_lines.append(f"{ms.latex_label} & " + " & ".join(cells) + r" \\")
 
         tex_lines.append(r"\bottomrule")
@@ -1249,12 +1212,8 @@ def main() -> None:
             produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.png", OUT_FIGURES_DIR / f"{out_stem}.pdf"])
 
     # Summary
-    print("Tables:")
-    for p in produced_tables:
-        print(f"  - {p}")
-    print("\nFigures:")
-    for p in produced_figs:
-        print(f"  - {p}")
+    for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
+        print(f"{label}:\n" + "\n".join(f"  - {p}" for p in paths))
 
 if __name__ == "__main__":
     main()
