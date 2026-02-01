@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from scripts.kwok_workload_once import seal_results as cr
+from scripts.helpers.data_helpers import rate, format_num
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -54,7 +55,7 @@ def _write_results_csv(path: Path, rows: list[dict]) -> None:
     ],
 )
 def test_rate(num, den, expect_nan: bool, expect_value: float | None):
-    got = cr.rate(num, den)
+    got = rate(num, den)
     if expect_nan:
         assert math.isnan(got)
     else:
@@ -134,7 +135,7 @@ def test_load_csv_renames_and_converts(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# _format_num
+# format_num (now in data_helpers)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -146,7 +147,7 @@ def test_load_csv_renames_and_converts(tmp_path: Path):
     ],
 )
 def test_format_num(value: float, decimals: int | None, expected):
-    got = cr.CombineResultsAnalyzer._format_num(value, decimals)
+    got = format_num(value, decimals)
     assert got == expected
 
 

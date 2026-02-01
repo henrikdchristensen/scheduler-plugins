@@ -11,13 +11,11 @@ from typing import List, Tuple
 
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mtick
 
 from scripts.config.plot_config import (
-    PLOT_FIGURE_DPI,
     PLOT_TITLE_FONTSIZE,
     PLOT_AXIS_LABEL_FONTSIZE,
     PLOT_TICK_FONTSIZE,
@@ -26,6 +24,9 @@ from scripts.config.plot_config import (
     PLOT_LEGEND_COLUMN_SPACING,
     PLOT_LEGEND_HANDLE_TEXT_PAD,
 )
+from scripts.helpers.data_helpers import is_finite, safe_div
+from scripts.helpers.plotting_helpers import configure_matplotlib, save_figure
+from scripts.helpers.table_helpers import fmt_pct
 
 #################################################################
 # CONFIG (constants)
@@ -85,35 +86,8 @@ CATEGORIES = [
 ]
 
 #################################################################
-# Plotting helpers
-#################################################################
-
-
-def configure_matplotlib() -> None:
-    mpl.rcParams.update(
-        {
-            "axes.titlesize": PLOT_TITLE_FONTSIZE,
-            "axes.labelsize": PLOT_AXIS_LABEL_FONTSIZE,
-            "xtick.labelsize": PLOT_TICK_FONTSIZE,
-            "ytick.labelsize": PLOT_TICK_FONTSIZE,
-        }
-    )
-
-
-def save_figure(fig: mpl.figure.Figure, out_path: Path) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    for ext in FIGURE_FORMATS:
-        fname = out_path.with_suffix(f".{ext}")
-        fig.savefig(fname, dpi=PLOT_FIGURE_DPI, bbox_inches="tight")
-    plt.close(fig)
-    print(f"[ok] saved figure: {out_path} ({', '.join(FIGURE_FORMATS)})")
-
-
-#################################################################
 # Aggregation helpers
 #################################################################
-def _safe_div(num: pd.Series, den: pd.Series) -> pd.Series:
-    return num.div(den.replace(0, np.nan)).fillna(0.0)
 
 
 def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> pd.DataFrame:
@@ -144,18 +118,18 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
         )
     )
 
-    g["default_all_running_rate"] = _safe_div(g["n_default_all_running"], g["n_seeds"])
-    g["solver_called_rate"] = _safe_div(g["n_solver_called"], g["n_seeds"])
-    g["solver_failed_rate"] = _safe_div(g["n_solver_failed"], g["n_seeds"])
-    g["default_optimal_rate"] = _safe_div(g["n_default_optimal"], g["n_seeds"])
-    g["solver_optimal_rate"] = _safe_div(g["n_solver_optimal"], g["n_seeds"])
-    g["solver_feasible_rate"] = _safe_div(g["n_solver_feasible"], g["n_seeds"])
-    g["solver_improve_rate"] = _safe_div(g["n_solver_improve"], g["n_seeds"])
-    g["other_rate"] = _safe_div(g["n_other"], g["n_seeds"])
+    g["default_all_running_rate"] = safe_div(g["n_default_all_running"], g["n_seeds"])
+    g["solver_called_rate"] = safe_div(g["n_solver_called"], g["n_seeds"])
+    g["solver_failed_rate"] = safe_div(g["n_solver_failed"], g["n_seeds"])
+    g["default_optimal_rate"] = safe_div(g["n_default_optimal"], g["n_seeds"])
+    g["solver_optimal_rate"] = safe_div(g["n_solver_optimal"], g["n_seeds"])
+    g["solver_feasible_rate"] = safe_div(g["n_solver_feasible"], g["n_seeds"])
+    g["solver_improve_rate"] = safe_div(g["n_solver_improve"], g["n_seeds"])
+    g["other_rate"] = safe_div(g["n_other"], g["n_seeds"])
 
-    g["solver_duration_ms_mean"] = _safe_div(g["solver_duration_ms_sum"], g["n_solver_called"])
-    g["cpu_delta_mean"] = _safe_div(g["cpu_delta_sum"], g["n_seeds"])
-    g["mem_delta_mean"] = _safe_div(g["mem_delta_sum"], g["n_seeds"])
+    g["solver_duration_ms_mean"] = safe_div(g["solver_duration_ms_sum"], g["n_solver_called"])
+    g["cpu_delta_mean"] = safe_div(g["cpu_delta_sum"], g["n_seeds"])
+    g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
     return g.copy()
 
 
@@ -182,22 +156,6 @@ OUTCOME_ROWS: List[Tuple[str, str]] = [
     ("Better\\&Optimal", "solver_optimal_rate"),
     ("Other", "other_rate"),
 ]
-
-
-def _is_finite(x: object) -> bool:
-    try:
-        return np.isfinite(float(x))
-    except Exception:
-        return False
-
-
-def _fmt_pct(x: object, decimals: int = 1) -> str:
-    if not _is_finite(x):
-        return r"\text{--}"
-    v = float(x)
-    if abs(v) < 5e-13:
-        v = 0.0
-    return f"{v:.{decimals}f}"
 
 
 def _infer_orders_for_table(
@@ -324,8 +282,8 @@ def write_outcome_breakdown_table_tex(
                 for n in nodes_order:
                     for ppn in ppn_order:
                         r_ = get_rate(timeout_s=t, util=u, nodes=n, ppn=ppn, col=col)
-                        pct = 100.0 * r_ if _is_finite(r_) else float("nan")
-                        cells.append(_fmt_pct(pct, decimals=decimals))
+                        pct = 100.0 * r_ if is_finite(r_) else float("nan")
+                        cells.append(fmt_pct(pct, decimals=decimals))
                 lines.append(f"{label} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
