@@ -266,6 +266,30 @@ Y_DELTAS: Dict[str, YAxisCfg] = {
     "deletions": YAxisCfg("symlog", (-1e3 - 1.0, 1e3 + 1.0), SYMLOG_LINTHRESH_DELETIONS),
 }
 
+
+# =============================================================================
+# Grid row configuration (for unified grid function)
+# =============================================================================
+
+@dataclass(frozen=True)
+class GridRowSpec:
+    """Configuration for one row in a grid plot."""
+    col_name: str
+    ycfg_key: str  # key in Y_MAIN or Y_DELTAS
+    y_tick_strategy: Optional[str] = None  # "count_sparse", "count_sparse_symmetric", or None
+    ylabel: str = ""
+    is_bottom: bool = False  # whether this is the bottom row (shows x labels)
+
+
+# Row configurations - reused for both main and delta grids
+GRID_ROW_SPECS = [
+    GridRowSpec("delta_U_pct_eff_mean", "util", ylabel=r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$"),
+    GridRowSpec("delta_L_ms_total_mean", "latency", ylabel=r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$"),
+    GridRowSpec("delta_D_num_total_mean", "deletions", ylabel=r"$\mathrm{diff.}\ \mathrm{deletions}$"),
+    GridRowSpec("solver_attempts_mean", "solver", y_tick_strategy="count_sparse", ylabel=r"$\mathrm{solver\ runs}$"),
+    GridRowSpec("plan_activated_mean", "plans", y_tick_strategy="count_sparse", ylabel=r"$\mathrm{plan\ activations}$", is_bottom=True),
+]
+
 # =============================================================================
 # Formatting helpers (tables)
 # =============================================================================
@@ -282,6 +306,11 @@ def is_finite(x: object) -> bool:
 
 def nan_str() -> str:
     return r"\text{--}"
+
+
+def fmt_arrival_value(a: float) -> Union[int, float]:
+    """Convert arrival to int if close to integer, otherwise keep as float."""
+    return int(a) if abs(a - round(a)) < 1e-9 else a
 
 
 def fmt_signed(x: object, decimals: int) -> str:
@@ -381,17 +410,14 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
     return df
 
 
-def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
+def _generic_aggregate_mean_std(df: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
     """
-    One row per configuration. Produces:
-      - *_mean columns: mean across seeds (for numeric cols)
-      - *_std columns: std across seeds
+    Generic aggregation: compute mean+std across seeds for numeric columns.
+    Adds <col>_std columns for each numeric column.
     """
-    group_cols = ["job_name", "plugin_config"] + KEY_COLS_MAIN
+    numeric_cols = [c for c in df.columns if c not in set(group_cols + [SEED_COL]) and pd.api.types.is_numeric_dtype(df[c])]
 
-    numeric_cols = [c for c in df_seeds.columns if c not in set(group_cols + [SEED_COL]) and pd.api.types.is_numeric_dtype(df_seeds[c])]
-
-    grp = df_seeds.groupby(group_cols, dropna=False)
+    grp = df.groupby(group_cols, dropna=False)
     mean_df = grp[numeric_cols].mean(numeric_only=True)
     std_df = grp[numeric_cols].std(numeric_only=True)
 
@@ -402,6 +428,16 @@ def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
         out[f"{c}_std"] = std_reset[c].to_numpy()
 
     return out
+
+
+def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
+    """
+    One row per configuration. Produces:
+      - *_mean columns: mean across seeds (for numeric cols)
+      - *_std columns: std across seeds
+    """
+    group_cols = ["job_name", "plugin_config"] + KEY_COLS_MAIN
+    return _generic_aggregate_mean_std(df_seeds, group_cols)
 
 
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
@@ -476,20 +512,7 @@ def aggregate_delta_mean_std(df_delta_seeds: pd.DataFrame) -> pd.DataFrame:
     Aggregate delta-by-seed to mean+std per configuration and delta_name.
     Adds <col>_std columns.
     """
-    group_cols = DELTA_KEY_COLS
-    numeric_cols = [c for c in df_delta_seeds.columns if c not in set(group_cols + [SEED_COL]) and pd.api.types.is_numeric_dtype(df_delta_seeds[c])]
-
-    grp = df_delta_seeds.groupby(group_cols, dropna=False)
-    mean_df = grp[numeric_cols].mean(numeric_only=True)
-    std_df = grp[numeric_cols].std(numeric_only=True)
-
-    out = mean_df.reset_index()
-    std_reset = std_df.reset_index()
-
-    for c in numeric_cols:
-        out[f"{c}_std"] = std_reset[c].to_numpy()
-
-    return out
+    return _generic_aggregate_mean_std(df_delta_seeds, DELTA_KEY_COLS)
 
 
 def build_lookup_deltas(df_delta_meanstd: pd.DataFrame) -> pd.DataFrame:
@@ -759,6 +782,109 @@ def compute_symmetric_ylim_deltas(df_delta_meanstd: pd.DataFrame, *, priorities_
 # Plots (main + deltas)
 # =============================================================================
 
+def _make_grid_unified(
+    *,
+    y_function_factory: Callable[[str], YOfFn],
+    series: List[RowKey],
+    color_override: Optional[Callable[[RowKey], Any]],
+    legend_labels: List[str],
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    priorities_cols: List[int],
+    ylim_solver: Tuple[float, float],
+    ylim_plans: Tuple[float, float],
+    out_stem: str,
+    y_config: Dict[str, YAxisCfg],
+    figsize: Tuple[float, float],
+    grid_left: float,
+    mode_x_spacing: float,
+    legend_ncol: int,
+    y_tick_symmetric: bool = False,
+) -> None:
+    """Unified grid plotting function used by both main and delta grids."""
+    fig, axes = plt.subplots(nrows=5, ncols=2, figsize=figsize, sharex=True)
+    axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 1].set_title(f"#priorities = {priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
+
+    # Build y-axis configs for solver and plans rows
+    y_config_with_limits = dict(y_config)
+    y_config_with_limits["solver"] = YAxisCfg("linear", ylim_solver, 1.0)
+    y_config_with_limits["plans"] = YAxisCfg("linear", ylim_plans, 1.0)
+
+    # Draw all rows using configuration
+    for row_idx, row_spec in enumerate(GRID_ROW_SPECS):
+        y_of = y_function_factory(row_spec.col_name)
+        ycfg = y_config_with_limits[row_spec.ycfg_key]
+        
+        # Determine y_tick_strategy
+        y_tick_strategy = row_spec.y_tick_strategy
+        if y_tick_symmetric and y_tick_strategy == "count_sparse":
+            y_tick_strategy = "count_sparse_symmetric"
+
+        for col_i, k in enumerate(priorities_cols):
+            draw_points_on_ax(
+                ax=axes[row_idx, col_i],
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                priorities=k,
+                series=series,
+                y_of=y_of,
+                ycfg=ycfg,
+                show_xticklabels=row_spec.is_bottom,
+                show_yticklabels=(col_i == 0),
+                arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
+                mode_x_spacing=mode_x_spacing,
+                y_tick_strategy=y_tick_strategy,
+                color_of=color_override,
+            )
+
+    fig.subplots_adjust(
+        left=grid_left,
+        right=GRID_RIGHT,
+        bottom=GRID_BOTTOM,
+        top=GRID_TOP,
+        wspace=GRID_WSPACE,
+        hspace=GRID_HSPACE,
+    )
+
+    # Legend
+    if color_override:
+        # Custom colors for delta plots
+        legend_handles = [Line2D([0], [0], color=color_override(rk), linewidth=1.8) for rk in series]
+    else:
+        # Standard colors from RowKey
+        legend_handles = [Line2D([0], [0], color=rk_color(rk), linewidth=1.8) for rk in series]
+
+    bbox_l = axes[0, 0].get_position()
+    bbox_r = axes[0, 1].get_position()
+    x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
+    y_top_grid = max(bbox_l.y1, bbox_r.y1)
+    legend_y = min(0.98, y_top_grid + float(GRID_LEGEND_PAD))
+
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="lower center",
+        bbox_to_anchor=(x_center_grid, legend_y),
+        ncol=min(legend_ncol, len(legend_labels)),
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+
+    # Row labels (left)
+    x_text = x_from_left_with_pad_points(fig, grid_left, GRID_YLABEL_PAD_PT)
+    for r, row_spec in enumerate(GRID_ROW_SPECS):
+        bbox = axes[r, 0].get_position()
+        y_center = 0.5 * (bbox.y0 + bbox.y1)
+        fig.text(x_text, y_center, row_spec.ylabel, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
+    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
+    plt.close(fig)
+
+
 def make_grid_main(
     *,
     df_seeds: pd.DataFrame,
@@ -774,137 +900,31 @@ def make_grid_main(
 ) -> None:
     series = sort_rks([RowKey(mode=m, blocking=b, defpreempt=defpreempt) for (m, b) in MAIN_PLOT_MODES])
 
-    def y_from_col(col: str) -> YOfFn:
+    def y_function_factory(col: str) -> YOfFn:
         if plot_seeds:
             return lambda rk, n, a, k: values_from_df_seeds(df_seeds, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
         return lambda rk, n, a, k: lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
 
-    fig, axes = plt.subplots(nrows=5, ncols=2, figsize=GRID_FIGSIZE_MAIN, sharex=True)
-    axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
-    axes[0, 1].set_title(f"#priorities = {priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
+    legend_labels = [rk_label(rk) for rk in series]
 
-    for col_i, k in enumerate(priorities_cols):
-        draw_points_on_ax(
-            ax=axes[0, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=series,
-            y_of=y_from_col("delta_U_pct_eff_mean"),
-            ycfg=Y_MAIN["util"],
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
-        )
-        draw_points_on_ax(
-            ax=axes[1, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=series,
-            y_of=y_from_col("delta_L_ms_total_mean"),
-            ycfg=Y_MAIN["latency"],
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
-        )
-        draw_points_on_ax(
-            ax=axes[2, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=series,
-            y_of=y_from_col("delta_D_num_total_mean"),
-            ycfg=Y_MAIN["deletions"],
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
-        )
-
-        draw_points_on_ax(
-            ax=axes[3, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=series,
-            y_of=y_from_col("solver_attempts_mean"),
-            ycfg=YAxisCfg("linear", ylim_solver, 1.0),
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
-            y_tick_strategy="count_sparse",
-        )
-
-        draw_points_on_ax(
-            ax=axes[4, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=series,
-            y_of=y_from_col("plan_activated_mean"),
-            ycfg=YAxisCfg("linear", ylim_plans, 1.0),
-            show_xticklabels=True,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
-            y_tick_strategy="count_sparse",
-        )
-
-    fig.subplots_adjust(
-        left=GRID_LEFT_MAIN,
-        right=GRID_RIGHT,
-        bottom=GRID_BOTTOM,
-        top=GRID_TOP,
-        wspace=GRID_WSPACE,
-        hspace=GRID_HSPACE,
+    _make_grid_unified(
+        y_function_factory=y_function_factory,
+        series=series,
+        color_override=None,
+        legend_labels=legend_labels,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        priorities_cols=priorities_cols,
+        ylim_solver=ylim_solver,
+        ylim_plans=ylim_plans,
+        out_stem=out_stem,
+        y_config=Y_MAIN,
+        figsize=GRID_FIGSIZE_MAIN,
+        grid_left=GRID_LEFT_MAIN,
+        mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
+        legend_ncol=GRID_LEGEND_NCOL_MAIN,
+        y_tick_symmetric=False,
     )
-
-    # Legend
-    legend_handles: List[Line2D] = []
-    legend_labels: List[str] = []
-    for rk in series:
-        legend_labels.append(rk_label(rk))
-        legend_handles.append(Line2D([0], [0], color=rk_color(rk), linewidth=1.8))
-
-    bbox_l = axes[0, 0].get_position()
-    bbox_r = axes[0, 1].get_position()
-    x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
-    y_top_grid = max(bbox_l.y1, bbox_r.y1)
-    legend_y = min(0.98, y_top_grid + float(GRID_LEGEND_PAD))
-
-    fig.legend(
-        legend_handles,
-        legend_labels,
-        loc="lower center",
-        bbox_to_anchor=(x_center_grid, legend_y),
-        ncol=min(int(GRID_LEGEND_NCOL_MAIN), len(legend_labels)),
-        fontsize=PLOT_LEGEND_FONTSIZE,
-        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
-        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
-        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
-    )
-
-    # Row labels (left)
-    x_text = x_from_left_with_pad_points(fig, GRID_LEFT_MAIN, GRID_YLABEL_PAD_PT)
-    row_labels = [
-        r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$",
-        r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$",
-        r"$\mathrm{diff.}\ \mathrm{deletions}$",
-        r"$\mathrm{solver\ runs}$",
-        r"$\mathrm{plan\ activations}$",
-    ]
-    for r, text in enumerate(row_labels):
-        bbox = axes[r, 0].get_position()
-        y_center = 0.5 * (bbox.y0 + bbox.y1)
-        fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
-
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
-    plt.close(fig)
 
 
 def make_grid_periodic_vs_stable(
@@ -920,174 +940,75 @@ def make_grid_periodic_vs_stable(
     ylim_plans: Tuple[float, float],
     out_stem: str,
 ) -> None:
-    labels = [d[0] for d in DELTA_SERIES]
+    delta_names = [d[0] for d in DELTA_SERIES]
     cmap = plt.get_cmap("Set2").colors
 
-    fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(labels))]
+    # Create fake series for coloring
+    fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(delta_names))]
 
     def color_override(rk: RowKey) -> Any:
         idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
         return cmap[idx % len(cmap)]
 
-    def y_delta(col: str, delta_name: str) -> YOfFn:
-        if plot_seeds:
-            def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
-                sub = df_delta_seeds[
-                    (df_delta_seeds["defpreempt"] == int(defpreempt))
-                    & (df_delta_seeds["nodes"] == int(nodes))
-                    & (df_delta_seeds["priorities"] == int(priorities))
-                    & (df_delta_seeds["arrival_s"] == float(a))
-                    & (df_delta_seeds["delta_name"] == str(delta_name))
-                ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
-                return [float(v) for v in sub[col].tolist() if is_finite(v)]
-            return _y
+    def y_function_factory(col: str) -> YOfFn:
+        """Creates y-value function for deltas that dispatches based on RowKey."""
+        # Build individual delta functions
+        delta_fns = []
+        for delta_name in delta_names:
+            if plot_seeds:
+                def make_seed_fn(dn=delta_name):  # Capture delta_name
+                    def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
+                        sub = df_delta_seeds[
+                            (df_delta_seeds["defpreempt"] == int(defpreempt))
+                            & (df_delta_seeds["nodes"] == int(nodes))
+                            & (df_delta_seeds["priorities"] == int(priorities))
+                            & (df_delta_seeds["arrival_s"] == float(a))
+                            & (df_delta_seeds["delta_name"] == str(dn))
+                        ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
+                        return [float(v) for v in sub[col].tolist() if is_finite(v)]
+                    return _y
+                delta_fns.append(make_seed_fn())
+            else:
+                def make_mean_fn(dn=delta_name):  # Capture delta_name
+                    def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> float:
+                        m, _s = lookup_delta_mean_std(
+                            lookup_deltas,
+                            nodes=nodes,
+                            priorities=priorities,
+                            arrival_s=a,
+                            defpreempt=defpreempt,
+                            delta_name=dn,
+                            col_mean=col,
+                        )
+                        return float(m)
+                    return _y
+                delta_fns.append(make_mean_fn())
 
-        def _y(_rk_unused: RowKey, nodes: int, a: float, priorities: int) -> float:
-            m, _s = lookup_delta_mean_std(
-                lookup_deltas,
-                nodes=nodes,
-                priorities=priorities,
-                arrival_s=a,
-                defpreempt=defpreempt,
-                delta_name=delta_name,
-                col_mean=col,
-            )
-            return float(m)
-        return _y
-
-    def y_of_from_delta(col: str) -> Callable[[RowKey, int, float, int], YVal]:
-        fns = [y_delta(col, name) for name in labels]
-
-        def _y(rk: RowKey, nodes: int, a: float, priorities: int) -> YVal:
+        # Return dispatcher function
+        def _dispatcher(rk: RowKey, nodes: int, a: float, priorities: int) -> YVal:
             idx = int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
-            return fns[idx](rk, nodes, a, priorities)
+            return delta_fns[idx](rk, nodes, a, priorities)
 
-        return _y
+        return _dispatcher
 
-    fig, axes = plt.subplots(nrows=5, ncols=2, figsize=GRID_FIGSIZE_DELTAS, sharex=True)
-    axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
-    axes[0, 1].set_title(f"#priorities = {priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
-
-    for col_i, k in enumerate(priorities_cols):
-        draw_points_on_ax(
-            ax=axes[0, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=fake_series,
-            y_of=y_of_from_delta("delta_U_pct_eff_mean"),
-            ycfg=Y_DELTAS["util"],
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
-            color_of=color_override,
-        )
-        draw_points_on_ax(
-            ax=axes[1, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=fake_series,
-            y_of=y_of_from_delta("delta_L_ms_total_mean"),
-            ycfg=Y_DELTAS["latency"],
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
-            color_of=color_override,
-        )
-        draw_points_on_ax(
-            ax=axes[2, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=fake_series,
-            y_of=y_of_from_delta("delta_D_num_total_mean"),
-            ycfg=Y_DELTAS["deletions"],
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
-            color_of=color_override,
-        )
-
-        draw_points_on_ax(
-            ax=axes[3, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=fake_series,
-            y_of=y_of_from_delta("solver_attempts_mean"),
-            ycfg=YAxisCfg("linear", ylim_solver, 1.0),
-            show_xticklabels=False,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
-            y_tick_strategy="count_sparse_symmetric",
-            color_of=color_override,
-        )
-        draw_points_on_ax(
-            ax=axes[4, col_i],
-            nodes_order=nodes_order,
-            arrivals_order=arrivals_order,
-            priorities=k,
-            series=fake_series,
-            y_of=y_of_from_delta("plan_activated_mean"),
-            ycfg=YAxisCfg("linear", ylim_plans, 1.0),
-            show_xticklabels=True,
-            show_yticklabels=(col_i == 0),
-            arrival_x_spacing=PLOT_ARRIVAL_X_SPACING,
-            mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
-            y_tick_strategy="count_sparse_symmetric",
-            color_of=color_override,
-        )
-
-    fig.subplots_adjust(
-        left=GRID_LEFT_DELTAS,
-        right=GRID_RIGHT,
-        bottom=GRID_BOTTOM,
-        top=GRID_TOP,
-        wspace=GRID_WSPACE,
-        hspace=GRID_HSPACE,
+    _make_grid_unified(
+        y_function_factory=y_function_factory,
+        series=fake_series,
+        color_override=color_override,
+        legend_labels=delta_names,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        priorities_cols=priorities_cols,
+        ylim_solver=ylim_solver,
+        ylim_plans=ylim_plans,
+        out_stem=out_stem,
+        y_config=Y_DELTAS,
+        figsize=GRID_FIGSIZE_DELTAS,
+        grid_left=GRID_LEFT_DELTAS,
+        mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
+        legend_ncol=GRID_LEGEND_NCOL_DELTAS,
+        y_tick_symmetric=True,
     )
-
-    # Legend
-    legend_handles = [Line2D([0], [0], color=cmap[i % len(cmap)], linewidth=1.8) for i in range(len(labels))]
-    bbox_l = axes[0, 0].get_position()
-    bbox_r = axes[0, 1].get_position()
-    x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
-    y_top_grid = max(bbox_l.y1, bbox_r.y1)
-    legend_y = min(0.98, y_top_grid + float(GRID_LEGEND_PAD))
-
-    fig.legend(
-        legend_handles,
-        labels,
-        loc="lower center",
-        bbox_to_anchor=(x_center_grid, legend_y),
-        ncol=min(int(GRID_LEGEND_NCOL_DELTAS), len(labels)),
-        fontsize=PLOT_LEGEND_FONTSIZE,
-        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
-        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
-        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
-    )
-
-    x_text = x_from_left_with_pad_points(fig, GRID_LEFT_DELTAS, GRID_YLABEL_PAD_PT)
-    row_labels = [
-        r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$",
-        r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$",
-        r"$\mathrm{diff.}\ \mathrm{deletions}$",
-        r"$\mathrm{solver\ runs}$",
-        r"$\mathrm{plan\ activations}$",
-    ]
-    for r, text in enumerate(row_labels):
-        bbox = axes[r, 0].get_position()
-        y_center = 0.5 * (bbox.y0 + bbox.y1)
-        fig.text(x_text, y_center, text, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
-
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
-    plt.close(fig)
 
 
 # =============================================================================
@@ -1147,9 +1068,6 @@ def latex_table_main(
 
     total_cols = 1 + len(specs)
 
-    def ai(a: float) -> str:
-        return str(int(a)) if abs(a - round(a)) < 1e-9 else str(a)
-
     first_block = True
     for n in nodes_order:
         for a in arrivals_order:
@@ -1157,7 +1075,8 @@ def latex_table_main(
                 lines.append(r"\midrule")
             first_block = False
 
-            lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {int(n)}, inter-arrival = {ai(float(a))}\,s}} \\")
+            a_str = fmt_arrival_value(a)
+            lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {int(n)}, inter-arrival = {a_str}\,s}} \\")
             lines.append(r"\midrule")
 
             for rk in modes:
@@ -1205,10 +1124,6 @@ def latex_table_periodic_vs_stable(
         end = start + n_modes - 1
         cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
 
-    def arrival_group_label(a: float) -> str:
-        a_i = int(a) if abs(a - round(a)) < 1e-9 else a
-        return rf"inter-arrival = {a_i}\,s"
-
     metric_specs: List[MetricSpec] = [
         MetricSpec("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", True, 2, 2, "signed"),
         MetricSpec("delta_L_ms_total_mean", r"$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", True, 0, 0, "signed"),
@@ -1228,7 +1143,7 @@ def latex_table_periodic_vs_stable(
         tex_lines.append(r"\toprule")
         tex_lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{Mode $\Delta$ (PR 8$\rightarrow$32, SQ 2$\rightarrow$8), \#priorities = {priorities}, defaultpreemption = {defpreempt}}} \\")
         tex_lines.append(r"\addlinespace[0.2em]")
-        tex_lines.append(" & " + " & ".join([rf"\multicolumn{{{n_modes}}}{{c}}{{{arrival_group_label(a)}}}" for a in arrivals_order]) + r" \\")
+        tex_lines.append(" & " + " & ".join([rf"\multicolumn{{{n_modes}}}{{c}}{{inter-arrival = {fmt_arrival_value(a)}\,s}}" for a in arrivals_order]) + r" \\")
         tex_lines.append("".join(cmid))
         tex_lines.append(" & " + " & ".join([c for _a in arrivals_order for c in delta_cols]) + r" \\")
         tex_lines.append(r"\midrule")
