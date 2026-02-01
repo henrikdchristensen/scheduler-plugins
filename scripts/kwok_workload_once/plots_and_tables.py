@@ -31,7 +31,7 @@ from scripts.config.plot_config import (
 # CONFIG (constants)
 #################################################################
 
-DF_PER_COMBO_PATH = Path("analysis/kwok_workload_once/per_combo_results.csv")
+DF_PER_COMBO_PATH = Path("analysis/kwok_workload_once/results_per_combo.csv")
 
 OUT_DIR = Path("analysis/kwok_workload_once")
 OUT_FIGURES_DIR = OUT_DIR / "figures"
@@ -58,8 +58,15 @@ PODS_PER_NODE_LABEL = "pods/node"
 FIGURE_FORMATS = ["pdf", "png"]
 
 # 2d sizes
-CELL_FIGSIZE_2D = (3.1, 1.6)
-BAR_WIDTH_2D = 0.9
+GRID_2D_CELL_FIGSIZE = (2.6, 1.6)
+GRID_2D_BAR_WIDTH = 0.88
+GRID_2D_WSPACE = 0.08
+GRID_2D_HSPACE = 0.12
+GRID_2D_LEFT = 0.1
+GRID_2D_RIGHT = 0.995
+GRID_2D_BOTTOM = 0.0
+GRID_2D_TOP = 0.88
+GRID_2D_YLABEL_XPOS = 0.015
 
 # 3d sizes
 FIGSIZE_3D = (8, 4)
@@ -350,7 +357,7 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
         squeeze=False,
     )
 
-    fig.supylabel("% of instances", fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=0.055)
+    fig.supylabel("% of instances", fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=GRID_2D_YLABEL_XPOS)
 
     seen_keys = set()
 
@@ -370,7 +377,7 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
             nodes_vals = sorted(panel["nodes"].unique().tolist())
             ts = sorted(panel["timeout_s"].unique().tolist())
             bars_per_group = max(1, len(ts))
-            width = BAR_WIDTH_2D / bars_per_group
+            width = GRID_2D_BAR_WIDTH / bars_per_group
             x = np.arange(len(nodes_vals))
 
             for j, timeout in enumerate(ts):
@@ -445,6 +452,16 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
         handlelength=PLOT_LEGEND_HANDLE_LENGTH,
         handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
         columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+    
+    # Make the grid tighter (reduce space between panels)
+    fig.subplots_adjust(
+        left=GRID_2D_LEFT,
+        right=GRID_2D_RIGHT,
+        bottom=GRID_2D_BOTTOM,
+        top=GRID_2D_TOP,
+        wspace=GRID_2D_WSPACE,
+        hspace=GRID_2D_HSPACE,
     )
 
     save_figure(fig, out_path)
@@ -584,7 +601,7 @@ def main() -> None:
         ppns=PLOT_PPNS,
         priorities=PLOT_PRIORITIES,
         out_path=OUT_FIGURES_DIR / "2d_grid_ppn_prio",
-        cell_figsize=CELL_FIGSIZE_2D,
+        cell_figsize=GRID_2D_CELL_FIGSIZE,
     )
 
     for ppn in PLOT_PPNS:

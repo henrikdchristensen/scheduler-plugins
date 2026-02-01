@@ -1387,17 +1387,12 @@ def main() -> None:
             produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.png", OUT_FIGURES_DIR / f"{out_stem}.pdf"])
 
     # Summary
-    print("Produced outputs:\n")
     print("Tables:")
     for p in produced_tables:
         print(f"  - {p}")
     print("\nFigures:")
     for p in produced_figs:
         print(f"  - {p}")
-    print("")
-    print(f"Wrote tables to:  {OUT_TABLES_DIR}")
-    print(f"Wrote figures to: {OUT_FIGURES_DIR}")
-    print(f"Input: {IN_RESULTS_SEEDS}")
 
 
 if __name__ == "__main__":

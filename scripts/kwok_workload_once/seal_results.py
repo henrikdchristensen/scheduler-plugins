@@ -416,7 +416,7 @@ class CombineResultsAnalyzer:
             if c in per_combo_df.columns:
                 per_combo_df[c] = pd.to_numeric(per_combo_df[c], errors="coerce")
 
-        out_per_combo = out_dir / "per_combo_results.csv"
+        out_per_combo = out_dir / "results_per_combo.csv"
         per_combo_df.sort_values(
             ["util", "nodes", "pods_per_node", "priorities", "timeout_s", "config_dir"]
         ).to_csv(out_per_combo, index=False)
