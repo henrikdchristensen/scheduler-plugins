@@ -612,7 +612,7 @@ def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_t
 
 
 def arrival_tick_label(a: float) -> str:
-    a_i = int(a) if abs(a - round(a)) < 1e-9 else a
+    a_i = fmt_arrival_value(a)
     return f"{a_i}s"
 
 
@@ -1024,6 +1024,29 @@ class MetricSpec:
     std_dec: int
     kind: str  # "signed" | "unsigned_int"
 
+    def format_cell(self, mean_val: object, std_val: object, include_std: bool) -> str:
+        """Format a table cell for this metric."""
+        if include_std:
+            if self.kind == "unsigned_int":
+                return fmt_pm(mean_val, std_val, mean_signed=False, mean_dec=self.mean_dec, std_dec=self.std_dec)
+            else:
+                return fmt_pm(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
+        else:
+            if self.kind == "unsigned_int":
+                return fmt_unsigned_int(mean_val)
+            else:
+                return fmt_signed(mean_val, self.mean_dec)
+
+
+# Metric specs used for periodic vs stable delta tables
+METRICS_DELTAS: List[MetricSpec] = [
+    MetricSpec("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", True, 2, 2, "signed"),
+    MetricSpec("delta_L_ms_total_mean", r"$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", True, 0, 0, "signed"),
+    MetricSpec("delta_D_num_total_mean", r"$\Delta\ \mathrm{deletions}_{\mathrm{total}}$", True, 1, 1, "signed"),
+    MetricSpec("solver_attempts_mean", r"$\Delta\ \mathrm{solver\ runs}$", True, 1, 1, "signed"),
+    MetricSpec("plan_activated_mean", r"$\Delta\ \mathrm{plan\ activations}$", True, 1, 1, "signed"),
+]
+
 
 def metrics_main(priorities: int) -> List[MetricSpec]:
     out: List[MetricSpec] = [
@@ -1084,16 +1107,10 @@ def latex_table_main(
                 for s in specs:
                     if std == 1:
                         m, sd = lookup_mean_std(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col_mean=s.col_mean)
-                        if s.kind == "unsigned_int":
-                            cells.append(fmt_pm(m, sd, mean_signed=False, mean_dec=s.mean_dec, std_dec=s.std_dec))
-                        else:
-                            cells.append(fmt_pm(m, sd, mean_signed=s.mean_signed, mean_dec=s.mean_dec, std_dec=s.std_dec))
+                        cells.append(s.format_cell(m, sd, include_std=True))
                     else:
                         v = lookup_val(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=s.col_mean)
-                        if s.kind == "unsigned_int":
-                            cells.append(fmt_unsigned_int(v))
-                        else:
-                            cells.append(fmt_signed(v, s.mean_dec))
+                        cells.append(s.format_cell(v, None, include_std=False))
                 lines.append(f"{rk_label_tex(rk)} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
@@ -1124,14 +1141,6 @@ def latex_table_periodic_vs_stable(
         end = start + n_modes - 1
         cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
 
-    metric_specs: List[MetricSpec] = [
-        MetricSpec("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", True, 2, 2, "signed"),
-        MetricSpec("delta_L_ms_total_mean", r"$\Delta\ \mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", True, 0, 0, "signed"),
-        MetricSpec("delta_D_num_total_mean", r"$\Delta\ \mathrm{deletions}_{\mathrm{total}}$", True, 1, 1, "signed"),
-        MetricSpec("solver_attempts_mean", r"$\Delta\ \mathrm{solver\ runs}$", True, 1, 1, "signed"),
-        MetricSpec("plan_activated_mean", r"$\Delta\ \mathrm{plan\ activations}$", True, 1, 1, "signed"),
-    ]
-
     tex_lines: List[str] = []
 
     for defpreempt in (1, 0):
@@ -1154,7 +1163,7 @@ def latex_table_periodic_vs_stable(
             tex_lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {n}}} \\")
             tex_lines.append(r"\midrule")
 
-            for ms in metric_specs:
+            for ms in METRICS_DELTAS:
                 cells: List[str] = []
                 for a in arrivals_order:
                     for name in delta_cols:
@@ -1167,10 +1176,7 @@ def latex_table_periodic_vs_stable(
                             delta_name=str(name),
                             col_mean=ms.col_mean,
                         )
-                        if std == 1:
-                            cells.append(fmt_pm(m, sd, mean_signed=ms.mean_signed, mean_dec=ms.mean_dec, std_dec=ms.std_dec))
-                        else:
-                            cells.append(fmt_signed(m, ms.mean_dec))
+                        cells.append(ms.format_cell(m, sd, include_std=(std == 1)))
                 tex_lines.append(f"{ms.latex_label} & " + " & ".join(cells) + r" \\")
 
         tex_lines.append(r"\bottomrule")
