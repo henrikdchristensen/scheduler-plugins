@@ -58,6 +58,27 @@ def fmt_pm(
         return rf"\ensuremath{{{m}}}"
     return rf"\ensuremath{{{m}\,\pm\,{abs(float(std_v)):.{std_dec}f}}}"
 
+def fmt_pm_split(
+    mean_v: object,
+    std_v: object,
+    *,
+    mean_signed: bool,
+    mean_dec: int,
+    std_dec: int,
+) -> Tuple[str, str]:
+    """
+    Format a mean ± std value for LaTeX as separate columns.
+    Returns (mean_str, std_str) for aligned ± tables.
+    """
+    if not is_finite(mean_v):
+        return (nan_str(), "")
+    m = f"{float(mean_v):+.{mean_dec}f}" if mean_signed else f"{float(mean_v):.{mean_dec}f}"
+    if not is_finite(std_v):
+        s = ""
+    else:
+        s = f"{abs(float(std_v)):.{std_dec}f}"
+    return (m, s)
+
 def metric_header_tex(label: str) -> str:
     """
     Create a LaTeX makecell header from a metric label.

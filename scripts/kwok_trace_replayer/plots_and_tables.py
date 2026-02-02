@@ -28,6 +28,7 @@ from scripts.helpers.plot_config import (
 from scripts.helpers.data_helpers import is_finite
 from scripts.helpers.table_helpers import (
     fmt_pm,
+    fmt_pm_split,
     fmt_signed,
     fmt_unsigned_int,
     metric_header_tex,
@@ -997,6 +998,22 @@ class MetricSpec:
             else:
                 return fmt_signed(mean_val, self.mean_dec)
 
+    def format_cell_split(self, mean_val: object, std_val: object, include_std: bool) -> Tuple[str, str]:
+        """
+        Format a table cell for this metric as separate mean and std columns.
+        Returns (mean_str, std_str) for aligned ± tables.
+        """
+        if include_std:
+            if self.kind == "unsigned_int":
+                return fmt_pm_split(mean_val, std_val, mean_signed=False, mean_dec=self.mean_dec, std_dec=self.std_dec)
+            else:
+                return fmt_pm_split(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
+        else:
+            if self.kind == "unsigned_int":
+                return (fmt_unsigned_int(mean_val), "")
+            else:
+                return (fmt_signed(mean_val, self.mean_dec), "")
+
 # Metric specs used for periodic vs stable delta tables
 METRICS_DELTAS: List[MetricSpec] = [
     MetricSpec("delta_U_pct_eff_mean", r"$\Delta\ \mathrm{usage}\;(\%)$", True, 2, 2, "signed"),
@@ -1045,13 +1062,26 @@ def latex_table_main(
     specs = metrics_main(priorities)
 
     lines: List[str] = []
-    colspec = "l " + " ".join(["c"] * len(specs))
+    
+    if std:
+        # Split each metric into mean and std columns with aligned ±
+        colspec = "l " + " ".join([r"r@{$\,\pm\,$}l" for _ in specs])
+        total_cols = 1 + 2 * len(specs)  # 1 label + 2 columns per metric
+    else:
+        colspec = "l " + " ".join(["c"] * len(specs))
+        total_cols = 1 + len(specs)
+    
     lines.append(rf"\begin{{tabular}}{{{colspec}}}")
     lines.append(r"\toprule")
-    lines.append(" & " + " & ".join([metric_header_tex(s.latex_label) for s in specs]) + r" \\")
+    
+    if std:
+        # Headers span 2 columns each
+        header_parts = [rf"\multicolumn{{2}}{{c}}{{{metric_header_tex(s.latex_label)}}}" for s in specs]
+        lines.append(" & " + " & ".join(header_parts) + r" \\")
+    else:
+        lines.append(" & " + " & ".join([metric_header_tex(s.latex_label) for s in specs]) + r" \\")
+    
     lines.append(r"\midrule")
-
-    total_cols = 1 + len(specs)
 
     first_block = True
     for nodes in nodes_order:
@@ -1065,8 +1095,15 @@ def latex_table_main(
             lines.append(r"\midrule")
 
             for row_key in modes:
-                cells = [s.format_cell(*(lookup_mean_std(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col_mean=s.col_mean) if std else (lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=s.col_mean), None)), include_std=bool(std)) for s in specs]
-                lines.append(f"{row_key_label_tex(row_key)} & " + " & ".join(cells) + r" \\")
+                if std:
+                    # Use split formatting for aligned ±
+                    cell_pairs = [s.format_cell_split(*(lookup_mean_std(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col_mean=s.col_mean)), include_std=True) for s in specs]
+                    # Flatten pairs: [mean1, std1, mean2, std2, ...]
+                    cell_values = [val for pair in cell_pairs for val in pair]
+                    lines.append(f"{row_key_label_tex(row_key)} & " + " & ".join(cell_values) + r" \\")
+                else:
+                    cells = [s.format_cell(lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=s.col_mean), None, include_std=False) for s in specs]
+                    lines.append(f"{row_key_label_tex(row_key)} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
