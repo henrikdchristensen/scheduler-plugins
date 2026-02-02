@@ -54,7 +54,7 @@ def plot_utilization_and_num_pods(
         return
 
     t_s = np.asarray(times, dtype=float)
-    u = np.asarray(u_req_hist, dtype=float)
+    util = np.asarray(u_req_hist, dtype=float)
     pods = np.asarray(pods_hist, dtype=float)
 
     max_time_s = float(np.nanmax(t_s)) if t_s.size else 0.0
@@ -71,7 +71,7 @@ def plot_utilization_and_num_pods(
     c_util = colors[0] if len(colors) > 0 else "C0"
     c_pods = colors[1] if len(colors) > 1 else "C1"
 
-    l1, = ax1.plot(x, u, label="effective utilization, max(cpu, mem)", linewidth=0.9, color=c_util)
+    l1, = ax1.plot(x, util, label="effective utilization, max(cpu, mem)", linewidth=0.9, color=c_util)
     ax1.set_xlabel(x_label, labelpad=20)
     ax1.set_ylabel("effective utilization, max(cpu, mem)", color=c_util)
     ax1.tick_params(axis="y", colors=c_util)
@@ -119,9 +119,9 @@ def plot_utilization_and_num_pods(
             d_count = 0
 
             while idx < n_events and events[idx][0] <= right_s:
-                t_ev_s, kind = events[idx]
+                t_event_s, kind = events[idx]
                 idx += 1
-                if t_ev_s > left_s:
+                if t_event_s > left_s:
                     if kind == "C":
                         c_count += 1
                     else:
@@ -404,7 +404,7 @@ def plot_histogram_with_pareto(
                 y_fit = pareto_pdf(x_fit, alpha=a, x_min=xm)
                 label = rf"Pareto: $\alpha={a:.3f}$, $x_{{\min}}={xm:.3g}$"
 
-            line, = ax.plot(x_fit, y_fit, linewidth=1.5, linestyle="-")
+            line, _ = ax.plot(x_fit, y_fit, linewidth=1.5, linestyle="-")
             legend_handles.append(line)
             legend_labels.append(label)
 
@@ -447,53 +447,53 @@ def plot_bar_with_geometric(
     """
     Plot a discrete distribution as a bar chart, with optional geometric(-like) overlay.
     """
-    data_int = np.asarray(data, dtype=int)
-    finite_mask = np.isfinite(data_int)
-    data_int = data_int[finite_mask]
+    data_integers = np.asarray(data, dtype=int)
+    finite_mask = np.isfinite(data_integers)
+    data_integers = data_integers[finite_mask]
 
-    if data_int.size == 0:
+    if data_integers.size == 0:
         ax.set_axis_off()
         return
 
     if x_min is not None:
-        data_int = data_int[data_int >= int(x_min)]
+        data_integers = data_integers[data_integers >= int(x_min)]
     if x_max is not None:
-        data_int = data_int[data_int <= int(x_max)]
+        data_integers = data_integers[data_integers <= int(x_max)]
 
-    if data_int.size == 0:
+    if data_integers.size == 0:
         ax.set_axis_off()
         return
 
-    unique_vals = np.sort(np.unique(data_int))
+    unique_vals = np.sort(np.unique(data_integers))
     n_vals = unique_vals.size
     positions = np.arange(n_vals, dtype=float)
 
-    counts = np.array([np.sum(data_int == v) for v in unique_vals], dtype=float)
+    counts = np.array([np.sum(data_integers == v) for v in unique_vals], dtype=float)
     total = counts.sum()
-    probs_emp = counts / total if total > 0.0 else np.zeros_like(counts)
+    probs_empirical = counts / total if total > 0.0 else np.zeros_like(counts) 
 
-    ax.bar(positions, probs_emp, width=0.8, align="center")
+    ax.bar(positions, probs_empirical, width=0.8, align="center")
 
     legend_handles: List[Any] = []
     legend_labels: List[str] = []
 
     if geom_fit and geom_ratio is not None and float(geom_ratio) > 0.0:
-        r = float(geom_ratio)
+        ratio = float(geom_ratio)
         k0 = int(unique_vals[0])
         exponents = (unique_vals - k0).astype(float)
 
-        if np.isclose(r, 1.0):
+        if np.isclose(ratio, 1.0):
             weights = np.ones_like(exponents)
         else:
-            weights = r ** exponents
+            weights = ratio ** exponents
 
-        probs_theo = weights / weights.sum()
+        probs_theoretical = weights / weights.sum()
 
-        line, = ax.plot(positions, probs_theo, linestyle="-", linewidth=1.0)
+        line, = ax.plot(positions, probs_theoretical, linestyle="-", linewidth=1.0)
         legend_handles.append(line)
         legend_labels.append(
             r"geometric: "
-            rf"$r={r:.3f}$, "
+            rf"$r={ratio:.3f}$, "
             rf"$k\in[{int(unique_vals[0])},{int(unique_vals[-1])}]$"
         )
 

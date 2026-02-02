@@ -33,7 +33,7 @@ from scripts.helpers.table_helpers import (
 )
 
 # =============================================================================
-# CONFIG (edit here)
+# CONFIG
 # =============================================================================
 
 IN_RESULTS_SEEDS = Path("analysis/kwok_trace_replayer/results_seeds.csv")
@@ -46,13 +46,11 @@ SEED_COL = "seed"
 SEED_JITTER_FRAC = 0.12  # jitter as fraction of mode_spacing
 
 PRIORITIES_TO_SHOW = [1, 4]
-INTER_ARRIVALS_TO_SHOW = [2.0, 4.0, 8.0, 16.0]
+INTER_ARRIVALS_TO_SHOW = [2.0, 4.0, 8.0, 16.0] # TODO: for thesis add 1.0
 
-# =============================================================================
-# Expected schema from seal_results.py
-# =============================================================================
+TABLE_DECIMALS = 1
 
-SEED_OUT_COLS = [
+SEED_COLS_NEEDED = [
     "job_name",
     "plugin_config",
     "seed",
@@ -65,117 +63,7 @@ SEED_OUT_COLS = [
     "plan_not_applicable_mean","plan_activated_mean",
 ]
 
-# =============================================================================
-# Parsing: job_name + plugin_config
-# =============================================================================
-
-JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
-
-def parse_job(job_name: str) -> Tuple[int, int, float]:
-    m = JOB_RE.fullmatch(str(job_name).strip())
-    if not m:
-        raise ValueError(f"Invalid job_name: {job_name}")
-    return int(m.group(1)), int(m.group(2)), float(m.group(3))
-
-def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
-    kv: Dict[str, str] = {}
-    for tok in str(plugin_config).split("_"):
-        if "=" in tok:
-            k, v = tok.split("=", 1)
-            kv[k.strip().lower()] = v.strip()
-    return kv
-
-def canonical_mode(mode: str) -> str:
-    s = str(mode).strip().lower()
-    m = re.fullmatch(r"periodic-?([0-9.]+)s", s)
-    if m:
-        return f"periodic{m.group(1)}s"
-    m = re.fullmatch(r"(?:stable-queue|stablequeue)-?([0-9.]+)s", s)
-    if m:
-        return f"stable-queue-{m.group(1)}s"
-    return s
-
-@dataclass(frozen=True)
-class RowKey:
-    mode: str
-    blocking: int
-    defpreempt: int
-
-    @staticmethod
-    def from_plugin_config(plugin_config: str) -> "RowKey":
-        kv = parse_plugin_config(plugin_config)
-        mode = canonical_mode(kv.get("mode", "unknown"))
-        blocking = 1 if str(kv.get("blocking", "0")).lower() in {"1", "true", "yes"} else 0
-        defpreempt = int(str(kv.get("defpreempt", "0"))) if "defpreempt" in kv else 0
-        return RowKey(mode=mode, blocking=blocking, defpreempt=defpreempt)
-
-# =============================================================================
-# Modes (rows in main tables, styling in plots)
-# =============================================================================
-
-@dataclass(frozen=True)
-class ModeSpec:
-    mode: str
-    blocking: int
-    abbr: str
-    label: str
-    rank: int
-    palette: str  # "set2" or "set3"
-    color_idx: int
-
-MODE_SPECS: List[ModeSpec] = [
-    ModeSpec("schedulingfailure", 1, "SF-B", "Scheduling-failure (blocking)", 0, "set2", 0),
-    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, "set2", 1),
-    ModeSpec("periodic8s", 1, "PR-8-B", "Periodic (blocking), 8s interval", 2, "set2", 2),
-    ModeSpec("periodic8s", 0, "PR-8-NB", "Periodic (non-blocking), 8s interval", 3, "set2", 3),
-    ModeSpec("periodic32s", 1, "PR-32-B", "Periodic (blocking), 32s interval", 4, "set2", 4),
-    ModeSpec("periodic32s", 0, "PR-32-NB", "Periodic (non-blocking), 32s interval", 5, "set2", 5),
-    ModeSpec("stable-queue-2s", 1, "SQ-2-B", "Stable-queue (blocking), 2s delay", 6, "set2", 6),
-    ModeSpec("stable-queue-2s", 0, "SQ-2-NB", "Stable-queue (non-blocking), 2s delay", 7, "set2", 7),
-    ModeSpec("stable-queue-8s", 1, "SQ-8-B", "Stable-queue (blocking), 8s delay", 8, "set3", 3),
-    ModeSpec("stable-queue-8s", 0, "SQ-8-NB", "Stable-queue (non-blocking), 8s delay", 9, "set3", 4),
-]
-
-_SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
-
-def rk_rank(rk: RowKey) -> int:
-    spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
-    return int(spec.rank) if spec else 10_000
-
-def rk_label(rk: RowKey) -> str:
-    spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
-    return spec.label if spec else f"{rk.mode}:{rk.blocking}"
-
-def rk_color(rk: RowKey):
-    set2 = plt.get_cmap("Set2").colors
-    set3 = plt.get_cmap("Set3").colors
-    spec = _SPEC_BY_MODE_BLOCK.get((rk.mode, int(rk.blocking)))
-    if not spec:
-        return set3[0]
-    palette = set2 if spec.palette == "set2" else set3
-    return palette[int(spec.color_idx) % len(palette)]
-
-def sort_rks(rks: Iterable[RowKey]) -> List[RowKey]:
-    return sorted(set(rks), key=lambda r: (rk_rank(r), r.mode, int(r.blocking), int(r.defpreempt)))
-
-# =============================================================================
-# Plot selection
-# =============================================================================
-
-def select_arrivals_order(all_arrivals: List[float]) -> List[float]:
-    all_sorted = sorted(set(float(a) for a in all_arrivals))
-    if INTER_ARRIVALS_TO_SHOW is None:
-        return all_sorted
-
-    wanted = [float(a) for a in INTER_ARRIVALS_TO_SHOW]
-    wanted_set = set(wanted)
-
-    missing = [a for a in wanted if a not in set(all_sorted)]
-    if missing:
-        raise SystemExit(f"INTER_ARRIVALS_TO_SHOW_S contains values not in data: {missing}. Available: {all_sorted}")
-
-    # Preserve the order provided in INTER_ARRIVALS_TO_SHOW_S (don’t re-sort unless you want to)
-    return [a for a in wanted if a in wanted_set]
+KEY_COLS_MAIN = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
 
 # Main grids show only a subset (but tables include ALL MODE_SPECS)
 MAIN_PLOT_MODES: List[Tuple[str, int]] = [
@@ -235,31 +123,138 @@ PLOT_ARRIVAL_X_SPACING = 0.35
 PLOT_MODE_X_SPACING_MAIN = 0.05
 PLOT_MODE_X_SPACING_DELTAS = 0.11
 
-# =============================================================================
-# Y-axis config: SAME for defpreempt=0/1.
-# Separate config for main vs deltas.
-# =============================================================================
-
 SYMLOG_BASE = 10.0
 SYMLOG_LINSCALE = 1.0
-SYMLOG_LINTHRESH_LAT_MS = 1.0
+SYMLOG_LINTHRESH_LATENCY_MS = 1.0
 SYMLOG_LINTHRESH_DELETIONS = 1.0
+
+# =============================================================================
+# Parsing: job_name + plugin_config
+# =============================================================================
+
+JOB_RE = re.compile(r"nodes=(\d+)_prio=(\d+)_arrival=([0-9.]+)s")
+
+def parse_job(job_name: str) -> Tuple[int, int, float]:
+    m = JOB_RE.fullmatch(str(job_name).strip())
+    if not m:
+        raise ValueError(f"Invalid job_name: {job_name}")
+    return int(m.group(1)), int(m.group(2)), float(m.group(3))
+
+def parse_plugin_config(plugin_config: str) -> Dict[str, str]:
+    kv: Dict[str, str] = {}
+    for token in str(plugin_config).split("_"):
+        if "=" in token:
+            key, value = token.split("=", 1)
+            kv[key.strip().lower()] = value.strip()
+    return kv
+
+def canonical_mode(mode_match: str) -> str:
+    s = str(mode_match).strip().lower()
+    mode_match = re.fullmatch(r"periodic-?([0-9.]+)s", s)
+    if mode_match:
+        return f"periodic{mode_match.group(1)}s"
+    mode_match = re.fullmatch(r"(?:stable-queue|stablequeue)-?([0-9.]+)s", s)
+    if mode_match:
+        return f"stable-queue-{mode_match.group(1)}s"
+    return s
+
+@dataclass(frozen=True)
+class RowKey:
+    mode: str
+    blocking: int
+    defpreempt: int
+
+    @staticmethod
+    def from_plugin_config(plugin_config: str) -> "RowKey":
+        kv = parse_plugin_config(plugin_config)
+        mode = canonical_mode(kv.get("mode", "unknown"))
+        blocking = 1 if str(kv.get("blocking", "0")).lower() in {"1", "true", "yes"} else 0
+        defpreempt = int(str(kv.get("defpreempt", "0"))) if "defpreempt" in kv else 0
+        return RowKey(mode=mode, blocking=blocking, defpreempt=defpreempt)
+
+# =============================================================================
+# Modes
+# =============================================================================
+
+@dataclass(frozen=True)
+class ModeSpec:
+    mode: str
+    blocking: int
+    abbreviation: str
+    label: str
+    rank: int
+    color_palette: str  # "set2" or "set3"
+    color_idx: int
+
+MODE_SPECS: List[ModeSpec] = [
+    ModeSpec("schedulingfailure", 1, "SF-B", "Scheduling-failure (blocking)", 0, "set2", 0),
+    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, "set2", 1),
+    ModeSpec("periodic8s", 1, "PR-8-B", "Periodic (blocking), 8s interval", 2, "set2", 2),
+    ModeSpec("periodic8s", 0, "PR-8-NB", "Periodic (non-blocking), 8s interval", 3, "set2", 3),
+    ModeSpec("periodic32s", 1, "PR-32-B", "Periodic (blocking), 32s interval", 4, "set2", 4),
+    ModeSpec("periodic32s", 0, "PR-32-NB", "Periodic (non-blocking), 32s interval", 5, "set2", 5),
+    ModeSpec("stable-queue-2s", 1, "SQ-2-B", "Stable-queue (blocking), 2s delay", 6, "set2", 6),
+    ModeSpec("stable-queue-2s", 0, "SQ-2-NB", "Stable-queue (non-blocking), 2s delay", 7, "set2", 7),
+    ModeSpec("stable-queue-8s", 1, "SQ-8-B", "Stable-queue (blocking), 8s delay", 8, "set3", 3),
+    ModeSpec("stable-queue-8s", 0, "SQ-8-NB", "Stable-queue (non-blocking), 8s delay", 9, "set3", 4),
+]
+
+_SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
+
+def row_key_rank(row_key: RowKey) -> int:
+    mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
+    return int(mode_spec.rank) if mode_spec else 10_000
+
+def row_key_label(row_key: RowKey) -> str:
+    mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
+    return mode_spec.label if mode_spec else f"{row_key.mode}:{row_key.blocking}"
+
+def row_key_color(row_key: RowKey):
+    set2 = plt.get_cmap("Set2").colors
+    set3 = plt.get_cmap("Set3").colors
+    mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
+    if not mode_spec:
+        return set3[0]
+    color_palette = set2 if mode_spec.color_palette == "set2" else set3
+    return color_palette[int(mode_spec.color_idx) % len(color_palette)]
+
+def sort_row_keys(row_keys: Iterable[RowKey]) -> List[RowKey]:
+    return sorted(set(row_keys), key=lambda r: (row_key_rank(r), r.mode, int(r.blocking), int(r.defpreempt)))
+
+# =============================================================================
+# Plot selection
+# =============================================================================
+
+def select_arrivals_order(all_arrivals: List[float]) -> List[float]:
+    all_sorted = sorted(set(float(a) for a in all_arrivals))
+    if INTER_ARRIVALS_TO_SHOW is None:
+        return all_sorted
+    wanted = [float(a) for a in INTER_ARRIVALS_TO_SHOW]
+    wanted_set = set(wanted)
+    missing = [a for a in wanted if a not in set(all_sorted)]
+    if missing:
+        raise SystemExit(f"INTER_ARRIVALS_TO_SHOW contains values not in data: {missing}. Available: {all_sorted}")
+    # Preserve the order provided in INTER_ARRIVALS_TO_SHOW
+    return [a for a in wanted if a in wanted_set]
 
 @dataclass(frozen=True)
 class YAxisCfg:
+    """
+    Configuration for a Y axis.
+    """
     scale: str  # "linear" | "symlog"
-    ylim: Tuple[float, float]
+    y_lim: Tuple[float, float]
     symlog_linthresh: float = 1.0
 
 Y_MAIN: Dict[str, YAxisCfg] = {
     "util": YAxisCfg("linear", (-5.0, 5.0)),
-    "latency": YAxisCfg("symlog", (-1e5 - 1.0, 1e5 + 1.0), SYMLOG_LINTHRESH_LAT_MS),
+    "latency": YAxisCfg("symlog", (-1e5 - 1.0, 1e5 + 1.0), SYMLOG_LINTHRESH_LATENCY_MS),
     "deletions": YAxisCfg("symlog", (-1e4 - 1.0, 1e4 + 1.0), SYMLOG_LINTHRESH_DELETIONS),
 }
 
 Y_DELTAS: Dict[str, YAxisCfg] = {
     "util": YAxisCfg("linear", (-1.0, 1.0)),
-    "latency": YAxisCfg("symlog", (-1e4 - 1.0, 1e4 + 1.0), SYMLOG_LINTHRESH_LAT_MS),
+    "latency": YAxisCfg("symlog", (-1e4 - 1.0, 1e4 + 1.0), SYMLOG_LINTHRESH_LATENCY_MS),
     "deletions": YAxisCfg("symlog", (-1e3 - 1.0, 1e3 + 1.0), SYMLOG_LINTHRESH_DELETIONS),
 }
 
@@ -269,48 +264,53 @@ Y_DELTAS: Dict[str, YAxisCfg] = {
 
 @dataclass(frozen=True)
 class GridRowSpec:
-    """Configuration for one row in a grid plot."""
+    """
+    Configuration for one row in a grid plot.
+    """
     col_name: str
     ycfg_key: str  # key in Y_MAIN or Y_DELTAS
     y_tick_strategy: Optional[str] = None  # "count_sparse", "count_sparse_symmetric", or None
-    ylabel: str = ""
+    y_label: str = ""
     is_bottom: bool = False  # whether this is the bottom row (shows x labels)
-
 
 # Row configurations - reused for both main and delta grids
 GRID_ROW_SPECS = [
-    GridRowSpec("delta_U_pct_eff_mean", "util", ylabel=r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$"),
-    GridRowSpec("delta_L_ms_total_mean", "latency", ylabel=r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$"),
-    GridRowSpec("delta_D_num_total_mean", "deletions", ylabel=r"$\mathrm{diff.}\ \mathrm{deletions}$"),
-    GridRowSpec("solver_attempts_mean", "solver", y_tick_strategy="count_sparse", ylabel=r"$\mathrm{solver\ runs}$"),
-    GridRowSpec("plan_activated_mean", "plans", y_tick_strategy="count_sparse", ylabel=r"$\mathrm{plan\ activations}$", is_bottom=True),
+    GridRowSpec("delta_U_pct_eff_mean", "util", y_label=r"$\mathrm{diff.}\ \mathrm{usage}\;(\%)$"),
+    GridRowSpec("delta_L_ms_total_mean", "latency", y_label=r"$\mathrm{diff.}\ \mathrm{latency}\;(\mathrm{ms})$"),
+    GridRowSpec("delta_D_num_total_mean", "deletions", y_label=r"$\mathrm{diff.}\ \mathrm{deletions}$"),
+    GridRowSpec("solver_attempts_mean", "solver", y_tick_strategy="count_sparse", y_label=r"$\mathrm{solver\ runs}$"),
+    GridRowSpec("plan_activated_mean", "plans", y_tick_strategy="count_sparse", y_label=r"$\mathrm{plan\ activations}$", is_bottom=True),
 ]
 
 # =============================================================================
-# Formatting helpers (tables)
+# Formatting helpers
 # =============================================================================
 
-TABLE_DECIMALS = 1
-
 def fmt_arrival_value(a: float) -> Union[int, float]:
-    """Convert arrival to int if close to integer, otherwise keep as float."""
+    """
+    Convert arrival to int if close to integer, otherwise keep as float.
+    """
     return int(a) if abs(a - round(a)) < 1e-9 else a
 
-def rk_label_tex(rk: RowKey) -> str:
-    return rf"\makecell[l]{{{rk_label(rk)}}}"
+def row_key_label_tex(row_key: RowKey) -> str:
+    """
+    Return a LaTeX-formatted label for a RowKey.
+    """
+    return rf"\makecell[l]{{{row_key_label(row_key)}}}"
 
 # =============================================================================
 # Data loading + aggregation
 # =============================================================================
 
-KEY_COLS_MAIN = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
-
 def load_results_seeds(path: Path) -> pd.DataFrame:
+    """
+    Load per-seed results CSV into a DataFrame, parsing job_name and plugin_config.
+    """
     if not path.exists():
         raise SystemExit(f"Not found: {path}")
 
     df = pd.read_csv(path)
-    missing = [c for c in SEED_OUT_COLS if c not in df.columns]
+    missing = [c for c in SEED_COLS_NEEDED if c not in df.columns]
     if missing:
         raise SystemExit(f"{path} missing required columns: {', '.join(missing)}")
 
@@ -319,59 +319,66 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
     df[["nodes", "priorities", "arrival_s"]] = pd.DataFrame(parsed.tolist(), index=df.index, columns=["nodes", "priorities", "arrival_s"])
 
     # Parse plugin_config into mode/blocking/defpreempt
-    rks = df["plugin_config"].map(RowKey.from_plugin_config)
-    df[["mode", "blocking", "defpreempt"]] = pd.DataFrame([(r.mode, r.blocking, r.defpreempt) for r in rks], index=df.index, columns=["mode", "blocking", "defpreempt"])
+    row_keys = df["plugin_config"].map(RowKey.from_plugin_config)
+    df[["mode", "blocking", "defpreempt"]] = pd.DataFrame([(r.mode, r.blocking, r.defpreempt) for r in row_keys], index=df.index, columns=["mode", "blocking", "defpreempt"])
 
     return df
 
-def _generic_aggregate_mean_std(df: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
+def _aggregate_mean_std(df: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
     """
-    Generic aggregation: compute mean+std across seeds for numeric columns.
+    Compute mean+std across seeds for numeric columns.
     Adds <col>_std columns for each numeric column.
     """
     numeric_cols = [c for c in df.columns if c not in set(group_cols + [SEED_COL]) and pd.api.types.is_numeric_dtype(df[c])]
-
     grp = df.groupby(group_cols, dropna=False)
     mean_df = grp[numeric_cols].mean(numeric_only=True)
     std_df = grp[numeric_cols].std(numeric_only=True)
-
     out = mean_df.reset_index()
     std_reset = std_df.reset_index()
-
     for c in numeric_cols:
         out[f"{c}_std"] = std_reset[c].to_numpy()
-
     return out
 
 def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
     """
-    One row per configuration. Produces:
-      - *_mean columns: mean across seeds (for numeric cols)
-      - *_std columns: std across seeds
+    Aggregate per-seed DataFrame to mean+std per configuration.
     """
     group_cols = ["job_name", "plugin_config"] + KEY_COLS_MAIN
-    return _generic_aggregate_mean_std(df_seeds, group_cols)
+    return _aggregate_mean_std(df_seeds, group_cols)
 
 def _build_lookup_from_df(df: pd.DataFrame, key_cols: List[str]) -> pd.DataFrame:
-    """Build a lookup DataFrame indexed by key columns."""
+    """
+    Build a lookup DataFrame indexed by key columns for fast access.
+    """
     return df.drop_duplicates(subset=key_cols, keep="first").set_index(key_cols).sort_index()
 
 def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a lookup DataFrame from the main aggregated DataFrame.
+    """
     return _build_lookup_from_df(df, KEY_COLS_MAIN)
 
 def _safe_lookup(lookup: pd.DataFrame, key: Tuple, col: str) -> float:
-    """Safely lookup a value from a DataFrame index, returning NaN if not found."""
+    """
+    Safely lookup a value from a DataFrame index, returning NaN if not found.
+    """
     try:
         return float(lookup.at[key, col])
     except KeyError:
         return float("nan")
 
-def lookup_val(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str) -> float:
-    key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
+def lookup_val(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, row_key: RowKey, col: str) -> float:
+    """
+    Lookup a value from the lookup DataFrame.
+    """
+    key = (int(nodes), int(priorities), float(arrival_s), str(row_key.mode), int(row_key.blocking), int(row_key.defpreempt))
     return _safe_lookup(lookup, key, col)
 
-def lookup_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col_mean: str) -> Tuple[float, float]:
-    key = (int(nodes), int(priorities), float(arrival_s), str(rk.mode), int(rk.blocking), int(rk.defpreempt))
+def lookup_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, row_key: RowKey, col_mean: str) -> Tuple[float, float]:
+    """
+    Lookup mean and std from the lookup DataFrame.
+    """
+    key = (int(nodes), int(priorities), float(arrival_s), str(row_key.mode), int(row_key.blocking), int(row_key.defpreempt))
     return _safe_lookup(lookup, key, col_mean), _safe_lookup(lookup, key, f"{col_mean}_std")
 
 # =============================================================================
@@ -383,8 +390,6 @@ DELTA_KEY_COLS = ["nodes", "priorities", "arrival_s", "defpreempt", "delta_name"
 def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
     """
     For each delta series (left->right) and each defpreempt value, compute per-seed deltas.
-    Output rows:
-      nodes, priorities, arrival_s, defpreempt, seed, delta_name, <metric cols>
     """
     out_rows: List[pd.DataFrame] = []
 
@@ -418,9 +423,12 @@ def aggregate_delta_mean_std(df_delta_seeds: pd.DataFrame) -> pd.DataFrame:
     Aggregate delta-by-seed to mean+std per configuration and delta_name.
     Adds <col>_std columns.
     """
-    return _generic_aggregate_mean_std(df_delta_seeds, DELTA_KEY_COLS)
+    return _aggregate_mean_std(df_delta_seeds, DELTA_KEY_COLS)
 
 def build_lookup_deltas(df_delta_meanstd: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a lookup DataFrame from the delta aggregated DataFrame.
+    """
     return _build_lookup_from_df(df_delta_meanstd, DELTA_KEY_COLS)
 
 def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, defpreempt: int, delta_name: str, col_mean: str) -> Tuple[float, float]:
@@ -468,12 +476,12 @@ def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int
     """
     Set y-ticks for linear scale, with a minimum number of ticks.
     """
-    ylo, yhi = float(ylim[0]), float(ylim[1])
-    y0 = int(math.ceil(ylo))
-    y1 = int(math.floor(yhi))
+    y_lo, y_hi = float(ylim[0]), float(ylim[1])
+    y0 = int(math.ceil(y_lo))
+    y1 = int(math.floor(y_hi))
     ticks = list(range(y0, y1 + 1))
     if len(ticks) < int(min_ticks):
-        ticks = [round(float(t), 2) for t in np.linspace(ylo, yhi, int(min_ticks))]
+        ticks = [round(float(t), 2) for t in np.linspace(y_lo, y_hi, int(min_ticks))]
     ax.set_yticks(ticks)
 
 def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int = 5) -> None:
@@ -481,18 +489,18 @@ def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int 
     Set y-ticks for count data (non-negative), with a maximum number of ticks.
     0 is always included.
     """
-    ylo, yhi = float(ylim[0]), float(ylim[1])
-    ylo = max(0.0, ylo)
-    if yhi <= 0:
+    y_lo, y_hi = float(ylim[0]), float(ylim[1])
+    y_lo = max(0.0, y_lo)
+    if y_hi <= 0:
         ax.set_yticks([0])
         return
-    step = max(1.0, compute_step(yhi - ylo, max_ticks - 1))
+    step = max(1.0, compute_step(y_hi - y_lo, max_ticks - 1))
     ticks: List[float] = []
     t = 0.0
     for _ in range(50):
         ticks.append(t)
         t += step
-        if t > yhi + 1e-9:
+        if t > y_hi + 1e-9:
             break
     if abs(step - round(step)) < 1e-9:
         ticks = [int(round(x)) for x in ticks]
@@ -503,8 +511,8 @@ def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_t
     Set y-ticks symmetrically around zero, with a maximum total number of ticks.
     0 is always included.
     """
-    ylo, yhi = float(ylim[0]), float(ylim[1])
-    hi = max(abs(ylo), abs(yhi))
+    y_lo, y_hi = float(ylim[0]), float(ylim[1])
+    hi = max(abs(y_lo), abs(y_hi))
     if hi <= 0:
         ax.set_yticks([0])
         return
@@ -515,21 +523,24 @@ def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_t
     for i in range(1, per_side + 1):
         t = i * step
         ticks.extend([-t, t])
-    ticks = sorted([t for t in ticks if ylo - 1e-9 <= t <= yhi + 1e-9])
+    ticks = sorted([t for t in ticks if y_lo - 1e-9 <= t <= y_hi + 1e-9])
     if all(abs(t - round(t)) < 1e-9 for t in ticks):
         ticks = [int(round(t)) for t in ticks]
     ax.set_yticks(ticks)
 
-def arrival_tick_label(a: float) -> str:
-    a_i = fmt_arrival_value(a)
+def arrival_tick_label(arrival: float) -> str:
+    """
+    Arrival tick label.
+    """
+    a_i = fmt_arrival_value(arrival)
     return f"{a_i}s"
 
-def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
+def arrival_tick_label_with_axis(arrival: float, xi: int, n_arrivals: int) -> str:
     """
     Arrival tick label, with extra axis label in the middle tick.
     """
-    base = arrival_tick_label(a)
-    return base + ("\ninter-arrival (s)" if xi == n_arr // 2 else "")
+    base = arrival_tick_label(arrival)
+    return base + ("\ninter-arrival (s)" if xi == n_arrivals // 2 else "")
 
 def x_from_left_with_pad_points(fig: plt.Figure, left: float, pad_pt: float) -> float:
     """
@@ -565,29 +576,32 @@ def draw_points_on_ax(
     boundaries = [i * step for i in range(n_arrivals + 1)]
     x_base = [(i + 0.5) * step for i in range(n_arrivals)]
 
-    m = max(1, len(series))
+    n_modes = max(1, len(series))
     max_allowed = 0.45 * step
-    mode_spacing = 0.0 if m <= 1 else min(float(mode_x_spacing), (2.0 * max_allowed) / float(m - 1))
+    mode_spacing = 0.0 if n_modes <= 1 else min(float(mode_x_spacing), (2.0 * max_allowed) / float(n_modes - 1))
 
-    _color_of = color_of if color_of is not None else rk_color
+    _color_of = color_of if color_of is not None else row_key_color
 
-    for i, rk in enumerate(series):
-        color = _color_of(rk)
-        mode_offset = (i - (m - 1) / 2.0) * mode_spacing
+    for i, row_key in enumerate(series):
+        color = _color_of(row_key)
+        mode_offset = (i - (n_modes - 1) / 2.0) * mode_spacing
 
-        for xi, a in enumerate(arrivals_order):
+        for xi, arrival in enumerate(arrivals_order):
             x_center = x_base[xi] + mode_offset
-            y0_list = to_finite_list(y_of(rk, nodes_order[0], a, priorities))
-            y1_list = to_finite_list(y_of(rk, nodes_order[1], a, priorities))
+            y0_list = to_finite_list(y_of(row_key, nodes_order[0], arrival, priorities))
+            y1_list = to_finite_list(y_of(row_key, nodes_order[1], arrival, priorities))
 
             def plot_many(xs_center: float, ys: List[float], marker: str) -> None:
+                """
+                Plot many points at given x_center with jitter.
+                """
                 if not ys:
                     return
                 if len(ys) == 1:
                     xs = [xs_center]
                 else:
-                    j = max(0.001, float(seed_jitter_frac) * max(0.001, mode_spacing))
-                    offsets = np.linspace(-j, j, len(ys))
+                    jitter = max(0.001, float(seed_jitter_frac) * max(0.001, mode_spacing))
+                    offsets = np.linspace(-jitter, jitter, len(ys))
                     xs = [xs_center + float(o) for o in offsets]
 
                 for x, y in zip(xs, ys):
@@ -611,32 +625,32 @@ def draw_points_on_ax(
         ax.set_yscale("linear")
 
     ax.axhline(0.0, linewidth=0.8, color="black", linestyle="-", alpha=0.7)
-    ax.set_ylim(float(ycfg.ylim[0]), float(ycfg.ylim[1]))
+    ax.set_ylim(float(ycfg.y_lim[0]), float(ycfg.y_lim[1]))
 
     if ycfg.scale == "linear":
         if y_tick_strategy == "count_sparse":
-            set_count_yticks(ax, ycfg.ylim, max_ticks=5)
+            set_count_yticks(ax, ycfg.y_lim, max_ticks=5)
         elif y_tick_strategy == "count_sparse_symmetric":
-            set_symmetric_count_yticks(ax, ycfg.ylim, max_ticks_total=7)
+            set_symmetric_count_yticks(ax, ycfg.y_lim, max_ticks_total=7)
         else:
-            set_linear_yticks(ax, ycfg.ylim)
+            set_linear_yticks(ax, ycfg.y_lim)
 
     ax.set_xlim(boundaries[0], boundaries[-1])
     ax.margins(x=0)
 
-    for bx in boundaries:
-        ax.axvline(bx, linewidth=0.8, color="black", linestyle="--", alpha=0.7, zorder=0)
+    for boundary_x in boundaries:
+        ax.axvline(boundary_x, linewidth=0.8, color="black", linestyle="--", alpha=0.7, zorder=0)
 
     ax.set_xticks(boundaries)
     ax.tick_params(axis="both", which="major", labelsize=PLOT_TICK_FONTSIZE, pad=PLOT_TICK_PAD)
 
     if show_xticklabels:
         ax.set_xticklabels([""] * len(boundaries))
-        for xi, a in enumerate(arrivals_order):
+        for xi, arrival in enumerate(arrivals_order):
             ax.text(
                 x_base[xi],
                 -0.03,
-                arrival_tick_label_with_axis(a, xi, len(arrivals_order)),
+                arrival_tick_label_with_axis(arrival, xi, len(arrivals_order)),
                 transform=ax.get_xaxis_transform(),
                 ha="center",
                 va="top",
@@ -656,7 +670,7 @@ def draw_points_on_ax(
         ax.axhline(y, linewidth=0.8, color="black", linestyle="--", alpha=0.15, zorder=0)
 
 def values_from_df_seeds(
-    df_seeds: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str
+    df_seeds: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, row_key: RowKey, col: str
 ) -> List[float]:
     """
     Extract per-seed values from df_seeds for given configuration.
@@ -665,9 +679,9 @@ def values_from_df_seeds(
         (df_seeds["nodes"] == int(nodes))
         & (df_seeds["priorities"] == int(priorities))
         & (df_seeds["arrival_s"] == float(arrival_s))
-        & (df_seeds["mode"] == rk.mode)
-        & (df_seeds["blocking"] == int(rk.blocking))
-        & (df_seeds["defpreempt"] == int(rk.defpreempt))
+        & (df_seeds["mode"] == row_key.mode)
+        & (df_seeds["blocking"] == int(row_key.blocking))
+        & (df_seeds["defpreempt"] == int(row_key.defpreempt))
     ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
     vals = [float(v) for v in sub[col].tolist() if is_finite(v)]
     return vals
@@ -684,11 +698,11 @@ def compute_nonnegative_ylim_main(lookup_main: pd.DataFrame, *, series_all: List
     Compute non-negative y-axis limits for main plots.
     """
     vals = []
-    for rk in series_all:
+    for row_key in series_all:
         for nodes in nodes_order:
             for arrivals in arrivals_order:
                 for priorities in priorities_cols:
-                    value = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrivals, rk=rk, col=col)
+                    value = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrivals, row_key=row_key, col=col)
                     if is_finite(value):
                         vals.append(value)
     return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=False)
@@ -725,7 +739,7 @@ def make_grid(
     y_tick_symmetric: bool = False,
 ) -> None:
     """
-    Unified grid plotting function used by both main and delta grids.
+    Grid plotting used by both main and delta grids.
     """
     fig, axes = plt.subplots(nrows=5, ncols=2, figsize=figsize, sharex=True)
     axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
@@ -775,10 +789,10 @@ def make_grid(
     # Legend
     if color_override:
         # Custom colors for delta plots
-        legend_handles = [Line2D([0], [0], color=color_override(rk), linewidth=1.8) for rk in series]
+        legend_handles = [Line2D([0], [0], color=color_override(row_key), linewidth=1.8) for row_key in series]
     else:
         # Standard colors from RowKey
-        legend_handles = [Line2D([0], [0], color=rk_color(rk), linewidth=1.8) for rk in series]
+        legend_handles = [Line2D([0], [0], color=row_key_color(row_key), linewidth=1.8) for row_key in series]
 
     bbox_l = axes[0, 0].get_position()
     bbox_r = axes[0, 1].get_position()
@@ -803,7 +817,7 @@ def make_grid(
     for r, row_spec in enumerate(GRID_ROW_SPECS):
         bbox = axes[r, 0].get_position()
         y_center = 0.5 * (bbox.y0 + bbox.y1)
-        fig.text(x_text, y_center, row_spec.ylabel, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+        fig.text(x_text, y_center, row_spec.y_label, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
     fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
     fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
@@ -823,17 +837,17 @@ def make_grid_main(
     out_stem: str,
 ) -> None:
     """
-    Make main grid plot comparing scheduling modes.
+    Make main grid plot.
     Each mode/blocking combination is a separate series.
     """
-    series = sort_rks([RowKey(mode=m, blocking=b, defpreempt=defpreempt) for (m, b) in MAIN_PLOT_MODES])
+    series = sort_row_keys([RowKey(mode=m, blocking=b, defpreempt=defpreempt) for (m, b) in MAIN_PLOT_MODES])
 
     def y_function_factory(col: str) -> YOfFn:
         if plot_seeds:
-            return lambda rk, n, a, k: values_from_df_seeds(df_seeds, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
-        return lambda rk, n, a, k: lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
+            return lambda row_key, n, a, k: values_from_df_seeds(df_seeds, nodes=n, priorities=k, arrival_s=a, row_key=row_key, col=col)
+        return lambda row_key, n, a, k: lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, row_key=row_key, col=col)
 
-    legend_labels = [rk_label(rk) for rk in series]
+    legend_labels = [row_key_label(row_key) for row_key in series]
 
     make_grid(
         y_function_factory=y_function_factory,
@@ -876,19 +890,29 @@ def make_grid_periodic_vs_stable(
     # Create fake series for coloring
     fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(DELTA_NAMES))]
 
-    def _extract_custom_index(rk: RowKey) -> int:
-        """Extract index from custom RowKey mode."""
-        return int(rk.mode.replace("custom", "")) if rk.mode.startswith("custom") else 0
+    def _extract_custom_index(row_key: RowKey) -> int:
+        """
+        Extract index from custom RowKey mode.
+        """
+        return int(row_key.mode.replace("custom", "")) if row_key.mode.startswith("custom") else 0
 
-    def color_override(rk: RowKey) -> Any:
-        return cmap[_extract_custom_index(rk) % len(cmap)]
+    def color_override(row_key: RowKey) -> Any:
+        """
+        Custom color override based on RowKey index.
+        """
+        return cmap[_extract_custom_index(row_key) % len(cmap)]
 
     def y_function_factory(col: str) -> YOfFn:
-        """Creates y-value function for deltas that dispatches based on RowKey."""
+        """
+        Creates y-value function for deltas that dispatches based on RowKey.
+        """
         # Build individual delta functions with cleaner closure handling
-        def make_delta_fn(delta_name: str):
+        def make_delta_func(delta_name: str):
+            """
+            Create y-value function for a specific delta_name.
+            """
             if plot_seeds:
-                def _y(_rk: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
+                def _y(_row_key: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
                     sub = df_delta_seeds[
                         (df_delta_seeds["defpreempt"] == defpreempt) &
                         (df_delta_seeds["nodes"] == nodes) &
@@ -898,13 +922,13 @@ def make_grid_periodic_vs_stable(
                     ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
                     return [float(v) for v in sub[col].tolist() if is_finite(v)]
             else:
-                def _y(_rk: RowKey, nodes: int, a: float, priorities: int) -> float:
-                    m, _s = lookup_delta_mean_std(lookup_deltas, nodes=nodes, priorities=priorities, arrival_s=a, defpreempt=defpreempt, delta_name=delta_name, col_mean=col)
+                def _y(_row_key: RowKey, nodes: int, a: float, priorities: int) -> float:
+                    m, _ = lookup_delta_mean_std(lookup_deltas, nodes=nodes, priorities=priorities, arrival_s=a, defpreempt=defpreempt, delta_name=delta_name, col_mean=col)
                     return float(m)
             return _y
         
-        delta_fns = {i: make_delta_fn(dn) for i, dn in enumerate(DELTA_NAMES)}
-        return lambda rk, nodes, a, priorities: delta_fns[_extract_custom_index(rk)](rk, nodes, a, priorities)
+        delta_fns = {i: make_delta_func(dn) for i, dn in enumerate(DELTA_NAMES)}
+        return lambda row_key, nodes, a, priorities: delta_fns[_extract_custom_index(row_key)](row_key, nodes, a, priorities)
 
     make_grid(
         y_function_factory=y_function_factory,
@@ -939,7 +963,9 @@ class MetricSpec:
     kind: str  # "signed" | "unsigned_int"
 
     def format_cell(self, mean_val: object, std_val: object, include_std: bool) -> str:
-        """Format a table cell for this metric."""
+        """
+        Format a table cell for this metric.
+        """
         if include_std:
             if self.kind == "unsigned_int":
                 return fmt_pm(mean_val, std_val, mean_signed=False, mean_dec=self.mean_dec, std_dec=self.std_dec)
@@ -972,13 +998,10 @@ def metrics_main(priorities: int) -> List[MetricSpec]:
     if priorities != 1:
         for p in (1, 2, 3, 4):
             out.append(MetricSpec(f"delta_L_ms_p{p}_mean", rf"$\Delta\mathrm{{latency}}_{{p{p}}}\;(\mathrm{{ms}})$", True, 0, 0, "signed"))
-
     out.append(MetricSpec("delta_D_num_total_mean", r"$\Delta\mathrm{deletions}_{\mathrm{total}}$", True, 1, 1, "signed"))
-
     if priorities != 1:
         for p in (1, 2, 3, 4):
             out.append(MetricSpec(f"delta_D_num_p{p}_mean", rf"$\Delta\mathrm{{deletions}}_{{p{p}}}$", True, 1, 1, "signed"))
-
     out.append(MetricSpec("solver_attempts_mean", r"\#solver\\runs", False, 0, 1, "unsigned_int"))
     out.append(MetricSpec("plan_activated_mean", r"\#plan\\activations", False, 0, 1, "unsigned_int"))
     return out
@@ -998,7 +1021,7 @@ def latex_table_main(
     Rows: modes
     Columns: metrics
     """
-    modes = sort_rks([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(defpreempt)) for s in MODE_SPECS])
+    modes = sort_row_keys([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(defpreempt)) for s in MODE_SPECS])
     specs = metrics_main(priorities)
 
     lines: List[str] = []
@@ -1021,9 +1044,9 @@ def latex_table_main(
             lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {int(nodes)}, inter-arrival = {arrival_str}\,s}} \\")
             lines.append(r"\midrule")
 
-            for rk in modes:
-                cells = [s.format_cell(*(lookup_mean_std(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, rk=rk, col_mean=s.col_mean) if std else (lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, rk=rk, col=s.col_mean), None)), include_std=bool(std)) for s in specs]
-                lines.append(f"{rk_label_tex(rk)} & " + " & ".join(cells) + r" \\")
+            for row_key in modes:
+                cells = [s.format_cell(*(lookup_mean_std(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col_mean=s.col_mean) if std else (lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=s.col_mean), None)), include_std=bool(std)) for s in specs]
+                lines.append(f"{row_key_label_tex(row_key)} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -1098,35 +1121,27 @@ def main() -> None:
     OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
     df_seeds = load_results_seeds(IN_RESULTS_SEEDS)
-    if df_seeds.empty:
-        raise SystemExit("results_seeds.csv is empty")
 
-    df_meanstd = aggregate_mean_std(df_seeds)
-    lookup_main = build_lookup(df_meanstd)
+    df_mean_std = aggregate_mean_std(df_seeds)
+    lookup_main = build_lookup(df_mean_std)
 
-    nodes_order = sorted(df_meanstd["nodes"].unique().tolist())
-    arrivals_order_all = df_meanstd["arrival_s"].unique().tolist()
+    nodes_order = sorted(df_mean_std["nodes"].unique().tolist())
+    arrivals_order_all = df_mean_std["arrival_s"].unique().tolist()
     arrivals_order = select_arrivals_order(arrivals_order_all)
-    priorities_order = sorted(df_meanstd["priorities"].unique().tolist())
-
-    if len(nodes_order) != 2:
-        raise SystemExit(f"Expected exactly 2 node values for plots; found {nodes_order}")
-    if any(k not in priorities_order for k in PRIORITIES_TO_SHOW):
-        raise SystemExit(f"Expected priorities {PRIORITIES_TO_SHOW}; found {priorities_order}")
 
     # Build delta datasets (seed-level + mean/std)
     df_delta_seeds = build_delta_seeds(df_seeds)
-    df_delta_meanstd = aggregate_delta_mean_std(df_delta_seeds) if not df_delta_seeds.empty else pd.DataFrame(columns=DELTA_KEY_COLS)
-    lookup_deltas = build_lookup_deltas(df_delta_meanstd) if not df_delta_meanstd.empty else pd.DataFrame().set_index(DELTA_KEY_COLS)
+    df_delta_mean_std = aggregate_delta_mean_std(df_delta_seeds) if not df_delta_seeds.empty else pd.DataFrame(columns=DELTA_KEY_COLS)
+    lookup_deltas = build_lookup_deltas(df_delta_mean_std) if not df_delta_mean_std.empty else pd.DataFrame().set_index(DELTA_KEY_COLS)
 
     # Shared y-lims (main counters) across defpreempt=0/1
-    series_all_for_limits = sort_rks([RowKey(mode=m, blocking=b, defpreempt=d) for d in (0, 1) for (m, b) in MAIN_PLOT_MODES])
+    series_all_for_limits = sort_row_keys([RowKey(mode=m, blocking=b, defpreempt=d) for d in (0, 1) for (m, b) in MAIN_PLOT_MODES])
     ylim_solver_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean")
     ylim_plans_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean")
 
     # Shared y-lims (delta counters) across defpreempt=0/1 (symmetric)
-    ylim_solver_deltas = compute_symmetric_ylim_deltas(df_delta_meanstd, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean") if not df_delta_meanstd.empty else (-1.0, 1.0)
-    ylim_plans_deltas = compute_symmetric_ylim_deltas(df_delta_meanstd, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean") if not df_delta_meanstd.empty else (-1.0, 1.0)
+    ylim_solver_deltas = compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean") if not df_delta_mean_std.empty else (-1.0, 1.0)
+    ylim_plans_deltas = compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean") if not df_delta_mean_std.empty else (-1.0, 1.0)
 
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
@@ -1134,13 +1149,13 @@ def main() -> None:
     # Generate all tables
     for defpreempt in (1, 0):
         for k in PRIORITIES_TO_SHOW:
-            for std in (0, 1):
+            for std in (1, 0):
                 out_tex = OUT_TABLES_DIR / f"table_main_defaultpreemption={defpreempt}_priorities={k}_std={std}.tex"
                 latex_table_main(out_path=out_tex, lookup_main=lookup_main, defpreempt=defpreempt, priorities=k, std=std, nodes_order=nodes_order, arrivals_order=arrivals_order)
                 produced_tables.append(out_tex)
     
     for k in PRIORITIES_TO_SHOW:
-        for std in (0, 1):
+        for std in (1, 0):
             out_tex = OUT_TABLES_DIR / f"table_periodic_vs_stable_priorities={k}_std={std}.tex"
             latex_table_periodic_vs_stable(out_path=out_tex, lookup_deltas=lookup_deltas, priorities=k, std=std, nodes_order=nodes_order, arrivals_order=arrivals_order)
             produced_tables.append(out_tex)
