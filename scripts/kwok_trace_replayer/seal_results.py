@@ -59,10 +59,6 @@ POD_TIME_COL = "time_s"
 
 MAX_PRIORITIES = 4
 
-# Conversion factors
-LATENCY_S_TO_MS = 1000.0
-UTIL_TO_PERCENT = 100.0
-
 # Output columns
 OUT_COLS = [
     "job_name",
@@ -92,7 +88,7 @@ OPT_TOTAL_KEYS = {
 # =============================================================================
 
 @dataclass(frozen=True)
-class GeneralData:
+class Data:
     t: np.ndarray  # normalized time (starts at 0)
     T_end: float
     cpu_util: np.ndarray
@@ -115,9 +111,9 @@ def arrival_str(arrival: float) -> str:
     """
     return str(int(arrival)) if abs(arrival - round(arrival)) < 1e-9 else f"{arrival:g}"
 
-def parse_job_dir_name(name: str) -> Optional[str]:
+def parse_default_run_dir(name: str) -> Optional[str]:
     """
-    Parse job dir name into canonical job name.
+    Parse default run dir into job_name.
     Example: nodes=16_prio=2_arrival=10s  -> nodes=16_prio=2_arrival=10s
     """
     m = JOB_RE.search(str(name))
@@ -134,23 +130,22 @@ def parse_plugin_run_dir(name: str) -> Optional[Tuple[str, str]]:
     Example: mode=schedulingfailure_blocking=0_defpreempt=0_nodes=32_prio=1_arrival=4s
     """
     kv: Dict[str, str] = {}
-    for tok in str(name).split("_"):
-        if "=" in tok:
-            k, v = tok.split("=", 1)
-            kv[k.strip().lower()] = v.strip()
+    for token in str(name).split("_"):
+        if "=" in token:
+            key, value = token.split("=", 1)
+            kv[key.strip().lower()] = value.strip()
     try:
-        n = int(kv["nodes"])
-        pr = int(kv["prio"])
+        nodes = int(kv["nodes"])
+        priorities = int(kv["prio"])
         arrival_raw = kv["arrival"]
-        a = float(arrival_raw[:-1] if arrival_raw.endswith("s") else arrival_raw)
+        arrival = float(arrival_raw[:-1] if arrival_raw.endswith("s") else arrival_raw)
     except Exception:
         return None
 
-    job_name = f"nodes={n}_prio={pr}_arrival={arrival_str(a)}s"
+    job_name = f"nodes={nodes}_prio={priorities}_arrival={arrival_str(arrival)}s"
     mode = kv.get("mode", "unknown").strip().lower()
     blocking = 1 if kv.get("blocking", "0").strip().lower() in {"1", "true", "yes"} else 0
     defpreempt = int(str(kv.get("defpreempt", "0")).strip()) if "defpreempt" in kv else 0
-
     plugin_config = f"mode={mode}_blocking={blocking}_defpreempt={defpreempt}"
     return job_name, plugin_config
 
@@ -171,6 +166,10 @@ def iter_seed_dirs(parent: Path) -> Iterable[Tuple[str, Path]]:
 # =============================================================================
 
 def read_optimization_stats(opt_json: Path) -> Dict[str, float]:
+    """
+    Read optimization stats from JSON file.
+    ️If file does not exist, returns NaNs.
+    """
     out = {v: float("nan") for v in OPT_TOTAL_KEYS.values()}
     if not opt_json.exists():
         return out
@@ -184,6 +183,9 @@ def read_optimization_stats(opt_json: Path) -> Dict[str, float]:
     return out
 
 def read_pod(pod_csv: Path) -> pd.DataFrame:
+    """
+    Read pod CSV with needed columns and types.
+    """
     df = pd.read_csv(
         pod_csv,
         usecols=[POD_EVENT_COL, POD_NAME_COL, POD_UID_COL, POD_PRIO_COL, POD_TIME_COL],
@@ -205,41 +207,41 @@ def read_pod(pod_csv: Path) -> pd.DataFrame:
 def cumulative_integral_step(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     cumulative[i] = ∫_0^{t[i]} y(s) ds, with y stepwise using y[j] on [t[j], t[j+1]).
-    Supports y shape (n,) and (n,m).
     """
     t = np.asarray(t, dtype=float)
     y = np.asarray(y, dtype=float)
     n = t.size
-
     if n == 0:
         return np.array([], dtype=float) if y.ndim == 1 else np.zeros((0, y.shape[1]), dtype=float)
     if n == 1:
         return np.zeros((1,), dtype=float) if y.ndim == 1 else np.zeros((1, y.shape[1]), dtype=float)
-
     dt = np.diff(t)
     if y.ndim == 1:
         out = np.zeros(n, dtype=float)
         out[1:] = np.cumsum(y[:-1] * dt)
         return out
-
     out2 = np.zeros((n, y.shape[1]), dtype=float)
     out2[1:, :] = np.cumsum(y[:-1, :] * dt[:, None], axis=0)
     return out2
 
-def mean_over_horizon(t: np.ndarray, y: np.ndarray, cum: np.ndarray, H: float) -> float:
-    if not (math.isfinite(H) and H > 0.0) or t.size == 0:
-        return float("nan")
-    Hc = min(H, float(t[-1]))
+def mean_over_horizon(t: np.ndarray, y: np.ndarray, cum: np.ndarray, T_end: float) -> float:
+    """
+    Mean of y over horizon [0, T_end]:
+    Hc means the effective horizon, min(T_end, t[-1]). That is, if T_end exceeds
+    the last timestamp, we consider the function y to be constant after t[-1].
+    """
+    Hc = min(T_end, float(t[-1]))
     idx = int(np.searchsorted(t, Hc, side="right") - 1)
     idx = max(idx, 0)
     base = float(cum[idx])
     tail = float(y[idx]) * float(Hc - t[idx])
     return float((base + tail) / Hc) if Hc > 0 else float("nan")
 
-def value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
-    if t.size == 0 or not math.isfinite(H):
-        return float("nan")
-    Hc = min(max(H, 0.0), float(t[-1]))
+def value_at_horizon(t: np.ndarray, y: np.ndarray, T_end: float) -> float:
+    """
+    Value of y at horizon T_end.
+    """
+    Hc = min(max(T_end, 0.0), float(t[-1]))
     idx = int(np.searchsorted(t, Hc, side="right") - 1)
     idx = max(idx, 0)
     v = float(y[idx])
@@ -249,7 +251,10 @@ def value_at_horizon(t: np.ndarray, y: np.ndarray, H: float) -> float:
 # General stats reading + horizon metrics
 # =============================================================================
 
-def read_general_data(general_csv: Path) -> GeneralData:
+def read_general_data(general_csv: Path) -> Data:
+    """
+    Read general stats CSV into Data.
+    """
     cols_needed = {TIME_COL, CPU_RUN_COL, MEM_RUN_COL}
     for p in range(1, MAX_PRIORITIES + 1):
         cols_needed.add(f"{RUNNING_PREFIX}{p}")
@@ -259,7 +264,7 @@ def read_general_data(general_csv: Path) -> GeneralData:
     df[TIME_COL] = pd.to_numeric(df[TIME_COL], errors="coerce")
     df = df.loc[df[TIME_COL].notna()].copy()
     if df.empty:
-        return GeneralData(
+        return Data(
             t=np.array([], dtype=float),
             T_end=float("nan"),
             cpu_util=np.array([], dtype=float),
@@ -280,7 +285,7 @@ def read_general_data(general_csv: Path) -> GeneralData:
     df = df.loc[valid].copy()
     t = t[valid]
     if t.size == 0:
-        return GeneralData(
+        return Data(
             t=t,
             T_end=float("nan"),
             cpu_util=np.array([], dtype=float),
@@ -309,7 +314,7 @@ def read_general_data(general_csv: Path) -> GeneralData:
         if dc in df.columns:
             pods_deleted[:, i] = pd.to_numeric(df[dc], errors="coerce").to_numpy(dtype=float)
 
-    return GeneralData(
+    return Data(
         t=t,
         T_end=float(t[-1]),
         cpu_util=cpu,
@@ -323,25 +328,26 @@ def read_general_data(general_csv: Path) -> GeneralData:
         cum_pods_running=cumulative_integral_step(t, pods_running),
     )
 
-def compute_horizon_metrics(g: GeneralData, H: float) -> Dict[str, float]:
-    t = g.t
+def compute_horizon_metrics(data: Data, T_end: float) -> Dict[str, float]:
+    """
+    Compute horizon metrics up to T_end from Data.
+    """
+    t = data.t
     out: Dict[str, float] = {
-        "U_cpu_mean": mean_over_horizon(t, g.cpu_util, g.cum_cpu_util, H),
-        "U_mem_mean": mean_over_horizon(t, g.mem_util, g.cum_mem_util, H),
-        "U_eff_mean": mean_over_horizon(t, g.eff_util, g.cum_eff_util, H),
+        "U_cpu_mean": mean_over_horizon(t, data.cpu_util, data.cum_cpu_util, T_end),
+        "U_mem_mean": mean_over_horizon(t, data.mem_util, data.cum_mem_util, T_end),
+        "U_eff_mean": mean_over_horizon(t, data.eff_util, data.cum_eff_util, T_end),
     }
     for i, p in enumerate(range(1, MAX_PRIORITIES + 1)):
-        out[f"R_p{p}_mean"] = mean_over_horizon(t, g.pods_running[:, i], g.cum_pods_running[:, i], H)
-        out[f"D_p{p}"] = value_at_horizon(t, g.pods_deleted[:, i], H)
-
+        out[f"R_p{p}_mean"] = mean_over_horizon(t, data.pods_running[:, i], data.cum_pods_running[:, i], T_end)
+        out[f"D_p{p}"] = value_at_horizon(t, data.pods_deleted[:, i], T_end)
     out["R_total_mean"] = float(np.nansum([out[f"R_p{p}_mean"] for p in range(1, MAX_PRIORITIES + 1)]))
     out["D_total"] = float(np.nansum([out[f"D_p{p}"] for p in range(1, MAX_PRIORITIES + 1)]))
     return out
 
 # =============================================================================
-# Latency (first-batch) in ms
+# Latency computation
 # =============================================================================
-
 
 def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float]:
     """
@@ -355,22 +361,22 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
     if pod_df.empty:
         return nan_out
 
-    apply_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
-    run_df = pod_df[pod_df[POD_EVENT_COL] == "running-time"].copy()
-    if apply_df.empty:
+    apply_time_df = pod_df[pod_df[POD_EVENT_COL] == "apply-time"].copy()
+    running_time_df = pod_df[pod_df[POD_EVENT_COL] == "running-time"].copy()
+    if apply_time_df.empty:
         return nan_out
 
-    apply_df = apply_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
-    run_df = run_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
+    apply_time_df = apply_time_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
+    running_time_df = running_time_df.sort_values(POD_TIME_COL, kind="mergesort").drop_duplicates(subset=[POD_UID_COL], keep="first")
 
-    apply_df["rs_prefix"] = apply_df[POD_NAME_COL].map(rs_prefix_from_pod_name)
+    apply_time_df["rs_prefix"] = apply_time_df[POD_NAME_COL].map(rs_prefix_from_pod_name)
 
-    joined = apply_df.merge(
-        run_df[[POD_UID_COL, POD_TIME_COL]].rename(columns={POD_TIME_COL: "running_time_s"}),
+    # Join apply times with running times
+    joined = apply_time_df.merge(
+        running_time_df[[POD_UID_COL, POD_TIME_COL]].rename(columns={POD_TIME_COL: "running_time_s"}),
         on=POD_UID_COL,
         how="left",
     ).rename(columns={POD_TIME_COL: "apply_time_s"})
-
     joined["apply_time_s"] = pd.to_numeric(joined["apply_time_s"], errors="coerce")
     joined["running_time_s"] = pd.to_numeric(joined["running_time_s"], errors="coerce")
     joined[POD_PRIO_COL] = pd.to_numeric(joined[POD_PRIO_COL], errors="coerce")
@@ -378,6 +384,7 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
     if joined.empty:
         return nan_out
 
+    # First batch selection, by taking pods with apply_time <= t0 + eps_s per rs_prefix
     joined = joined.sort_values(["rs_prefix", "apply_time_s"], kind="mergesort")
     t0 = joined.groupby("rs_prefix", sort=False)["apply_time_s"].transform("min")
     batch = joined.loc[(joined["apply_time_s"] - t0) <= float(eps_s)].copy()
@@ -386,16 +393,16 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
 
     latency_s = batch["running_time_s"] - batch["apply_time_s"]
     latency_s = latency_s.where(np.isfinite(latency_s) & (latency_s >= 0.0), np.nan)
-    batch["latency_ms"] = latency_s * LATENCY_S_TO_MS
+    batch["latency_ms"] = latency_s * 1000.0 # convert to milliseconds
 
     out: Dict[str, float] = {}
     out["L_ms_total"] = float(np.nanmean(batch["latency_ms"].to_numpy(dtype=float))) if batch.shape[0] else float("nan")
 
-    prios = batch[POD_PRIO_COL].to_numpy(dtype=float)
-    lat = batch["latency_ms"].to_numpy(dtype=float)
-    for p in range(1, MAX_PRIORITIES + 1):
-        mask = prios == float(p)
-        out[f"L_ms_p{p}"] = float(np.nanmean(lat[mask])) if np.any(mask) else float("nan")
+    priorities = batch[POD_PRIO_COL].to_numpy(dtype=float)
+    latencies = batch["latency_ms"].to_numpy(dtype=float)
+    for prio in range(1, MAX_PRIORITIES + 1):
+        mask = priorities == float(prio)
+        out[f"L_ms_p{prio}"] = float(np.nanmean(latencies[mask])) if np.any(mask) else float("nan")
 
     return out
 
@@ -404,11 +411,8 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
 # =============================================================================
 
 def main() -> None:
-    if not DEFAULT_ROOT.exists():
-        raise SystemExit(f"Not found: {DEFAULT_ROOT}")
-    if not PLUGIN_ROOT.exists():
-        raise SystemExit(f"Not found: {PLUGIN_ROOT}")
-
+    print("Sealing results...")
+    
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / OUT_FILENAME
 
@@ -416,42 +420,46 @@ def main() -> None:
     default_idx: Dict[Tuple[str, str], Tuple[Path, Path]] = {}
     default_seeds_by_job: Dict[str, set[str]] = {}
 
-    for job_dir in sorted(DEFAULT_ROOT.iterdir()):
-        if not job_dir.is_dir():
+    # Process default runs
+    for run_dir in sorted(DEFAULT_ROOT.iterdir()):
+        if not run_dir.is_dir():
             continue
-        job_name = parse_job_dir_name(job_dir.name)
-        if job_name is None:
+        parsed = parse_default_run_dir(run_dir.name)
+        if parsed is None:
             continue
         seeds: set[str] = set()
-        for seed, seed_dir in iter_seed_dirs(job_dir):
+        for seed, seed_dir in iter_seed_dirs(run_dir):
             seeds.add(seed)
-            default_idx[(job_name, seed)] = (seed_dir / GENERAL_STATS_FILENAME, seed_dir / POD_STATS_FILENAME)
+            default_idx[(parsed, seed)] = (seed_dir / GENERAL_STATS_FILENAME, seed_dir / POD_STATS_FILENAME)
         if seeds:
-            default_seeds_by_job[job_name] = seeds
+            default_seeds_by_job[parsed] = seeds
 
     rows: List[Dict[str, object]] = []
 
+    # Process plugin runs
     for run_dir in sorted(PLUGIN_ROOT.iterdir()):
         if not run_dir.is_dir():
             continue
         parsed = parse_plugin_run_dir(run_dir.name)
         if parsed is None:
             continue
-
-        job_name, plugin_config = parsed
-        default_seeds = default_seeds_by_job.get(job_name, set())
+        parsed, plugin_config = parsed
+        
+        # Find default seeds for this job
+        default_seeds = default_seeds_by_job.get(parsed, set())
         if not default_seeds:
-            print(f"[warn] no default seeds for job={job_name}")
+            print(f"[warn] no default seeds for job={parsed}")
             continue
 
         plugin_seeds = {seed for seed, _ in iter_seed_dirs(run_dir)}
         common_seeds = sorted(plugin_seeds & default_seeds)
         if not common_seeds:
-            print(f"[warn] no common seeds for job={job_name} plugin={plugin_config}")
+            print(f"[warn] no common seeds for job={parsed} plugin={plugin_config}")
             continue
 
+        # Process common seeds
         for seed in common_seeds:
-            default_general_csv, default_pod_csv = default_idx[(job_name, seed)]
+            default_general_csv, default_pod_csv = default_idx[(parsed, seed)]
             plugin_seed_dir = run_dir / seed
             plugin_general_csv = plugin_seed_dir / GENERAL_STATS_FILENAME
             plugin_pod_csv = plugin_seed_dir / POD_STATS_FILENAME
@@ -460,24 +468,17 @@ def main() -> None:
             default_g = read_general_data(default_general_csv)
             plugin_g = read_general_data(plugin_general_csv)
 
-            if not (math.isfinite(default_g.T_end) and math.isfinite(plugin_g.T_end)):
-                continue
-            if default_g.T_end <= 0.0 or plugin_g.T_end <= 0.0:
-                continue
+            # Determine common horizon T_end
+            T_end = float(min(default_g.T_end, plugin_g.T_end))
+            default_metrics = compute_horizon_metrics(default_g, T_end)
+            plugin_metrics = compute_horizon_metrics(plugin_g, T_end)
 
-            H = float(min(default_g.T_end, plugin_g.T_end))
-            if H <= 0.0:
-                continue
-
-            default_m = compute_horizon_metrics(default_g, H)
-            plugin_m = compute_horizon_metrics(plugin_g, H)
-
-            dU_cpu_pct = (float(plugin_m["U_cpu_mean"]) - float(default_m["U_cpu_mean"])) * UTIL_TO_PERCENT
-            dU_mem_pct = (float(plugin_m["U_mem_mean"]) - float(default_m["U_mem_mean"])) * UTIL_TO_PERCENT
-            dU_eff_pct = (float(plugin_m["U_eff_mean"]) - float(default_m["U_eff_mean"])) * UTIL_TO_PERCENT
-
-            dR = {p: float(plugin_m[f"R_p{p}_mean"]) - float(default_m[f"R_p{p}_mean"]) for p in range(1, MAX_PRIORITIES + 1)}
-            dD = {p: float(plugin_m[f"D_p{p}"]) - float(default_m[f"D_p{p}"]) for p in range(1, MAX_PRIORITIES + 1)}
+            # Deltas (plugin - default) & totals
+            dU_cpu_pct = (float(plugin_metrics["U_cpu_mean"]) - float(default_metrics["U_cpu_mean"])) * 100.0
+            dU_mem_pct = (float(plugin_metrics["U_mem_mean"]) - float(default_metrics["U_mem_mean"])) * 100.0
+            dU_eff_pct = (float(plugin_metrics["U_eff_mean"]) - float(default_metrics["U_eff_mean"])) * 100.0
+            dR = {p: float(plugin_metrics[f"R_p{p}_mean"]) - float(default_metrics[f"R_p{p}_mean"]) for p in range(1, MAX_PRIORITIES + 1)}
+            dD = {p: float(plugin_metrics[f"D_p{p}"]) - float(default_metrics[f"D_p{p}"]) for p in range(1, MAX_PRIORITIES + 1)}
             dR_total = float(np.nansum(list(dR.values())))
             dD_total = float(np.nansum(list(dD.values())))
 
@@ -486,14 +487,15 @@ def main() -> None:
             dL_total = float(plugin_L["L_ms_total"]) - float(default_L["L_ms_total"])
             dL_prio = {p: float(plugin_L[f"L_ms_p{p}"]) - float(default_L[f"L_ms_p{p}"]) for p in range(1, MAX_PRIORITIES + 1)}
 
-            opt = read_optimization_stats(plugin_opt_json)
+            # Optimization stats
+            opt_stats = read_optimization_stats(plugin_opt_json)
 
             rows.append(
                 {
-                    "job_name": job_name,
+                    "job_name": parsed,
                     "plugin_config": plugin_config,
                     "seed": seed,
-                    "T_end_s_mean": H,
+                    "T_end_s_mean": T_end,
                     "delta_U_pct_cpu_mean": dU_cpu_pct,
                     "delta_U_pct_mem_mean": dU_mem_pct,
                     "delta_U_pct_eff_mean": dU_eff_pct,
@@ -512,12 +514,12 @@ def main() -> None:
                     "delta_L_ms_p3_mean": dL_prio[3],
                     "delta_L_ms_p4_mean": dL_prio[4],
                     "delta_L_ms_total_mean": dL_total,
-                    "solver_attempts_mean": float(opt["solver_attempts"]),
-                    "solver_optimal_mean": float(opt["solver_optimal"]),
-                    "solver_feasible_mean": float(opt["solver_feasible"]),
-                    "solver_failed_mean": float(opt["solver_failed"]),
-                    "plan_not_applicable_mean": float(opt["plan_not_applicable"]),
-                    "plan_activated_mean": float(opt["plan_activated"]),
+                    "solver_attempts_mean": float(opt_stats["solver_attempts"]),
+                    "solver_optimal_mean": float(opt_stats["solver_optimal"]),
+                    "solver_feasible_mean": float(opt_stats["solver_feasible"]),
+                    "solver_failed_mean": float(opt_stats["solver_failed"]),
+                    "plan_not_applicable_mean": float(opt_stats["plan_not_applicable"]),
+                    "plan_activated_mean": float(opt_stats["plan_activated"]),
                 }
             )
 

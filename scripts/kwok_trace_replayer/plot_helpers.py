@@ -17,17 +17,14 @@ from scripts.kwok_trace_replayer.trace_helpers import (
 )
 
 # -----------------------------------------------------------------------------
-# Shared time scaling (align with trace_generator)
+# Time scaling
 # -----------------------------------------------------------------------------
 
 def choose_time_unit(max_time_s: float) -> tuple[float, str]:
     """
-    Match trace_generator behavior:
-      <= 7h   -> minutes
-      <= 7d   -> hours
-      else    -> days
-
-    Returns (scale, label) where x_plot = x_seconds * scale.
+    <= 7h   -> minutes
+    <= 7d   -> hours
+    else    -> days
     """
     if max_time_s <= 7 * 3600:
         return 1.0 / 60.0, "time (minutes)"
@@ -36,8 +33,9 @@ def choose_time_unit(max_time_s: float) -> tuple[float, str]:
     return 1.0 / (24.0 * 3600.0), "time (days)"
 
 # -----------------------------------------------------------------------------
-# Utilization time series
+# Utilization
 # -----------------------------------------------------------------------------
+
 def plot_utilization_and_num_pods(
     *,
     times: List[float],
@@ -49,7 +47,9 @@ def plot_utilization_and_num_pods(
     show_plots: bool = False,
     logger=None,
 ) -> None:
-    """Plot effective utilization (max(cpu, mem)) and pod-count time series."""
+    """
+    Plot effective utilization (max(cpu, mem)) and pod-count time series.
+    """
     if not times:
         return
 
@@ -60,12 +60,12 @@ def plot_utilization_and_num_pods(
     max_time_s = float(np.nanmax(t_s)) if t_s.size else 0.0
     x_scale, x_label = choose_time_unit(max_time_s)
 
-    x = t_s * x_scale  # x-axis is now truly in minutes/hours/days (aligned)
+    x = t_s * x_scale
     max_x = float(np.nanmax(x)) if x.size else 0.0
 
     fig, ax1 = plt.subplots(figsize=(9, 4))
 
-    # Pick two distinct colors from the active matplotlib cycle (theme-friendly)
+    # Pick two distinct colors
     cycle = plt.rcParams.get("axes.prop_cycle", None)
     colors = cycle.by_key().get("color", []) if cycle is not None else []
     c_util = colors[0] if len(colors) > 0 else "C0"
@@ -84,7 +84,7 @@ def plot_utilization_and_num_pods(
 
     ax1.legend([l1, l2], ["effective utilization, max(cpu, mem)", "number of pods"], loc="lower right", frameon=False)
 
-    # Build event stream in seconds (for counting), but render annotations in x-axis units.
+    # Build event stream in seconds (for counting)
     events: List[tuple[float, str]] = []
     for p in all_pods:
         events.append((float(p.start_time), "C"))
@@ -150,8 +150,9 @@ def plot_utilization_and_num_pods(
         logger.info("saved utilization plot to %s", out_path)
 
 # -----------------------------------------------------------------------------
-# Generator histograms
+# Histograms
 # -----------------------------------------------------------------------------
+
 def plot_generator_histograms(
     *,
     all_pods: List[TraceRecord],
@@ -177,11 +178,12 @@ def plot_generator_histograms(
     show_plots: bool = False,
     logger=None,
 ) -> None:
-    """Plot generation histograms and save to disk."""
+    """
+    Plot histograms
+    """
     if not all_pods:
         return
-
-    # Inter-arrivals should ignore initial snapshot (many pods at t=0).
+    
     trace_pods = [p for p in all_pods if float(p.start_time) > 0.0]
     trace_pods = sorted(trace_pods, key=lambda p: p.start_time)
 
@@ -196,7 +198,7 @@ def plot_generator_histograms(
     req_vals = np.array([p.cpu for p in pods_sorted], dtype=float)
     lifetimes = np.array([p.end_time - p.start_time for p in pods_sorted], dtype=float)
     prios = np.array([p.priority for p in pods_sorted], dtype=int)
-    reps = np.array([p.replicas for p in pods_sorted], dtype=int)
+    replicas = np.array([p.replicas for p in pods_sorted], dtype=int)
 
     fig, axes = plt.subplots(6, 1, figsize=(6, 10))
     axes = axes.flatten()
@@ -274,7 +276,7 @@ def plot_generator_histograms(
     )
     plot_bar_with_geometric(
         axes[5],
-        reps,
+        replicas,
         title="Replicas",
         x_label="replicas", 
         y_label="probability mass",
@@ -294,11 +296,11 @@ def plot_generator_histograms(
     if logger is not None:
         logger.info("saved generated histograms to %s", out_path)
 
-
 # -----------------------------------------------------------------------------
 # Plot helpers
 # -----------------------------------------------------------------------------
-def _bounded_pareto_pdf(x: np.ndarray, *, alpha: float, x_min: float, x_max: float) -> np.ndarray:
+
+def bounded_pareto_pdf(x: np.ndarray, *, alpha: float, x_min: float, x_max: float) -> np.ndarray:
     """
     Bounded Pareto PDF on [x_min, x_max]:
       f(x) = (alpha * x_min^alpha / x^(alpha+1)) / (1 - (x_min/x_max)^alpha)
@@ -310,12 +312,13 @@ def _bounded_pareto_pdf(x: np.ndarray, *, alpha: float, x_min: float, x_max: flo
     return (alpha * (x_min ** alpha) / (x ** (alpha + 1.0))) / denom
 
 
-def _pareto_pdf(x: np.ndarray, *, alpha: float, x_min: float) -> np.ndarray:
-    """Unbounded Pareto PDF for x >= x_min."""
+def pareto_pdf(x: np.ndarray, *, alpha: float, x_min: float) -> np.ndarray:
+    """
+    Unbounded Pareto PDF for x >= x_min.
+    """
     if not (alpha > 0 and x_min > 0):
         return np.zeros_like(x, dtype=float)
     return alpha * (x_min ** alpha) / (x ** (alpha + 1.0))
-
 
 def plot_histogram_with_pareto(
     ax: plt.Axes,
@@ -337,9 +340,9 @@ def plot_histogram_with_pareto(
 ) -> None:
     """
     Plot to an existing axes:
-      - Histogram as probability density (area ≈ 1)
-      - Optional (bounded) Pareto PDF overlay
-      - Sample mean line
+    - Histogram as probability density (area ≈ 1)
+    - Optional (bounded) Pareto PDF overlay
+    - Sample mean line
     """
     data_scaled = np.asarray(data, dtype=float) * float(scale)
 
@@ -395,10 +398,10 @@ def plot_histogram_with_pareto(
         if hi > lo and math.isfinite(lo) and math.isfinite(hi):
             x_fit = np.linspace(lo, hi, 400)
             if xM is not None:
-                y_fit = _bounded_pareto_pdf(x_fit, alpha=a, x_min=xm, x_max=xM)
+                y_fit = bounded_pareto_pdf(x_fit, alpha=a, x_min=xm, x_max=xM)
                 label = rf"bounded Pareto: $\alpha={a:.3f}$, $x_{{\min}}={xm:.3g}$, $x_{{\max}}={xM:.3g}$"
             else:
-                y_fit = _pareto_pdf(x_fit, alpha=a, x_min=xm)
+                y_fit = pareto_pdf(x_fit, alpha=a, x_min=xm)
                 label = rf"Pareto: $\alpha={a:.3f}$, $x_{{\min}}={xm:.3g}$"
 
             line, = ax.plot(x_fit, y_fit, linewidth=1.5, linestyle="-")
@@ -426,7 +429,6 @@ def plot_histogram_with_pareto(
     if legend_handles:
         ax.legend(legend_handles, legend_labels, fontsize=LEGEND_FONTSIZE)
 
-
 def plot_bar_with_geometric(
     ax: plt.Axes,
     data: np.ndarray,
@@ -443,13 +445,7 @@ def plot_bar_with_geometric(
     log_y: bool = False,
 ) -> None:
     """
-    Plot a discrete distribution as a bar chart (probability mass),
-    with optional geometric(-like) overlay.
-
-    Priorities are treated as categorical buckets:
-      - one bar per observed value (within [x_min, x_max] if given)
-      - equally spaced buckets; numeric distance does not affect spacing
-      - x-ticks are the true values.
+    Plot a discrete distribution as a bar chart, with optional geometric(-like) overlay.
     """
     data_int = np.asarray(data, dtype=int)
     finite_mask = np.isfinite(data_int)
