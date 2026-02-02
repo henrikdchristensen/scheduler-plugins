@@ -78,8 +78,8 @@ MAIN_PLOT_MODES: List[Tuple[str, int]] = [
 
 # Periodic vs stable deltas (fixed)
 DELTA_SERIES: List[Tuple[str, str, str, int]] = [
-    ("PR 8→32 (B)", "periodic8s", "periodic32s", 1),
-    ("SQ 2→8 (B)", "stable-queue-2s", "stable-queue-8s", 1),
+    ("Periodic (blocking), 8→32s interval", "periodic8s", "periodic32s", 1),
+    ("Stable-queue (blocking), 2→8s delay", "stable-queue-2s", "stable-queue-8s", 1),
 ]
 
 DELTA_NAMES = [d[0] for d in DELTA_SERIES]
@@ -98,9 +98,13 @@ DELTA_METRIC_COLS = [
 # =============================================================================
 
 PLOT_TICK_PAD = 2.0
-PLOT_MARKER_SIZE = 2.5
+PLOT_MARKER_SIZE = 2.0
+PLOT_MARKER_SEED_ALPHA = 0.5
+PLOT_MEAN_MARKER_SIZE = 3.5
 PLOT_MARKER_LINEWIDTH = 0.4
 PLOT_MIN_LINEAR_YTICKS = 5
+PLOT_COUNT_MAX_TICKS = 7
+PLOT_COUNT_MAX_TICKS_SYMMETRIC = 17
 
 PLOT_HEIGHT = 8.3
 
@@ -128,6 +132,12 @@ SYMLOG_BASE = 10.0
 SYMLOG_LINSCALE = 1.0
 SYMLOG_LINTHRESH_LATENCY_MS = 1.0
 SYMLOG_LINTHRESH_DELETIONS = 1.0
+
+# Fixed y-axis limits for solver runs and plan activations (None = auto-compute)
+YLIM_SOLVER_MAIN: Optional[Tuple[float, float]] = (0.0, 450.0)  # e.g., (0.0, 100.0) to fix
+YLIM_PLANS_MAIN: Optional[Tuple[float, float]] = (0.0, 350.0)   # e.g., (0.0, 50.0) to fix
+YLIM_SOLVER_DELTAS: Optional[Tuple[float, float]] = (-400.0, 50.0)  # e.g., (-20.0, 20.0) to fix
+YLIM_PLANS_DELTAS: Optional[Tuple[float, float]] = (-70.0, 10.0)   # e.g., (-10.0, 10.0) to fix
 
 # =============================================================================
 # Parsing: job_name + plugin_config
@@ -248,7 +258,7 @@ class YAxisCfg:
     symlog_linthresh: float = 1.0
 
 Y_MAIN: Dict[str, YAxisCfg] = {
-    "util": YAxisCfg("linear", (-5.0, 5.0)),
+    "util": YAxisCfg("linear", (-2.0, 5.0)),
     "latency": YAxisCfg("symlog", (-1e5 - 1.0, 1e5 + 1.0), SYMLOG_LINTHRESH_LATENCY_MS),
     "deletions": YAxisCfg("symlog", (-1e4 - 1.0, 1e4 + 1.0), SYMLOG_LINTHRESH_DELETIONS),
 }
@@ -448,18 +458,18 @@ YOfFn = Callable[[RowKey, int, float, int], YVal]  # scalar or list (seeds)
 
 def to_finite_list(v: object) -> List[float]:
     """
-    Convert v to a list of finite floats.
+    Convert v to a list of floats (including non-finite values).
     """
     if v is None:
         return []
     try:
         if np.isscalar(v):
-            return [float(v)] if is_finite(v) else []
+            return [float(v)]
     except Exception:
         pass
     if isinstance(v, (list, tuple, np.ndarray)):
-        return [float(x) for x in v if is_finite(x)]
-    return [float(v)] if is_finite(v) else []
+        return [float(x) for x in v]
+    return [float(v)]
 
 def compute_step(span: float, target_ticks: int) -> float:
     """
@@ -594,20 +604,11 @@ def draw_points_on_ax(
 
             def plot_many(xs_center: float, ys: List[float], marker: str) -> None:
                 """
-                Plot many points at given x_center with jitter.
+                Plot all points at the same x_center.
                 """
-                if not ys:
-                    return
-                if len(ys) == 1:
-                    xs = [xs_center]
-                else:
-                    jitter = max(0.001, float(seed_jitter_frac) * max(0.001, mode_spacing))
-                    offsets = np.linspace(-jitter, jitter, len(ys))
-                    xs = [xs_center + float(o) for o in offsets]
-
-                for x, y in zip(xs, ys):
+                for y in ys:
                     ax.plot(
-                        [x],
+                        [xs_center],
                         [y],
                         marker=marker,
                         linestyle="None",
@@ -615,10 +616,28 @@ def draw_points_on_ax(
                         markerfacecolor=color,
                         markeredgecolor="black",
                         markeredgewidth=PLOT_MARKER_LINEWIDTH,
+                        alpha=PLOT_MARKER_SEED_ALPHA,
                     )
 
             plot_many(x_center, y0_list, marker="o")
             plot_many(x_center, y1_list, marker="s")
+            
+            # Plot mean across both node configurations (only when seeds are being plotted)
+            if y0_list or y1_list:
+                all_values = y0_list + y1_list
+                if all_values:
+                    mean_val = np.mean(all_values)
+                    ax.plot(
+                        [x_center],
+                        [mean_val],
+                        marker="D",
+                        linestyle="None",
+                        markersize=PLOT_MEAN_MARKER_SIZE,
+                        markerfacecolor=color,
+                        markeredgecolor="black",
+                        markeredgewidth=PLOT_MARKER_LINEWIDTH * 1.5,
+                        zorder=10,
+                    )
 
     if ycfg.scale == "symlog":
         ax.set_yscale("symlog", base=SYMLOG_BASE, linthresh=ycfg.symlog_linthresh, linscale=SYMLOG_LINSCALE)
@@ -630,9 +649,9 @@ def draw_points_on_ax(
 
     if ycfg.scale == "linear":
         if y_tick_strategy == "count_sparse":
-            set_count_yticks(ax, ycfg.y_lim, max_ticks=5)
+            set_count_yticks(ax, ycfg.y_lim, max_ticks=PLOT_COUNT_MAX_TICKS)
         elif y_tick_strategy == "count_sparse_symmetric":
-            set_symmetric_count_yticks(ax, ycfg.y_lim, max_ticks_total=7)
+            set_symmetric_count_yticks(ax, ycfg.y_lim, max_ticks_total=PLOT_COUNT_MAX_TICKS_SYMMETRIC)
         else:
             set_linear_yticks(ax, ycfg.y_lim)
 
@@ -1139,12 +1158,12 @@ def main() -> None:
 
     # Shared y-lims (main counters) across defpreempt=0/1
     series_all_for_limits = sort_row_keys([RowKey(mode=m, blocking=b, defpreempt=d) for d in (0, 1) for (m, b) in MAIN_PLOT_MODES])
-    ylim_solver_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean")
-    ylim_plans_main = compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean")
+    ylim_solver_main = YLIM_SOLVER_MAIN if YLIM_SOLVER_MAIN is not None else compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean")
+    ylim_plans_main = YLIM_PLANS_MAIN if YLIM_PLANS_MAIN is not None else compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean")
 
     # Shared y-lims (delta counters) across defpreempt=0/1 (symmetric)
-    ylim_solver_deltas = compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean") if not df_delta_mean_std.empty else (-1.0, 1.0)
-    ylim_plans_deltas = compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean") if not df_delta_mean_std.empty else (-1.0, 1.0)
+    ylim_solver_deltas = YLIM_SOLVER_DELTAS if YLIM_SOLVER_DELTAS is not None else (compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean") if not df_delta_mean_std.empty else (-1.0, 1.0))
+    ylim_plans_deltas = YLIM_PLANS_DELTAS if YLIM_PLANS_DELTAS is not None else (compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean") if not df_delta_mean_std.empty else (-1.0, 1.0))
 
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
@@ -1163,20 +1182,16 @@ def main() -> None:
             latex_table_periodic_vs_stable(out_path=out_tex, lookup_deltas=lookup_deltas, priorities=k, std=std, nodes_order=nodes_order, arrivals_order=arrivals_order)
             produced_tables.append(out_tex)
 
-    # Generate all figures
+    # Generate all figures (always with seeds)
     for defpreempt in (1, 0):
-        for plot_seeds in (False, True):
-            seeds_flag = 1 if plot_seeds else 0
-            out_stem = f"grid_main_defaultpreemption={defpreempt}_seeds={seeds_flag}"
-            make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=plot_seeds, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=out_stem)
-            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
+        out_stem = f"grid_main_defaultpreemption={defpreempt}"
+        make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=True, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=out_stem)
+        produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
     
     for defpreempt in (1, 0):
-        for plot_seeds in (False, True):
-            seeds_flag = 1 if plot_seeds else 0
-            out_stem = f"grid_periodic_vs_stable_defaultpreemption={defpreempt}_seeds={seeds_flag}"
-            make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=plot_seeds, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=out_stem)
-            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
+        out_stem = f"grid_periodic_vs_stable_defaultpreemption={defpreempt}"
+        make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=True, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=out_stem)
+        produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
 
     # Summary
     for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
