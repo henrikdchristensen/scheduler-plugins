@@ -66,13 +66,13 @@ func (pl *SharedState) runSolverExternal(
 		<-stdoutCh
 		return nil, fmt.Errorf("solver context: %w", ctx.Err())
 
-	case werr := <-waitCh:
+	case waitErr := <-waitCh:
 		r := <-stdoutCh
 		if r.err != nil {
 			return nil, fmt.Errorf("read solver stdout: %w", r.err)
 		}
-		if werr != nil {
-			return nil, fmt.Errorf("solver run: %w", werr)
+		if waitErr != nil {
+			return nil, fmt.Errorf("solver run: %w", waitErr)
 		}
 		return r.b, nil
 	}

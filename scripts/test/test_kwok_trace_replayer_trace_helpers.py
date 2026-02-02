@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_kwok_trace_helpers.py
+# test_kwok_trace_replayer_trace_helpers.py
 
 import numpy as np
 import pytest

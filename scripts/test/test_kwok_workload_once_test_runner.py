@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_kwok_workload_once.py
+# test_kwok_workload_once_test_runner.py
 
 import pytest
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_seal_results.py
+# test_kwok_workload_once_seal_results.py
 
 import pytest
 

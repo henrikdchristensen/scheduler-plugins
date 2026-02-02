@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_kubectl_helpers.py
+# test_helpers_kubectl_helpers.py
 
 import json, subprocess
 

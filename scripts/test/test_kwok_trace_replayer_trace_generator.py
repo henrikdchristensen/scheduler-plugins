@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_kwok_trace_generator.py
+# test_kwok_trace_replayer_trace_generator.py
 
 import argparse, json, math, runpy, sys
 from pathlib import Path

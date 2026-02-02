@@ -1,8 +1,5 @@
-"""Test utilities.
-
-This module is imported by multiple test suites. Keep helpers stable and
-backwards compatible.
-"""
+#!/usr/bin/env python3
+# test_utils.py
 
 import io, logging, subprocess
 from typing import IO, Optional, Tuple, Callable, List

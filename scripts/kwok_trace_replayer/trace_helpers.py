@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # trace_helpers.py
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 import numpy as np
 from scipy.stats import pareto as pareto_dist
 
@@ -36,7 +36,9 @@ class TraceRecord:
 RS_PREFIX_RE = re.compile(r"^(rs-\d{6})(?:-.*)?$")
 
 def rs_prefix_from_pod_name(pod_name: str) -> str:
-    """Extract the ReplicaSet prefix (e.g. "rs-000001") from a pod name."""
+    """
+    Extract the ReplicaSet prefix (e.g. "rs-000001") from a pod name.
+    """
     m = RS_PREFIX_RE.match(pod_name or "")
     if m:
         return m.group(1)
@@ -51,8 +53,6 @@ def rs_prefix_from_pod_name(pod_name: str) -> str:
 def estimate_pareto_params(pos_data: np.ndarray) -> tuple[float, float] | None:
     """
     Estimate Pareto parameters via MLE using SciPy's pareto.
-    We fix loc=0 so that the support is x >= x_min (scale_hat).
-    Returns (alpha, x_min) or None if estimation fails.
     """
     b_hat, _, scale_hat = pareto_dist.fit(pos_data, floc=0.0)
     if scale_hat <= 0 or b_hat <= 0:

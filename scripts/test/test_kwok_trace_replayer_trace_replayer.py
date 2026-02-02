@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_kwok_trace_replayer.py
+# test_kwok_trace_replayer_trace_replayer.py
 
 import argparse, json, time
 from pathlib import Path

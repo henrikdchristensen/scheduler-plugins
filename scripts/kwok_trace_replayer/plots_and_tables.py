@@ -424,6 +424,9 @@ def build_lookup_deltas(df_delta_meanstd: pd.DataFrame) -> pd.DataFrame:
     return _build_lookup_from_df(df_delta_meanstd, DELTA_KEY_COLS)
 
 def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, defpreempt: int, delta_name: str, col_mean: str) -> Tuple[float, float]:
+    """
+    Lookup delta mean and std from delta lookup DataFrame.
+    """
     key = (int(nodes), int(priorities), float(arrival_s), int(defpreempt), str(delta_name))
     return _safe_lookup(lookup, key, col_mean), _safe_lookup(lookup, key, f"{col_mean}_std")
 
@@ -431,10 +434,13 @@ def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, 
 # Plot helpers
 # =============================================================================
 
-YVal = Union[float, Sequence[float]]
+YVal = Union[float, Sequence[float]] # scalar or list (seeds)
 YOfFn = Callable[[RowKey, int, float, int], YVal]  # scalar or list (seeds)
 
-def _as_finite_list(v: object) -> List[float]:
+def to_finite_list(v: object) -> List[float]:
+    """
+    Convert v to a list of finite floats.
+    """
     if v is None:
         return []
     try:
@@ -446,7 +452,10 @@ def _as_finite_list(v: object) -> List[float]:
         return [float(x) for x in v if is_finite(x)]
     return [float(v)] if is_finite(v) else []
 
-def nice_step(span: float, target_ticks: int) -> float:
+def compute_step(span: float, target_ticks: int) -> float:
+    """
+    Compute a step size for ticks, given the span and target number of ticks
+    """
     if span <= 0:
         return 1.0
     raw = span / max(1, int(target_ticks))
@@ -456,6 +465,9 @@ def nice_step(span: float, target_ticks: int) -> float:
     return min(candidates, key=lambda s: abs(s - raw))
 
 def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int = PLOT_MIN_LINEAR_YTICKS) -> None:
+    """
+    Set y-ticks for linear scale, with a minimum number of ticks.
+    """
     ylo, yhi = float(ylim[0]), float(ylim[1])
     y0 = int(math.ceil(ylo))
     y1 = int(math.floor(yhi))
@@ -465,12 +477,16 @@ def set_linear_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, min_ticks: int
     ax.set_yticks(ticks)
 
 def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int = 5) -> None:
+    """
+    Set y-ticks for count data (non-negative), with a maximum number of ticks.
+    0 is always included.
+    """
     ylo, yhi = float(ylim[0]), float(ylim[1])
     ylo = max(0.0, ylo)
     if yhi <= 0:
         ax.set_yticks([0])
         return
-    step = max(1.0, nice_step(yhi - ylo, max_ticks - 1))
+    step = max(1.0, compute_step(yhi - ylo, max_ticks - 1))
     ticks: List[float] = []
     t = 0.0
     for _ in range(50):
@@ -483,6 +499,10 @@ def set_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks: int 
     ax.set_yticks(ticks)
 
 def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_ticks_total: int = 7) -> None:
+    """
+    Set y-ticks symmetrically around zero, with a maximum total number of ticks.
+    0 is always included.
+    """
     ylo, yhi = float(ylim[0]), float(ylim[1])
     hi = max(abs(ylo), abs(yhi))
     if hi <= 0:
@@ -490,7 +510,7 @@ def set_symmetric_count_yticks(ax: plt.Axes, ylim: Tuple[float, float], *, max_t
         return
     max_ticks_total = max(3, int(max_ticks_total))
     per_side = max(1, (max_ticks_total - 1) // 2)
-    step = max(1e-12, float(nice_step(hi, per_side)))
+    step = max(1e-12, float(compute_step(hi, per_side)))
     ticks: List[float] = [0.0]
     for i in range(1, per_side + 1):
         t = i * step
@@ -505,10 +525,17 @@ def arrival_tick_label(a: float) -> str:
     return f"{a_i}s"
 
 def arrival_tick_label_with_axis(a: float, xi: int, n_arr: int) -> str:
+    """
+    Arrival tick label, with extra axis label in the middle tick.
+    """
     base = arrival_tick_label(a)
     return base + ("\ninter-arrival (s)" if xi == n_arr // 2 else "")
 
 def x_from_left_with_pad_points(fig: plt.Figure, left: float, pad_pt: float) -> float:
+    """
+    Compute x coordinate from left with padding in points.
+    1 point = 1/72 inch.
+    """
     pad_frac = float(pad_pt) / (72.0 * float(fig.get_figwidth()))
     return max(0.0, float(left) - pad_frac)
 
@@ -529,11 +556,14 @@ def draw_points_on_ax(
     color_of: Optional[Callable[[RowKey], Any]] = None,
     seed_jitter_frac: float = SEED_JITTER_FRAC,
 ) -> None:
-    n_arr = len(arrivals_order)
+    """
+    Draw points on the given Axes.
+    """
+    n_arrivals = len(arrivals_order)
     step = float(arrival_x_spacing)
 
-    boundaries = [i * step for i in range(n_arr + 1)]
-    x_base = [(i + 0.5) * step for i in range(n_arr)]
+    boundaries = [i * step for i in range(n_arrivals + 1)]
+    x_base = [(i + 0.5) * step for i in range(n_arrivals)]
 
     m = max(1, len(series))
     max_allowed = 0.45 * step
@@ -547,8 +577,8 @@ def draw_points_on_ax(
 
         for xi, a in enumerate(arrivals_order):
             x_center = x_base[xi] + mode_offset
-            y0_list = _as_finite_list(y_of(rk, nodes_order[0], a, priorities))
-            y1_list = _as_finite_list(y_of(rk, nodes_order[1], a, priorities))
+            y0_list = to_finite_list(y_of(rk, nodes_order[0], a, priorities))
+            y1_list = to_finite_list(y_of(rk, nodes_order[1], a, priorities))
 
             def plot_many(xs_center: float, ys: List[float], marker: str) -> None:
                 if not ys:
@@ -628,6 +658,9 @@ def draw_points_on_ax(
 def values_from_df_seeds(
     df_seeds: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str
 ) -> List[float]:
+    """
+    Extract per-seed values from df_seeds for given configuration.
+    """
     sub = df_seeds[
         (df_seeds["nodes"] == int(nodes))
         & (df_seeds["priorities"] == int(priorities))
@@ -636,36 +669,43 @@ def values_from_df_seeds(
         & (df_seeds["blocking"] == int(rk.blocking))
         & (df_seeds["defpreempt"] == int(rk.defpreempt))
     ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
-
     vals = [float(v) for v in sub[col].tolist() if is_finite(v)]
     return vals
 
 def _compute_scaled_ylim(max_val: float, symmetric: bool = False, scale_factor: float = 1.08) -> Tuple[float, float]:
-    """Compute y-axis limits with scaling."""
+    """
+    Compute y-axis limits with scaling.
+    """
     hi = max_val * scale_factor if max_val > 0 else 1.0
     return (-float(hi), float(hi)) if symmetric else (0.0, float(hi))
 
 def compute_nonnegative_ylim_main(lookup_main: pd.DataFrame, *, series_all: List[RowKey], nodes_order: List[int], arrivals_order: List[float], priorities_cols: List[int], col: str) -> Tuple[float, float]:
+    """
+    Compute non-negative y-axis limits for main plots.
+    """
     vals = []
     for rk in series_all:
-        for n in nodes_order:
-            for a in arrivals_order:
-                for k in priorities_cols:
-                    v = lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, rk=rk, col=col)
-                    if is_finite(v):
-                        vals.append(v)
+        for nodes in nodes_order:
+            for arrivals in arrivals_order:
+                for priorities in priorities_cols:
+                    value = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrivals, rk=rk, col=col)
+                    if is_finite(value):
+                        vals.append(value)
     return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=False)
 
 def compute_symmetric_ylim_deltas(df_delta_meanstd: pd.DataFrame, *, priorities_cols: List[int], col: str) -> Tuple[float, float]:
+    """
+    Compute symmetric y-axis limits for delta plots.
+    """
     sub = df_delta_meanstd[df_delta_meanstd["priorities"].isin(priorities_cols)]
     vals = [abs(float(v)) for v in sub[col].tolist() if is_finite(v)]
     return _compute_scaled_ylim(max(vals) if vals else 0.0, symmetric=True)
 
 # =============================================================================
-# Plots (main + deltas)
+# Plots
 # =============================================================================
 
-def _make_grid_unified(
+def make_grid(
     *,
     y_function_factory: Callable[[str], YOfFn],
     series: List[RowKey],
@@ -684,7 +724,9 @@ def _make_grid_unified(
     legend_ncol: int,
     y_tick_symmetric: bool = False,
 ) -> None:
-    """Unified grid plotting function used by both main and delta grids."""
+    """
+    Unified grid plotting function used by both main and delta grids.
+    """
     fig, axes = plt.subplots(nrows=5, ncols=2, figsize=figsize, sharex=True)
     axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
     axes[0, 1].set_title(f"#priorities = {priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
@@ -780,6 +822,10 @@ def make_grid_main(
     ylim_plans: Tuple[float, float],
     out_stem: str,
 ) -> None:
+    """
+    Make main grid plot comparing scheduling modes.
+    Each mode/blocking combination is a separate series.
+    """
     series = sort_rks([RowKey(mode=m, blocking=b, defpreempt=defpreempt) for (m, b) in MAIN_PLOT_MODES])
 
     def y_function_factory(col: str) -> YOfFn:
@@ -789,7 +835,7 @@ def make_grid_main(
 
     legend_labels = [rk_label(rk) for rk in series]
 
-    _make_grid_unified(
+    make_grid(
         y_function_factory=y_function_factory,
         series=series,
         color_override=None,
@@ -821,6 +867,10 @@ def make_grid_periodic_vs_stable(
     ylim_plans: Tuple[float, float],
     out_stem: str,
 ) -> None:
+    """
+    Make grid plot comparing periodic vs stable scheduling deltas.
+    Each delta metric is a separate series, with custom coloring.
+    """
     cmap = plt.get_cmap("Set2").colors
 
     # Create fake series for coloring
@@ -856,7 +906,7 @@ def make_grid_periodic_vs_stable(
         delta_fns = {i: make_delta_fn(dn) for i, dn in enumerate(DELTA_NAMES)}
         return lambda rk, nodes, a, priorities: delta_fns[_extract_custom_index(rk)](rk, nodes, a, priorities)
 
-    _make_grid_unified(
+    make_grid(
         y_function_factory=y_function_factory,
         series=fake_series,
         color_override=color_override,
@@ -911,6 +961,10 @@ METRICS_DELTAS: List[MetricSpec] = [
 ]
 
 def metrics_main(priorities: int) -> List[MetricSpec]:
+    """
+    Metric specs used for main metrics table.
+    Varies based on number of priorities.
+    """
     out: List[MetricSpec] = [
         MetricSpec("delta_U_pct_eff_mean", r"$\Delta\mathrm{usage}\;(\%)$", True, 2, 2, "signed"),
         MetricSpec("delta_L_ms_total_mean", r"$\Delta\mathrm{latency}_{\mathrm{total}}\;(\mathrm{ms})$", True, 0, 0, "signed"),
@@ -939,6 +993,11 @@ def latex_table_main(
     nodes_order: List[int],
     arrivals_order: List[float],
 ) -> None:
+    """
+    Generate LaTeX table for main metrics.
+    Rows: modes
+    Columns: metrics
+    """
     modes = sort_rks([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(defpreempt)) for s in MODE_SPECS])
     specs = metrics_main(priorities)
 
@@ -952,18 +1011,18 @@ def latex_table_main(
     total_cols = 1 + len(specs)
 
     first_block = True
-    for n in nodes_order:
-        for a in arrivals_order:
+    for nodes in nodes_order:
+        for arrival in arrivals_order:
             if not first_block:
                 lines.append(r"\midrule")
             first_block = False
 
-            a_str = fmt_arrival_value(a)
-            lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {int(n)}, inter-arrival = {a_str}\,s}} \\")
+            arrival_str = fmt_arrival_value(arrival)
+            lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\#nodes = {int(nodes)}, inter-arrival = {arrival_str}\,s}} \\")
             lines.append(r"\midrule")
 
             for rk in modes:
-                cells = [s.format_cell(*(lookup_mean_std(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col_mean=s.col_mean) if std else (lookup_val(lookup_main, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=s.col_mean), None)), include_std=bool(std)) for s in specs]
+                cells = [s.format_cell(*(lookup_mean_std(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, rk=rk, col_mean=s.col_mean) if std else (lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, rk=rk, col=s.col_mean), None)), include_std=bool(std)) for s in specs]
                 lines.append(f"{rk_label_tex(rk)} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
@@ -980,14 +1039,18 @@ def latex_table_periodic_vs_stable(
     nodes_order: List[int],
     arrivals_order: List[float],
 ) -> None:
+    """
+    Generate LaTeX table comparing periodic vs stable-queue modes for various arrivals.
+    2 delta columns per arrival (one per mode).
+    """
     # Two delta columns per arrival
     n_modes = len(DELTA_NAMES)
-    n_arr = len(arrivals_order)
-    total_cols = 1 + n_modes * n_arr
+    n_arrivals = len(arrivals_order)
+    total_cols = 1 + n_modes * n_arrivals
     tab_spec = "l" + " c" * (total_cols - 1)
 
     cmid = []
-    for i in range(n_arr):
+    for i in range(n_arrivals):
         start = 2 + i * n_modes
         end = start + n_modes - 1
         cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
@@ -996,7 +1059,7 @@ def latex_table_periodic_vs_stable(
 
     for defpreempt in (1, 0):
         tex_lines.append(r"% ------------------------------------------------------------")
-        tex_lines.append(rf"% periodic vs stable, defpreempt={defpreempt}")
+        tex_lines.append(rf"% Periodic vs Stable-queue, defpreempt={defpreempt}")
         tex_lines.append(r"% ------------------------------------------------------------")
         tex_lines.append("")
         tex_lines.append(rf"\begin{{tabular}}{{{tab_spec}}}")
