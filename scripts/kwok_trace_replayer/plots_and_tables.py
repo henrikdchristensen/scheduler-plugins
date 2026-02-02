@@ -23,6 +23,7 @@ from scripts.helpers.plot_config import (
     PLOT_LEGEND_HANDLE_TEXT_PAD,
     PLOT_TICK_FONTSIZE,
     PLOT_TITLE_FONTSIZE,
+    PLOT_FORMATS,
 )
 from scripts.helpers.data_helpers import is_finite
 from scripts.helpers.table_helpers import (
@@ -819,8 +820,8 @@ def make_grid(
         y_center = 0.5 * (bbox.y0 + bbox.y1)
         fig.text(x_text, y_center, row_spec.y_label, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.png", dpi=PLOT_FIGURE_DPI)
-    fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.pdf")
+    for fmt in PLOT_FORMATS:
+        fig.savefig(OUT_FIGURES_DIR / f"{out_stem}.{fmt}", dpi=PLOT_FIGURE_DPI)
     plt.close(fig)
 
 def make_grid_main(
@@ -1116,6 +1117,8 @@ def latex_table_periodic_vs_stable(
 # =============================================================================
 
 def main() -> None:
+    print("Generating tables and figures...")
+    
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     OUT_TABLES_DIR.mkdir(parents=True, exist_ok=True)
     OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -1166,14 +1169,14 @@ def main() -> None:
             seeds_flag = 1 if plot_seeds else 0
             out_stem = f"grid_main_defaultpreemption={defpreempt}_seeds={seeds_flag}"
             make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=plot_seeds, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=out_stem)
-            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.png", OUT_FIGURES_DIR / f"{out_stem}.pdf"])
+            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
     
     for defpreempt in (1, 0):
         for plot_seeds in (False, True):
             seeds_flag = 1 if plot_seeds else 0
             out_stem = f"grid_periodic_vs_stable_defaultpreemption={defpreempt}_seeds={seeds_flag}"
             make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=plot_seeds, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=out_stem)
-            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.png", OUT_FIGURES_DIR / f"{out_stem}.pdf"])
+            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
 
     # Summary
     for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:

@@ -9,6 +9,7 @@ from typing import List, Tuple
 
 import pandas as pd
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mtick
@@ -21,9 +22,11 @@ from scripts.helpers.plot_config import (
     PLOT_LEGEND_HANDLE_LENGTH,
     PLOT_LEGEND_COLUMN_SPACING,
     PLOT_LEGEND_HANDLE_TEXT_PAD,
+    PLOT_FIGURE_DPI,
+    PLOT_FORMATS,
 )
+
 from scripts.helpers.data_helpers import is_finite, safe_div
-from scripts.helpers.plot_helpers import configure_matplotlib, save_figure
 from scripts.helpers.table_helpers import fmt_pct
 
 #################################################################
@@ -54,7 +57,7 @@ INSTANCES_LABEL = "% of instances"
 PODS_PER_NODE_LABEL = "pods/node"
 
 # figure saving
-FIGURE_FORMATS = ["pdf", "png"]
+
 
 # 2d sizes
 GRID_2D_CELL_FIGSIZE = (2.6, 1.6)
@@ -283,11 +286,40 @@ def write_outcome_breakdown_table_tex(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"[ok] wrote table: {out_path}")
 
 #################################################################
 # Plots
 #################################################################
+
+def configure_matplotlib() -> None:
+    """
+    Configure matplotlib with standard font sizes for publication-quality plots.
+    Uses settings from scripts.config.plot_config.
+    """
+    mpl.rcParams.update(
+        {
+            "axes.titlesize": PLOT_TITLE_FONTSIZE,
+            "axes.labelsize": PLOT_AXIS_LABEL_FONTSIZE,
+            "xtick.labelsize": PLOT_TICK_FONTSIZE,
+            "ytick.labelsize": PLOT_TICK_FONTSIZE,
+        }
+    )
+
+def save_figure(
+    fig: mpl.figure.Figure,
+    out_path: Path,
+    *,
+    formats: List[str] = PLOT_FORMATS,
+    dpi: int = PLOT_FIGURE_DPI,
+) -> None:
+    """
+    Save a matplotlib figure to multiple file formats.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    for ext in formats:
+        fname = out_path.with_suffix(f".{ext}")
+        fig.savefig(fname, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
 
 def plot_2d_grid_ppn_prio_with_aggregated_util(
     df_util_agg: pd.DataFrame,
@@ -520,12 +552,17 @@ def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path) -> No
 #################################################################
 
 def main() -> None:
+    print("Generating tables and figures...")
+    
     configure_matplotlib()
 
     OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     OUT_TABLES_DIR.mkdir(parents=True, exist_ok=True)
 
     df_per_combo = pd.read_csv(DF_PER_COMBO_PATH)
+
+    produced_tables: List[Path] = []
+    produced_figs: List[Path] = []
 
     # --- TABLES: keep util (breaker = timeout + util)
     df_table = aggregate_keep_util(df_per_combo)
@@ -540,17 +577,20 @@ def main() -> None:
             timeouts=PLOT_TIMEOUTS,
             decimals=1,
         )
+        produced_tables.append(out_tex)
 
     # --- PLOTS (aggregate away util for 2D, and 3D uses per-combo)
     df_util_agg = aggregate_over_util(df_per_combo)
 
+    out_path_2d = OUT_FIGURES_DIR / "2d_grid_ppn_prio"
     plot_2d_grid_ppn_prio_with_aggregated_util(
         df_util_agg=df_util_agg,
         ppns=PLOT_PPNS,
         priorities=PLOT_PRIORITIES,
-        out_path=OUT_FIGURES_DIR / "2d_grid_ppn_prio",
+        out_path=out_path_2d,
         cell_figsize=GRID_2D_CELL_FIGSIZE,
     )
+    produced_figs.extend([out_path_2d.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     for ppn in PLOT_PPNS:
         for prio in PLOT_PRIORITIES:
@@ -566,6 +606,11 @@ def main() -> None:
                 title = rf"{PODS_PER_NODE_LABEL}={ppn}, #priorities={prio}, timeout={t}s"
                 out_file = OUT_FIGURES_DIR / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
                 plot_3d_ppn_prio_timeout(sub, title, out_file)
+                produced_figs.extend([out_file.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    # Summary
+    for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
+        print(f"{label}:\n" + "\n".join(f"  - {p}" for p in paths))
 
 if __name__ == "__main__":
     main()

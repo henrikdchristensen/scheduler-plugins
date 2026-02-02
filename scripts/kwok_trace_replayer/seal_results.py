@@ -526,9 +526,9 @@ def main() -> None:
     df = pd.DataFrame(rows)
 
     # Ensure schema even when empty
-    for c in OUT_COLS:
-        if c not in df.columns:
-            df[c] = np.nan
+    for col in OUT_COLS:
+        if col not in df.columns:
+            df[col] = np.nan
     df = df[OUT_COLS]
 
     round_numeric_df(df, decimals=FLOAT_DECIMALS, exclude=["job_name", "plugin_config", "seed"])
