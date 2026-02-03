@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 # scripts/helpers/data_helpers.py
-"""
-Shared data processing helper functions for kwok_workload_once and kwok_trace_replayer.
-"""
 
 from typing import List, Optional, Union
 
@@ -20,7 +17,7 @@ def is_finite(x: object) -> bool:
 
 def safe_div(num: pd.Series, den: pd.Series) -> pd.Series:
     """
-    Safely divide two pandas Series, returning 0.0 for division by zero.
+    Safely divide two pandas, returning 0.0 for division by zero.
     """
     return num.div(den.replace(0, np.nan)).fillna(0.0)
 
@@ -38,12 +35,7 @@ def format_num(value: float, decimals: Optional[int]) -> Union[float, str]:
         return value
     return f"{value:.{decimals}f}"
 
-def round_numeric_df(
-    df: pd.DataFrame,
-    decimals: int,
-    *,
-    exclude: Optional[List[str]] = None,
-) -> pd.DataFrame:
+def round_numeric_df(df: pd.DataFrame, decimals: int, *, exclude: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Round all numeric columns in a DataFrame to specified decimal places.
     """

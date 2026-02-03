@@ -141,12 +141,6 @@ class TraceGenerator:
     ) -> None:
         """
         Create a TraceGenerator.
-
-        By default, this resolves and validates args (including optional job-file
-        merging) and configures logging.
-
-        For per-seed runs where args are already resolved, pass resolved=True and
-        provide create_figures_dir/log_args as desired.
         """
         args = cli_args if resolved else TraceGenerator.resolve_args(cli_args)
         if setup_logger:
@@ -215,11 +209,8 @@ class TraceGenerator:
 
     @staticmethod
     def expand_job_dir_runs(cli_args: argparse.Namespace) -> list[argparse.Namespace]:
-        """Expand a --job-dir into one resolved args object per job file.
-        Each expanded run will:
-        - set job_file to the discovered YAML file
-        - resolve/merge/validate args against that job file
-        - place outputs under <output-dir>/<job-stem>/ to avoid collisions
+        """
+        Expand a --job-dir into one resolved args object per job file.
         """
         if getattr(cli_args, "job_file", None) and getattr(cli_args, "job_dir", None):
             raise SystemExit("--job-file and --job-dir cannot be used together")
@@ -333,12 +324,6 @@ class TraceGenerator:
     def validate_args(args: argparse.Namespace) -> None:
         """
         Validate required args and value ranges.
-
-        We do basic sanity checks and validate that configured bounded-Pareto
-        means are achievable given their bounds:
-        - mean must satisfy xmin < mean < xmax
-        - mean must be < max achievable mean for bounded Pareto:
-                mean_max = (xmax - xmin) / ln(xmax/xmin)
         """
         missing: list[str] = []
 
@@ -383,32 +368,32 @@ class TraceGenerator:
         if missing:
             raise SystemExit(f"missing required arguments (via CLI or job-file): {', '.join(missing)}")
 
-        def positive_val(name: str) -> float:
+        def _positive_val(name: str) -> float:
             """Ensure arg is > 0 and return its float value."""
             v = float(getattr(args, name))
             if v <= 0:
                 raise SystemExit(f"{name} must be > 0 (got {v})")
             return v
 
-        positive_val("num_nodes")
+        _positive_val("num_nodes")
 
-        positive_val("xmin_arrival")
-        positive_val("xmax_arrival")
-        positive_val("mean_arrival")
+        _positive_val("xmin_arrival")
+        _positive_val("xmax_arrival")
+        _positive_val("mean_arrival")
         
-        positive_val("xmin_life")
-        positive_val("xmax_life")
+        _positive_val("xmin_life")
+        _positive_val("xmax_life")
         
-        positive_val("xmin_cpu")
-        positive_val("xmax_cpu")
-        positive_val("mean_cpu")
+        _positive_val("xmin_cpu")
+        _positive_val("xmax_cpu")
+        _positive_val("mean_cpu")
         
-        positive_val("xmin_mem")
-        positive_val("xmax_mem")
-        positive_val("mean_mem")
+        _positive_val("xmin_mem")
+        _positive_val("xmax_mem")
+        _positive_val("mean_mem")
 
-        positive_val("priority_ratio")
-        positive_val("replicas_ratio")
+        _positive_val("priority_ratio")
+        _positive_val("replicas_ratio")
 
         # Bounds ordering
         if float(args.xmin_life) < MIN_LIFETIME_S:
@@ -433,7 +418,7 @@ class TraceGenerator:
         if not (0.0 < target_util <= 1.0):
             raise SystemExit("target-util must be in (0,1]")
 
-        def validate_bounded_pareto_mean(mean_name: str, xmin_name: str, xmax_name: str) -> None:
+        def _validate_bounded_pareto_mean(mean_name: str, xmin_name: str, xmax_name: str) -> None:
             mu = float(getattr(args, mean_name))
             xmin = float(getattr(args, xmin_name))
             xmax = float(getattr(args, xmax_name))
@@ -449,14 +434,14 @@ class TraceGenerator:
                 )
 
         # Validate bounded Pareto means
-        validate_bounded_pareto_mean("mean_arrival", "xmin_arrival", "xmax_arrival")
-        validate_bounded_pareto_mean("mean_cpu", "xmin_cpu", "xmax_cpu")
-        validate_bounded_pareto_mean("mean_mem", "xmin_mem", "xmax_mem")
+        _validate_bounded_pareto_mean("mean_arrival", "xmin_arrival", "xmax_arrival")
+        _validate_bounded_pareto_mean("mean_cpu", "xmin_cpu", "xmax_cpu")
+        _validate_bounded_pareto_mean("mean_mem", "xmin_mem", "xmax_mem")
 
         # mean-life is optional (can be inferred) - only validate if provided.
         if getattr(args, "mean_life", None) is not None:
-            positive_val("mean_life")
-            validate_bounded_pareto_mean("mean_life", "xmin_life", "xmax_life")
+            _positive_val("mean_life")
+            _validate_bounded_pareto_mean("mean_life", "xmin_life", "xmax_life")
 
         # File existence checks
         if getattr(args, "job_file", None):
@@ -561,10 +546,10 @@ class TraceGenerator:
         """
         Sample from the upper-truncated Pareto (Type I) distribution on [x_min, x_max]
         via inverse-CDF sampling.
-
-        Paper alignment:
-          - Truncated Pareto CDF: Zaninetti & Ferraro (2008), Eq. (4), p. 2.
-          - Random variate generation: Zaninetti & Ferraro (2008), Eq. (13), p. 3.
+        
+        See papers:
+        - Truncated Pareto CDF: Zaninetti & Ferraro (2008), Eq. (4), p. 2.
+        - Random variate generation: Zaninetti & Ferraro (2008), Eq. (13), p. 3.
 
         Using Eq. (13) with our notation (a=x_min, b=x_max, c=alpha):
             X = x_min * ( 1 - R * (1 - (x_min/x_max)^alpha) )^(-1/alpha),
@@ -600,7 +585,7 @@ class TraceGenerator:
         """
         Mean E[X] of the upper-truncated Pareto (Type I) on [x_min, x_max].
 
-        Paper alignment:
+        See paper:
           - Zaninetti & Ferraro (2008), Eq. (5), p. 2 (mean for c != 1 and c = 1).
 
         With a=x_min, b=x_max, c=alpha:
@@ -608,7 +593,6 @@ class TraceGenerator:
         If alpha != 1:
             E[X] = (alpha * x_min / (alpha - 1))
                    * (1 - (x_min/x_max)^(alpha-1)) / (1 - (x_min/x_max)^alpha)
-
         If alpha == 1:
             E[X] = (alpha * x_min^alpha / (1 - (x_min/x_max)^alpha)) * ln(x_max/x_min)
                  = (x_min / (1 - x_min/x_max)) * ln(x_max/x_min)
@@ -625,7 +609,7 @@ class TraceGenerator:
             one_minus_r = -math.expm1(log_r)          # 1 - r
             return (x_min / one_minus_r) * math.log(x_max / x_min)
 
-        # alpha != 1 case (Eq. 5, c != 1), computed stably with expm1
+        # alpha != 1 case (Eq. 5, c != 1)
         den = -math.expm1(alpha * log_r)              # 1 - r^alpha
         num = -math.expm1((alpha - 1.0) * log_r)      # 1 - r^(alpha-1)
         return (alpha * x_min / (alpha - 1.0)) * (num / den)
@@ -661,7 +645,7 @@ class TraceGenerator:
         We solve for alpha > 0 such that:
             bounded_pareto_mean(alpha, x_min, x_max) == target_mean
 
-        Paper alignment:
+        See paper:
           - Mean formula is from Zaninetti & Ferraro (2008), Eq. (5), p. 2.
           - Sampling (used elsewhere) is from Eq. (13), p. 3.
 
@@ -679,14 +663,12 @@ class TraceGenerator:
                 f"target_mean={target_mean} is not achievable for bounded Pareto on [{x_min}, {x_max}]. "
                 f"Maximum achievable mean is about {mean_max:.6f}. Increase x_max or reduce target_mean."
             )
-
         lo = 1e-12
         hi = 1.0
         while TraceGenerator.bounded_pareto_mean(hi, x_min, x_max) > target_mean:
             hi *= 2.0
             if hi > 1e12:
                 raise RuntimeError("Failed to bracket alpha; hi grew too large.")
-
         for _ in range(max_iterations):
             mid = 0.5 * (lo + hi)
             mm = TraceGenerator.bounded_pareto_mean(mid, x_min, x_max)
@@ -696,7 +678,6 @@ class TraceGenerator:
                 lo = mid
             else:
                 hi = mid
-
         return float(0.5 * (lo + hi))
 
     @staticmethod
@@ -708,11 +689,11 @@ class TraceGenerator:
         x_max: float,
         size: int = 1,
     ) -> np.ndarray:
-        """Sample the steady-state residual lifetime for a bounded Pareto.
-
-        In a renewal process observed at a random time, the residual lifetime R
-        (time remaining until completion) is not distributed as the original
-        lifetime X. Instead, X is length-biased and then R is uniform on [0, X].
+        """
+        Sample the steady-state residual lifetime for a bounded Pareto. In a
+        renewal process observed at a random time, the residual lifetime R (time
+        remaining until completion) is not distributed as the original lifetime
+        X. Instead, X is length-biased and then R is uniform on [0, X].
 
         For bounded Pareto with lifetime pdf f(x) ∝ x^{-(alpha+1)} on [x_min,
         x_max], the length-biased lifetime has pdf g(x) ∝ x f(x) ∝ x^{-alpha} on
@@ -725,9 +706,7 @@ class TraceGenerator:
             raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
         if not (isinstance(size, int) and size >= 1):
             raise ValueError("Require size to be a positive int")
-
         u = rng.random(size)
-
         # Sample length-biased lifetime X with pdf ∝ x^{-alpha} on [x_min, x_max].
         # CDF inversion:
         #   alpha != 1: F(x) = (x^(1-alpha) - x_min^(1-alpha)) / (x_max^(1-alpha) - x_min^(1-alpha))
@@ -741,7 +720,6 @@ class TraceGenerator:
             a = x_min ** p
             b = x_max ** p
             x = np.power(a + (b - a) * u, 1.0 / p)
-
         # Given X, residual lifetime R is uniform on [0, X].
         r = x * (1.0 - rng.random(size))
         return r.astype(float)
@@ -752,14 +730,16 @@ class TraceGenerator:
 
     def infer_mean_lifetime_from_target_util(self) -> float:
         """
-        Infer an initial guess for mean pod lifetime from the target steady-state utilization.
+        Infer an initial guess for mean pod lifetime from the target
+        steady-state utilization.
 
-        We approximate steady-state flow-balance (Little's-law style) under the generator's
-        effective-load objective:
+        We approximate steady-state (Little's-law style) under effective-load:
             eff(t) = max(total_cpu_req(t), total_mem_req(t))
 
-        In expectation, the long-run average effective requested load across the cluster is:
-            E[eff_total] ≈ arrival_rate * E[replicas] * E[max(cpu_req, mem_req)] * E[lifetime]
+        In expectation, the long-run average effective requested load across the
+        cluster is:
+            E[eff_total] ≈ arrival_rate * E[replicas] * E[max(cpu_req, mem_req)]
+            * E[lifetime]
 
         We set E[eff_total] equal to the target effective requested capacity:
             target_eff_total = target_util * num_nodes
@@ -768,30 +748,28 @@ class TraceGenerator:
             mean_life = (target_util * num_nodes) /
                         (arrival_rate * E[replicas] * E[max(cpu_req, mem_req)])
 
-        Notes:
-        - arrival_rate = 1/mean_arrival
-        - E[replicas] comes from the truncated geometric/uniform replica model
-        - E[max(cpu_req, mem_req)] is estimated via deterministic Monte Carlo
+        Notes: - arrival_rate = 1/mean_arrival - E[replicas] comes from the
+        truncated geometric/uniform replica model - E[max(cpu_req, mem_req)] is
+        estimated via deterministic Monte Carlo
 
-        This is an initial guess; calibration adjusts mean_life to match the measured
-        time-mean effective utilization of a generated trace.
+        This is an initial guess; calibration adjusts mean_life to match the
+        measured time-mean effective utilization of a generated trace.
         """
         mean_arrival = float(self.args.mean_arrival)
-        lam = 1.0 / mean_arrival
-
+        _lambda = 1.0 / mean_arrival
         rep_vals, rep_probs = self.build_trunc_geometric_support(
             int(self.args.replicas_min),
             int(self.args.replicas_max),
             float(self.args.replicas_ratio),
         )
         e_rep = self.expected_value(rep_vals, rep_probs)
-
+        
         e_req_eff = self.mc_estimate_eff_mean_max_req()
 
         U = float(self.args.target_util)
         N = float(self.args.num_nodes)
 
-        mean_life = (U * N) / (lam * e_rep * e_req_eff)
+        mean_life = (U * N) / (_lambda * e_rep * e_req_eff)
 
         xmin = float(self.args.xmin_life)
         xmax = float(self.args.xmax_life)
@@ -804,21 +782,14 @@ class TraceGenerator:
             "[infer-mean-life] using E[max(cpu,mem)]=%.6f (per replica), E[replicas]=%.3f, lambda=%.6f",
             float(e_req_eff),
             float(e_rep),
-            float(lam),
+            float(_lambda),
         )
-
         return float(mean_life)
 
     def mc_estimate_eff_mean_max_req(self) -> float:
         """
         Estimate E[max(cpu_req, mem_req)] per replica under the configured bounded-Pareto
-        request distribution.
-
-        This improves the Little's-law-style mean-life inference because the generator
-        targets effective utilization:
-            eff(t) = max(total_cpu_req(t), total_mem_req(t))
-
-        We estimate E[max(cpu, mem)] using deterministic Monte Carlo with a derived seed.
+        request distribution using deterministic (derived seed) Monte Carlo.
         """
         # Solve alpha for requests deterministically from bounds + mean.
         alpha_cpu = self.solve_alpha_for_bounded_mean(
@@ -826,52 +797,37 @@ class TraceGenerator:
             x_max=float(self.args.xmax_cpu),
             target_mean=float(self.args.mean_cpu),
         )
-        
         alpha_mem = self.solve_alpha_for_bounded_mean(
             x_min=float(self.args.xmin_mem),
             x_max=float(self.args.xmax_mem),
             target_mean=float(self.args.mean_mem),
         )
-
-        n = EFFECTIVE_MAX_REQ_MC_SAMPLES
         rng = np.random.default_rng(derive_seed(self.base_seed, "infer-mean-life-e-max-req"))
-
         cpu = self.sample_bounded_pareto(
             rng,
             alpha=float(alpha_cpu),
             x_min=float(self.args.xmin_cpu),
             x_max=float(self.args.xmax_cpu),
-            size=n,
+            size=EFFECTIVE_MAX_REQ_MC_SAMPLES,
         ).astype(float)
-
         mem = self.sample_bounded_pareto(
             rng,
             alpha=float(alpha_mem),
             x_min=float(self.args.xmin_mem),
             x_max=float(self.args.xmax_mem),
-            size=n,
+            size=EFFECTIVE_MAX_REQ_MC_SAMPLES,
         ).astype(float)
-
-        e_max = float(np.mean(np.maximum(cpu, mem)))
-        if not (e_max > 0.0):
-            raise ValueError(f"Invalid E[max(cpu,mem)] estimate: {e_max}")
-        return e_max
+        eff_mean_max = float(np.mean(np.maximum(cpu, mem)))
+        if not (eff_mean_max > 0.0):
+            raise ValueError(f"Invalid E[max(cpu,mem)] estimate: {eff_mean_max}")
+        return eff_mean_max
 
     def fit_pareto_alphas(self) -> None:
         """
         Fit bounded-Pareto shape parameters (alphas) from configured bounds and
-        means.
-
-        For each bounded Pareto distribution (request size, inter-arrival time,
-        and pod lifetime), we solve the shape parameter alpha such that the
-        distribution on [x_min, x_max] has the desired mean. The solve is
-        deterministic and uses solve_alpha_for_bounded_mean.
-
-        Caching behavior:
-        - alpha_cpu, alpha_mem, and alpha_arrival are computed once and cached because
-            their target means are fixed for a run.
-        - alpha_life is recomputed on every call because args.mean_life may
-            be updated during utilization calibration.
+        means. For each bounded Pareto distribution (inter-arrival time,
+        lifetime, request size), we solve the shape parameter alpha such that
+        the distribution on [x_min, x_max] has the desired mean.
         """
         if self.alpha_arrival is None:
             self.alpha_arrival = round(
@@ -925,49 +881,83 @@ class TraceGenerator:
                  float(self.args.mean_mem), float(self.args.xmin_mem), float(self.args.xmax_mem), float(self.alpha_mem))
 
     # -------------------------------------------------------------------------
+    # Calibrate mean-life to hit target utilization
+    # -------------------------------------------------------------------------
+
+    def calibrate_mean_lifetime(
+        self,
+        tolerance=float(MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE),
+        max_iterations=int(MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS),
+    ) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
+        """
+        Calibrate args.mean_life to match the requested target utilization.
+        Effective utilization is defined as:
+            eff(t) = max(cpu_util(t), mem_util(t))
+        How it works:
+        1) Use a fixed iteration seed (CRN: common random numbers) across calibration
+            iterations.
+        2) For each iteration, generate a full trace realization and
+            measure time-mean effective utilization.
+        3) Compute relative error err = |measured - target| / target. If within
+           tolerance, stop and return the best trace seen. Otherwise update
+           mean_life proportionally:
+                mean_life <- mean_life * (target / measured)
+        """
+        target = float(self.args.target_util)
+        iteration_seed = int(derive_seed(self.base_seed, "calibrate-mean-life-crn"))
+        best_error = float("inf")
+        best_initial: List[TraceRecord] = []
+        best_trace: List[TraceRecord] = []
+        best_extra: Dict[str, object] = {}
+        for it in range(1, max_iterations + 1):
+            initial_pods, trace_pods, measured, extra = self.make_trace(iteration_seed)
+            err = abs(measured - target) / max(1e-12, target)
+            if err < best_error:
+                best_error = err
+                best_initial, best_trace, best_extra = initial_pods, trace_pods, extra
+            LOG.info(
+                "[calibrate-mean-life] iteration=%d measured=%.4f target=%.4f rel_err=%.2f%% mean_life=%.3fs",
+                it, measured, target, 100.0 * err, float(self.args.mean_life),
+            )
+            if err <= tolerance:
+                return best_initial, best_trace, best_extra
+            if measured <= 1e-12:
+                raise RuntimeError("Measured utilization is ~0; cannot calibrate mean-life.")
+            new_mean = float(self.args.mean_life) * (target / measured)
+            xmin = float(self.args.xmin_life)
+            xmax = float(self.args.xmax_life)
+            new_mean = max(new_mean, xmin * 1.001)
+            new_mean = min(new_mean, xmax * 0.999)
+            self.args.mean_life = float(new_mean)
+        LOG.warning("[calibrate-mean-life] did not reach util-tolerance; best error=%.2f%%", 100.0 * best_error)
+        return best_initial, best_trace, best_extra
+
+    # -------------------------------------------------------------------------
     # Geometric support + expected value
     # -------------------------------------------------------------------------
 
     @staticmethod
     def build_trunc_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
-        Build the discrete integer support and PMF for a truncated geometric family
-        on the inclusive range k ∈ [min_val, max_val].
+        Build the discrete integer support and PMF for a truncated geometric
+        distribution on the inclusive range k ∈ [min_val, max_val].
 
-        Paper alignment (geometric + truncation):
+        See paper (geometric + truncation):
           - Geometric PMF: Chattopadhyay et al. (2014), Eq. (7), p. 31:
                 f(x) = p (1-p)^(x-1) = p q^(x-1),  x = 1,2,...
-          - Truncation/renormalization to a finite range: Chattopadhyay et al. (2014),
-            p. 26 (definition of truncation + table of truncated PMFs).
-
-        Mapping to this function:
-          - We expose a single "ratio" parameter which corresponds to q = (1-p).
-          - Over a finite support, the multiplicative constant p cancels during
-            renormalization, so it is sufficient to use weights proportional to q^(x-1).
-
-        Concretely, for k in [min_val, max_val], we assign unnormalized weights
+          - Truncation/renormalization to a finite range: Chattopadhyay et al.
+            (2014), p. 26 (definition of truncation + table of truncated PMFs).
+        For k in [min_val, max_val], we assign unnormalized weights
             w(k) = ratio^(k - min_val)
         and normalize over the finite interval to obtain probabilities.
-
-        Interpretation of ratio:
-          - ratio < 1 biases probability toward smaller values (fast decay).
-          - ratio > 1 biases probability toward larger values (increasing weights).
-          - ratio ≈ 1 yields a uniform distribution over the support.
-
-        Returns:
-            (vals, probs) where vals is an int array of support values.
-            If ratio≈1 (or support size is 1), probs is None and callers may treat
-            the distribution as uniform.
         """
         if ratio <= 0:
             raise ValueError("ratio must be > 0.")
         lo = int(min_val)
         hi = max(int(max_val), lo)
         vals = np.arange(lo, hi + 1, dtype=int)
-
         if vals.size == 1 or np.isclose(ratio, 1.0):
             return vals, None
-
         exps = np.arange(vals.size, dtype=float)
         w = ratio ** exps
         p = w / w.sum()
@@ -991,23 +981,20 @@ class TraceGenerator:
         u_mem_hist: List[float],
     ) -> Tuple[float, float, float]:
         """
-        Compute time-mean (cpu_util, mem_util, eff_util) from already-built utilization
-        histories.
+        Compute time-mean utilization (cpu_util, mem_util, eff_util).
 
         The histories are assumed to represent a right-continuous step function:
-        value[i] applies on [times[i], times[i+1]) and value[-1] applies on [times[-1], T].
-        Values are already normalized by num_nodes (i.e., utilization units).
+        value[i] applies on [times[i], times[i+1]) and value[-1] applies on
+        [times[-1], T].
         """
-        T = float(self.trace_time_s)
-        if T <= 0.0:
+        T_end = float(self.trace_time_s)
+        if T_end <= 0.0:
             return 0.0, 0.0, 0.0
         if not times or len(times) != len(u_cpu_hist) or len(times) != len(u_mem_hist):
             return 0.0, 0.0, 0.0
-
         area_cpu = 0.0
         area_mem = 0.0
         area_eff = 0.0
-
         # Integrate over consecutive segments.
         for i in range(len(times) - 1):
             t0 = float(times[i])
@@ -1020,18 +1007,16 @@ class TraceGenerator:
             area_cpu += cpu_u * dt
             area_mem += mem_u * dt
             area_eff += max(cpu_u, mem_u) * dt
-
         # Tail to T.
         last_t = float(times[-1])
-        if last_t < T:
-            dt = T - last_t
+        if last_t < T_end:
+            dt = T_end - last_t
             cpu_u = float(u_cpu_hist[-1])
             mem_u = float(u_mem_hist[-1])
             area_cpu += cpu_u * dt
             area_mem += mem_u * dt
             area_eff += max(cpu_u, mem_u) * dt
-
-        return area_cpu / T, area_mem / T, area_eff / T
+        return area_cpu / T_end, area_mem / T_end, area_eff / T_end
 
     # -------------------------------------------------------------------------
     # Initial pods via warm-up simulation
@@ -1050,20 +1035,15 @@ class TraceGenerator:
     ) -> Tuple[List[TraceRecord], int]:
         """
         Generate the initial snapshot at t=0.
-
         We generate a list of pods that are alive at the snapshot and aim for an
         effective requested load close to the target utilization, where:
             effective = max(total_cpu_req, total_mem_req)
-
-        Implementation notes:
+        Notes:
         - All returned pods have start_time = 0.0.
-        - end_time is a *residual* lifetime sampled from the steady-state residual
-        distribution (not the raw lifetime distribution).
+        - end_time is a residual lifetime sampled from the steady-state residual distribution (not the original lifetime distribution).
         - We add pods until we reach the target request, and if the last pod causes an
-        overshoot we pop it (and roll back next_id).
+        overshoot we pop it.
         """
-        assert self.alpha_cpu is not None and self.alpha_mem is not None and self.alpha_life is not None and self.alpha_arrival is not None
-
         pods: List[TraceRecord] = []
         total_cpu_req = 0.0
         total_mem_req = 0.0
@@ -1155,8 +1135,6 @@ class TraceGenerator:
         """
         Generate trace pod events over the trace horizon.
         """
-        assert self.alpha_cpu is not None and self.alpha_mem is not None and self.alpha_arrival is not None and self.alpha_life is not None
-
         state = ClusterState()
         end_heap: List[EndHeapEntry] = []
 
@@ -1284,16 +1262,12 @@ class TraceGenerator:
         return pods, next_id, times, u_eff_hist, u_cpu_hist, u_mem_hist, pods_hist
 
     # -------------------------------------------------------------------------
-    # Make trace: one generation pass
+    # Make trace
     # -------------------------------------------------------------------------
 
     def make_trace(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], float, Dict[str, object]]:
         """
         Make one trace generation pass: initial pods + trace pods.
-
-        Measured utilization is the time-mean effective utilization:
-            eff(t) = max(cpu_util(t), mem_util(t))
-        computed from the already-built utilization histories.
         """
         rng_initial = np.random.default_rng(derive_seed(iter_seed, "initial-pods"))
         rng_trace = np.random.default_rng(derive_seed(iter_seed, "trace-pods"))
@@ -1327,7 +1301,7 @@ class TraceGenerator:
             initial_pods=initial_pods,
         )
 
-        # Store plot series (plot expects u_req_hist but it is effective util in our case).
+        # Store plot series
         self.times = times
         self.u_eff_hist = u_eff_hist
         self.u_cpu_hist = u_cpu_hist
@@ -1389,82 +1363,6 @@ class TraceGenerator:
         return initial_pods, trace_pods, util, extra_info
 
     # -------------------------------------------------------------------------
-    # Calibrate mean-life to hit target utilization
-    # -------------------------------------------------------------------------
-
-    def calibrate_mean_lifetime(
-        self,
-        tolerance=float(MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE),
-        max_iterations=int(MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS),
-    ) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
-        """
-        Calibrate args.mean_life to match the requested target utilization.
-
-        Objective:
-        Adjust the bounded-Pareto mean lifetime parameter (args.mean_life) so that
-        the generated trace's time-mean effective utilization matches
-        args.target_util within tolerance.
-
-        Effective utilization is defined as:
-            eff(t) = max(cpu_util(t), mem_util(t))
-
-        How it works:
-        1) Use a fixed iteration seed (CRN: common random numbers) across calibration
-            iterations. This reduces RNG noise so utilization changes mostly reflect
-            changes in mean_life.
-        2) For each iteration, generate a full trace realization via make_trace and
-            measure time-mean effective utilization.
-        3) Compute relative error err = |measured - target| / target.
-        4) If within tolerance, stop and return the best trace seen.
-        5) Otherwise update mean_life proportionally:
-                mean_life <- mean_life * (target / measured)
-            Intuition: if utilization is low, increase lifetimes; if high, decrease.
-        6) Clamp mean_life to stay strictly within (xmin_life, xmax_life) so the
-            bounded-Pareto alpha solver remains valid.
-
-        Returns:
-        (best_initial_pods, best_trace_pods, best_extra) for the closest iteration
-        encountered (including one that meets tolerance).
-        """
-        target = float(self.args.target_util)
-        iteration_seed = int(derive_seed(self.base_seed, "calibrate-mean-life-crn"))
-
-        best_error = float("inf")
-        best_initial: List[TraceRecord] = []
-        best_trace: List[TraceRecord] = []
-        best_extra: Dict[str, object] = {}
-
-        for it in range(1, max_iterations + 1):
-            initial_pods, trace_pods, measured, extra = self.make_trace(iteration_seed)
-
-            err = abs(measured - target) / max(1e-12, target)
-            if err < best_error:
-                best_error = err
-                best_initial, best_trace, best_extra = initial_pods, trace_pods, extra
-
-            LOG.info(
-                "[calibrate-mean-life] iteration=%d measured=%.4f target=%.4f rel_err=%.2f%% mean_life=%.3fs",
-                it, measured, target, 100.0 * err, float(self.args.mean_life),
-            )
-
-            if err <= tolerance:
-                return best_initial, best_trace, best_extra
-            if measured <= 1e-12:
-                raise RuntimeError("Measured utilization is ~0; cannot calibrate mean-life.")
-
-            new_mean = float(self.args.mean_life) * (target / measured)
-
-            xmin = float(self.args.xmin_life)
-            xmax = float(self.args.xmax_life)
-            new_mean = max(new_mean, xmin * 1.001)
-            new_mean = min(new_mean, xmax * 0.999)
-
-            self.args.mean_life = float(new_mean)
-
-        LOG.warning("[calibrate-mean-life] did not reach util-tolerance; best error=%.2f%%", 100.0 * best_error)
-        return best_initial, best_trace, best_extra
-
-    # -------------------------------------------------------------------------
     # Write outputs: JSON and info YAML
     # -------------------------------------------------------------------------
 
@@ -1475,10 +1373,8 @@ class TraceGenerator:
         _, _, util_eff = self.time_mean_utils_from_hist(self.times, self.u_cpu_hist, self.u_mem_hist)
         self.pods_to_json(self.initial_path, initial_pods)
         self.pods_to_json(self.trace_path, trace_pods)
-
         LOG.info("[utilization] util-time-mean over whole trace: %.4f (target=%.4f)",
                 float(util_eff), float(self.args.target_util))
-
         self.write_info_file(extra=extra_info)
 
     @staticmethod
@@ -1579,13 +1475,11 @@ class TraceGenerator:
         """
         runs = TraceGenerator.expand_seed_runs(self.args)
         total = len(runs)
-
         for i, a in enumerate(runs, start=1):
             header, footer = make_header_footer(
                 f"SEED RUN {int(a.seed)} ({i}/{total})" if total > 1 else f"SEED RUN {int(a.seed)}"
             )
             LOG.info("\n%s\nseed=%d output_dir=%s\n%s", header, int(a.seed), str(a.output_dir), footer)
-
             setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=a.log_level)
             gen = TraceGenerator(
                 a,
@@ -1595,7 +1489,6 @@ class TraceGenerator:
                 setup_logger=False,
             )
             gen.run_seed()
-
         header, footer = make_header_footer("DONE")
         LOG.info("\n%s\n%s\n%s", header, "All runs complete.", footer)
 
@@ -1607,7 +1500,6 @@ def main() -> None:
     if os.getenv("TRACE_GENERATOR_NOOP") == "1":
         return
     args = build_arg_parser().parse_args()
-
     if getattr(args, "job_dir", None):
         job_runs = TraceGenerator.expand_job_dir_runs(args)
         total = len(job_runs)
@@ -1617,7 +1509,6 @@ def main() -> None:
             )
             setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=a.log_level)
             LOG.info("\n%s\njob_file=%s\noutput_dir=%s\n%s", header, str(a.job_file), str(a.output_dir), footer)
-
             gen = TraceGenerator(
                 a,
                 resolved=True,
@@ -1627,10 +1518,8 @@ def main() -> None:
             )
             gen.run()
         return
-
     trace_generator = TraceGenerator(args)
     trace_generator.run()
-
 
 if __name__ == "__main__":
     main()

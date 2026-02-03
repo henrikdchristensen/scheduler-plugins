@@ -158,11 +158,8 @@ def create_kwok_nodes(logger: logging.Logger, ctx: str, num_nodes: int,
         return
     if pods_cap <= 0:
         raise ValueError("pods_cap must be > 0")
-
     docs = [yaml_kwok_node(f"kwok-node-{i}", node_cpu, node_mem, pods_cap)
             for i in range(1, num_nodes + 1)]
-
-    # Use "\n---\n" if yaml_kwok_node does NOT already include '---'
     body = "\n---\n".join(docs).rstrip() + "\n"
     kubectl_apply_yaml(logger, ctx, body)
 
@@ -213,48 +210,43 @@ def merge_kwokctl_envs(doc: dict, add_envs: Iterable[Mapping[str, Any]] | None, 
     - Ensures componentsPatches and the component entry exist.
     - Sorts components and envs by name for stability.
     """
-    d = copy.deepcopy(doc) if isinstance(doc, dict) else {}
+    doc = copy.deepcopy(doc) if isinstance(doc, dict) else {}
     # Normalize inputs
     add = [
         e for e in (add_envs or [])
         if isinstance(e, Mapping) and e.get("name")
     ]
     if not add:
-        return d
+        return doc
     # Ensure componentsPatches is a list of dicts
-    cps = [c for c in (d.get("componentsPatches") or []) if isinstance(c, dict)]
-    d["componentsPatches"] = cps  # normalize back on the copy
+    components_patches = [c for c in (doc.get("componentsPatches") or []) if isinstance(c, dict)]
+    doc["componentsPatches"] = components_patches  # normalize back on the copy
     # Get or create the target component patch
-    comp = next((c for c in cps if c.get("name") == component), None)
-    if comp is None:
-        comp = {"name": component}
-        cps.append(comp)
+    component = next((c for c in components_patches if c.get("name") == component), None)
+    if component is None:
+        component = {"name": component}
+        components_patches.append(component)
     # Merge by name
-    cur = [e for e in (comp.get("extraEnvs") or []) if isinstance(e, dict) and e.get("name")]
+    cur = [e for e in (component.get("extraEnvs") or []) if isinstance(e, dict) and e.get("name")]
     env_by_name = {e["name"]: copy.deepcopy(e) for e in cur}
     env_by_name.update({e["name"]: copy.deepcopy(e) for e in add})
-    comp["extraEnvs"] = [env_by_name[k] for k in sorted(env_by_name)]
-    cps.sort(key=lambda c: c.get("name", ""))
-    return d
+    component["extraEnvs"] = [env_by_name[k] for k in sorted(env_by_name)]
+    components_patches.sort(key=lambda c: c.get("name", ""))
+    return doc
 
 def save_kwok_scheduler_logs(cluster_name, out_path, *, runner=subprocess.run, logger=None):
     """
     Save `kwokctl logs kube-scheduler --name <cluster>` to out_path.
-
-    runner: injectable subprocess runner (defaults to subprocess.run)
-    logger: injectable logger (defaults to module logger)
     """
     log = logger or logging.getLogger(__name__)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-
     if out_path.exists():
         try:
             out_path.unlink()
             log.info("pruned existing scheduler log: %s", out_path)
         except OSError as e:
             log.warning("failed pruning existing scheduler log %s: %s", out_path, e)
-
     try:
         r = runner(
             ["kwokctl", "logs", "kube-scheduler", "--name", str(cluster_name)],
@@ -267,5 +259,4 @@ def save_kwok_scheduler_logs(cluster_name, out_path, *, runner=subprocess.run, l
         log.info("saved scheduler logs to %s", out_path)
     except Exception as e:
         log.warning("failed saving scheduler logs: %s", e)
-
     return out_path

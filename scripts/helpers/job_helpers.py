@@ -18,15 +18,27 @@ class JobField:
     accept: Optional[Callable[[Any], bool]] = None
 
 def accept_default(v: Any) -> bool:
+    """
+    Default accept function: accepts any value not None or empty string.
+    """
     return v is not None and v != ""
 
 def parse_optional_str(v: Any) -> str | None:
+    """
+    Parse an optional string value.
+    """
     return get_str(v)
 
 def parse_optional_bool(v: Any) -> bool | None:
+    """
+    Parse an optional boolean value.
+    """
     return coerce_bool(v, default=None)
 
 def parse_optional_int(v: Any) -> int | None:
+    """
+    Parse an optional integer value.
+    """
     if v is None:
         return None
     if isinstance(v, bool):
@@ -42,6 +54,9 @@ def parse_optional_int(v: Any) -> int | None:
         return None
 
 def parse_optional_float(v: Any) -> float | None:
+    """
+    Parse an optional float value.
+    """
     if v is None:
         return None
     if isinstance(v, bool):
@@ -58,9 +73,7 @@ def parse_optional_float(v: Any) -> float | None:
 
 def parse_optional_duration_seconds(v: Any) -> float | None:
     """Parse a duration-like value into seconds.
-
     Accepts numeric values (treated as seconds) and strings like "2h", "30m", "10s", "1d".
-    Returns None on empty/unparseable inputs.
     """
     if v is None:
         return None
@@ -76,15 +89,9 @@ def parse_optional_duration_seconds(v: Any) -> float | None:
     except Exception:
         return None
 
-def merge_job_fields_into_args(
-    args: argparse.Namespace,
-    job: dict,
-    fields: Iterable[JobField],
-) -> argparse.Namespace:
+def merge_job_fields_into_args(args: argparse.Namespace, job: dict, fields: Iterable[JobField]) -> argparse.Namespace:
     """
     Merge job-file fields into args.
-
-    CLI priority: we only set args.<attr> when it is currently None.
     """
     job = job or {}
     for f in fields:

@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 # scripts/helpers/table_helpers.py
-"""
-Shared LaTeX table formatting helper functions for kwok_workload_once and kwok_trace_replayer.
-"""
 
 from typing import Optional, Tuple
 
 from scripts.helpers.data_helpers import is_finite
 
 def nan_str() -> str:
-    """Return LaTeX representation for NaN/missing values."""
+    """
+    Return LaTeX representation for NaN/missing values.
+    """
     return r"\text{--}"
 
 def fmt_pct(x: object, decimals: int = 1) -> str:
@@ -40,7 +39,7 @@ def fmt_unsigned_int(x: object) -> str:
         return nan_str()
     return f"{int(round(float(x))):d}"
 
-def fmt_pm(
+def fmt_mean_std(
     mean_v: object,
     std_v: object,
     *,
@@ -58,7 +57,7 @@ def fmt_pm(
         return rf"\ensuremath{{{m}}}"
     return rf"\ensuremath{{{m}\,\pm\,{abs(float(std_v)):.{std_dec}f}}}"
 
-def fmt_pm_split(
+def fmt_mean_std_split(
     mean_v: object,
     std_v: object,
     *,
@@ -84,7 +83,6 @@ def metric_header_tex(label: str) -> str:
     Create a LaTeX makecell header from a metric label.
     """
     s = str(label).strip()
-
     def split_core(core: str) -> Optional[Tuple[str, str]]:
         core = core.strip()
         if r"\;(" in core:
@@ -94,7 +92,6 @@ def metric_header_tex(label: str) -> str:
             left, right = core.rsplit(" (", 1)
             return left.strip(), "(" + right.strip()
         return None
-
     if s.startswith("$") and s.endswith("$") and len(s) >= 2:
         core = s[1:-1].strip()
         parts = split_core(core)
@@ -102,7 +99,6 @@ def metric_header_tex(label: str) -> str:
             return rf"\makecell{{${core}$}}"
         left, right = parts
         return rf"\makecell{{${left}$\\${right}$}}"
-
     parts = split_core(s)
     if parts is None:
         return rf"\makecell{{{s}}}"

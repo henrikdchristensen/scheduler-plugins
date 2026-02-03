@@ -18,6 +18,10 @@ from scripts.kwok_trace_replayer.plot_helpers import (
     plot_bar_with_geometric,
 )
 
+PLOT_TITLE_FONTSIZE = 6.0
+PLOT_CELL_WIDTH = 1.8
+PLOT_CELL_HEIGHT = 1.3
+
 # ----------------------------------------------------------------------
 # CONFIG
 # ----------------------------------------------------------------------
@@ -28,26 +32,26 @@ DATASETS: List[Dict[str, Any]] = [
         "csv_path": "data/public_trace_data/google-cluster-data/ClusterData2019/data.csv",
         "plots": {
             "inter_arrival_us": {
-                "x_label": "Δt (milliseconds)",
+                "x_label": "inter-arrival time (milliseconds)",
                 "scale": 1e-3,  # µs → ms
                 "fit_pareto": True,
-                "pareto_alpha": 0.21,
+                "pareto_alpha": 0.29,
                 "pareto_xmin": 0.001,
             },
             "life_time_us": {
                 "fit_pareto": True,
-                "pareto_alpha": 0.72,
-                "pareto_xmin": 1.0,
+                "pareto_alpha": 0.5,
+                "pareto_xmin": 0.05,
             },
             "cpu_request": {
-                "x_label": "Requested CPU (fraction of node capacity)",
-                "x_max": 0.2,
+                "x_label": "requested CPU (fraction of node capacity)",
+                "x_max": 0.3,
                 "fit_pareto": True,
                 "pareto_alpha": 2.5,
                 "pareto_xmin": 0.005,
             },
             "mem_request": {
-                "x_label": "Requested memory (fraction of node capacity)",
+                "x_label": "requested memory (fraction of node capacity)",
                 "x_max": 0.2,
                 "fit_pareto": True,
                 "pareto_alpha": 2.5,
@@ -75,10 +79,10 @@ DATASETS: List[Dict[str, Any]] = [
                 "pareto_xmin": 1.0,
             },
             "cpu_request": {
-                "x_label": "Requested CPU (cores)",
+                "x_label": "requested CPU (cores)",
             },
             "mem_request": {
-                "x_label": "Requested memory (GB)",
+                "x_label": "requested memory (GB)",
             },
         },
     },
@@ -91,9 +95,8 @@ DATASETS: List[Dict[str, Any]] = [
 BASE_PLOT_SPECS = [
     {
         "column": "inter_arrival_us",
-        "title": "Inter-arrival time",
-        "x_label": "Δt (seconds)",
-        "y_label": "Probability density",
+        "x_label": "inter-arrival time (seconds)",
+        "y_label": "probability density",
         "bins": 100,
         "log_y": True,
         "y_min": 1e-6,
@@ -104,9 +107,8 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "life_time_us",
-        "title": "Instance lifetime",
-        "x_label": "Lifetime (hours)",
-        "y_label": "Probability density",
+        "x_label": "lifetime (hours)",
+        "y_label": "probability density",
         "bins": 100,
         "log_y": True,
         "y_min": 1e-5,
@@ -117,9 +119,8 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "cpu_request",
-        "title": "CPU request",
-        "x_label": "Requested CPU",
-        "y_label": "Probability density",
+        "x_label": "requested CPU",
+        "y_label": "probability density",
         "bins": 100,
         "log_y": True,
         "y_min": 1e-4,
@@ -130,9 +131,8 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "mem_request",
-        "title": "Memory request",
-        "x_label": "Requested memory",
-        "y_label": "Probability density",
+        "x_label": "requested memory",
+        "y_label": "probability density",
         "bins": 100,
         "log_y": True,
         "y_min": 1e-4,
@@ -143,9 +143,8 @@ BASE_PLOT_SPECS = [
     },
     {
         "column": "priority",
-        "title": "Priority",
-        "x_label": "Priority",
-        "y_label": "Probability mass",
+        "x_label": "priority",
+        "y_label": "probability mass",
         "bins": 10,
         "log_y": False,
         "y_min": None,
@@ -181,7 +180,6 @@ def _draw_cell(ax, col_name: str, data, spec: Dict[str, Any], y_label: str) -> N
         plot_bar_with_geometric(
             ax,
             data,
-            title="",
             x_label=spec["x_label"],
             y_label=y_label,
             geom_fit=spec.get("fit_geometric", False),
@@ -196,7 +194,6 @@ def _draw_cell(ax, col_name: str, data, spec: Dict[str, Any], y_label: str) -> N
         plot_histogram_with_pareto(
             ax,
             data,
-            title="",
             x_label=spec["x_label"],
             y_label=y_label,
             bins=spec["bins"],
@@ -232,8 +229,8 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
     if layout == "datasets-cols":
         n_rows = len(metric_columns)
         n_cols = len(loaded)
-        fig_w = 3.2 * n_cols
-        fig_h = 1.9 * n_rows
+        fig_w = PLOT_CELL_WIDTH * n_cols
+        fig_h = PLOT_CELL_HEIGHT * n_rows
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
 
         for row_idx, col_name in enumerate(metric_columns):
@@ -252,25 +249,14 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
 
                 _draw_cell(ax, col_name, data, spec, y_label)
 
-                if col_idx == 0:
-                    ax.text(
-                        -0.20, 0.5, base_spec["title"],
-                        transform=ax.transAxes,
-                        rotation=90,
-                        va="center",
-                        ha="center",
-                        fontsize=7,
-                        fontweight="bold",
-                    )
-
         for col_idx, ds_info in enumerate(loaded):
-            axes[0, col_idx].set_title(ds_info["name"], fontsize=11, pad=8, fontweight="bold")
+            axes[0, col_idx].set_title(ds_info["name"], fontsize=PLOT_TITLE_FONTSIZE, pad=8, fontweight="bold")
 
     else:
         n_rows = len(loaded)
         n_cols = len(metric_columns)
-        fig_w = 2.1 * n_cols
-        fig_h = 1.6 * n_rows
+        fig_w = PLOT_CELL_WIDTH * n_cols
+        fig_h = PLOT_CELL_HEIGHT * n_rows
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
 
         for row_idx, ds_info in enumerate(loaded):
@@ -293,16 +279,14 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
 
                 if col_idx == 0:
                     ax.text(
-                        -0.32, 0.5, ds_name,
+                        -0.33, 0.5, ds_name,
                         transform=ax.transAxes,
                         rotation=90,
                         va="center",
                         ha="center",
+                        fontsize=PLOT_TITLE_FONTSIZE,
                         fontweight="bold",
                     )
-
-        for col_idx, col_name in enumerate(metric_columns):
-            axes[0, col_idx].set_title(base_by_col[col_name]["title"], fontsize=7, pad=8, fontweight="bold")
 
     fig.tight_layout(
         rect=(0.01, 0.01, 0.99, 0.99),
@@ -316,7 +300,6 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
     fig.savefig(out_dir + "public_trace_histograms.pdf", bbox_inches="tight")
     plt.close(fig)
     print(f"[OK] Saved combined grid to {out_dir} (layout={layout})")
-
 
 # ----------------------------------------------------------------------
 # main
@@ -334,16 +317,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--out-dir",
         type=str,
-        default="analysis/kwok_trace_replayer/figures/",
+        default="analysis/kwok_trace_replayer/public_trace_histograms/",
         help="Output directory for the combined plots.",
     )
     return p
 
-
 def main() -> None:
     args = _build_arg_parser().parse_args()
     make_combined_grid(layout=args.layout, out_dir=args.out_dir)
-
 
 if __name__ == "__main__":
     main()

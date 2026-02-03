@@ -8,13 +8,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scripts.kwok_trace_replayer.trace_helpers import (
-    AXIS_LABEL_FONTSIZE,
-    LEGEND_FONTSIZE,
-    TICK_LABEL_FONTSIZE,
-    TITLE_FONTSIZE,
     estimate_pareto_params,
     TraceRecord,
 )
+
+# -------------------------------------------------------------------
+# Plot configuration
+# -------------------------------------------------------------------
+
+PLOT_AXIS_LABEL_FONTSIZE = 5.0
+PLOT_TICK_LABEL_FONTSIZE = 4.0
+PLOT_LEGEND_FONTSIZE = 4.0
 
 # -----------------------------------------------------------------------------
 # Time scaling
@@ -65,7 +69,7 @@ def plot_utilization_and_num_pods(
 
     fig, ax1 = plt.subplots(figsize=(9, 4))
 
-    # Pick two distinct colors
+    # Pick colors
     cycle = plt.rcParams.get("axes.prop_cycle", None)
     colors = cycle.by_key().get("color", []) if cycle is not None else []
     c_util = colors[0] if len(colors) > 0 else "C0"
@@ -206,8 +210,7 @@ def plot_generator_histograms(
     plot_histogram_with_pareto(
         axes[0],
         inter_arr,
-        title="Inter-arrival times",
-        x_label="Δt (seconds)",
+        x_label="inter-arrival time (seconds)",
         y_label="probability density",
         bins=80,
         log_y=True,
@@ -221,7 +224,6 @@ def plot_generator_histograms(
     plot_histogram_with_pareto(
         axes[1],
         lifetimes,
-        title="Lifetimes",
         x_label="lifetime (seconds)",
         y_label="probability density",
         bins=80,
@@ -236,8 +238,7 @@ def plot_generator_histograms(
     plot_histogram_with_pareto(
         axes[2],
         req_vals,
-        title="CPU requests",
-        x_label="request (fraction of node capacity)",
+        x_label="requested CPU (fraction of node capacity)",
         y_label="probability density",
         bins=80,
         log_y=True,
@@ -251,8 +252,7 @@ def plot_generator_histograms(
     plot_histogram_with_pareto(
         axes[3],
         req_vals,
-        title="Memory requests",
-        x_label="request (fraction of node capacity)",
+        x_label="requested memory (fraction of node capacity)",
         y_label="probability density",
         bins=80,
         log_y=True,
@@ -266,7 +266,6 @@ def plot_generator_histograms(
     plot_bar_with_geometric(
         axes[4],
         prios,
-        title="Priorities",
         x_label="priority",
         y_label="probability mass",
         geom_fit=True,
@@ -277,7 +276,6 @@ def plot_generator_histograms(
     plot_bar_with_geometric(
         axes[5],
         replicas,
-        title="Replicas",
         x_label="replicas", 
         y_label="probability mass",
         geom_fit=True,
@@ -285,14 +283,11 @@ def plot_generator_histograms(
         x_min=int(replicas_min),
         x_max=int(replicas_max),
     )
-
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
-
     if show_plots:
         plt.show()
     plt.close(fig)
-
     if logger is not None:
         logger.info("saved generated histograms to %s", out_path)
 
@@ -311,7 +306,6 @@ def bounded_pareto_pdf(x: np.ndarray, *, alpha: float, x_min: float, x_max: floa
     denom = max(denom, 1e-300)
     return (alpha * (x_min ** alpha) / (x ** (alpha + 1.0))) / denom
 
-
 def pareto_pdf(x: np.ndarray, *, alpha: float, x_min: float) -> np.ndarray:
     """
     Unbounded Pareto PDF for x >= x_min.
@@ -324,7 +318,6 @@ def plot_histogram_with_pareto(
     ax: plt.Axes,
     data: np.ndarray,
     *,
-    title: str,
     x_label: str,
     y_label: str,
     bins: int,
@@ -420,20 +413,18 @@ def plot_histogram_with_pareto(
     if y_min is not None:
         ax.set_ylim(bottom=y_min)
 
-    ax.set_xlabel(x_label, fontsize=AXIS_LABEL_FONTSIZE)
-    ax.set_ylabel(y_label, fontsize=AXIS_LABEL_FONTSIZE)
-    ax.tick_params(axis="both", which="major", labelsize=TICK_LABEL_FONTSIZE)
+    ax.set_xlabel(x_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel(y_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+    ax.tick_params(axis="both", which="major", labelsize=PLOT_TICK_LABEL_FONTSIZE)
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=TITLE_FONTSIZE)
 
     if legend_handles:
-        ax.legend(legend_handles, legend_labels, fontsize=LEGEND_FONTSIZE)
+        ax.legend(legend_handles, legend_labels, fontsize=PLOT_LEGEND_FONTSIZE)
 
 def plot_bar_with_geometric(
     ax: plt.Axes,
     data: np.ndarray,
     *,
-    title: str,
     x_label: str,
     y_label: str,
     geom_fit: bool = False,
@@ -506,13 +497,12 @@ def plot_bar_with_geometric(
 
     ax.set_xlim(-0.5, n_vals - 0.5)
     ax.set_xticks(positions)
-    ax.set_xticklabels(unique_vals, rotation=90, ha="center", fontsize=TICK_LABEL_FONTSIZE)
+    ax.set_xticklabels(unique_vals, rotation=90, ha="center", fontsize=PLOT_TICK_LABEL_FONTSIZE)
 
-    ax.set_xlabel(x_label, fontsize=AXIS_LABEL_FONTSIZE)
-    ax.set_ylabel(y_label, fontsize=AXIS_LABEL_FONTSIZE)
-    ax.tick_params(axis="y", which="major", labelsize=TICK_LABEL_FONTSIZE)
+    ax.set_xlabel(x_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel(y_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+    ax.tick_params(axis="y", which="major", labelsize=PLOT_TICK_LABEL_FONTSIZE)
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
-    ax.set_title(title, fontsize=TITLE_FONTSIZE)
 
     if legend_handles:
-        ax.legend(legend_handles, legend_labels, fontsize=LEGEND_FONTSIZE)
+        ax.legend(legend_handles, legend_labels, fontsize=PLOT_LEGEND_FONTSIZE)

@@ -7,15 +7,6 @@ import numpy as np
 from scipy.stats import pareto as pareto_dist
 
 # -------------------------------------------------------------------
-# Plot configuration
-# -------------------------------------------------------------------
-
-AXIS_LABEL_FONTSIZE = 5.5
-TICK_LABEL_FONTSIZE = 4.0
-TITLE_FONTSIZE = 6.5
-LEGEND_FONTSIZE = 4.0
-
-# -------------------------------------------------------------------
 # Data model
 # -------------------------------------------------------------------
 
