@@ -4,7 +4,7 @@
 python -m scripts.kwok_trace_replayer.seal_results
 """
 
-import json, math, re
+import json, math, re, warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -396,13 +396,17 @@ def latency_means_first_batch_ms(pod_csv: Path, eps_s: float) -> Dict[str, float
     batch["latency_ms"] = latency_s * 1000.0 # convert to milliseconds
 
     out: Dict[str, float] = {}
-    out["L_ms_total"] = float(np.nanmean(batch["latency_ms"].to_numpy(dtype=float))) if batch.shape[0] else float("nan")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out["L_ms_total"] = float(np.nanmean(batch["latency_ms"].to_numpy(dtype=float))) if batch.shape[0] else float("nan")
 
     priorities = batch[POD_PRIO_COL].to_numpy(dtype=float)
     latencies = batch["latency_ms"].to_numpy(dtype=float)
-    for prio in range(1, MAX_PRIORITIES + 1):
-        mask = priorities == float(prio)
-        out[f"L_ms_p{prio}"] = float(np.nanmean(latencies[mask])) if np.any(mask) else float("nan")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        for prio in range(1, MAX_PRIORITIES + 1):
+            mask = priorities == float(prio)
+            out[f"L_ms_p{prio}"] = float(np.nanmean(latencies[mask])) if np.any(mask) else float("nan")
 
     return out
 
