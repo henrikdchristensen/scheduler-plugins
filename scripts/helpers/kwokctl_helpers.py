@@ -206,33 +206,30 @@ def kwok_cache_lock():
 def merge_kwokctl_envs(doc: dict, add_envs: Iterable[Mapping[str, Any]] | None, component: str = "kube-scheduler") -> dict:
     """
     Return a copy of `doc` with extraEnvs for `component` merged by env 'name'.
-    - Items in `add_envs` override/insert existing envs.
-    - Ensures componentsPatches and the component entry exist.
-    - Sorts components and envs by name for stability.
     """
-    doc = copy.deepcopy(doc) if isinstance(doc, dict) else {}
+    d = copy.deepcopy(doc) if isinstance(doc, dict) else {}
     # Normalize inputs
     add = [
         e for e in (add_envs or [])
         if isinstance(e, Mapping) and e.get("name")
     ]
     if not add:
-        return doc
+        return d
     # Ensure componentsPatches is a list of dicts
-    components_patches = [c for c in (doc.get("componentsPatches") or []) if isinstance(c, dict)]
-    doc["componentsPatches"] = components_patches  # normalize back on the copy
+    cps = [c for c in (d.get("componentsPatches") or []) if isinstance(c, dict)]
+    d["componentsPatches"] = cps  # normalize back on the copy
     # Get or create the target component patch
-    component = next((c for c in components_patches if c.get("name") == component), None)
-    if component is None:
-        component = {"name": component}
-        components_patches.append(component)
+    comp = next((c for c in cps if c.get("name") == component), None)
+    if comp is None:
+        comp = {"name": component}
+        cps.append(comp)
     # Merge by name
-    cur = [e for e in (component.get("extraEnvs") or []) if isinstance(e, dict) and e.get("name")]
+    cur = [e for e in (comp.get("extraEnvs") or []) if isinstance(e, dict) and e.get("name")]
     env_by_name = {e["name"]: copy.deepcopy(e) for e in cur}
     env_by_name.update({e["name"]: copy.deepcopy(e) for e in add})
-    component["extraEnvs"] = [env_by_name[k] for k in sorted(env_by_name)]
-    components_patches.sort(key=lambda c: c.get("name", ""))
-    return doc
+    comp["extraEnvs"] = [env_by_name[k] for k in sorted(env_by_name)]
+    cps.sort(key=lambda c: c.get("name", ""))
+    return d
 
 def save_kwok_scheduler_logs(cluster_name, out_path, *, runner=subprocess.run, logger=None):
     """
