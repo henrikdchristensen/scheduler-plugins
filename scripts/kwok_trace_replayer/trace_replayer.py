@@ -4,7 +4,7 @@
 python -m scripts.kwok_trace_replayer.trace_replayer --job-file <job-file.yaml>
 """
 
-import argparse, csv, json, logging, threading, time, yaml, subprocess, re
+import argparse, csv, json, logging, threading, time, yaml, subprocess
 from argparse import BooleanOptionalAction
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass
@@ -611,8 +611,7 @@ class TraceReplayer:
                     )
                 )
 
-            # Only delete if within horizon; if a pod would naturally end after
-            # the trace horizon, we just stop the replay while it is still alive.
+            # Only delete if within horizon
             delete_t = start_delay + float(p.end_time)
             if delete_t <= replay_end_s:
                 events.append(Event(sim_time_s=delete_t, kind="delete", record_id=p.id))
@@ -803,8 +802,6 @@ class TraceReplayer:
         """
         Dump optimization stats ConfigMap to a local JSON file.
         """
-        # IMPORTANT: Don't call get_json_ctx() here as kubectl can block
-        # indefinitely. Use a small timeout for this best-effort dump.
         cmd = ["kubectl"]
         if self.ctx:
             cmd += ["--context", str(self.ctx)]
@@ -980,7 +977,7 @@ class TraceReplayer:
                 now_ts = get_timestamp()
                 t_s = self.time_s()
 
-                # Dump optimization-stats every 30s (observable)
+                # Dump optimization-stats every 30s
                 if (t_s - last_opt_dump_s) >= OPT_STATS_DUMP_INTERVAL_S:
                     did_write, updated_at = self.dump_optimization_stats()
                     if did_write:
