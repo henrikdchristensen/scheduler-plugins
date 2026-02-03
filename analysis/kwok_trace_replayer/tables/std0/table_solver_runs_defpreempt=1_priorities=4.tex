@@ -1,0 +1,26 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in number of solver runs between the plugin with default preemption enabled and the default scheduler for runs with 4 priorities.}
+\label{tab:solver_runs-defpreempt1-prio4-std0}
+\begin{tabular}{l c c c c @{\hspace{1.5em}} c c c c}
+\toprule
+ & \multicolumn{4}{c}{\#nodes = 16} & \multicolumn{4}{c}{\#nodes = 32} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+ & \llap{inter-arrival =\,}2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
+\midrule
+\makecell[tl]{Scheduling-failure (blocking)} & 391 & 279 & 194 & 143 & 286 & 198 & 121 & 85 \\
+\makecell[tl]{Scheduling-failure (non-blocking)} & 398 & 289 & 198 & 134 & 291 & 198 & 127 & 85 \\
+\makecell[tl]{Periodic (blocking), 8s interval} & 57 & 66 & 75 & 61 & 59 & 54 & 47 & 51 \\
+\makecell[tl]{Periodic (non-blocking), 8s interval} & 56 & 73 & 64 & 74 & 55 & 62 & 50 & 45 \\
+\makecell[tl]{Periodic (blocking), 32s interval} & 7 & 17 & 20 & 19 & 11 & 18 & 18 & 16 \\
+\makecell[tl]{Periodic (non-blocking), 32s interval} & 5 & 16 & 17 & 18 & 10 & 17 & 16 & 16 \\
+\makecell[tl]{Stable-queue (blocking), 2s delay} & 356 & 352 & 324 & 238 & 312 & 228 & 158 & 100 \\
+\makecell[tl]{Stable-queue (non-blocking), 2s delay} & 361 & 396 & 246 & 210 & 301 & 240 & 161 & 96 \\
+\makecell[tl]{Stable-queue (blocking), 8s delay} & 100 & 104 & 187 & 96 & 81 & 96 & 74 & 54 \\
+\makecell[tl]{Stable-queue (non-blocking), 8s delay} & 74 & 140 & 218 & 124 & 78 & 81 & 71 & 50 \\
+\bottomrule
+\end{tabular}
+\end{table*}

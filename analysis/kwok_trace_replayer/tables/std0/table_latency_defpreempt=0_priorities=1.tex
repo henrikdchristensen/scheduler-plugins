@@ -1,0 +1,26 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in scheduling latency (ms) between the plugin without default preemption and the default scheduler for runs with one priority.}
+\label{tab:latency-defpreempt0-prio1-std0}
+\begin{tabular}{l c c c c @{\hspace{1.5em}} c c c c}
+\toprule
+ & \multicolumn{4}{c}{\#nodes = 16} & \multicolumn{4}{c}{\#nodes = 32} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+ & \llap{inter-arrival =\,}2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
+\midrule
+\makecell[tl]{Scheduling-failure (blocking)} & +2375 & +2220 & +2863 & -688 & +3087 & +2798 & +7610 & +1304 \\
+\makecell[tl]{Scheduling-failure (non-blocking)} & +2370 & +2381 & +3000 & -235 & +3608 & +2198 & +6973 & +3281 \\
+\makecell[tl]{Periodic (blocking), 8s interval} & +54 & +171 & +388 & -1955 & -156 & -1383 & +163 & -4687 \\
+\makecell[tl]{Periodic (non-blocking), 8s interval} & -1 & +174 & +205 & -2966 & -71 & -1619 & -622 & -4267 \\
+\makecell[tl]{Periodic (blocking), 32s interval} & +6 & +246 & +704 & -1255 & +3 & -907 & -551 & -1707 \\
+\makecell[tl]{Periodic (non-blocking), 32s interval} & +41 & +443 & +313 & -1319 & +29 & -1066 & +250 & -1096 \\
+\makecell[tl]{Stable-queue (blocking), 2s delay} & -18 & +76 & -14 & -3409 & -144 & -1403 & -855 & -3667 \\
+\makecell[tl]{Stable-queue (non-blocking), 2s delay} & -113 & -67 & -22 & -2924 & -219 & -1308 & -260 & -4809 \\
+\makecell[tl]{Stable-queue (blocking), 8s delay} & -24 & +70 & +300 & -2460 & -73 & -1435 & +333 & -2654 \\
+\makecell[tl]{Stable-queue (non-blocking), 8s delay} & +54 & +69 & +321 & -2899 & -145 & -1242 & -657 & -3899 \\
+\bottomrule
+\end{tabular}
+\end{table*}

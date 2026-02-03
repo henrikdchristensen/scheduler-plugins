@@ -1,0 +1,26 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in usage between the plugin with default preemption enabled and the default scheduler for runs with one priority.}
+\label{tab:usage-defpreempt1-prio1-std0}
+\begin{tabular}{l c c c c @{\hspace{1.5em}} c c c c}
+\toprule
+ & \multicolumn{4}{c}{\#nodes = 16} & \multicolumn{4}{c}{\#nodes = 32} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+ & \llap{inter-arrival =\,}2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
+\midrule
+\makecell[tl]{Scheduling-failure (blocking)} & -0.17 & +1.34 & +1.87 & +3.25 & -0.08 & +1.13 & +1.17 & +2.74 \\
+\makecell[tl]{Scheduling-failure (non-blocking)} & -0.18 & +2.26 & +1.97 & +3.34 & -0.17 & +1.16 & +1.01 & +2.72 \\
+\makecell[tl]{Periodic (blocking), 8s interval} & +1.00 & +1.69 & +2.12 & +3.40 & +0.68 & +1.35 & +1.29 & +2.77 \\
+\makecell[tl]{Periodic (non-blocking), 8s interval} & +1.01 & +1.81 & +2.21 & +3.33 & +0.71 & +1.50 & +1.22 & +2.45 \\
+\makecell[tl]{Periodic (blocking), 32s interval} & +0.22 & +1.14 & +1.57 & +2.81 & +0.30 & +1.05 & +1.04 & +2.19 \\
+\makecell[tl]{Periodic (non-blocking), 32s interval} & +0.42 & +1.20 & +1.48 & +2.91 & +0.31 & +1.20 & +1.03 & +2.65 \\
+\makecell[tl]{Stable-queue (blocking), 2s delay} & +1.27 & +2.12 & +2.38 & +3.53 & +0.79 & +1.51 & +1.47 & +2.89 \\
+\makecell[tl]{Stable-queue (non-blocking), 2s delay} & +1.29 & +1.97 & +2.35 & +3.42 & +0.83 & +1.51 & +1.41 & +2.82 \\
+\makecell[tl]{Stable-queue (blocking), 8s delay} & +1.01 & +1.88 & +2.14 & +3.33 & +0.52 & +1.43 & +1.48 & +2.77 \\
+\makecell[tl]{Stable-queue (non-blocking), 8s delay} & +0.96 & +1.72 & +2.21 & +3.23 & +0.51 & +1.39 & +1.54 & +2.94 \\
+\bottomrule
+\end{tabular}
+\end{table*}

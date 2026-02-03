@@ -5,10 +5,13 @@ omit =
     scripts/test/**
     scripts/helpers/job*
     scripts/helpers/list_filenames.py 
+    scripts/helpers/plot_config.py
+    scripts/helpers/table_helpers.py
     scripts/kwok_integration_tests/*
     scripts/kwok_integration_tests/**
     scripts/kwok_workload_once/plots_and_tables.py
     scripts/kwok_trace_replayer/plots_and_tables.py
+    scripts/kwok_trace_replayer/plots_and_tables2.py
     scripts/kwok_trace_replayer/plot_helpers.py
     scripts/kwok_trace_replayer/job_generator.py
     */__init__.py
