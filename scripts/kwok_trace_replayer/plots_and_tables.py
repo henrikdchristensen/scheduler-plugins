@@ -85,6 +85,13 @@ DELTA_SERIES: List[Tuple[str, str, str, int]] = [
 
 DELTA_NAMES = [d[0] for d in DELTA_SERIES]
 
+# Delta color indices: Index into PLOT_COLORS for each delta series
+# Users can modify these to use different colors from the unified palette
+DELTA_COLOR_INDICES: List[int] = [
+    5,  # Periodic (blocking), 8→32s interval
+    9,  # Stable-queue (blocking), 2→8s delay
+]
+
 # Metric columns used in delta computations
 DELTA_METRIC_COLS = [
     "delta_U_pct_eff_mean",
@@ -97,6 +104,10 @@ DELTA_METRIC_COLS = [
 # =============================================================================
 # Plot styling / layout
 # =============================================================================
+
+# Unified color palette for all plots (main modes and deltas)
+# Combines Set2 and Set3 colormaps for a comprehensive palette
+PLOT_COLORS = list(plt.get_cmap("tab20c").colors)
 
 PLOT_TICK_PAD = 2.0
 PLOT_MARKER_SIZE = 2.0
@@ -195,20 +206,20 @@ class ModeSpec:
     abbreviation: str
     label: str
     rank: int
-    color_palette: str  # "set2" or "set3"
-    color_idx: int
+    color_idx: int  # Index into PLOT_COLORS
 
+# Specify: mode, blocking, abbreviation, label, rank, color_idx
 MODE_SPECS: List[ModeSpec] = [
-    ModeSpec("schedulingfailure", 1, "SF-B", "Scheduling-failure (blocking)", 0, "set2", 0),
-    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, "set2", 1),
-    ModeSpec("periodic8s", 1, "PR-8-B", "Periodic (blocking), 8s interval", 2, "set2", 2),
-    ModeSpec("periodic8s", 0, "PR-8-NB", "Periodic (non-blocking), 8s interval", 3, "set2", 3),
-    ModeSpec("periodic32s", 1, "PR-32-B", "Periodic (blocking), 32s interval", 4, "set2", 4),
-    ModeSpec("periodic32s", 0, "PR-32-NB", "Periodic (non-blocking), 32s interval", 5, "set2", 5),
-    ModeSpec("stable-queue-2s", 1, "SQ-2-B", "Stable-queue (blocking), 2s delay", 6, "set2", 6),
-    ModeSpec("stable-queue-2s", 0, "SQ-2-NB", "Stable-queue (non-blocking), 2s delay", 7, "set2", 7),
-    ModeSpec("stable-queue-8s", 1, "SQ-8-B", "Stable-queue (blocking), 8s delay", 8, "set3", 3),
-    ModeSpec("stable-queue-8s", 0, "SQ-8-NB", "Stable-queue (non-blocking), 8s delay", 9, "set3", 4),
+    ModeSpec("schedulingfailure", 1, "SF-B", "Scheduling-failure (blocking)", 0, 1),
+    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, 3),
+    ModeSpec("periodic8s", 1, "PR-8s-B", "Periodic (blocking), 8s interval", 2, 5),
+    ModeSpec("periodic8s", 0, "PR-8s-NB", "Periodic (non-blocking), 8s interval", 3, 7),
+    ModeSpec("periodic32s", 1, "PR-32s-B", "Periodic (blocking), 32s interval", 4, 5),
+    ModeSpec("periodic32s", 0, "PR-32s-NB", "Periodic (non-blocking), 32s interval", 5, 7),
+    ModeSpec("stable-queue-2s", 1, "SQ-2s-B", "Stable-queue (blocking), 2s delay", 6, 9),
+    ModeSpec("stable-queue-2s", 0, "SQ-2s-NB", "Stable-queue (non-blocking), 2s delay", 7, 11),
+    ModeSpec("stable-queue-8s", 1, "SQ-8s-B", "Stable-queue (blocking), 8s delay", 8, 9), 
+    ModeSpec("stable-queue-8s", 0, "SQ-8s-NB", "Stable-queue (non-blocking), 8s delay", 9, 11),
 ]
 
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
@@ -222,13 +233,10 @@ def row_key_label(row_key: RowKey) -> str:
     return mode_spec.label if mode_spec else f"{row_key.mode}:{row_key.blocking}"
 
 def row_key_color(row_key: RowKey):
-    set2 = plt.get_cmap("Set2").colors
-    set3 = plt.get_cmap("Set3").colors
     mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
     if not mode_spec:
-        return set3[0]
-    color_palette = set2 if mode_spec.color_palette == "set2" else set3
-    return color_palette[int(mode_spec.color_idx) % len(color_palette)]
+        return PLOT_COLORS[0]
+    return PLOT_COLORS[int(mode_spec.color_idx) % len(PLOT_COLORS)]
 
 def sort_row_keys(row_keys: Iterable[RowKey]) -> List[RowKey]:
     return sorted(set(row_keys), key=lambda r: (row_key_rank(r), r.mode, int(r.blocking), int(r.defpreempt)))
@@ -906,9 +914,7 @@ def make_grid_periodic_vs_stable(
     Make grid plot comparing periodic vs stable scheduling deltas.
     Each delta metric is a separate series, with custom coloring.
     """
-    cmap = plt.get_cmap("Set2").colors
-
-    # Create fake series for coloring
+    # Create fake series for indexing (mode encodes which delta)
     fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(DELTA_NAMES))]
 
     def _extract_custom_index(row_key: RowKey) -> int:
@@ -919,9 +925,11 @@ def make_grid_periodic_vs_stable(
 
     def color_override(row_key: RowKey) -> Any:
         """
-        Custom color override based on RowKey index.
+        Color override using unified color palette from PLOT_COLORS.
         """
-        return cmap[_extract_custom_index(row_key) % len(cmap)]
+        idx = _extract_custom_index(row_key)
+        color_idx = DELTA_COLOR_INDICES[idx]
+        return PLOT_COLORS[int(color_idx) % len(PLOT_COLORS)]
 
     def y_function_factory(col: str) -> YOfFn:
         """
