@@ -9,6 +9,7 @@ from typing import List, Tuple
 
 import pandas as pd
 import numpy as np
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -254,11 +255,11 @@ def write_outcome_breakdown_table_tex(
 
     # Breaker: timeout, util
     first_block = True
-    for t in timeout_order:
-        for u in util_order:
+    for timeout in timeout_order:
+        for util in util_order:
             # skip blocks that do not exist in data
             try:
-                _ = dff.loc[(int(priorities), int(t), int(u))]
+                _ = dff.loc[(int(priorities), int(timeout), int(util))]
             except Exception:
                 continue
 
@@ -267,7 +268,7 @@ def write_outcome_breakdown_table_tex(
             first_block = False
 
             lines.append(
-                rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{timeout = {int(t)}\,s, util = {int(u)}\%}}}} \\"
+                rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{timeout = {int(timeout)}\,s, util = {int(util)}\%}}}} \\"
             )
             lines.append(r"\midrule")
 
@@ -275,7 +276,7 @@ def write_outcome_breakdown_table_tex(
                 cells: List[str] = []
                 for n in nodes_order:
                     for ppn in ppn_order:
-                        r_ = get_rate(timeout_s=t, util=u, nodes=n, ppn=ppn, col=col)
+                        r_ = get_rate(timeout_s=timeout, util=util, nodes=n, ppn=ppn, col=col)
                         pct = 100.0 * r_ if is_finite(r_) else float("nan")
                         cells.append(fmt_pct(pct, decimals=decimals))
                 lines.append(f"{label} & " + " & ".join(cells) + r" \\")
@@ -292,10 +293,6 @@ def write_outcome_breakdown_table_tex(
 #################################################################
 
 def configure_matplotlib() -> None:
-    """
-    Configure matplotlib with standard font sizes for publication-quality plots.
-    Uses settings from scripts.config.plot_config.
-    """
     mpl.rcParams.update(
         {
             "axes.titlesize": PLOT_TITLE_FONTSIZE,
@@ -312,9 +309,6 @@ def save_figure(
     formats: List[str] = PLOT_FORMATS,
     dpi: int = PLOT_FIGURE_DPI,
 ) -> None:
-    """
-    Save a matplotlib figure to multiple file formats.
-    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     for ext in formats:
         fname = out_path.with_suffix(f".{ext}")
@@ -491,18 +485,18 @@ def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path) -> No
     dy = max(0.05, min(1.0, BAR_WIDTH_3D))
 
     seen_keys = set()
-    for u in utils:
+    for util in utils:
         for n in nodes:
-            x0 = x_index[u] + (1 - dx) / 2
+            x0 = x_index[util] + (1 - dx) / 2
             y0 = y_index[n] + (1 - dy) / 2
             z = 0.0
 
-            rate_solver_opt = get_rate(df, u, n, "solver_optimal_rate")
-            rate_solver_feas = get_rate(df, u, n, "solver_feasible_rate")
-            rate_solver_fail = get_rate(df, u, n, "solver_failed_rate")
-            rate_default_opt = get_rate(df, u, n, "default_optimal_rate")
-            rate_default_all = get_rate(df, u, n, "default_all_running_rate")
-            rate_other = get_rate(df, u, n, "other_rate")
+            rate_solver_opt = get_rate(df, util, n, "solver_optimal_rate")
+            rate_solver_feas = get_rate(df, util, n, "solver_feasible_rate")
+            rate_solver_fail = get_rate(df, util, n, "solver_failed_rate")
+            rate_default_opt = get_rate(df, util, n, "default_optimal_rate")
+            rate_default_all = get_rate(df, util, n, "default_all_running_rate")
+            rate_other = get_rate(df, util, n, "other_rate")
 
             for key, rate_ in [
                 ("other", rate_other),
@@ -564,7 +558,7 @@ def main() -> None:
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
 
-    # --- TABLES: keep util (breaker = timeout + util)
+    # --- TABLES
     df_table = aggregate_keep_util(df_per_combo)
     present_prios = set(df_table["priorities"].astype(int).unique().tolist())
     for prio in [p for p in PLOT_PRIORITIES if p in present_prios]:
@@ -579,7 +573,7 @@ def main() -> None:
         )
         produced_tables.append(out_tex)
 
-    # --- PLOTS (aggregate away util for 2D, and 3D uses per-combo)
+    # --- PLOTS
     df_util_agg = aggregate_over_util(df_per_combo)
 
     out_path_2d = OUT_FIGURES_DIR / "2d_grid_ppn_prio"
@@ -607,8 +601,6 @@ def main() -> None:
                 out_file = OUT_FIGURES_DIR / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
                 plot_3d_ppn_prio_timeout(sub, title, out_file)
                 produced_figs.extend([out_file.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
-
-    # Summary
     for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
         print(f"{label}:\n" + "\n".join(f"  - {p}" for p in paths))
 

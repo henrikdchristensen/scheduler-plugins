@@ -41,6 +41,9 @@ DIR_RE_SOLVER = re.compile(
 # ============================================================
 
 def parse_solver_dirname(name: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse solver directory name into metadata.
+    """
     m = DIR_RE_SOLVER.match(name)
     if not m:
         return None
@@ -61,6 +64,9 @@ def parse_solver_dirname(name: str) -> Optional[Dict[str, Any]]:
     }
 
 def load_csv(csv_path: Path) -> pd.DataFrame:
+    """
+    Load results CSV and normalize columns.
+    """
     if not csv_path.exists():
         raise FileNotFoundError(f"results.csv not found: {csv_path}")
 
@@ -97,6 +103,9 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
     return df
 
 def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: str) -> pd.DataFrame:
+    """
+    Compare solver vs default per-seed results.
+    """
     df_s = load_csv(solver_csv)
     df_d = load_csv(default_csv)
 
@@ -190,12 +199,18 @@ class CombineResultsAnalyzer:
 
     @staticmethod
     def _split_default_all_running(per_seed_df: pd.DataFrame) -> Tuple[pd.Series, pd.DataFrame]:
+        """
+        Split per-seed DataFrame into default_all_running mask and not_all_running DataFrame.
+        """
         mask_default_all = per_seed_df["default_all_running"]
         not_all_running = per_seed_df[~mask_default_all].copy()
         return mask_default_all, not_all_running
 
     @staticmethod
     def _status_flags(not_all_running: pd.DataFrame) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        Status flags: is_optimal, is_feasible, is_ok.
+        """
         status = not_all_running["solver_status"]
         is_optimal = status.eq("OPTIMAL")
         is_feasible = status.eq("FEASIBLE")
@@ -204,6 +219,9 @@ class CombineResultsAnalyzer:
 
     @staticmethod
     def _placement_flags(not_all_running: pd.DataFrame) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        Placement flags: placed_equal, placed_better, placed_worse.
+        """
         placed_equal = not_all_running["placed_cmp"].eq(0)
         placed_better = not_all_running["placed_cmp"].gt(0)
         placed_worse = not_all_running["placed_cmp"].lt(0)
@@ -211,10 +229,16 @@ class CombineResultsAnalyzer:
 
     @staticmethod
     def _solver_called_count(not_all_running: pd.DataFrame) -> int:
+        """
+        Count of solver_called in not_all_running DataFrame.
+        """
         return int(not_all_running["solver_called"].sum())
 
     @staticmethod
     def _compute_category_counts(per_seed_df: pd.DataFrame) -> CategoryCounts:
+        """
+        Compute category counts from per-seed DataFrame.
+        """
         mask_default_all, not_all_running = CombineResultsAnalyzer._split_default_all_running(per_seed_df)
         is_optimal, is_feasible, is_ok = CombineResultsAnalyzer._status_flags(not_all_running)
         placed_equal, placed_better, placed_worse = CombineResultsAnalyzer._placement_flags(not_all_running)
@@ -270,6 +294,9 @@ class CombineResultsAnalyzer:
         )
 
     def analyze_combo(self, *, solver_dir: Path, default_dir: Path, meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Analyze a solver/default combo and return summary row.
+        """
         solver_csv = solver_dir / self.args.results_csv
         default_csv = default_dir / self.args.results_csv
 
@@ -360,6 +387,9 @@ class CombineResultsAnalyzer:
         }
 
     def run(self) -> None:
+        """
+        Main runner.
+        """
         solver_root = (self.args.results_root / self.args.solver_dir).resolve()
         default_root = (self.args.results_root / self.args.default_dir).resolve()
         out_dir = self.args.out_dir.resolve()

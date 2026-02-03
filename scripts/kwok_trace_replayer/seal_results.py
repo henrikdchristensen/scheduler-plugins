@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# scripts/kwok_trace_replayer/seal_results.py
+# seal_results.py
 """
 python -m scripts.kwok_trace_replayer.seal_results
 """

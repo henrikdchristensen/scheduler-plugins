@@ -1,0 +1,17 @@
+\begin{tabular}{l c c c c c c c c}
+\toprule
+ & \multicolumn{4}{c}{\#nodes = 16} & \multicolumn{4}{c}{\#nodes = 32} \\
+ & 2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & 322 & 220 & 159 & 117 & 266 & 201 & 151 & 109 \\
+\makecell[l]{Scheduling-failure (non-blocking)} & 312 & 226 & 157 & 119 & 272 & 183 & 152 & 119 \\
+\makecell[l]{Periodic (blocking), 8s interval} & 39 & 44 & 45 & 54 & 51 & 56 & 74 & 67 \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & 38 & 45 & 43 & 52 & 48 & 59 & 69 & 68 \\
+\makecell[l]{Periodic (blocking), 32s interval} & 6 & 11 & 12 & 18 & 7 & 14 & 23 & 35 \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & 7 & 10 & 15 & 19 & 8 & 14 & 29 & 35 \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & 304 & 244 & 206 & 147 & 346 & 279 & 220 & 177 \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & 298 & 254 & 192 & 175 & 340 & 276 & 230 & 163 \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & 50 & 69 & 62 & 81 & 92 & 96 & 116 & 107 \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & 51 & 68 & 65 & 88 & 86 & 96 & 104 & 103 \\
+\bottomrule
+\end{tabular}

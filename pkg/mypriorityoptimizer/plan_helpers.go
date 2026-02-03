@@ -1052,8 +1052,7 @@ var (
 	onPlanCompletedHook           func(pl *SharedState, status PlanStatus, ap *ActivePlan)
 	exportPlanToConfigMapHook     func(pl *SharedState, ctx context.Context, name string, sp *StoredPlan) error
 	markPlanStatusToConfigMapHook func(pl *SharedState, ctx context.Context, planCM string, status PlanStatus) bool
-
-	activatePods = func(pl *SharedState, toAct map[string]*v1.Pod) {
+	activatePods                  = func(pl *SharedState, toAct map[string]*v1.Pod) {
 		pl.Handle.Activate(klog.Background(), toAct)
 	}
 )

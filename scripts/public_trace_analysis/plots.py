@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-# scripts/public_trace_analysis/plots.py
-
-# ----------------------------------------------------------------------
-# Examples:
-#   python -m scripts.public_trace_analysis.plots --layout datasets-cols
-#   python -m scripts.public_trace_analysis.plots --layout datasets-rows
-# ----------------------------------------------------------------------
+# plots.py
+"""
+python -m scripts.public_trace_analysis.plots --layout datasets-cols
+or
+python -m scripts.public_trace_analysis.plots --layout datasets-rows
+"""
 
 import argparse
 from typing import Dict, Any, List
@@ -101,8 +100,8 @@ BASE_PLOT_SPECS = [
         "log_y": True,
         "y_min": 1e-6,
         "y_max": 1e-1,
-        "x_max": 4_000.0,       # after scaling
-        "scale": 1e-6,          # µs → seconds
+        "x_max": 4_000.0,    # after scaling
+        "scale": 1e-6,       # µs → seconds
         "fit_pareto": False,
     },
     {
@@ -234,19 +233,15 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
 
         for row_idx, col_name in enumerate(metric_columns):
-            base_spec = base_by_col[col_name]
             for col_idx, ds_info in enumerate(loaded):
                 ax = axes[row_idx, col_idx]
                 df = ds_info["df"]
                 spec = ds_info["specs_by_col"][col_name]
-
                 if col_name not in df.columns:
                     ax.axis("off")
                     continue
-
                 data = df[col_name].to_numpy()
                 y_label = spec["y_label"] if col_idx == 0 else ""
-
                 _draw_cell(ax, col_name, data, spec, y_label)
 
         for col_idx, ds_info in enumerate(loaded):
@@ -266,17 +261,13 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
 
             for col_idx, col_name in enumerate(metric_columns):
                 ax = axes[row_idx, col_idx]
-
                 if col_name not in df.columns:
                     ax.axis("off")
                     continue
-
                 spec = specs_by_col[col_name]
                 data = df[col_name].to_numpy()
                 y_label = spec["y_label"] if col_idx == 0 else ""
-
                 _draw_cell(ax, col_name, data, spec, y_label)
-
                 if col_idx == 0:
                     ax.text(
                         -0.33, 0.5, ds_name,
@@ -287,14 +278,12 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
                         fontsize=PLOT_TITLE_FONTSIZE,
                         fontweight="bold",
                     )
-
     fig.tight_layout(
         rect=(0.01, 0.01, 0.99, 0.99),
         pad=0.3,
         w_pad=0.4,
         h_pad=0.4,
     )
-
     out_dir = out_dir.rstrip("/") + "/"
     fig.savefig(out_dir + "public_trace_histograms.png", dpi=300, bbox_inches="tight")
     fig.savefig(out_dir + "public_trace_histograms.pdf", bbox_inches="tight")

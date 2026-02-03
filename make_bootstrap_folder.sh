@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Run as: ./make_bootstrap_folder.sh
 
 ENV_FILE="opt-prio.env"
 echo "Loading versions from ${ENV_FILE}..."

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Can be run as: ./run_tests.sh [all|unit_py|unit_go|unit_all|int_kwok|integration]
 
 # Load environment variables
 ENV_FILE="opt-prio.env"

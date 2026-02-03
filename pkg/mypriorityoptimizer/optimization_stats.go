@@ -145,7 +145,7 @@ func (pl *SharedState) addOptimizationStatsDelta(ctx context.Context, d Optimiza
 	return fmt.Errorf("optimization-stats update: too many conflicts")
 }
 
-// Test hook (optional)
+// Test hook
 var (
 	persistOptimizationStatsHook func(pl *SharedState, ctx context.Context, d OptimizationStatsDelta) error
 )

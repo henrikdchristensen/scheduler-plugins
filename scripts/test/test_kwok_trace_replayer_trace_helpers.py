@@ -6,7 +6,6 @@ import pytest
 
 from scripts.kwok_trace_replayer import trace_helpers as th
 
-
 # ---------------------------------------------------------------------------
 # estimate_pareto_params
 # ---------------------------------------------------------------------------
@@ -28,7 +27,6 @@ def test_estimate_pareto_params_returns_positive_estimates(pos_data: np.ndarray)
     assert alpha > 0
     assert x_min > 0
 
-
 @pytest.mark.parametrize(
     "b_hat,scale_hat",
     [
@@ -40,14 +38,11 @@ def test_estimate_pareto_params_returns_positive_estimates(pos_data: np.ndarray)
 )
 def test_estimate_pareto_params_returns_none_on_invalid(monkeypatch, b_hat: float, scale_hat: float):
     calls = {"floc": None}
-
     def fake_fit(data, *args, **kwargs):
         calls["floc"] = kwargs.get("floc", None)
         # SciPy returns: (shape=b_hat, loc, scale)
         return (b_hat, 0.0, scale_hat)
-
     monkeypatch.setattr(th.pareto_dist, "fit", fake_fit)
-
     pos_data = np.array([1.0, 2.0, 3.0], dtype=float)
     assert th.estimate_pareto_params(pos_data) is None
     assert calls["floc"] == 0.0

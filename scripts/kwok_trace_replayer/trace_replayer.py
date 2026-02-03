@@ -28,7 +28,7 @@ from scripts.helpers.kubectl_helpers import (
 from scripts.helpers.kwokctl_helpers import (
     yaml_kwok_rs, create_kwok_nodes, ensure_kwok_cluster, kwok_pods_cap, merge_kwokctl_envs, save_kwok_scheduler_logs,
 )
-from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
+from scripts.kwok_trace_replayer.trace_helpers import TraceRecord, rs_prefix_from_pod_name
 
 # ---------------------------------------------------------------------
 # Constants
@@ -37,7 +37,6 @@ from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 MAX_REPLAY_WORKERS = 5 # max concurrent kubectl apply/delete calls during replay
 LOGGER_NAME = "trace-replayer" # logger name
 LOG = logging.getLogger(LOGGER_NAME) # module logger
-from scripts.kwok_trace_replayer.trace_helpers import TraceRecord, rs_prefix_from_pod_name
 
 # Plugin-exported optimization stats
 OPT_STATS_NS = "kube-system"
@@ -573,8 +572,8 @@ class TraceReplayer:
         # If no trace_time_s, derive from max end_time of trace pods.
         if effective_trace_time_s <= 0.0 and self.trace_pods:
             t_max = 0.0 # max end_time from trace pods
-            for p in self.trace_pods:
-                t_max = max(t_max, float(p.end_time))
+            for pod in self.trace_pods:
+                t_max = max(t_max, float(pod.end_time))
             effective_trace_time_s = float(t_max)
         # Replay end time is start_delay + effective_trace_time_s
         replay_end_s = start_delay + effective_trace_time_s
@@ -582,28 +581,28 @@ class TraceReplayer:
 
         # Initial pods are created up-front by apply_initial_pods().
         # Schedule their deletions here so they don't persist forever.
-        for p in self.initial_pods:
-            end_t = float(p.end_time)
+        for pod in self.initial_pods:
+            end_t = float(pod.end_time)
             # Only schedule deletes that happen within the replay horizon.
             if end_t <= replay_end_s:
-                events.append(Event(sim_time_s=end_t, kind="delete", record_id=p.id))
+                events.append(Event(sim_time_s=end_t, kind="delete", record_id=pod.id))
         # Trace pods: schedule creates and deletes within horizon.
-        for p in self.trace_pods:
-            cpu_m = max(1, int(round(p.cpu * self.node_cpu_m)))
-            mem_b = max(1, int(round(p.mem * self.node_mem_b)))
+        for pod in self.trace_pods:
+            cpu_m = max(1, int(round(pod.cpu * self.node_cpu_m)))
+            mem_b = max(1, int(round(pod.mem * self.node_mem_b)))
             cpu_str = qty_to_mcpu_str(cpu_m)
             mem_str = qty_to_bytes_str(mem_b)
-            pc_name = f"p{int(p.priority)}"
-            replicas = max(1, int(getattr(p, "replicas", 1)))
+            pc_name = f"p{int(pod.priority)}"
+            replicas = max(1, int(getattr(pod, "replicas", 1)))
 
             # Only create if within horizon
-            create_t = start_delay + float(p.start_time)
+            create_t = start_delay + float(pod.start_time)
             if create_t <= replay_end_s:
                 events.append(
                     Event(
                         sim_time_s=create_t,
                         kind="create",
-                        record_id=p.id,
+                        record_id=pod.id,
                         cpu_str=cpu_str,
                         mem_str=mem_str,
                         pc_name=pc_name,
@@ -612,9 +611,9 @@ class TraceReplayer:
                 )
 
             # Only delete if within horizon
-            delete_t = start_delay + float(p.end_time)
+            delete_t = start_delay + float(pod.end_time)
             if delete_t <= replay_end_s:
-                events.append(Event(sim_time_s=delete_t, kind="delete", record_id=p.id))
+                events.append(Event(sim_time_s=delete_t, kind="delete", record_id=pod.id))
 
         # At identical timestamps, process deletes first to free capacity and
         # for determinism.
@@ -648,15 +647,15 @@ class TraceReplayer:
         futures: List[Future] = []
 
         try:
-            for p in self.initial_pods:
-                cpu_m = max(1, int(round(p.cpu * self.node_cpu_m)))
-                mem_b = max(1, int(round(p.mem * self.node_mem_b)))
+            for pod in self.initial_pods:
+                cpu_m = max(1, int(round(pod.cpu * self.node_cpu_m)))
+                mem_b = max(1, int(round(pod.mem * self.node_mem_b)))
                 cpu_str = qty_to_mcpu_str(cpu_m)
                 mem_str = qty_to_bytes_str(mem_b)
-                pc_name = f"p{int(p.priority)}"
-                replicas = max(1, int(getattr(p, "replicas", 1)))
+                pc_name = f"p{int(pod.priority)}"
+                replicas = max(1, int(getattr(pod, "replicas", 1)))
 
-                rs_name = self.rs_name_for_record(p.id)
+                rs_name = self.rs_name_for_record(pod.id)
                 yaml_text = yaml_kwok_rs(
                     ns=namespace,
                     rs_name=rs_name,
@@ -668,7 +667,7 @@ class TraceReplayer:
                 LOG.info(
                     "INITIAL CREATE: rs=%s (id=%d) replicas=%d cpu=%s mem=%s pc=%s",
                     rs_name,
-                    p.id,
+                    pod.id,
                     replicas,
                     cpu_str,
                     mem_str,
@@ -815,7 +814,7 @@ class TraceReplayer:
             return False, None
         except subprocess.CalledProcessError as e:
             raw = getattr(e, "output", None) or getattr(e, "stdout", None) or b""
-            tail = raw.decode("utf-8", "replace")[-1200:]
+            tail = raw.decode("utf-8", "replace")[-1200:] # last 1200 chars
             LOG.debug("opt-stats: kubectl failed: rc=%s output_tail=%r", getattr(e, "returncode", None), tail)
             return False, None
         except Exception as e:
@@ -835,6 +834,7 @@ class TraceReplayer:
         except Exception:
             pass
 
+        # Write to local file, creating parent dirs as needed
         try:
             self.optimization_stats_path.parent.mkdir(parents=True, exist_ok=True)
             self.optimization_stats_path.write_text(raw.strip() + "\n", encoding="utf-8")
@@ -879,10 +879,10 @@ class TraceReplayer:
             # are either Running or Pending
             if phase in ("Running", "Pending"):
                 containers = spec.get("containers", []) or []
-                for c in containers:
-                    res = (c.get("resources") or {}).get("requests", {}) or {}
-                    cpu_q = res.get("cpu")
-                    mem_q = res.get("memory")
+                for container in containers:
+                    resources = (container.get("resources") or {}).get("requests", {}) or {}
+                    cpu_q = resources.get("cpu")
+                    mem_q = resources.get("memory")
                     cpu_m = qty_to_mcpu_int(cpu_q)
                     mem_b = qty_to_bytes_int(mem_q)
                     total_cpu_req_m += cpu_m
@@ -904,16 +904,16 @@ class TraceReplayer:
         Return pod status.startTime as epoch seconds (or None).
         """
         status = pod.get("status", {}) or {}
-        st = status.get("startTime")
-        return parse_rfc3339_to_epoch(st) if isinstance(st, str) else None
+        start_time = status.get("startTime")
+        return parse_rfc3339_to_epoch(start_time) if isinstance(start_time, str) else None
 
     def pod_creation_time(self, pod: Dict[str, Any]) -> Optional[float]:
         """
         Return pod metadata.creationTimestamp as epoch seconds (or None).
         """
         meta = pod.get("metadata", {}) or {}
-        ts = meta.get("creationTimestamp")
-        return parse_rfc3339_to_epoch(ts) if isinstance(ts, str) else None
+        creation_time = meta.get("creationTimestamp")
+        return parse_rfc3339_to_epoch(creation_time) if isinstance(creation_time, str) else None
 
     def monitor_loop(
         self,
@@ -943,8 +943,8 @@ class TraceReplayer:
         # later.
         prev_live_uids: set[str] = set()
         prev_phase_by_uid: Dict[str, str] = {}
-        eligible_uids: set[str] = set()  # UIDs eligible to be counted deleted (must have been Running)
-        uid_to_prio: Dict[str, int] = {}  # last known prio for that uid (best-effort)
+        eligible_uids: set[str] = set()   # UIDs eligible to be counted deleted (must have been running)
+        uid_to_prio: Dict[str, int] = {}  # last known prio for that uid
         deletions_cum_by_prio: Dict[int, int] = {p: 0 for p in range(1, self.max_prio + 1)}
         with open(general_csv, "w", encoding="utf-8", newline="") as f_ts, open(
             pod_stats_csv, "w", encoding="utf-8", newline=""
@@ -954,24 +954,24 @@ class TraceReplayer:
 
             # general_stats.csv header
             header = ["timestamp", "time_s", "cpu_run_util", "mem_run_util", "cpu_req_util", "mem_req_util"]
-            for p in range(1, self.max_prio + 1):
-                header.append(f"running_p{p}")
-            for p in range(1, self.max_prio + 1):
-                header.append(f"unsched_p{p}")
+            for prio in range(1, self.max_prio + 1):
+                header.append(f"running_p{prio}")
+            for prio in range(1, self.max_prio + 1):
+                header.append(f"unsched_p{prio}")
 
             # cumulative deletions per priority
-            for p in range(1, self.max_prio + 1):
-                header.append(f"deletions_cum_p{p}")
+            for prio in range(1, self.max_prio + 1):
+                header.append(f"deletions_cum_p{prio}")
 
             timestamp_writer.writerow(header)
 
             # pod_stats.csv header
             pod_stats_writer.writerow(["timestamp", "event", "pod_name", "pod_uid", "priority", "time_s"])
 
-            # Don't force an immediate opt-stats dump on startup.
+            # Initial dump of optimization stats
             last_opt_dump_s = float(self.time_s())
 
-            # monitoring loop
+            # Monitoring loop
             while not stop_event.is_set():
                 loop_start = float(self.clock.time())
                 now_ts = get_timestamp()
@@ -1025,26 +1025,26 @@ class TraceReplayer:
                     if uid not in eligible_uids:
                         continue
                     if prev_phase_by_uid.get(uid) == "Running" and cur_phase_by_uid.get(uid) == "Pending":
-                        p = int(uid_to_prio.get(uid, 0))
-                        if p in delta_by_prio:
-                            delta_by_prio[p] += 1
+                        prio = int(uid_to_prio.get(uid, 0))
+                        if prio in delta_by_prio:
+                            delta_by_prio[prio] += 1
                         eligible_uids.discard(uid)
 
-                # Count + cleanup: if a previously-running UID disappears from the pod list,
-                # treat it as a deletion event.
+                # Count + cleanup: if a previously-running UID disappears from
+                # the pod list, treat it as a deletion event.
                 gone = prev_live_uids - cur_live_uids
                 if gone:
                     for uid in gone:
                         if uid in eligible_uids and prev_phase_by_uid.get(uid) == "Running":
-                            p = int(uid_to_prio.get(uid, 0))
-                            if p in delta_by_prio:
-                                delta_by_prio[p] += 1
+                            prio = int(uid_to_prio.get(uid, 0))
+                            if prio in delta_by_prio:
+                                delta_by_prio[prio] += 1
                         eligible_uids.discard(uid)
                         prev_phase_by_uid.pop(uid, None)
                         uid_to_prio.pop(uid, None)
 
-                for p in range(1, self.max_prio + 1):
-                    deletions_cum_by_prio[p] += delta_by_prio[p]
+                for prio in range(1, self.max_prio + 1):
+                    deletions_cum_by_prio[prio] += delta_by_prio[prio]
 
                 prev_live_uids = cur_live_uids
                 prev_phase_by_uid = cur_phase_by_uid
@@ -1059,12 +1059,12 @@ class TraceReplayer:
                     f"{cpu_req_util:.6f}",
                     f"{mem_req_util:.6f}",
                 ]
-                for p in range(1, self.max_prio + 1):
-                    row.append(str(int(running_by_prio.get(p, 0))))
-                for p in range(1, self.max_prio + 1):
-                    row.append(str(int(pending_by_prio.get(p, 0))))
-                for p in range(1, self.max_prio + 1):
-                    row.append(str(int(deletions_cum_by_prio.get(p, 0))))
+                for prio in range(1, self.max_prio + 1):
+                    row.append(str(int(running_by_prio.get(prio, 0))))
+                for prio in range(1, self.max_prio + 1):
+                    row.append(str(int(pending_by_prio.get(prio, 0))))
+                for prio in range(1, self.max_prio + 1):
+                    row.append(str(int(deletions_cum_by_prio.get(prio, 0))))
 
                 timestamp_writer.writerow(row)
                 f_ts.flush()
@@ -1201,7 +1201,7 @@ class TraceReplayer:
             )
             monitor_thread.start()
 
-            # 3) Replay trace aligned so sim_time 0 happens at trace_start_wall
+            # 3) Replay trace so that sim_time_s=0 aligns with trace_start_wall
             self.replay_trace_events(namespace=self.args.namespace, trace_start_wall=trace_start_wall)
 
         # 4) Cleanup
@@ -1237,15 +1237,14 @@ class TraceReplayer:
         for run_dir in run_dirs:
             if multi_seed:
                 seed_name = run_dir.name
-                
-                # Skip seeds in SKIP_SEEDS
+                # Skip seeds if SKIP_SEEDS contains any matching numeric seed numbers
                 try:
                     seed_num = int(seed_name.replace("seed-", ""))
                     if seed_num in SKIP_SEEDS:
                         LOG.info("Skipping seed %d (in SKIP_SEEDS)", seed_num)
                         continue
                 except ValueError:
-                    pass  # Not a numeric seed, proceed normally
+                    pass # non-numeric seed name; proceed normally
                 
                 run_result_dir = base_results_dir / seed_name
                 header, footer = make_header_footer(f"SEED RUN {seed_name}")

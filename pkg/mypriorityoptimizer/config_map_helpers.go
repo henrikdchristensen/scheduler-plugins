@@ -195,7 +195,6 @@ func (d ConfigMapDoc) readJson(
 ) (raw []byte, found bool, err error) {
 	// get config map
 	cm, err := nsLister.Get(d.Name)
-
 	// NotFound => treat as missing (no error)
 	if apierrors.IsNotFound(err) {
 		return nil, false, nil
@@ -206,7 +205,6 @@ func (d ConfigMapDoc) readJson(
 	if cm == nil {
 		return nil, false, nil
 	}
-
 	// get data key
 	return []byte(cm.Data[d.DataKey]), true, nil
 }
@@ -228,13 +226,11 @@ func mutateJson[T any](
 	if err != nil || !found {
 		return err // no-op on missing, propagate error
 	}
-
 	// unmarshal existing array
 	var arr []T
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &arr)
 	}
-
 	// mutate
 	out, err := f(arr)
 	if err != nil || out == nil { // allow nil => “no change”
@@ -259,13 +255,11 @@ func (d ConfigMapDoc) mutateRaw(
 	if err != nil || !found {
 		return err // missing => no-op
 	}
-
 	// Mutate
 	newRaw, err := mutate(raw)
 	if err != nil || newRaw == nil {
 		return err // nil => no-op
 	}
-
 	// Patch back
 	return d.patchDataString(ctx, cms, string(newRaw))
 }

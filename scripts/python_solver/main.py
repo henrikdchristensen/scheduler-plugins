@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#main.py
+# main.py
 
 import time, sys, json
 from dataclasses import dataclass

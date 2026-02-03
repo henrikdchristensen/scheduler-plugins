@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # test_runner.py
+"""
+python -m scripts.kwok_workload_once.test_runner --job-file <job-file.yaml>
+"""
 
 import sys, shutil, argparse, math, time, random, csv, json, logging, yaml, subprocess, traceback, shlex
 from argparse import BooleanOptionalAction

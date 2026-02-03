@@ -27,7 +27,6 @@ CSV_COLUMNS = [
     "best_solver_score",
 ]
 
-
 def _write_results_csv(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -35,11 +34,6 @@ def _write_results_csv(path: Path, rows: list[dict]) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({k: row.get(k, "") for k in CSV_COLUMNS})
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # rate
@@ -61,7 +55,6 @@ def test_rate(num, den, expect_nan: bool, expect_value: float | None):
     else:
         assert got == expect_value
 
-
 # ---------------------------------------------------------------------------
 # parse_solver_dirname
 # ---------------------------------------------------------------------------
@@ -69,7 +62,6 @@ def test_rate(num, den, expect_nan: bool, expect_value: float | None):
 def test_parse_solver_dirname_invalid_returns_none():
     assert cr.parse_solver_dirname("not-a-match") is None
     assert cr.parse_solver_dirname("") is None
-
 
 def test_parse_solver_dirname_valid_extracts_meta():
     meta = cr.parse_solver_dirname("nodes2_pods10_prio3_util050_timeout10")
@@ -82,7 +74,6 @@ def test_parse_solver_dirname_valid_extracts_meta():
     assert meta["pods_per_node"] == 5
     assert meta["default_dirname"] == "nodes2_pods10_prio3_util050"
 
-
 # ---------------------------------------------------------------------------
 # load_csv
 # ---------------------------------------------------------------------------
@@ -90,7 +81,6 @@ def test_parse_solver_dirname_valid_extracts_meta():
 def test_load_csv_missing_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         cr.load_csv(tmp_path / "does-not-exist.csv")
-
 
 def test_load_csv_renames_and_converts(tmp_path: Path):
     p = tmp_path / "results.csv"
@@ -115,8 +105,8 @@ def test_load_csv_renames_and_converts(tmp_path: Path):
     df = cr.load_csv(p)
 
     # renamed columns exist
-    for c in ["seed", "util_run_cpu", "util_run_mem", "solver_status", "solver_duration_ms", "placed_by_prio"]:
-        assert c in df.columns
+    for col in ["seed", "util_run_cpu", "util_run_mem", "solver_status", "solver_duration_ms", "placed_by_prio"]:
+        assert col in df.columns
 
     # conversions
     assert df.loc[0, "seed"] == "s1"
@@ -129,13 +119,8 @@ def test_load_csv_renames_and_converts(tmp_path: Path):
     assert isinstance(df.loc[0, "placed_by_prio"], str)
     assert df.loc[0, "placed_by_prio"].startswith("{") and df.loc[0, "placed_by_prio"].endswith("}")
 
-
 # ---------------------------------------------------------------------------
-# CombineResultsAnalyzer
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# format_num (now in data_helpers)
+# format_num
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -149,7 +134,6 @@ def test_load_csv_renames_and_converts(tmp_path: Path):
 def test_format_num(value: float, decimals: int | None, expected):
     got = format_num(value, decimals)
     assert got == expected
-
 
 # ---------------------------------------------------------------------------
 # _split_default_all_running
@@ -166,7 +150,6 @@ def test_split_default_all_running_splits_rows():
     assert mask.tolist() == [True, False, True]
     assert not_all["seed"].tolist() == ["b"]
 
-
 # ---------------------------------------------------------------------------
 # _status_flags
 # ---------------------------------------------------------------------------
@@ -177,7 +160,6 @@ def test_status_flags_optimal_feasible_ok():
     assert is_opt.tolist() == [True, False, False, False]
     assert is_feas.tolist() == [False, True, False, False]
     assert is_ok.tolist() == [True, True, False, False]
-
 
 # ---------------------------------------------------------------------------
 # _placement_flags
@@ -190,7 +172,6 @@ def test_placement_flags_equal_better_worse():
     assert better.tolist() == [False, True, False, True, False]
     assert worse.tolist() == [False, False, True, False, True]
 
-
 # ---------------------------------------------------------------------------
 # _solver_called_count
 # ---------------------------------------------------------------------------
@@ -198,7 +179,6 @@ def test_placement_flags_equal_better_worse():
 def test_solver_called_count_sums_int_flags():
     df = pd.DataFrame({"solver_called": [0, 1, 1, 0]})
     assert cr.CombineResultsAnalyzer._solver_called_count(df) == 2
-
 
 # ---------------------------------------------------------------------------
 # _compute_category_counts
@@ -222,7 +202,6 @@ def test_compute_category_counts_empty_df_uses_denominator_one():
     assert counts.n_default_all_running == 0
     assert counts.default_all_running_rate == 0.0
     assert counts.other_rate == 1.0
-
 
 # ---------------------------------------------------------------------------
 # default_vs_solver_per_seed
@@ -290,7 +269,6 @@ def test_default_vs_solver_per_seed_and_category_counts(tmp_path: Path):
             "best_solver_duration_ms": "",
         },
     ]
-
     default_rows = [
         {
             "seed": "s_all",
@@ -367,7 +345,6 @@ def test_default_vs_solver_per_seed_and_category_counts(tmp_path: Path):
     assert counts.n_solver_improve == 2
     assert counts.n_other == 0
 
-
 # ---------------------------------------------------------------------------
 # CombineResultsAnalyzer.analyze_combo / run
 # ---------------------------------------------------------------------------
@@ -406,7 +383,6 @@ def test_analyze_combo_skips_missing_dirs_and_files(tmp_path: Path, capsys):
     assert analyzer.analyze_combo(solver_dir=solver_dir, default_dir=default_dir, meta=meta) is None
     out = capsys.readouterr().out
     assert "default results.csv missing" in out
-
 
 def test_analyze_combo_emits_warn_branches_when_patched(tmp_path: Path, capsys, monkeypatch):
     # Minimal valid directory structure
@@ -489,7 +465,6 @@ def test_analyze_combo_emits_warn_branches_when_patched(tmp_path: Path, capsys, 
     assert "rates sum > 1.00" in out
     assert "category counts sum" in out
 
-
 def test_analyze_combo_emits_warn_rate_sum_lt_zero_when_patched(tmp_path: Path, capsys, monkeypatch):
     # Minimal valid directory structure
     solver_dir = tmp_path / "solver" / "nodes1_pods1_prio1_util050_timeout10"
@@ -571,7 +546,6 @@ def test_analyze_combo_emits_warn_rate_sum_lt_zero_when_patched(tmp_path: Path, 
     assert "rates sum < 0.00" in out
     assert "category counts sum" in out
 
-
 def test_run_writes_per_combo_csv_and_skips_bad_folder(tmp_path: Path, capsys):
     results_root = tmp_path / "results"
     solver_root = results_root / "solver"
@@ -635,7 +609,6 @@ def test_run_writes_per_combo_csv_and_skips_bad_folder(tmp_path: Path, capsys):
     assert "config_dir" in text
     assert "nodes1_pods1_prio1_util050_timeout10" in text
 
-
 # ---------------------------------------------------------------------------
 # build_argparser / main
 # ---------------------------------------------------------------------------
@@ -647,7 +620,6 @@ def test_main_parses_args_and_decimals_disable(tmp_path: Path, monkeypatch):
         seen["args"] = self.args
 
     monkeypatch.setattr(cr.CombineResultsAnalyzer, "run", fake_run)
-
     cr.main(
         [
             "--results-root",
@@ -662,7 +634,6 @@ def test_main_parses_args_and_decimals_disable(tmp_path: Path, monkeypatch):
             "-1",
         ]
     )
-
     assert "args" in seen
     assert seen["args"].results_root == tmp_path
     assert seen["args"].decimals is None

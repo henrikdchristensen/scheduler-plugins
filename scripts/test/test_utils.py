@@ -5,7 +5,7 @@ import io, logging, subprocess
 from typing import IO, Optional, Tuple, Callable, List
 
 # ---------------------------------------------------------------------------
-# Lock helpers (for testing thread-safe code)
+# Lock helpers
 # ---------------------------------------------------------------------------
 
 # A no-op lock for testing that doesn't actually lock
@@ -24,7 +24,6 @@ class _NullLock:
 
 null_lock = _NullLock()
 
-
 # ---------------------------------------------------------------------------
 # Time mocking helpers
 # ---------------------------------------------------------------------------
@@ -34,7 +33,6 @@ def time_sequence(values: List[float]) -> Callable[[], float]:
     def _next_time() -> float:
         return next(iterator)
     return _next_time
-
 
 # ---------------------------------------------------------------------------
 # Subprocess mocking helpers
@@ -58,7 +56,6 @@ def make_subprocess_run(
         )
     return _fake_run
 
-
 def make_subprocess_run_seq(
     returncodes: List[int],
     out_bytes: bytes = b"",
@@ -74,11 +71,9 @@ def make_subprocess_run_seq(
         )
     return _fake_run
 
-
 def make_subprocess_check_output(
     out_bytes: bytes = b"",
     *,
-    # Backward-compatible alias used by some tests.
     output: bytes | None = None,
     assert_prefix: Optional[List[str]] = None,
     raises: bool = False,
@@ -94,7 +89,6 @@ def make_subprocess_check_output(
             raise subprocess.CalledProcessError(1, cmd, output=effective)
         return effective
     return _fake_check_output
-
 
 # ---------------------------------------------------------------------------
 # Clock helpers (for testing time-dependent code)
@@ -125,7 +119,6 @@ class TimeController:
         """Manually advance the clock (for test control)"""
         self.current_time += seconds
 
-
 # ---------------------------------------------------------------------------
 # Logger helpers
 # ---------------------------------------------------------------------------
@@ -139,9 +132,7 @@ def make_logger_stream(
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
-
-    # Remove existing handlers to avoid duplicate log lines when called
-    # multiple times across tests.
+    
     for handler in list(logger.handlers):
         logger.removeHandler(handler)
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
+# bootstrap.sh
+# Can be run as: ./bootstrap.sh --content-dir <dir> --runner <test_runner|trace_replayer> --job-file <job-file.yaml>
 set -euo pipefail
 
 ########################## Defaults ##########################
 CONTENT_DIR="${CONTENT_DIR:-/workspace}"
-CONTENT_DIR_WAIT_TIMEOUT_S="${CONTENT_DIR_WAIT_TIMEOUT:-30}" # seconds
+CONTENT_DIR_WAIT_TIMEOUT_S="${CONTENT_DIR_WAIT_TIMEOUT:-30}"  # seconds
 CONTENT_DIR_WAIT_INTERVAL_S="${CONTENT_DIR_WAIT_INTERVAL:-2}" # seconds
 
 PYTHON_SOLVER_OUT_VENV_DIR="/opt/venv"
@@ -15,14 +17,14 @@ RUNNER="${RUNNER:-test_runner}"
 # Shared config
 CLUSTER_NAME="${CLUSTER_NAME:-}"
 KWOK_RUNTIME="${KWOK_RUNTIME:-binary}"  # binary | docker
-JOB_FILE="${JOB_FILE:-}"               # can be relative to CONTENT_DIR
+JOB_FILE="${JOB_FILE:-}"                # can be relative to CONTENT_DIR
 LOG_LEVEL="${LOG_LEVEL:-}"
 CLEAN_START="${CLEAN_START:-}"
 
 # For test_runner
-RESULTS_DIR="${RESULTS_DIR:-}"          # can be relative to CONTENT_DIR
-CONFIG_FILE="${CONFIG_FILE:-}"          # can be relative to CONTENT_DIR
-SEED_FILE="${SEED_FILE:-}"              # can be relative to CONTENT_DIR
+RESULTS_DIR="${RESULTS_DIR:-}" # can be relative to CONTENT_DIR
+CONFIG_FILE="${CONFIG_FILE:-}" # can be relative to CONTENT_DIR
+SEED_FILE="${SEED_FILE:-}"     # can be relative to CONTENT_DIR
 SEED="${SEED:-}"
 RE_RUN_SEEDS="${RE_RUN_SEEDS:-}"
 DEFAULT_SCHEDULER="${DEFAULT_SCHEDULER:-}" # if true, use default kube-scheduler instead of custom one
@@ -33,8 +35,8 @@ SAVE_SOLVER_STATS="${SAVE_SOLVER_STATS:-}"
 SAVE_SCHEDULER_LOGS="${SAVE_SCHEDULER_LOGS:-}"
 
 # For trace_replayer
-TRACE_DIR="${TRACE_DIR:-}"                       # can be relative to CONTENT_DIR
-KWOKCTL_CONFIG_FILE="${KWOKCTL_CONFIG_FILE:-}"  # can be relative to CONTENT_DIR
+TRACE_DIR="${TRACE_DIR:-}"                     # can be relative to CONTENT_DIR
+KWOKCTL_CONFIG_FILE="${KWOKCTL_CONFIG_FILE:-}" # can be relative to CONTENT_DIR
 NODE_CPU="${NODE_CPU:-}"
 NODE_MEM="${NODE_MEM:-}"
 MONITOR_INTERVAL="${MONITOR_INTERVAL:-}"

@@ -9,7 +9,6 @@ from pathlib import Path
 from scripts.test.test_utils import TimeController
 from scripts.kwok_workload_once import test_runner as tr
 
-
 # ---------------------------------------------------------------------------
 # Test Helpers
 # ---------------------------------------------------------------------------
@@ -17,14 +16,12 @@ from scripts.kwok_workload_once import test_runner as tr
 def ns(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**kwargs)
 
-
 def touch_configs(tmp_path: Path) -> tuple[Path, Path]:
     wl = tmp_path / "wl.yaml"
     kw = tmp_path / "kwokctl.yaml"
     wl.write_text("namespace: ns\n", encoding="utf-8")
     kw.write_text("componentsPatches: []\n", encoding="utf-8")
     return wl, kw
-
 
 def applied_cfg(
     *,
@@ -57,7 +54,6 @@ def applied_cfg(
         settle_timeout_max_s=settle_timeout_max_s,
     )
 
-
 # ---------------------------------------------------------------------------
 # build_argparser
 # ---------------------------------------------------------------------------
@@ -77,7 +73,6 @@ def test_build_argparser_parses_minimal_seed_run():
     assert args.workload_config_file == "wl.yaml"
     assert args.kwokctl_config_file == "kwokctl.yaml"
     assert args.seed == 1
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._initialize
@@ -186,7 +181,6 @@ override-kwokctl-envs:
     assert captured["info"]["inputs"]["cli-cmd"] == "CMD"
     assert captured["envs"] == {"X": "1"}
 
-
 def test_initialize_missing_job_file_raises_system_exit(tmp_path):
     ap = tr.build_argparser()
     args = ap.parse_args(
@@ -203,7 +197,6 @@ def test_initialize_missing_job_file_raises_system_exit(tmp_path):
     )
     with pytest.raises(SystemExit):
         tr.TestRunner(args)
-
 
 def test_initialize_job_file_must_be_mapping(tmp_path, monkeypatch):
     job = tmp_path / "job.yaml"
@@ -227,14 +220,12 @@ def test_initialize_job_file_must_be_mapping(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         tr.TestRunner(args)
 
-
 # ---------------------------------------------------------------------------
 # TestRunner.ensure_default_args
 # ---------------------------------------------------------------------------
 
 def test_ensure_default_args_sets_defaults_and_validates_paths(tmp_path):
     wl, kw = touch_configs(tmp_path)
-
     args = ns(
         workload_config_file=str(wl),
         kwokctl_config_file=str(kw),
@@ -245,7 +236,6 @@ def test_ensure_default_args_sets_defaults_and_validates_paths(tmp_path):
         # leave the rest unset on purpose
     )
     out = tr.TestRunner.ensure_default_args(args)
-
     assert out.cluster_name == "kwok1"
     assert out.kwok_runtime == "binary"
     assert out.output_dir == "./output"
@@ -256,7 +246,6 @@ def test_ensure_default_args_sets_defaults_and_validates_paths(tmp_path):
     assert out.default_scheduler is False
     assert out.repeats == 1
     assert out.solver_timeout_ms == 10000
-
 
 @pytest.mark.parametrize(
     "args_kwargs",
@@ -275,11 +264,9 @@ def test_ensure_default_args_rejects_incompatible_seed_args(tmp_path, args_kwarg
         seed_file = tmp_path / "seeds.txt"
         seed_file.write_text("1\n", encoding="utf-8")
         args_kwargs["seed_file"] = str(seed_file)
-
     args = ns(workload_config_file=str(wl), kwokctl_config_file=str(kw), **args_kwargs)
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(args)
-
 
 def test_ensure_default_args_defaults_count_from_seeds_not_all_running(tmp_path):
     wl, kw = touch_configs(tmp_path)
@@ -294,7 +281,6 @@ def test_ensure_default_args_defaults_count_from_seeds_not_all_running(tmp_path)
     out = tr.TestRunner.ensure_default_args(args)
     assert out.count == 3
 
-
 def test_ensure_default_args_requires_a_run_mode(tmp_path):
     wl, kw = touch_configs(tmp_path)
     args = ns(
@@ -308,10 +294,8 @@ def test_ensure_default_args_requires_a_run_mode(tmp_path):
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(args)
 
-
 def test_ensure_default_args_rejects_invalid_seed_and_count_bounds(tmp_path):
     wl, kw = touch_configs(tmp_path)
-
     bad_seed = ns(
         workload_config_file=str(wl),
         kwokctl_config_file=str(kw),
@@ -322,7 +306,6 @@ def test_ensure_default_args_rejects_invalid_seed_and_count_bounds(tmp_path):
     )
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(bad_seed)
-
     bad_count = ns(
         workload_config_file=str(wl),
         kwokctl_config_file=str(kw),
@@ -334,10 +317,8 @@ def test_ensure_default_args_rejects_invalid_seed_and_count_bounds(tmp_path):
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(bad_count)
 
-
 def test_ensure_default_args_validates_seed_file_and_config_paths(tmp_path):
     wl, kw = touch_configs(tmp_path)
-
     args_missing_seedfile = ns(
         workload_config_file=str(wl),
         kwokctl_config_file=str(kw),
@@ -348,7 +329,6 @@ def test_ensure_default_args_validates_seed_file_and_config_paths(tmp_path):
     )
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(args_missing_seedfile)
-
     args_missing_wl = ns(
         workload_config_file=str(tmp_path / "missing-wl.yaml"),
         kwokctl_config_file=str(kw),
@@ -359,7 +339,6 @@ def test_ensure_default_args_validates_seed_file_and_config_paths(tmp_path):
     )
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(args_missing_wl)
-
     args_missing_kw = ns(
         workload_config_file=str(wl),
         kwokctl_config_file=str(tmp_path / "missing-kw.yaml"),
@@ -370,7 +349,6 @@ def test_ensure_default_args_validates_seed_file_and_config_paths(tmp_path):
     )
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(args_missing_kw)
-
 
 def test_ensure_default_args_default_scheduler_rejects_incompatible_flags(tmp_path):
     wl, kw = touch_configs(tmp_path)
@@ -387,7 +365,6 @@ def test_ensure_default_args_default_scheduler_rejects_incompatible_flags(tmp_pa
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(args)
 
-
 def test_ensure_default_args_solver_trigger_requires_binary_runtime(tmp_path):
     wl, kw = touch_configs(tmp_path)
     args = ns(
@@ -403,7 +380,6 @@ def test_ensure_default_args_solver_trigger_requires_binary_runtime(tmp_path):
     )
     with pytest.raises(SystemExit):
         tr.TestRunner.ensure_default_args(args)
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._read_seeds_file
@@ -427,11 +403,9 @@ nope
     seeds = tr.TestRunner._read_seeds_file(p)
     assert seeds == [1, 2, 3]
 
-
 def test_read_seeds_file_missing_raises_value_error(tmp_path):
     with pytest.raises(ValueError):
         tr.TestRunner._read_seeds_file(tmp_path / "missing.txt")
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._parse_config_doc
@@ -456,7 +430,6 @@ def test_parse_config_doc():
     assert cfg.num_nodes == 3
     assert cfg.wait_pod_mode == "ready"
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._validate_workload_config
 # ---------------------------------------------------------------------------
@@ -479,7 +452,6 @@ def test_validate_workload_config_reports_multiple_errors():
     assert "num_pods" in msg
     assert "util" in msg
 
-
 def test_validate_workload_config_ok():
     good = tr.TestConfigRaw(
         namespace="ns",
@@ -494,7 +466,6 @@ def test_validate_workload_config_ok():
     ok, msg = tr.TestRunner._validate_workload_config(good)
     assert ok is True
     assert msg == ""
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._resolve_config_for_seed
@@ -515,7 +486,6 @@ def test_resolve_config_for_seed():
     )
     with pytest.raises(SystemExit):
         runner._resolve_config_for_seed(1)
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._write_info_file
@@ -551,7 +521,6 @@ def test_write_info_file_calls_write_info_file(monkeypatch, tmp_path):
     assert seen["inputs"]["cli-cmd"] == "CMD"
     assert seen["inputs"]["job"] == {"a": 1}
 
-
 def test_write_info_file_logs_warning_on_exception(monkeypatch, tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.output_dir_resolved = tmp_path
@@ -568,7 +537,6 @@ def test_write_info_file_logs_warning_on_exception(monkeypatch, tmp_path):
 
     runner._write_info_file()
     assert seen["warn"] == 1
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._combined_job_configs_seed_str
@@ -588,7 +556,6 @@ def test_combined_job_configs_seed_str():
     assert "kwokctl_config_file=kwok.yaml" in s
     assert "seed_file=seeds.txt" in s
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._record_failure
 # ---------------------------------------------------------------------------
@@ -598,7 +565,6 @@ def test_record_failure(tmp_path):
     runner.suppress_fail_log = True
     runner.failure = None
     runner.failed_f = tmp_path / "failed.tsv"
-
     runner._record_failure("cat", 7, "phase", "msg", details="d")
     assert runner.failure is not None
     assert runner.failure.category == "cat"
@@ -607,7 +573,6 @@ def test_record_failure(tmp_path):
     assert runner.failure.message == "msg"
     assert runner.failure.details == "d"
     assert not runner.failed_f.exists()
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._eta_record_seed_duration
@@ -619,7 +584,6 @@ def test_eta_record_seed_duration(monkeypatch):
     monkeypatch.setattr(tr.time, "time", lambda: 100.0)
     runner._eta_record_seed_duration(started_at=90.0)
     assert runner.seed_durations == [10.0]
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._eta_estimation
@@ -634,14 +598,12 @@ def test_eta_estimation_returns_none_when_unknown_or_no_samples():
     assert runner._eta_estimation(1, -1) is None
     assert runner._eta_estimation(1, 0) is None
 
-
 def test_eta_estimation_returns_epoch(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.seed_durations = [2.0, 4.0]  # avg = 3s
     monkeypatch.setattr(tr.time, "time", lambda: 100.0)
     # seed_idx=3 => done=2 => left=8 (for total=10) => eta=100+8*3
     assert runner._eta_estimation(3, 10) == 124.0
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._eta_write_file
@@ -659,7 +621,6 @@ def test_eta_write_file(tmp_path):
     runner.output_dir_resolved = out
     runner.args = ns(seeds_not_all_running=5)
     runner.saved_not_all_running = 2  # left = 3
-
     runner._eta_write_file(eta_epoch=1234567890.0, seed_idx=3, seeds_total=10)
 
     # old markers removed, exactly one new marker should exist
@@ -684,7 +645,6 @@ def test_eta_write_file(tmp_path):
     assert payload2["eta_epoch"] is None
     assert payload2["seeds_total"] == -1
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._eta_summary
 # ---------------------------------------------------------------------------
@@ -706,7 +666,6 @@ def test_eta_summary(monkeypatch):
     runner.saved_not_all_running = 1
     monkeypatch.setattr(runner, "_eta_estimation", lambda *_a, **_k: None)
     runner._eta_summary(next_seed_idx=2, seeds_total=10)
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._eta_update_marker
@@ -730,7 +689,6 @@ def test_eta_update_marker(monkeypatch, tmp_path):
     assert called["n"] == 1
     assert called["got"] == (111.0, 2, 5)
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._parse_waits
 # ---------------------------------------------------------------------------
@@ -748,7 +706,6 @@ def test_parse_waits():
     assert pod_to == 3
     assert settle_min == 2
     assert settle_max == 0
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._get_wait_pod_mode_from_dict
@@ -772,11 +729,9 @@ def test_get_wait_pod_mode_from_dict(raw, expected):
     else:
         assert tr.TestRunner._get_wait_pod_mode_from_dict(doc, "wait_pod_mode", None) == expected
 
-
 def test_get_wait_pod_mode_from_dict_invalid_raises():
     with pytest.raises(ValueError):
         tr.TestRunner._get_wait_pod_mode_from_dict({"wait_pod_mode": "bogus"}, "wait_pod_mode", None)
-
 
 # ---------------------------------------------------------------------------
 # TestRunner.merge_job_fields_into_args
@@ -833,7 +788,6 @@ def test_merge_job_fields_into_args():
     assert overrides["workload_config"] == {"namespace": "ns"}
     assert overrides["kwokctl_envs"] == [{"name": "X", "value": "1"}]
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._get_kwokctl_envs
 # ---------------------------------------------------------------------------
@@ -855,7 +809,6 @@ def test_get_kwokctl_envs():
     envs = tr.TestRunner._get_kwokctl_envs(doc, component="kube-scheduler")
     assert envs == {"A": "1", "B": "2", "EMPTY": None, "NOVAL": None}
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._record_seed_outcome
 # ---------------------------------------------------------------------------
@@ -864,7 +817,6 @@ def test_record_seed_outcome(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.seeds_all_running_f = tmp_path / "all.txt"
     runner.seeds_not_all_running_f = tmp_path / "notall.txt"
-
     runner._record_seed_outcome(seed=7, all_running=True)
     assert runner.seeds_all_running_f.read_text(encoding="utf-8") == "7\n"
 
@@ -883,7 +835,6 @@ def test_record_seed_outcome(tmp_path, monkeypatch):
     runner._record_seed_outcome(seed=8, all_running=False)
     assert warned["n"] >= 1
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._prepare_output_dir
 # ---------------------------------------------------------------------------
@@ -900,7 +851,6 @@ def test_prepare_output_dir(tmp_path):
     assert resolved.exists()
     assert resolved.is_dir()
     assert not (resolved / "old.txt").exists()
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._append_result_csv
@@ -924,7 +874,6 @@ def test_append_result_csv_rerun_seeds_removes_old_rows(tmp_path):
     seeds = [r.get("seed") for r in rows]
     assert seeds.count("5") == 1
     assert "6" in seeds
-
 
 def test_append_result_csv_prune_failure_logs_warning(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -958,7 +907,6 @@ def test_append_result_csv_prune_failure_logs_warning(tmp_path, monkeypatch):
     assert warned["n"] >= 1
     assert appended["n"] == 1
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._purge_mismatched_results_csv
 # ---------------------------------------------------------------------------
@@ -974,7 +922,6 @@ def test_purge_mismatched_results_csv_deletes_when_clean_start(tmp_path):
     assert deleted is True
     assert not p.exists()
 
-
 def test_purge_mismatched_results_csv_does_not_delete_without_clean_start(tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.args = ns(clean_start=False)
@@ -986,7 +933,6 @@ def test_purge_mismatched_results_csv_does_not_delete_without_clean_start(tmp_pa
     assert deleted is False
     assert p.exists()
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._load_seen_results_csv
 # ---------------------------------------------------------------------------
@@ -997,7 +943,6 @@ def test_load_seen_results_csv(tmp_path):
     runner.results_f.write_text("seed\nnotint\n", encoding="utf-8")
     seen = runner._load_seen_results_csv()
     assert seen == set()
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._extract_best_attempt_fields
@@ -1013,7 +958,6 @@ def test_extract_best_attempt_fields_extracts_values():
     assert dur == 7
     assert status == "FAIL"
 
-
 def test_extract_best_attempt_fields_handles_missing_or_invalid():
     # invalid attempts
     score, dur, status = tr.TestRunner._extract_best_attempt_fields("b", attempts=[])
@@ -1028,7 +972,6 @@ def test_extract_best_attempt_fields_handles_missing_or_invalid():
     score, dur, status = tr.TestRunner._extract_best_attempt_fields("b", attempts)
     assert dur is None
     assert status == ""
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._get_solver_attempts
@@ -1048,12 +991,10 @@ def test_get_solver_attempts_prefers_last_solver_result():
     assert attempts == [{"name": "b", "score": 1}]
     assert error == ""
 
-
 def test_get_solver_attempts_fallback_to_configmap_parses_latest(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.ctx = "ctx"
     runner.last_solver_result = None
-
     cm = {
         "data": {
             "runs.json": json.dumps(
@@ -1065,13 +1006,11 @@ def test_get_solver_attempts_fallback_to_configmap_parses_latest(monkeypatch):
         }
     }
     monkeypatch.setattr(runner, "_get_latest_configmap", lambda *_a, **_k: cm)
-
     baseline, best_name, attempts, error = runner._get_solver_attempts()
     assert baseline == {"b": 1}
     assert best_name == "b"
     assert attempts == [{"name": "b", "score": 1}]
     assert error == ""
-
 
 def test_get_solver_attempts_fallback_handles_cm_missing_or_bad_json(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1093,7 +1032,6 @@ def test_get_solver_attempts_fallback_handles_cm_missing_or_bad_json(monkeypatch
     baseline, best_name, attempts, error = runner._get_solver_attempts()
     assert (baseline, best_name, attempts, error) == ({}, "", [], "")
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._write_solver_stats_json
 # ---------------------------------------------------------------------------
@@ -1102,22 +1040,18 @@ def test_write_solver_stats_json_writes_runs_raw(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.ctx = "ctx"
     runner.solver_stats_dir = tmp_path / "solver-stats"
-
     runs_raw = '[{"best_name":"x"}]'
     cm = {"data": {"runs.json": runs_raw}}
     monkeypatch.setattr(runner, "_get_latest_configmap", lambda *a, **k: cm)
-
     runner._write_solver_stats_json(seed=7, run_idx=2)
     out = runner.solver_stats_dir / "solver_stats_seed-7_run-2.json"
     assert out.exists()
     assert out.read_text(encoding="utf-8") == runs_raw
 
-
 def test_write_solver_stats_json_skips_when_no_cm_or_missing_runs(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.ctx = "ctx"
     runner.solver_stats_dir = tmp_path / "solver-stats"
-
     warned = {"n": 0}
     monkeypatch.setattr(tr.LOG, "warning", lambda *_a, **_k: warned.__setitem__("n", warned["n"] + 1))
 
@@ -1144,7 +1078,6 @@ def test_write_solver_stats_json_skips_when_no_cm_or_missing_runs(tmp_path, monk
     monkeypatch.setattr(builtins, "open", bad_open)
     runner._write_solver_stats_json(seed=2, run_idx=3)
     assert warned["n"] >= 3
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._get_latest_configmap
@@ -1194,7 +1127,6 @@ def test_get_latest_configmap_retries_then_returns_latest():
     assert cm is not None
     assert cm["metadata"]["name"] == "solver-stats-bbb"
     assert clk.slept == 1
-
 
 def test_get_latest_configmap_label_selector_accepts_any(monkeypatch):
     class R:
@@ -1255,7 +1187,6 @@ def test_get_latest_configmap_label_selector_accepts_any(monkeypatch):
     )
     assert cm3 is None
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._save_scheduler_logs
 # ---------------------------------------------------------------------------
@@ -1277,7 +1208,6 @@ def test_save_scheduler_logs(tmp_path, monkeypatch):
     assert seen["cluster_name"] == "kwok1"
     assert Path(seen["out_path"]).name == "sched_logs_seed-3_run-1.log"
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._build_pod_list
 # ---------------------------------------------------------------------------
@@ -1294,7 +1224,6 @@ def test_build_pod_list():
     assert by_name["rs-01-p2-abc"]["cpu_m"] == 100
     assert by_name["rs-01-p2-def"]["cpu_m"] == 100
     assert by_name["other"]["cpu_m"] == 0
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._make_replicaset_specs_only
@@ -1329,7 +1258,6 @@ def test_make_replicaset_specs_only_builds_specs_and_rejects_invalid():
     with pytest.raises(ValueError):
         runner._make_replicaset_specs_only(random.Random(0), ta)
 
-
 def test_make_replicaset_specs_only_clamps_priority_when_num_priorities_zero():
     runner = tr.TestRunner(ns(), initialize=False)
 
@@ -1345,7 +1273,6 @@ def test_make_replicaset_specs_only_clamps_priority_when_num_priorities_zero():
     specs = runner._make_replicaset_specs_only(random.Random(0), ta)
     assert specs[0]["priority"] == 1
     assert "p1" in specs[0]["name"]
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._apply_replicasets
@@ -1367,7 +1294,6 @@ def test_apply_replicasets_calls_kubectl_and_wait(monkeypatch):
     assert calls["apply"] == [("ctx", "YAML")]
     assert calls["wait"] == [("rs-01-p1", "ready")]
 
-
 def test_apply_replicasets_skips_wait_when_mode_none(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.ctx = "ctx"
@@ -1384,7 +1310,6 @@ def test_apply_replicasets_skips_wait_when_mode_none(monkeypatch):
     assert calls["apply"] == 1
     assert calls["wait"] == 0
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._gen_rs_sizes
 # ---------------------------------------------------------------------------
@@ -1395,7 +1320,6 @@ def test_gen_rs_sizes():
     assert sum(sizes) == 20
     assert all(1 <= s <= 8 for s in sizes)
     assert sizes[0] >= 6
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._solver_directly
@@ -1417,7 +1341,6 @@ def test_solver_directly_exports_and_preplace(tmp_path, monkeypatch):
         node_mem_b = 2000
 
     rs_specs = [{"name": "rs-01-p1", "priority": 1, "req_cpu_m": 100, "req_mem_bytes": 200, "replicas": 6}]
-
     monkeypatch.setattr(tr.importlib_metadata, "version", lambda _d: "9.14.6206")
 
     class R:
@@ -1425,7 +1348,6 @@ def test_solver_directly_exports_and_preplace(tmp_path, monkeypatch):
         stderr = b""
 
     monkeypatch.setattr(tr.subprocess, "run", lambda *a, **k: R())
-
     resp, meta = runner._solver_directly(TA(), seed=9, rs_specs=rs_specs)
     assert resp["status"] == "OK"
     assert meta["total_pods"] == 6
@@ -1436,7 +1358,6 @@ def test_solver_directly_exports_and_preplace(tmp_path, monkeypatch):
     inst = json.loads((tmp_path / "in.json").read_text(encoding="utf-8"))
     assert any((p.get("node") or "") for p in inst.get("pods", []))
     assert (tmp_path / "out.json").exists()
-
 
 def test_solver_directly_stdout_parse_error_writes_output(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1454,7 +1375,6 @@ def test_solver_directly_stdout_parse_error_writes_output(tmp_path, monkeypatch)
         node_mem_b = 100
 
     rs_specs = [{"name": "rs-01-p1", "priority": 1, "req_cpu_m": 1, "req_mem_bytes": 1, "replicas": 1}]
-
     monkeypatch.setattr(tr.importlib_metadata, "version", lambda _d: "9.14.6206")
 
     class R:
@@ -1462,11 +1382,9 @@ def test_solver_directly_stdout_parse_error_writes_output(tmp_path, monkeypatch)
         stderr = b""
 
     monkeypatch.setattr(tr.subprocess, "run", lambda *a, **k: R())
-
     resp, _ = runner._solver_directly(TA(), seed=1, rs_specs=rs_specs)
     assert resp["status"] == "PY_SOLVER_STDOUT_PARSE_ERROR"
     assert (tmp_path / "out.json").exists()
-
 
 def test_solver_directly_missing_or_wrong_ortools_version_raises(monkeypatch, tmp_path):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1495,7 +1413,6 @@ def test_solver_directly_missing_or_wrong_ortools_version_raises(monkeypatch, tm
     with pytest.raises(SystemExit):
         runner._solver_directly(TA(), seed=1, rs_specs=rs_specs)
 
-
 def test_solver_directly_python_exception_logs_error(tmp_path, monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.args = ns(
@@ -1504,7 +1421,7 @@ def test_solver_directly_python_exception_logs_error(tmp_path, monkeypatch):
         solver_output_export=tmp_path / "out.json",
         solver_directly_running_target_util=0.0,
     )
-
+    
     class TA:
         namespace = "ns"
         num_nodes = 1
@@ -1512,7 +1429,6 @@ def test_solver_directly_python_exception_logs_error(tmp_path, monkeypatch):
         node_mem_b = 100
 
     rs_specs = [{"name": "rs", "priority": 1, "req_cpu_m": 1, "req_mem_bytes": 1, "replicas": 1}]
-
     monkeypatch.setattr(tr.importlib_metadata, "version", lambda _d: "9.14.6206")
 
     class R:
@@ -1522,12 +1438,10 @@ def test_solver_directly_python_exception_logs_error(tmp_path, monkeypatch):
     seen = {"err": 0}
     monkeypatch.setattr(tr.LOG, "error", lambda *_a, **_k: seen.__setitem__("err", seen["err"] + 1))
     monkeypatch.setattr(tr.subprocess, "run", lambda *a, **k: R())
-
     resp, _ = runner._solver_directly(TA(), seed=1, rs_specs=rs_specs)
     assert resp["status"] == "PYTHON_EXCEPTION"
     assert seen["err"] >= 1
     assert (tmp_path / "out.json").exists()
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._wait_solver_inactive_http
@@ -1547,18 +1461,14 @@ def test_wait_solver_inactive_http_invalid_json(monkeypatch):
     ok = runner._wait_solver_inactive_http("http://x/active", timeout_s=10, poll_initial_s=0.0, poll_interval_s=0.0)
     assert ok is True
 
-
 def test_wait_solver_inactive_http_timeout(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     tc = TimeController(now=0.0)
-
     monkeypatch.setattr(tr.time, "time", tc.time)
     monkeypatch.setattr(tr.time, "sleep", tc.sleep)
     monkeypatch.setattr(tr, "get_solver_active_status_http", lambda _url: (200, '{"Active": true}'))
-
     ok = runner._wait_solver_inactive_http("http://x/active", timeout_s=0, poll_initial_s=0.0, poll_interval_s=0.0)
     assert ok is False
-
 
 def test_wait_solver_inactive_http_logs_and_non_str_body(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1571,10 +1481,8 @@ def test_wait_solver_inactive_http_logs_and_non_str_body(monkeypatch):
     monkeypatch.setattr(tr.time, "time", tc.time)
     monkeypatch.setattr(tr.time, "sleep", tc.sleep)
     monkeypatch.setattr(tr, "get_solver_active_status_http", fake_status)
-
     ok = runner._wait_solver_inactive_http("http://x/active", timeout_s=1, poll_initial_s=0.0, poll_interval_s=0.2)
     assert ok is False
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._pause
@@ -1583,44 +1491,34 @@ def test_wait_solver_inactive_http_logs_and_non_str_body(monkeypatch):
 def test_pause_skips_when_disabled(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.args = ns(pause=False)
-
     monkeypatch.setattr(tr.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
         builtins,
         "input",
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not prompt")),
     )
-
     runner._pause(next_exists=True)
-
 
 def test_pause_skips_when_not_tty(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.args = ns(pause=True)
-
     monkeypatch.setattr(tr.sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(
         builtins,
         "input",
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not prompt")),
     )
-
     runner._pause(next_exists=True)
-
 
 def test_pause_keyboard_interrupt(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
     runner.args = ns(pause=True)
-
     monkeypatch.setattr(tr.sys.stdin, "isatty", lambda: True)
-
     def boom(*_a, **_k):
         raise KeyboardInterrupt()
-
     monkeypatch.setattr(builtins, "input", boom)
     with pytest.raises(SystemExit):
         runner._pause(next_exists=True)
-
 
 # ---------------------------------------------------------------------------
 # TestRunner.run_mode_single_seed
@@ -1631,14 +1529,11 @@ def test_run_mode_single_seed(monkeypatch, tmp_path):
     runner.seen_results = {123}
     runner.results_f = tmp_path / "results.csv"
     runner.args = ns(seed=123, re_run_seeds=False, repeats=1)
-
     monkeypatch.setattr(runner, "_eta_update_marker", lambda *_a, **_k: None)
     monkeypatch.setattr(runner, "_eta_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(runner, "_log_seed_run", lambda *_a, **_k: None)
     monkeypatch.setattr(runner, "_resolve_config_for_seed", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("should not resolve")))
-
     runner.run_mode_single_seed()
-
 
 # ---------------------------------------------------------------------------
 # TestRunner.run_mode_count
@@ -1675,7 +1570,6 @@ def test_run_mode_count(monkeypatch):
     runner.run_mode_count()
     assert ran["seeds"] == [2, 3]
 
-
 # ---------------------------------------------------------------------------
 # TestRunner.run_mode_seed_file
 # ---------------------------------------------------------------------------
@@ -1707,7 +1601,6 @@ def test_run_mode_seed_file(monkeypatch, tmp_path):
     runner.run_mode_seed_file()
     assert ran["seeds"] == [1, 3]
 
-
 # ---------------------------------------------------------------------------
 # TestRunner._run_single_seed
 # ---------------------------------------------------------------------------
@@ -1732,7 +1625,6 @@ def test_run_single_seed(monkeypatch):
     assert calls["n"] == 2
     assert runner.suppress_fail_log is False
     assert runner.failure is None
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._execute_seed_direct
@@ -1779,7 +1671,6 @@ def test_execute_seed_direct(monkeypatch):
     assert "direct-solving status=OK" in (seen["note"] or "")
     assert "running=" in (seen["note"] or "")
     assert "unscheduled=" in (seen["note"] or "")
-
 
 # ---------------------------------------------------------------------------
 # TestRunner._execute_seed_on_cluster
@@ -1839,7 +1730,6 @@ def test_execute_seed_on_cluster_nodes_exception_records_failure(monkeypatch):
     assert ok is False
     assert seen["phase"] == "nodes"
     assert "boom" in seen["msg"]
-
 
 def test_execute_seed_on_cluster_snapshot_validation_mismatch_fails(monkeypatch):
     runner = tr.TestRunner(ns(), initialize=False)
@@ -1982,7 +1872,6 @@ def test_execute_seed_on_cluster_happy_path(monkeypatch, tmp_path):
 
     # outcome recorded: not all running
     assert seen["outcome"] == (7, False)
-
 
 # ---------------------------------------------------------------------------
 # Main runner dispatch

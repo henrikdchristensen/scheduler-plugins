@@ -6,13 +6,6 @@ import pytest
 from scripts.helpers import cluster_stats as cs
 from scripts.test.test_utils import time_sequence
 
-
-# ---------------------------------------------------------------------------
-# Snapshot
-# ---------------------------------------------------------------------------
-# (dataclass, no dedicated tests)
-
-
 # ---------------------------------------------------------------------------
 # stat_snapshot
 # ---------------------------------------------------------------------------
@@ -21,7 +14,6 @@ def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
 	monkeypatch.setattr(cs, "get_running_and_unscheduled",
 		lambda ctx, ns, expected: ("all_running", [("p1", "n1"), ("p2", "n2")], ["p3"]),
 	)
-
 	def fake_get_json_ctx(ctx, cmd):
 		nodes = {
 			"items": [
@@ -29,7 +21,6 @@ def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
 				{"metadata": {"name": "n2"}, "status": {"allocatable": {"cpu": "1", "memory": "1Gi"}}},
 			]
 		}
-
 		pods = {
 			"items": [
 				{
@@ -61,16 +52,16 @@ def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
 				},
 			]
 		}
-
 		if cmd[:2] == ["get", "nodes"]:
 			return nodes
 		if "pods" in cmd:
 			return pods
 		raise AssertionError(f"unexpected cmd: {cmd}")
-
+	
 	monkeypatch.setattr(cs, "get_json_ctx", fake_get_json_ctx)
 
 	snap = cs.stat_snapshot("ctx", "ns", expected=3)
+	
 	assert snap.cpu_alloc_by_node == {"n1": 2000, "n2": 1000}
 	assert snap.mem_alloc_by_node == {"n1": 1024**3, "n2": 1024**3}
 
@@ -86,7 +77,6 @@ def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
 
 	assert snap.cpu_run_util == pytest.approx((500 + 1000) / (2000 + 1000))
 	assert snap.mem_run_util == pytest.approx(((512 * 1024**2) + (1024**3)) / (2 * 1024**3))
-
 
 # ---------------------------------------------------------------------------
 # sum_pod_requests
@@ -105,7 +95,6 @@ def test_sum_pod_requests_sums_containers_requests():
 	assert cpu_m == 250 + 500
 	assert mem_b == 128 * 1024**2 + 256 * 1024**2
 
-
 def test_sum_pod_requests_adds_max_init_container_requests():
 	pod = {
 		"spec": {
@@ -122,7 +111,6 @@ def test_sum_pod_requests_adds_max_init_container_requests():
 	assert cpu_m == 250 + 1000
 	assert mem_b == (128 * 1024**2) + (1 * 1024**3)
 
-
 # ---------------------------------------------------------------------------
 # get_running_and_unscheduled
 # ---------------------------------------------------------------------------
@@ -134,14 +122,12 @@ def test_get_running_and_unscheduled_all_running(monkeypatch):
 			{"metadata": {"name": "a"}, "spec": {"nodeName": "n1"}, "status": {"phase": "Running"}},
 		]
 	}
-
 	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
 	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=1)
 	assert status == "all_running"
 	# Should be sorted by pod name
 	assert running == [("a", "n1"), ("b", "n2")]
 	assert unsched == []
-
 
 def test_get_running_and_unscheduled_some_unschedulable(monkeypatch):
 	pods_obj = {
@@ -150,13 +136,11 @@ def test_get_running_and_unscheduled_some_unschedulable(monkeypatch):
 			{"metadata": {"name": "b"}, "spec": {}, "status": {"phase": "Pending"}},
 		]
 	}
-
 	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
 	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=1)
 	assert status == "some_unschedulable"
 	assert running == [("a", "n1")]
 	assert unsched == ["b"]
-
 
 def test_get_running_and_unscheduled_timeout(monkeypatch):
 	pods_obj = {
@@ -164,13 +148,10 @@ def test_get_running_and_unscheduled_timeout(monkeypatch):
 			{"metadata": {"name": "a"}, "spec": {}, "status": {"phase": "Pending"}},
 		]
 	}
-
 	fake_time = time_sequence([0.0, 0.0, 999.0])
-
 	monkeypatch.setattr(cs, "get_json_ctx", lambda ctx, cmd: pods_obj)
 	monkeypatch.setattr(cs.time, "time", fake_time)
 	monkeypatch.setattr(cs.time, "sleep", lambda _: None)
-
 	status, running, unsched = cs.get_running_and_unscheduled("ctx", "ns", expected=2, timeout=0)
 	assert status == "timeout"
 	assert running == []

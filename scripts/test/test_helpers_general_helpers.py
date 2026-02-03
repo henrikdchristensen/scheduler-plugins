@@ -143,7 +143,6 @@ def test_write_info_file(tmp_path: Path, monkeypatch, capsys):
         (123, "123"),
     ],
 )
-
 def test_log_field_fmt(value, expected):
     assert gh.log_field_fmt(value) == expected
 
@@ -194,7 +193,6 @@ def test_log_args_block(capsys):
     keys_unsorted = re.findall(r"^\s*([A-Za-z_]\w*)\s*=\s*", out2, flags=re.M)
     assert keys_unsorted == ["b", "a"]
 
-
 # ---------------------------------------------------------------------------
 # Parser helpers
 # ---------------------------------------------------------------------------
@@ -210,10 +208,8 @@ def test_log_args_block(capsys):
         ({}, ("single", "lo", "hi"), None),
     ],
 )
-
 def test_normalize_interval(doc, key_combo, expected):
     assert gh.normalize_interval(doc, key_combo) == expected
-
 
 def test_normalize_interval_force_empty_string():
     # allow_none=False should return "" when nothing found
@@ -232,7 +228,6 @@ def test_normalize_interval_force_empty_string():
         ("  3m  ", 180.0),
     ],
 )
-
 def test_parse_duration_to_seconds_valid(s, expected):
     assert gh.parse_duration_to_seconds(s) == pytest.approx(expected)
 
@@ -251,7 +246,6 @@ def test_parse_duration_to_seconds_invalid(s):
         ("10,5", 1, (10, 10)),  # hi >= lo
     ],
 )
-
 def test_parse_int_interval_valid(s, min_lo, expected):
     assert gh.parse_int_interval(s, min_lo=min_lo) == expected
 
@@ -267,7 +261,6 @@ def test_parse_int_interval_none():
         (" a , b ", ("a", "b")),
     ],
 )
-
 def test_parse_qty_interval_valid(s, expected):
     assert gh.parse_qty_interval(s) == expected
 
@@ -288,7 +281,6 @@ def test_parse_qty_interval_none():
         ("42", 60, 42),
     ],
 )
-
 def test_parse_timeout_s_valid(t, default, expected):
     assert gh.parse_timeout_s(t, default=default) == expected
 
@@ -312,7 +304,7 @@ def test_parse_timeout_s_invalid_uses_default():
         ("no", True, False),
         ("n", True, False),
         ("off", True, False),
-        ("maybe", False, False),  # falls back to default
+        ("maybe", False, False), # unrecognized -> default
     ],
 )
 
@@ -329,7 +321,6 @@ def test_coerce_bool(value, default, expected):
         ("  abc  ", "abc"),
     ],
 )
-
 def test_get_str(value, expected):
     assert gh.get_str(value) == expected
 
@@ -373,7 +364,6 @@ def test_get_str_from_dict():
         ("0m", 1),  # clamped to >=1
     ],
 )
-
 def test_qty_to_mcpu_int_valid(token, expected):
     assert gh.qty_to_mcpu_int(token) == expected
 
@@ -395,7 +385,6 @@ def test_qty_to_mcpu_int_invalid(token):
         ("0", 1),  # clamped to >=1
     ],
 )
-
 def test_qty_to_bytes_int_valid(token, expected):
     assert gh.qty_to_bytes_int(token) == expected
 
@@ -413,7 +402,6 @@ def test_qty_to_bytes_int_invalid(token):
         (0, "0"),  # 0m → 0 cores
     ],
 )
-
 def test_qty_to_mcpu_str(m, expected):
     assert gh.qty_to_mcpu_str(m) == expected
 
@@ -425,7 +413,6 @@ def test_qty_to_mcpu_str(m, expected):
         (-5, "1"),  # clamped to >=1
     ],
 )
-
 def test_qty_to_bytes_str(b, expected):
     assert gh.qty_to_bytes_str(b) == expected
 
@@ -460,7 +447,6 @@ def test_csv_append_row_rejects_extra_fields(tmp_path: Path):
     csv_path = tmp_path / "test_extra.csv"
     header = ["a", "b"]
     row = {"a": "1", "b": "2", "c": "3"}  # extra field 'c'
-
     with pytest.raises(ValueError):
         gh.csv_append_row(csv_path, header, row)
 
@@ -501,7 +487,7 @@ def test_seeded_random_reproducible():
 
     # Same base_seed and labels -> identical sequence
     assert seq1 == seq2
-    # Different labels -> different sequence (very high probability)
+    # Different labels -> different sequence
     assert seq1 != seq3
 
 @pytest.mark.parametrize(
@@ -513,7 +499,6 @@ def test_seeded_random_reproducible():
         ["p", "1", "2", "3"],
     ],
 )
-
 def test_generate_seeds_invalid_arity(args):
     with pytest.raises(SystemExit):
         gh.generate_seeds(args)
@@ -525,10 +510,9 @@ def test_generate_seeds_invalid_arity(args):
         ["p", "0"],
         ["p", "2", "bad"],
         ["p", "2", "0"],
-        ["p", "2", "3"],  # parts > total
+        ["p", "2", "3"],
     ],
 )
-
 def test_generate_seeds_invalid_numbers(args):
     with pytest.raises(SystemExit):
         gh.generate_seeds(args)
@@ -537,7 +521,6 @@ def test_generate_seeds_single_file(tmp_path: Path, monkeypatch, capsys):
     monkeypatch.setattr(gh.time, "time_ns", lambda: 123456789)
     out_file = tmp_path / "seeds.txt"
     gh.generate_seeds([str(out_file), "3"])
-
     lines = out_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 3
     assert all(int(x) > 0 for x in lines)
@@ -571,13 +554,10 @@ class _FakeHTTPResp:
     def __init__(self, status: int, body: bytes):
         self.status = status
         self._body = body
-
     def __enter__(self):
         return self
-
     def __exit__(self, exc_type, exc, tb):
         return False
-
     def read(self):
         return self._body
 
@@ -659,7 +639,6 @@ def test_cmp_placed_by_prio_row():
         "placed_by_prio_solver": '{"1": 2, "2": 0}',
         "placed_by_prio_default": '{"1": 2, "2": 0}',
     }
-
     assert gh.cmp_placed_by_prio_row(row_win) == 1
     assert gh.cmp_placed_by_prio_row(row_lose) == -1
     assert gh.cmp_placed_by_prio_row(row_tie) == 0

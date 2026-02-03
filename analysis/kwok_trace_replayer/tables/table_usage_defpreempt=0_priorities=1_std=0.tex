@@ -1,0 +1,17 @@
+\begin{tabular}{l c c c c c c c c}
+\toprule
+ & \multicolumn{4}{c}{\#nodes = 16} & \multicolumn{4}{c}{\#nodes = 32} \\
+ & 2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
+\midrule
+\makecell[l]{Scheduling-failure (blocking)} & -0.12 & +1.52 & +1.97 & +3.37 & +0.07 & +1.31 & +0.84 & +2.80 \\
+\makecell[l]{Scheduling-failure (non-blocking)} & -0.15 & +1.44 & +1.95 & +3.35 & -0.17 & +1.20 & +0.91 & +2.70 \\
+\makecell[l]{Periodic (blocking), 8s interval} & +1.03 & +1.83 & +2.15 & +3.38 & +0.81 & +1.58 & +1.19 & +2.82 \\
+\makecell[l]{Periodic (non-blocking), 8s interval} & +1.01 & +1.86 & +2.11 & +3.45 & +0.75 & +1.61 & +1.42 & +2.74 \\
+\makecell[l]{Periodic (blocking), 32s interval} & +0.32 & +1.25 & +1.74 & +2.88 & +0.28 & +1.06 & +1.22 & +2.54 \\
+\makecell[l]{Periodic (non-blocking), 32s interval} & +0.41 & +1.34 & +1.57 & +2.80 & +0.15 & +1.04 & +0.92 & +2.41 \\
+\makecell[l]{Stable-queue (blocking), 2s delay} & +1.26 & +2.12 & +2.33 & +3.55 & +0.80 & +1.54 & +1.57 & +2.61 \\
+\makecell[l]{Stable-queue (non-blocking), 2s delay} & +1.31 & +2.00 & +2.35 & +3.49 & +0.84 & +1.60 & +1.27 & +2.82 \\
+\makecell[l]{Stable-queue (blocking), 8s delay} & +0.90 & +1.82 & +2.16 & +3.38 & +0.69 & +1.44 & +1.17 & +2.56 \\
+\makecell[l]{Stable-queue (non-blocking), 8s delay} & +1.03 & +1.80 & +2.13 & +3.47 & +0.62 & +1.49 & +1.42 & +2.77 \\
+\bottomrule
+\end{tabular}

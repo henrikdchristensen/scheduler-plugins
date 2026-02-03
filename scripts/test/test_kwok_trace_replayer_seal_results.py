@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # test_kwok_trace_replayer_seal_results.py
 
-import pytest
-
 import json
 import math
 from pathlib import Path
@@ -23,12 +21,10 @@ def _write_csv(path: Path, data: Dict[str, list]) -> None:
     df = pd.DataFrame(data)
     df.to_csv(path, index=False)
 
-
 def _write_json(path: Path, data: dict) -> None:
     """Write JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
-
 
 # ---------------------------------------------------------------------------
 # arrival_str
@@ -48,7 +44,6 @@ class TestArrivalStr:
         # Very close to integer should round
         assert sr.arrival_str(10.0000000001) == "10"
 
-
 # ---------------------------------------------------------------------------
 # parse_default_run_dir
 # ---------------------------------------------------------------------------
@@ -66,7 +61,6 @@ class TestParseDefaultRunDir:
         assert sr.parse_default_run_dir("invalid") is None
         assert sr.parse_default_run_dir("") is None
         assert sr.parse_default_run_dir("nodes_prio_arrival") is None
-
 
 # ---------------------------------------------------------------------------
 # parse_plugin_run_dir
@@ -92,11 +86,9 @@ class TestParsePluginRunDir:
         assert sr.parse_plugin_run_dir("") is None
         assert sr.parse_plugin_run_dir("mode=test_blocking=1") is None  # Missing nodes/prio/arrival
 
-
 # ---------------------------------------------------------------------------
 # iter_seed_dirs
 # ---------------------------------------------------------------------------
-
 class TestIterSeedDirs:
     def test_nonexistent_dir(self, tmp_path: Path):
         result = list(sr.iter_seed_dirs(tmp_path / "nonexistent"))
@@ -128,11 +120,9 @@ class TestIterSeedDirs:
         assert "seed1" in seeds
         assert "seed2" in seeds
 
-
 # ---------------------------------------------------------------------------
 # read_optimization_stats
 # ---------------------------------------------------------------------------
-
 class TestReadOptimizationStats:
     def test_missing_file(self, tmp_path: Path):
         result = sr.read_optimization_stats(tmp_path / "nonexistent.json")
@@ -163,11 +153,9 @@ class TestReadOptimizationStats:
         _write_json(opt_json, {
             "solver_attempts_total": 5,
         })
-
         result = sr.read_optimization_stats(opt_json)
         assert result["solver_attempts"] == 5.0
         assert math.isnan(result["solver_optimal"])
-
 
 # ---------------------------------------------------------------------------
 # read_pod
@@ -183,12 +171,10 @@ class TestReadPod:
             sr.POD_PRIO_COL: [1, 1],
             sr.POD_TIME_COL: [0.0, 0.5],
         })
-
         df = sr.read_pod(pod_csv)
         assert len(df) == 2
         assert sr.POD_EVENT_COL in df.columns
         assert sr.POD_NAME_COL in df.columns
-
 
 # ---------------------------------------------------------------------------
 # cumulative_integral_step
@@ -227,7 +213,6 @@ class TestCumulativeIntegralStep:
         np.testing.assert_array_almost_equal(result[1], [1.0, 2.0])
         np.testing.assert_array_almost_equal(result[2], [4.0, 6.0])
 
-
 # ---------------------------------------------------------------------------
 # mean_over_horizon
 # ---------------------------------------------------------------------------
@@ -262,7 +247,6 @@ class TestMeanOverHorizon:
         # Mean over [0, 2]: integral = 0 + 1*1 + 2*1 = 3, mean = 3/2 = 1.5
         assert abs(result - 1.5) < 1e-9
 
-
 # ---------------------------------------------------------------------------
 # value_at_horizon
 # ---------------------------------------------------------------------------
@@ -271,7 +255,6 @@ class TestValueAtHorizon:
     def test_exact_point(self):
         t = np.array([0.0, 1.0, 2.0, 3.0])
         y = np.array([10.0, 20.0, 30.0, 40.0])
-        
         # At T_end = 1.0, we should get y[0] since searchsorted returns 1, idx = 0
         # Actually, searchsorted(t, 1.0, side='right') = 2, idx = 1
         result = sr.value_at_horizon(t, y, 1.0)
@@ -280,7 +263,6 @@ class TestValueAtHorizon:
     def test_between_points(self):
         t = np.array([0.0, 1.0, 2.0, 3.0])
         y = np.array([10.0, 20.0, 30.0, 40.0])
-        
         # At T_end = 1.5, searchsorted = 2, idx = 1
         result = sr.value_at_horizon(t, y, 1.5)
         assert result == 20.0
@@ -288,11 +270,9 @@ class TestValueAtHorizon:
     def test_horizon_beyond_data(self):
         t = np.array([0.0, 1.0, 2.0])
         y = np.array([10.0, 20.0, 30.0])
-        
         # T_end = 5.0, Hc = min(5.0, 2.0) = 2.0
         result = sr.value_at_horizon(t, y, 5.0)
         assert result == 30.0
-
 
 # ---------------------------------------------------------------------------
 # read_general_data
@@ -314,7 +294,6 @@ class TestReadGeneralData:
             "deletions_cum_p3": [0, 0, 0],
             "deletions_cum_p4": [0, 0, 0],
         })
-
         data = sr.read_general_data(csv_path)
         assert data.T_end == 2.0
         assert len(data.t) == 3
@@ -325,11 +304,9 @@ class TestReadGeneralData:
     def test_empty_csv(self, tmp_path: Path):
         csv_path = tmp_path / "general_stats.csv"
         csv_path.write_text(f"{sr.TIME_COL},{sr.CPU_RUN_COL},{sr.MEM_RUN_COL}\n")
-
         data = sr.read_general_data(csv_path)
         assert len(data.t) == 0
         assert math.isnan(data.T_end)
-
 
 # ---------------------------------------------------------------------------
 # compute_horizon_metrics
@@ -351,10 +328,8 @@ class TestComputeHorizonMetrics:
             "deletions_cum_p3": [0, 0, 0],
             "deletions_cum_p4": [0, 0, 0],
         })
-
         data = sr.read_general_data(csv_path)
         metrics = sr.compute_horizon_metrics(data, T_end=2.0)
-
         assert "U_cpu_mean" in metrics
         assert "U_mem_mean" in metrics
         assert "U_eff_mean" in metrics
@@ -362,12 +337,9 @@ class TestComputeHorizonMetrics:
         assert "D_p1" in metrics
         assert "R_total_mean" in metrics
         assert "D_total" in metrics
-
-        # Check deletions at horizon
         assert metrics["D_p1"] == 2.0
         assert metrics["D_p2"] == 1.0
         assert metrics["D_total"] == 3.0
-
 
 # ---------------------------------------------------------------------------
 # latency_means_first_batch_ms
@@ -383,9 +355,7 @@ class TestLatencyMeansFirstBatchMs:
             sr.POD_PRIO_COL: [1, 1, 2, 2],
             sr.POD_TIME_COL: [0.0, 0.1, 0.0, 0.2],
         })
-
         result = sr.latency_means_first_batch_ms(pod_csv, eps_s=1.0)
-        
         # uid1: latency = 0.1 - 0.0 = 0.1s = 100ms
         # uid2: latency = 0.2 - 0.0 = 0.2s = 200ms
         assert result["L_ms_p1"] == 100.0
@@ -401,7 +371,6 @@ class TestLatencyMeansFirstBatchMs:
             sr.POD_PRIO_COL: [],
             sr.POD_TIME_COL: [],
         })
-
         result = sr.latency_means_first_batch_ms(pod_csv, eps_s=1.0)
         assert math.isnan(result["L_ms_total"])
         for p in range(1, sr.MAX_PRIORITIES + 1):
@@ -416,11 +385,9 @@ class TestLatencyMeansFirstBatchMs:
             sr.POD_PRIO_COL: [1],
             sr.POD_TIME_COL: [0.0],
         })
-
         result = sr.latency_means_first_batch_ms(pod_csv, eps_s=1.0)
         # No running time, so latency should be NaN
         assert math.isnan(result["L_ms_total"])
-
 
 # ---------------------------------------------------------------------------
 # Constants and configuration
@@ -443,7 +410,6 @@ class TestConstants:
     def test_eps_s_default(self):
         assert sr.EPS_S == 1.0
 
-
 # ---------------------------------------------------------------------------
 # iter_seed_dirs - additional edge cases
 # ---------------------------------------------------------------------------
@@ -464,7 +430,6 @@ class TestIterSeedDirsEdgeCases:
         assert len(result) == 1
         assert result[0][0] == "seed1"
 
-
 # ---------------------------------------------------------------------------
 # read_optimization_stats - edge cases
 # ---------------------------------------------------------------------------
@@ -477,11 +442,9 @@ class TestReadOptimizationStatsEdgeCases:
             "solver_attempts_total": "not_a_number",
             "best_solver_optimal_total": {"nested": "object"},
         })
-
         result = sr.read_optimization_stats(opt_json)
         assert math.isnan(result["solver_attempts"])
         assert math.isnan(result["solver_optimal"])
-
 
 # ---------------------------------------------------------------------------
 # read_general_data - edge cases
@@ -497,11 +460,9 @@ class TestReadGeneralDataEdgeCases:
             sr.CPU_RUN_COL: [0.1, 0.2],
             sr.MEM_RUN_COL: [0.15, 0.25],
         })
-
         data = sr.read_general_data(csv_path)
         assert len(data.t) == 0
         assert math.isnan(data.T_end)
-
 
 # ---------------------------------------------------------------------------
 # latency_means_first_batch_ms - edge cases
@@ -518,7 +479,6 @@ class TestLatencyMeansFirstBatchMsEdgeCases:
             sr.POD_PRIO_COL: [1, 2],
             sr.POD_TIME_COL: [0.1, 0.2],
         })
-
         result = sr.latency_means_first_batch_ms(pod_csv, eps_s=1.0)
         assert math.isnan(result["L_ms_total"])
 
@@ -533,7 +493,6 @@ class TestLatencyMeansFirstBatchMsEdgeCases:
             sr.POD_PRIO_COL: [float("nan"), float("nan")],  # NaN priority
             sr.POD_TIME_COL: [0.0, 0.1],
         })
-
         result = sr.latency_means_first_batch_ms(pod_csv, eps_s=1.0)
         assert math.isnan(result["L_ms_total"])
 
@@ -548,7 +507,6 @@ class TestLatencyMeansFirstBatchMsEdgeCases:
             sr.POD_PRIO_COL: [1, 1, 1, 1],
             sr.POD_TIME_COL: [0.0, 0.1, 100.0, 100.1],  # Second pod at t=100
         })
-
         # With eps_s=0.0, only pods at exactly t0 should be included
         # But both pods are in the first batch since they each have their own rs_prefix... wait
         # Actually rs-000001-abc and rs-000001-def have same prefix "rs-000001"
@@ -567,7 +525,6 @@ class TestLatencyMeansFirstBatchMsEdgeCases:
             sr.POD_PRIO_COL: [1, 1, 4, 4],  # Only prio 1 and 4, skip 2 and 3
             sr.POD_TIME_COL: [0.0, 0.1, 0.0, 0.3],
         })
-
         result = sr.latency_means_first_batch_ms(pod_csv, eps_s=1.0)
         assert result["L_ms_p1"] == 100.0
         assert math.isnan(result["L_ms_p2"])
@@ -575,9 +532,8 @@ class TestLatencyMeansFirstBatchMsEdgeCases:
         assert result["L_ms_p4"] == 300.0
         assert result["L_ms_total"] == 200.0  # (100 + 300) / 2
 
-
 # ---------------------------------------------------------------------------
-# Main function integration test (lines 414-537)
+# Main function integration test
 # ---------------------------------------------------------------------------
 
 class TestMainIntegration:

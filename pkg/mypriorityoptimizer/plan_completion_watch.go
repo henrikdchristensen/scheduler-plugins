@@ -12,9 +12,9 @@ import (
 // planCompletionWatch
 // -------------------------
 
-// startPlanCompletionWatch spawns a goroutine that periodically checks
-// whether the active plan has been realized, or has timed out.
-// It will call onPlanCompleted(Completed/Failed) at most once (guarded inside
+// startPlanCompletionWatch spawns a goroutine that periodically checks whether
+// the active plan has been realized, or has timed out. It will call
+// onPlanCompleted(Completed/Failed) at most once (guarded inside
 // onPlanCompleted), and then exit.
 func (pl *SharedState) startPlanCompletionWatch(ap *ActivePlan) {
 	if ap == nil {
