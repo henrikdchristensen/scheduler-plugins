@@ -39,7 +39,6 @@ from scripts.helpers.kwokctl_helpers import (
 from scripts.helpers.cluster_stats import (
     stat_snapshot,
 )
-
 from scripts.helpers.job_helpers import (
     JobField,
     merge_job_fields_into_args,

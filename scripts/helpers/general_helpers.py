@@ -50,6 +50,7 @@ def format_seconds_to_hms(seconds: int) -> str:
 ##############################################
 # ------------ Logging/Info helpers ----------
 ##############################################
+
 class PrefixFilter(logging.Filter):
     """
     Injects a static 'prefix' field into each LogRecord.
@@ -57,6 +58,7 @@ class PrefixFilter(logging.Filter):
     def __init__(self, prefix: str):
         super().__init__()
         self.prefix = prefix
+    
     def filter(self, record: logging.LogRecord) -> bool:
         record.prefix = self.prefix
         return True
@@ -82,7 +84,7 @@ def setup_logging(name: str, prefix: str, level: str = "INFO") -> logging.Logger
 
 def make_header_footer(msg: str, width: int = 100, border: str = "=") -> Tuple[str, str]:
     """
-    Build a centered header line with `msg` between border chars and a matching-width footer line.
+    Build a centered header line with `msg` between borders.
     If `msg` is longer than `width`, the width expands to fit it.
     """
     msg = str(msg).strip().replace("\n", " ")
@@ -96,7 +98,7 @@ def make_header_footer(msg: str, width: int = 100, border: str = "=") -> Tuple[s
 
 def get_git_info(cwd: Optional[Path] = None, *, timeout_s: float = 0.5) -> Dict[str, Any]:
     """
-    Collect basic git info for reproducibility. Best effort; returns empty on failure.
+    Collect basic git info.
     """
     info: Dict[str, Any] = {}
     def _run(cmd: List[str]) -> Optional[str]:
@@ -116,25 +118,13 @@ def get_git_info(cwd: Optional[Path] = None, *, timeout_s: float = 0.5) -> Dict[
         return None
     commit = _run(["git", "rev-parse", "HEAD"])
     branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-    try:
-        r = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=str(cwd) if cwd else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=float(timeout_s) if timeout_s is not None else None,
-        )
-    except Exception:
-        r = None
     if commit is not None: info["commit"] = commit
     if branch is not None: info["branch"] = branch
     return info
 
 def build_cli_cmd() -> str:
     """
-    Return the full CLI command used to invoke the current script,
-    prefixed with 'python ' (for reproducible info bundles).
+    Return the full CLI command used to invoke the script.
     """
     return "python " + " ".join(shlex.quote(a) for a in sys.argv)
 
@@ -149,11 +139,9 @@ def write_info_file(
     Generic helper to write an info YAML bundle.
     """
     try:
+        from scripts.helpers.general_helpers import get_git_info, get_timestamp
         p = Path(out_path)
         p.parent.mkdir(parents=True, exist_ok=True)
-
-        from scripts.helpers.general_helpers import get_git_info, get_timestamp
-
         git_info = get_git_info(Path.cwd())
         meta = {
             "timestamp": get_timestamp(),
@@ -161,15 +149,11 @@ def write_info_file(
         }
         if meta_extra:
             meta.update(meta_extra)
-
         payload: dict = {"meta": meta}
-
         if inputs is not None:
             payload["inputs"] = inputs
-
         with open(p, "w", encoding="utf-8") as fh:
             yaml.safe_dump(payload, fh, sort_keys=False)
-
         if logger:
             logger.info("wrote info bundle to %s", p)
     except Exception as e:
@@ -177,10 +161,15 @@ def write_info_file(
             logger.warning("failed to write info bundle to %s: %s", out_path, e)
 
 def log_field_fmt(v):
+    """
+    Format a log field value for display in a kv-block.
+    """
     return "<unset>" if v in (None, "") else str(v)
 
 def log_kv_block(logger: logging.Logger, title: str, fields: List[Tuple[str, Any]]) -> None:
-    """Log a stable, aligned key/value block with a header/footer."""
+    """
+    Log a stable, aligned key/value block with a header/footer.
+    """
     if not fields:
         header, footer = make_header_footer(str(title))
         logger.info("\n%s\n%s\n%s", header, "<no fields>", footer)
@@ -194,15 +183,11 @@ def log_kv_block(logger: logging.Logger, title: str, fields: List[Tuple[str, Any
 def log_args_block(logger, args, *, title="ARGS", include=None, exclude=None, sort_keys=True) -> None:
     """
     Log argparse.Namespace (or any object with vars()) as a kv-block.
-
-    - include: explicit list of keys in desired order (only keys that exist are logged)
-    - exclude: set/list of keys to omit
     """
     try:
         d = vars(args)
     except Exception:
         d = {}
-
     exclude_set = set(exclude or [])
     if include is not None:
         keys = [k for k in include if k in d and k not in exclude_set]
@@ -211,7 +196,6 @@ def log_args_block(logger, args, *, title="ARGS", include=None, exclude=None, so
         if sort_keys:
             keys.sort()
         keys = [k for k in keys if k not in exclude_set]
-
     fields = [(k, d.get(k)) for k in keys]
     log_kv_block(logger, title, fields)
 
@@ -222,7 +206,6 @@ def log_args_block(logger, args, *, title="ARGS", include=None, exclude=None, so
 def normalize_interval(doc: Dict[str, Any], key_combo: Tuple[str, str, str], *, allow_none: bool = True) -> Optional[str]:
     """
     Normalize a (single) or (lo, hi) interval from the document.
-    It first checks for 'single' key; if not found, it looks for 'lo_key' and 'hi_key'.
     """
     single, lo_key, hi_key = key_combo
     if single in doc and doc[single] is not None:
@@ -256,19 +239,16 @@ def parse_duration_to_seconds(s: str) -> float:
         "30m" -> 30 minutes
         "1h"  -> 1 hour
         "1d"  -> 1 day
-    Units: s = seconds, m = minutes, h = hours, d = days.
     """
     s = s.strip().lower()
     if not s:
         raise ValueError("trace-time duration string cannot be empty")
-
     unit_multipliers = {
         "s": 1.0,
         "m": 60.0,
         "h": 3600.0,
         "d": 86400.0,
     }
-
     # If last char is a letter, treat it as unit
     if s[-1].isalpha():
         unit = s[-1]
@@ -301,6 +281,9 @@ def parse_int_interval(s: Optional[str], *, min_lo: int = 1) -> Optional[Tuple[i
     return lo, hi
 
 def parse_qty_interval(s: Optional[str]) -> Optional[Tuple[str, str]]:
+    """
+    Parse a quantity interval "lo,hi" or "x" into a (lo, hi) tuple.
+    """
     if not s:
         return None
     parts = [x.strip() for x in s.split(",", 1)]
@@ -324,6 +307,9 @@ def parse_timeout_s(t:str | None, default: int = 60) -> int:
         return default
 
 def coerce_bool(v, default=False):
+    """
+    Coerce a value to boolean, with a default if unrecognized.
+    """
     if v is None: return default
     if isinstance(v, bool): return v
     s = str(v).strip().lower()
@@ -332,6 +318,9 @@ def coerce_bool(v, default=False):
     return default
 
 def get_str(v):
+    """
+    Get a string value, or None if v is None or empty.
+    """
     if v is None: return None
     s = str(v).strip()
     return s if s else None
@@ -415,7 +404,9 @@ def qty_to_mcpu_str(m: int) -> str:
     return str(m // 1000) if m % 1000 == 0 else f"{m}m"
 
 def qty_to_bytes_str(b: int) -> str:
-    """Return bytes as a decimal quantity string for K8s."""
+    """
+    Return bytes as a decimal quantity string for K8s.
+    """
     return str(int(max(1, b)))
 
 ##############################################
@@ -514,7 +505,6 @@ def read_seeds_file(path: str | Path, *, logger: logging.Logger | None = None) -
                     continue
     except Exception as e:
         raise ValueError(f"Failed reading seed-file {p}: {e}")
-
     if log:
         if not seeds:
             log.warning("no seeds parsed from %s", p)
@@ -630,6 +620,9 @@ def get_solver_active_status_http(url: str, *, timeout: float = 3.0) -> tuple[in
         return 0, f"connect-failed: {e}"
 
 def strip_outer_quotes(s: Optional[str]) -> Optional[str]:
+    """
+    Strip matching outer quotes from a string.
+    """
     if s is None:
         return None
     s = str(s)
@@ -638,6 +631,9 @@ def strip_outer_quotes(s: Optional[str]) -> Optional[str]:
     return s
 
 def parse_json_cell(raw):
+    """
+    Parse a raw cell value into JSON, trying various unquoting strategies.
+    """
     if raw is None:
         return None
     s = strip_outer_quotes(str(raw).strip())
@@ -655,6 +651,9 @@ def parse_json_cell(raw):
 #############################################
 
 def prio_map(raw) -> Dict[int, int]:
+    """
+    Parse a raw priority map into Dict[int priority, int count].
+    """
     out: Dict[int, int] = {}
     obj = raw if isinstance(raw, dict) else parse_json_cell(raw)
     if not isinstance(obj, dict):
@@ -685,6 +684,10 @@ def place_compare(a: Dict[int, int], b: Dict[int, int]) -> int:
     return 0
 
 def cmp_placed_by_prio_row(row) -> int:
+    """
+    Compare placed_by_prio_solver vs placed_by_prio_default in a row.
+    Returns 1 if solver better, -1 if default better, 0 if equal.
+    """
     s_map = prio_map(row.get("placed_by_prio_solver", ""))
     d_map = prio_map(row.get("placed_by_prio_default", ""))
     return place_compare(s_map, d_map)
@@ -694,10 +697,16 @@ def cmp_placed_by_prio_row(row) -> int:
 #############################################
 
 class Clock(Protocol):
+    """
+    Clock protocol for time-related operations.
+    """
     def time(self) -> float: ...
     def sleep(self, seconds: float) -> None: ...
 
 class SystemClock:
+    """
+    System clock implementation.
+    """
     def time(self) -> float:
         return time.time()
 

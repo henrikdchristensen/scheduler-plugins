@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # trace_replayer.py
-
 """
 python -m scripts.kwok_trace_replayer.trace_replayer --job-file <job-file.yaml>
 """
 
-import argparse, csv, json, logging, threading, time, yaml, subprocess, re
+import argparse, csv, json, logging, threading, time, yaml, subprocess
 from argparse import BooleanOptionalAction
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass
@@ -45,6 +44,9 @@ OPT_STATS_NS = "kube-system"
 OPT_STATS_CM = "optimization-stats"
 OPT_STATS_KEY = "optimization-stats.json"
 OPT_STATS_DUMP_INTERVAL_S = 30.0
+
+# Seeds to skip during replay for selective runs
+SKIP_SEEDS = {1420052706459400740, 2219457405427907235, 3848061858430934892}
 
 # ---------------------------------------------------------------------
 # CLI + Job File
@@ -609,8 +611,7 @@ class TraceReplayer:
                     )
                 )
 
-            # Only delete if within horizon; if a pod would naturally end after
-            # the trace horizon, we just stop the replay while it is still alive.
+            # Only delete if within horizon
             delete_t = start_delay + float(p.end_time)
             if delete_t <= replay_end_s:
                 events.append(Event(sim_time_s=delete_t, kind="delete", record_id=p.id))
@@ -801,8 +802,6 @@ class TraceReplayer:
         """
         Dump optimization stats ConfigMap to a local JSON file.
         """
-        # IMPORTANT: Don't call get_json_ctx() here as kubectl can block
-        # indefinitely. Use a small timeout for this best-effort dump.
         cmd = ["kubectl"]
         if self.ctx:
             cmd += ["--context", str(self.ctx)]
@@ -978,7 +977,7 @@ class TraceReplayer:
                 now_ts = get_timestamp()
                 t_s = self.time_s()
 
-                # Dump optimization-stats every 30s (observable)
+                # Dump optimization-stats every 30s
                 if (t_s - last_opt_dump_s) >= OPT_STATS_DUMP_INTERVAL_S:
                     did_write, updated_at = self.dump_optimization_stats()
                     if did_write:
@@ -1238,6 +1237,16 @@ class TraceReplayer:
         for run_dir in run_dirs:
             if multi_seed:
                 seed_name = run_dir.name
+                
+                # Skip seeds in SKIP_SEEDS
+                try:
+                    seed_num = int(seed_name.replace("seed-", ""))
+                    if seed_num in SKIP_SEEDS:
+                        LOG.info("Skipping seed %d (in SKIP_SEEDS)", seed_num)
+                        continue
+                except ValueError:
+                    pass  # Not a numeric seed, proceed normally
+                
                 run_result_dir = base_results_dir / seed_name
                 header, footer = make_header_footer(f"SEED RUN {seed_name}")
                 LOG.info(

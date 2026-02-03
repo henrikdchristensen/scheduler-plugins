@@ -49,14 +49,12 @@ from scripts.kwok_integration_tests.test_helpers import (
 TEST_NAMESPACE = "integration-test"
 SYSTEM_NAMESPACE = "kube-system"
 
-# Must match your plugin's ConfigMap label & data key
 PLAN_LABEL_KEY = "plan"
 PLAN_DATA_KEY = PLAN_LABEL_KEY + ".json"
 
-# Plugin readiness ConfigMap (created once the plugin is fully ready)
 PLUGIN_CFG_NAME = "plugin-config"
 PLUGIN_CFG_DATA_KEY = "plugin-config.json"
-PLUGIN_CFG_TIMEOUT_S = 10  # timeout for waiting for plugin readiness
+PLUGIN_CFG_TIMEOUT_S = 10
 
 # Timing model:
 # 1) After creating workload & pods -> wait WORKLOAD_SETTLE_TIME_S
@@ -68,7 +66,7 @@ PLAN_EXECUTION_MAX_WAIT_S = 10
 PLAN_EXECUTION_MIN_WAIT_S = 5
 PLAN_EXECUTION_POLL_INTERVAL_S = 1
 
-# Manual HTTP trigger (same style as test_runner)
+# Manual HTTP trigger
 SOLVER_TRIGGER_URL = "http://localhost:18080/solve"
 SOLVER_TRIGGER_TIMEOUT_S = 60
 
@@ -79,9 +77,8 @@ SOLVER_ACTIVE_TIMEOUT_S = 5.0
 # KWOK node names
 NODE_NAMES = [f"kwok-node-{i+1}" for i in range(NUM_NODES)]
 
-# Mode combinations to exercise in pytest (central place to tweak)
+# Mode combinations to exercise in pytest
 # Each entry: (opt_mode, opt_sync, workload_ids)
-# We just test using sync=True for all modes.
 PYTEST_MODE_CASES: List[Tuple[str, bool, List[str]]] = [
     ("manual_blocking", True, ["prioaware"]),
     ("manual", True, ["sameprio"]),
@@ -91,7 +88,7 @@ PYTEST_MODE_CASES: List[Tuple[str, bool, List[str]]] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Helpers reused from setup_cluster + extra test-only helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def wait_for_plugin_configmap(
@@ -102,16 +99,9 @@ def wait_for_plugin_configmap(
 ) -> Optional[Dict[str, Any]]:
     """
     Wait until the plugin readiness ConfigMap appears.
-
-    The plugin is considered 'ready' once it has created the ConfigMap:
-      - namespace: SYSTEM_NAMESPACE
-      - name:      PLUGIN_CFG_NAME
-
-    Returns the ConfigMap JSON dict, or None on timeout.
     """
     deadline = time.time() + timeout_s
     last_err: Optional[Exception] = None
-
     while time.time() < deadline:
         try:
             cm = get_json_ctx(
@@ -137,7 +127,6 @@ def wait_for_plugin_configmap(
                 e,
             )
             time.sleep(1.0)
-
     logger.warning(
         "plugin ConfigMap %s/%s did not appear within %.1fs (last error: %s)",
         SYSTEM_NAMESPACE,
@@ -173,7 +162,6 @@ def get_latest_plan_configmap(
             logger.info("waiting for plan ConfigMap (kubectl failed): %s", e)
             time.sleep(1.0)
             continue
-
         items = data.get("items", [])
         if items:
             items.sort(
@@ -183,10 +171,8 @@ def get_latest_plan_configmap(
                 )
             )
             return items[-1]
-
         logger.info("no plan ConfigMap yet; sleeping...")
         time.sleep(1.0)
-
     logger.warning("no plan ConfigMap found within %ss", timeout_s)
     return None
 
@@ -214,7 +200,6 @@ def wait_for_plan_done(
     """
     start = time.time()
     deadline = start + max_wait_s
-
     if min_wait_s > 0:
         logger.info(
             "Waiting %.1fs minimum before checking plan status in ConfigMap %s/%s.",
@@ -223,10 +208,8 @@ def wait_for_plan_done(
             cm_name,
         )
         time.sleep(min_wait_s)
-
     attempt = 0
     last_err: Optional[Exception] = None
-
     while time.time() < deadline:
         attempt += 1
         try:
@@ -277,7 +260,6 @@ def wait_for_plan_done(
                         cm_name,
                         attempt,
                     )
-
         except RuntimeError as e:
             last_err = e
             logger.warning(
@@ -287,12 +269,10 @@ def wait_for_plan_done(
                 attempt,
                 e,
             )
-
         remaining = deadline - time.time()
         if remaining <= 0:
             break
         time.sleep(min(poll_interval_s, max(0.0, remaining)))
-
     logger.error(
         "Plan status did not reach 'done' within %.1fs for ConfigMap %s/%s (last_err=%r)",
         max_wait_s,
@@ -304,19 +284,10 @@ def wait_for_plan_done(
 
 def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
     """
-    Given a StoredPlan dict, compute the FINAL planned placement:
-
-      - Start from plan.old_placements as baseline.
-      - Remove pods listed in plan.evicts.
-      - Override/add pods from plan.new_placements.
-
-    Returns mapping: (namespace, name) -> final planned node.
-    Evicted pods are intentionally omitted (no final node).
+    Given a StoredPlan dict, compute the FINAL planned placement.
     """
     plan = sp.get("plan") or {}
-
     mapping: Dict[Tuple[str, str], str] = {}
-
     # 1) Baseline: old placements
     for op in plan.get("old_placements") or []:
         pod = op.get("pod") or {}
@@ -325,7 +296,6 @@ def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
         node = op.get("node")
         if ns and name and node:
             mapping[(str(ns), str(name))] = str(node)
-
     # 2) Evicts: remove from mapping
     for ev in plan.get("evicts") or []:
         pod = ev.get("pod") or {}
@@ -333,7 +303,6 @@ def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
         name = pod.get("name")
         if ns and name:
             mapping.pop((str(ns), str(name)), None)
-
     # 3) New placements: override / add
     for pl in plan.get("new_placements") or []:
         pod = pl.get("pod") or {}
@@ -342,17 +311,11 @@ def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
         to_node = pl.get("to_node")
         if ns and name and to_node:
             mapping[(str(ns), str(name))] = str(to_node)
-
     return mapping
 
-def build_expected_assignment(
-    scenario: WorkloadScenario,
-    namespace: str,
-) -> Dict[Tuple[str, str], bool]:
+def build_expected_assignment(scenario: WorkloadScenario, namespace: str) -> Dict[Tuple[str, str], bool]:
     """
-    Build expected assignment mapping at ReplicaSet level:
-      (namespace, rs_name) -> should_run
-    Only pods with expected_assignment != None are included.
+    Build expected assignment mapping at ReplicaSet level.
     """
     mapping: Dict[Tuple[str, str], bool] = {}
     for step in scenario.steps:
@@ -495,10 +458,10 @@ def write_plan_debug_files(
             writer = csv.writer(f)
             writer.writerow(
                 [
-                    "pod",              # real pod name
+                    "pod",
                     "planned_node",
                     "actual_node",
-                    "expected_assignment",  # from owning ReplicaSet (if any)
+                    "expected_assignment",
                 ]
             )
             for ns, name in all_keys:
@@ -564,13 +527,10 @@ def evaluate_plan_and_cluster_state(
         ns = meta.get("namespace", namespace)
         node = spec.get("nodeName", "") or ""
         labels = meta.get("labels") or {}
-
         if not name:
             continue
-
         key_pod = (str(ns), str(name))
         actual_nodes[key_pod] = node
-
         rs_name = labels.get("app")
         if rs_name:
             key_rs = (str(ns), str(rs_name))
@@ -581,7 +541,7 @@ def evaluate_plan_and_cluster_state(
             else:
                 rs_assigned.setdefault(key_rs, False)
 
-    # Sanity: make sure we saw at least one pod for each logical ReplicaSet
+    # Make sure we saw at least one pod for each logical ReplicaSet
     for step in scenario.steps:
         for pod in step.pods:
             rs_name = rs_name_for_pod(scenario, pod)
@@ -652,28 +612,23 @@ def assert_no_active_plan_http(logger: logging.Logger, *, when: str) -> bool:
     body_compact = (body or "").replace("\n", "\\n")
     if len(body_compact) > 600:
         body_compact = body_compact[:600] + "...(truncated)"
-
     logger.info("solver /active %s: code=%s body=%s", when, code, body_compact)
-
     if code != 200:
         logger.error("Unexpected /active status=%s %s", code, when)
         return False
-
     try:
         payload = json.loads(body)
     except Exception as e:
         logger.error("Failed to parse /active JSON %s: %s body=%r", when, e, body)
         return False
-
     active = bool(payload.get("active", False))
     if active:
         logger.error("Expected no active plan %s, but /active reported active=true: %s", when, payload)
         return False
-
     return True
 
 # ---------------------------------------------------------------------------
-# Core integration function
+# Core integration test runner
 # ---------------------------------------------------------------------------
 
 def run_mode_integration(
@@ -688,9 +643,6 @@ def run_mode_integration(
 ) -> bool:
     """
     End-to-end integration test for a given (opt_mode, scenario).
-
-    If disable_wait_and_active_checks is True, pod waits and /active checks
-    during workload application are skipped.
     """
     if opt_mode not in VALID_OPT_MODES:
         raise ValueError(f"Invalid opt_mode={opt_mode!r}; expected one of {sorted(VALID_OPT_MODES)}")
@@ -735,7 +687,7 @@ def run_mode_integration(
         pods_cap=kwok_pods_cap(total_pods),
     )
 
-    # --- Namespace + PCs ---
+    # --- Namespace + Priority Classes ---
     ensure_namespace(LOG, ctx, TEST_NAMESPACE)
     num_prios = max(NUM_PRIORITIES, scenario_max_priority(scenario))
     ensure_priority_classes(LOG, ctx, num_prios, prefix="p", start=1)

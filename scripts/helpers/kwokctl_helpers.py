@@ -158,11 +158,8 @@ def create_kwok_nodes(logger: logging.Logger, ctx: str, num_nodes: int,
         return
     if pods_cap <= 0:
         raise ValueError("pods_cap must be > 0")
-
     docs = [yaml_kwok_node(f"kwok-node-{i}", node_cpu, node_mem, pods_cap)
             for i in range(1, num_nodes + 1)]
-
-    # Use "\n---\n" if yaml_kwok_node does NOT already include '---'
     body = "\n---\n".join(docs).rstrip() + "\n"
     kubectl_apply_yaml(logger, ctx, body)
 
@@ -209,9 +206,6 @@ def kwok_cache_lock():
 def merge_kwokctl_envs(doc: dict, add_envs: Iterable[Mapping[str, Any]] | None, component: str = "kube-scheduler") -> dict:
     """
     Return a copy of `doc` with extraEnvs for `component` merged by env 'name'.
-    - Items in `add_envs` override/insert existing envs.
-    - Ensures componentsPatches and the component entry exist.
-    - Sorts components and envs by name for stability.
     """
     d = copy.deepcopy(doc) if isinstance(doc, dict) else {}
     # Normalize inputs
@@ -240,21 +234,16 @@ def merge_kwokctl_envs(doc: dict, add_envs: Iterable[Mapping[str, Any]] | None, 
 def save_kwok_scheduler_logs(cluster_name, out_path, *, runner=subprocess.run, logger=None):
     """
     Save `kwokctl logs kube-scheduler --name <cluster>` to out_path.
-
-    runner: injectable subprocess runner (defaults to subprocess.run)
-    logger: injectable logger (defaults to module logger)
     """
     log = logger or logging.getLogger(__name__)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-
     if out_path.exists():
         try:
             out_path.unlink()
             log.info("pruned existing scheduler log: %s", out_path)
         except OSError as e:
             log.warning("failed pruning existing scheduler log %s: %s", out_path, e)
-
     try:
         r = runner(
             ["kwokctl", "logs", "kube-scheduler", "--name", str(cluster_name)],
@@ -267,5 +256,4 @@ def save_kwok_scheduler_logs(cluster_name, out_path, *, runner=subprocess.run, l
         log.info("saved scheduler logs to %s", out_path)
     except Exception as e:
         log.warning("failed saving scheduler logs: %s", e)
-
     return out_path

@@ -12,14 +12,14 @@ class Snapshot:
     cpu_run_util: float                 # running requests / total alloc CPU
     mem_run_util: float                 # running requests / total alloc MEM
     pods_running: List[Tuple[str,str]]  # [(pod, node), ...] for Running pods
-    pods_unscheduled: List[str]         # not-Running pod names
+    pods_unscheduled: List[str]         # not-running pod names
     pods_run_by_node: Dict[str,int]     # node -> running pods count
-    cpu_req_by_node: Dict[str,int]      # node -> mCPU (Running & assigned only)
-    mem_req_by_node: Dict[str,int]      # node -> bytes (Running & assigned only)
+    cpu_req_by_node: Dict[str,int]      # node -> mCPU (running & assigned only)
+    mem_req_by_node: Dict[str,int]      # node -> bytes (running & assigned only)
     cpu_alloc_by_node: Dict[str,int]    # node -> allocatable mCPU
     mem_alloc_by_node: Dict[str,int]    # node -> allocatable bytes
-    running_placed_by_prio: Dict[str,int] = None  # priorityClassName -> count (Running only)
-    unschedulable_by_prio: Dict[str,int] = None  # priorityClassName
+    running_placed_by_prio: Dict[str,int] = None  # priorities -> count (running only)
+    unschedulable_by_prio: Dict[str,int] = None  # priorities
 
 def stat_snapshot(ctx: str, ns: str, expected: int) -> Snapshot:
     _, running, unscheduled = get_running_and_unscheduled(ctx, ns, expected)
@@ -88,7 +88,8 @@ def stat_snapshot(ctx: str, ns: str, expected: int) -> Snapshot:
 
 def sum_pod_requests(pod: dict) -> tuple[int, int]:
     """
-    Sum the CPU and memory requests for a pod by checking its containers and initContainers.
+    Sum the CPU and memory requests for a pod by checking its containers and
+    initContainers.
     """
     cpu_sum = 0
     mem_sum_b = 0
