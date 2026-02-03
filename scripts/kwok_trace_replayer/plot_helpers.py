@@ -404,7 +404,7 @@ def plot_histogram_with_pareto(
                 y_fit = pareto_pdf(x_fit, alpha=a, x_min=xm)
                 label = rf"Pareto: $\alpha={a:.3f}$, $x_{{\min}}={xm:.3g}$"
 
-            line, _ = ax.plot(x_fit, y_fit, linewidth=1.5, linestyle="-")
+            line = ax.plot(x_fit, y_fit, linewidth=1.5, linestyle="-")[0]
             legend_handles.append(line)
             legend_labels.append(label)
 

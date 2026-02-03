@@ -1,22 +1,7 @@
 #!/usr/bin/env python3
 # trace_generator.py
-
 """
 python -m scripts.kwok_trace_replayer.trace_generator --job-dir data/jobs/kwok_trace_generator/
-
-High-level flow per seed:
-  1) resolve args (CLI > job-file), validate (always bounded params)
-  2) if mean_life unset: infer it from target util (Little's law style)
-  3) calibrate mean_life: generate -> measure util -> proportional update
-  4) write initial.json + trace.json + info_generate.yaml + plots
-
-NOTE (initial pods / steady-state alignment):
-    We approximate a steady-state snapshot at t=0 by:
-      - sampling each initial pod’s remaining lifetime from the steady-state residual-life distribution
-      - sampling cpu/mem requests and replicas
-      - adding pods until the effective load reaches the target:
-            effective = max(total_cpu_req, total_mem_req)
-    This avoids ramping from an empty cluster without explicitly simulating t<0 arrivals.
 """
 
 import os, argparse, math, copy, heapq, json, logging, yaml

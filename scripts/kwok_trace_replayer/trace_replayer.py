@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # trace_replayer.py
-
 """
 python -m scripts.kwok_trace_replayer.trace_replayer --job-file <job-file.yaml>
 """
@@ -45,6 +44,9 @@ OPT_STATS_NS = "kube-system"
 OPT_STATS_CM = "optimization-stats"
 OPT_STATS_KEY = "optimization-stats.json"
 OPT_STATS_DUMP_INTERVAL_S = 30.0
+
+# Seeds to skip during replay for selective runs
+SKIP_SEEDS = {1420052706459400740, 2219457405427907235, 3848061858430934892}
 
 # ---------------------------------------------------------------------
 # CLI + Job File
@@ -1238,6 +1240,16 @@ class TraceReplayer:
         for run_dir in run_dirs:
             if multi_seed:
                 seed_name = run_dir.name
+                
+                # Skip seeds in SKIP_SEEDS
+                try:
+                    seed_num = int(seed_name.replace("seed-", ""))
+                    if seed_num in SKIP_SEEDS:
+                        LOG.info("Skipping seed %d (in SKIP_SEEDS)", seed_num)
+                        continue
+                except ValueError:
+                    pass  # Not a numeric seed, proceed normally
+                
                 run_result_dir = base_results_dir / seed_name
                 header, footer = make_header_footer(f"SEED RUN {seed_name}")
                 LOG.info(
