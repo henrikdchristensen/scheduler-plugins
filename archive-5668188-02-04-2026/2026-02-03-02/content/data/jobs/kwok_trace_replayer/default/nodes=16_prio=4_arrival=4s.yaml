@@ -1,0 +1,3 @@
+trace-dir: data/traces/nodes=16_prio=4_arrival=4s
+result-dir: results/default/nodes=16_prio=4_arrival=4s
+kwokctl-config-file: data/configs-kwokctl/default.yaml

@@ -1,0 +1,47 @@
+{
+  "plugin_version": "v0.0.1",
+  "optimization_strategy": "ManualBlocking/Blocking",
+  "generated_at": "2026-01-16T18:17:10.408168819Z",
+  "completed_at": "2026-01-16T18:17:10.6696087Z",
+  "solver_result": {
+    "name": "python",
+    "status": "OPTIMAL",
+    "duration_ms": 806,
+    "score": {
+      "placed_by_priority": {
+        "3": 2
+      },
+      "evicted": 0,
+      "moved": 0
+    }
+  },
+  "plan_status": "Completed",
+  "plan": {
+    "evicts": null,
+    "moves": null,
+    "old_placements": [],
+    "new_placements": [
+      {
+        "uid": "e4ad67d6-bc8e-4f54-b37d-9e1adcbc3fb2",
+        "namespace": "integration-test",
+        "name": "prioaware-rs-201-gk2m9",
+        "node": "kwok-node-2"
+      },
+      {
+        "uid": "e722d0f7-d9c8-4ff8-9926-ff8509206160",
+        "namespace": "integration-test",
+        "name": "prioaware-rs-202-b8d7k",
+        "node": "kwok-node-1"
+      }
+    ],
+    "placement_by_name": {},
+    "workload_quotas": {
+      "rs:integration-test/prioaware-rs-201": {
+        "kwok-node-2": 1
+      },
+      "rs:integration-test/prioaware-rs-202": {
+        "kwok-node-1": 1
+      }
+    }
+  }
+}
