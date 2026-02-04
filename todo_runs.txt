@@ -12,8 +12,3 @@ mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s.yaml
 mode=schedulingfailure_blocking=1_defpreempt=1_nodes=16_prio=4_arrival=1s.yaml
 mode=schedulingfailure_blocking=1_defpreempt=1_nodes=32_prio=4_arrival=1s.yaml
 mode=stablequeue8s_blocking=0_defpreempt=0_nodes=32_prio=1_arrival=4s.yaml
-
-5 (2026-02-04-04)
-mode=schedulingfailure_blocking=0_defpreempt=1_nodes=16_prio=4_arrival=2s.yaml
-mode=schedulingfailure_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=1s.yaml
-mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=4_arrival=2s.yaml
