@@ -1116,9 +1116,14 @@ class TraceReplayer:
                 elapsed = float(self.clock.time()) - loop_start
                 sleep_s = max(0.0, interval_s - elapsed)
                 if sleep_s > 0:
-                    # Use stop_event.wait() for interruptible sleep
-                    if stop_event.wait(timeout=sleep_s):
-                        break  # stop was signaled during sleep
+                    # Sleep in small increments to check stop_event frequently
+                    sleep_increment = min(0.1, sleep_s)
+                    remaining = sleep_s
+                    while remaining > 0 and not stop_event.is_set():
+                        self.clock.sleep(min(sleep_increment, remaining))
+                        remaining -= sleep_increment
+                    if stop_event.is_set():
+                        break
 
         LOG.info("monitor: stop signal received; exiting")
 
