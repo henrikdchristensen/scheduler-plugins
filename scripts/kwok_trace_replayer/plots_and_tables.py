@@ -27,8 +27,8 @@ from scripts.helpers.plot_config import (
 )
 from scripts.helpers.data_helpers import is_finite
 from scripts.helpers.table_helpers import (
-    fmt_pm,
-    fmt_pm_split,
+    fmt_mean_std,
+    fmt_mean_std_split,
     fmt_signed,
     fmt_unsigned_int,
     metric_header_tex,
@@ -997,9 +997,9 @@ class MetricSpec:
         """
         if include_std:
             if self.kind == "unsigned_int":
-                return fmt_pm(mean_val, std_val, mean_signed=False, mean_dec=self.mean_dec, std_dec=self.std_dec)
+                return fmt_mean_std(mean_val, std_val, mean_signed=False, mean_dec=self.mean_dec, std_dec=self.std_dec)
             else:
-                return fmt_pm(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
+                return fmt_mean_std(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
         else:
             if self.kind == "unsigned_int":
                 return fmt_unsigned_int(mean_val)
@@ -1013,9 +1013,9 @@ class MetricSpec:
         """
         if include_std:
             if self.kind == "unsigned_int":
-                return fmt_pm_split(mean_val, std_val, mean_signed=False, mean_dec=self.mean_dec, std_dec=self.std_dec)
+                return fmt_mean_std_split(mean_val, std_val, mean_signed=False, mean_dec=self.mean_dec, std_dec=self.std_dec)
             else:
-                return fmt_pm_split(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
+                return fmt_mean_std_split(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
         else:
             if self.kind == "unsigned_int":
                 return (fmt_unsigned_int(mean_val), "")

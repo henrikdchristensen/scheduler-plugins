@@ -86,6 +86,7 @@ MAIN_PLOT_MODES: List[Tuple[str, int]] = [
 DELTA_SERIES: List[Tuple[str, str, str, int]] = [
     ("Periodic (blocking), 8→32s interval", "periodic8s", "periodic32s", 1),
     ("Stable-queue (blocking), 2→8s delay", "stable-queue-2s", "stable-queue-8s", 1),
+    # ("Stable-queue (blocking), 2→16s delay", "stable-queue-2s", "stable-queue-16s", 1), TODO: 
 ]
 
 DELTA_NAMES = [d[0] for d in DELTA_SERIES]
@@ -95,6 +96,7 @@ DELTA_NAMES = [d[0] for d in DELTA_SERIES]
 DELTA_COLOR_INDICES: List[int] = [
     5,  # Periodic (blocking), 8→32s interval
     9,  # Stable-queue (blocking), 2→8s delay
+    # 10, # Stable-queue (blocking), 2→16s delay TODO: 
 ]
 
 # Metric columns used in delta computations
@@ -221,14 +223,14 @@ MODE_SPECS: List[ModeSpec] = [
     ModeSpec("periodic8s", 0, "PR-8s-NB", "Periodic (non-blocking), 8s interval", 3, 7),
     ModeSpec("periodic32s", 1, "PR-32s-B", "Periodic (blocking), 32s interval", 4, 5),
     ModeSpec("periodic32s", 0, "PR-32s-NB", "Periodic (non-blocking), 32s interval", 5, 7),
-    ModeSpec("periodic64s", 1, "PR-64s-B", "Periodic (blocking), 64s interval", 6, 5),
-    ModeSpec("periodic64s", 0, "PR-64s-NB", "Periodic (non-blocking), 64s interval", 7, 7),
+    # ModeSpec("periodic64s", 1, "PR-64s-B", "Periodic (blocking), 64s interval", 6, 5), TODO: 
+    # ModeSpec("periodic64s", 0, "PR-64s-NB", "Periodic (non-blocking), 64s interval", 7, 7),
     ModeSpec("stable-queue-2s", 1, "SQ-2s-B", "Stable-queue (blocking), 2s delay", 6, 9),
     ModeSpec("stable-queue-2s", 0, "SQ-2s-NB", "Stable-queue (non-blocking), 2s delay", 7, 11),
     ModeSpec("stable-queue-8s", 1, "SQ-8s-B", "Stable-queue (blocking), 8s delay", 8, 9), 
     ModeSpec("stable-queue-8s", 0, "SQ-8s-NB", "Stable-queue (non-blocking), 8s delay", 9, 11),
-    ModeSpec("stable-queue-16s", 1, "SQ-16s-B", "Stable-queue (blocking), 16s delay", 10, 9),
-    ModeSpec("stable-queue-16s", 0, "SQ-16s-NB", "Stable-queue (non-blocking), 16s delay", 11, 11),
+    # ModeSpec("stable-queue-16s", 1, "SQ-16s-B", "Stable-queue (blocking), 16s delay", 10, 9), TODO: 
+    # ModeSpec("stable-queue-16s", 0, "SQ-16s-NB", "Stable-queue (non-blocking), 16s delay", 11, 11),
 ]
 
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
