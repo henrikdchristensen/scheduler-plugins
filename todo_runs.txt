@@ -1,19 +1,19 @@
-1,2,3
-mode=periodic64s_blocking=0_defpreempt=0_nodes=16_prio=1_arrival=16s
+1,2,3 (2026-02-04-01)
+mode=periodic64s_blocking=0_defpreempt=0_nodes=16_prio=1_arrival=16s.yaml
 
-3,4,5
-mode=schedulingfailure_blocking=1_defpreempt=1_nodes=16_prio=1_arrival=1s
+3,4,5 (2026-02-04-02)
+mode=schedulingfailure_blocking=1_defpreempt=1_nodes=16_prio=1_arrival=1s.yaml
 
-4,5
-mode=periodic8s_blocking=0_defpreempt=1_nodes=16_prio=4_arrival=4s
-mode=periodic8s_blocking=1_defpreempt=0_nodes=32_prio=4_arrival=4s
-mode=schedulingfailure_blocking=0_defpreempt=0_nodes=16_prio=1_arrival=1s
-mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s
-mode=schedulingfailure_blocking=1_defpreempt=1_nodes=16_prio=4_arrival=1s
-mode=schedulingfailure_blocking=1_defpreempt=1_nodes=32_prio=4_arrival=1s
-mode=stablequeue8s_blocking=0_defpreempt=0_nodes=32_prio=1_arrival=4s
+4,5 (2026-02-04-03)
+mode=periodic8s_blocking=0_defpreempt=1_nodes=16_prio=4_arrival=4s.yaml
+mode=periodic8s_blocking=1_defpreempt=0_nodes=32_prio=4_arrival=4s.yaml
+mode=schedulingfailure_blocking=0_defpreempt=0_nodes=16_prio=1_arrival=1s.yaml
+mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s.yaml
+mode=schedulingfailure_blocking=1_defpreempt=1_nodes=16_prio=4_arrival=1s.yaml
+mode=schedulingfailure_blocking=1_defpreempt=1_nodes=32_prio=4_arrival=1s.yaml
+mode=stablequeue8s_blocking=0_defpreempt=0_nodes=32_prio=1_arrival=4s.yaml
 
-5
-mode=schedulingfailure_blocking=0_defpreempt=1_nodes=16_prio=4_arrival=2s
-mode=schedulingfailure_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=1s
-mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=4_arrival=2s
+5 (2026-02-04-04)
+mode=schedulingfailure_blocking=0_defpreempt=1_nodes=16_prio=4_arrival=2s.yaml
+mode=schedulingfailure_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=1s.yaml
+mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=4_arrival=2s.yaml
