@@ -48,7 +48,7 @@ SEED_COL = "seed"
 SEED_JITTER_FRAC = 0.12  # jitter as fraction of mode_spacing
 
 PRIORITIES_TO_SHOW = [1, 4]
-INTER_ARRIVALS_TO_SHOW = [2.0, 4.0, 8.0, 16.0] # TODO: for thesis add 1.0
+INTER_ARRIVALS_TO_SHOW = [2.0, 4.0, 8.0, 16.0] # TODO: for thesis add 1.0 and 32.0
 
 TABLE_DECIMALS = 1
 
@@ -221,10 +221,14 @@ MODE_SPECS: List[ModeSpec] = [
     ModeSpec("periodic8s", 0, "PR-8s-NB", "Periodic (non-blocking), 8s interval", 3, 7),
     ModeSpec("periodic32s", 1, "PR-32s-B", "Periodic (blocking), 32s interval", 4, 5),
     ModeSpec("periodic32s", 0, "PR-32s-NB", "Periodic (non-blocking), 32s interval", 5, 7),
+    # ModeSpec("periodic64s", 1, "PR-64s-B", "Periodic (blocking), 64s interval", 6, 5), #TODO: for thesis add back
+    # ModeSpec("periodic64s", 0, "PR-64s-NB", "Periodic (non-blocking), 64s interval", 7, 7),
     ModeSpec("stable-queue-2s", 1, "SQ-2s-B", "Stable-queue (blocking), 2s delay", 6, 9),
     ModeSpec("stable-queue-2s", 0, "SQ-2s-NB", "Stable-queue (non-blocking), 2s delay", 7, 11),
     ModeSpec("stable-queue-8s", 1, "SQ-8s-B", "Stable-queue (blocking), 8s delay", 8, 9), 
     ModeSpec("stable-queue-8s", 0, "SQ-8s-NB", "Stable-queue (non-blocking), 8s delay", 9, 11),
+    # ModeSpec("stable-queue-16s", 1, "SQ-16s-B", "Stable-queue (blocking), 16s delay", 10, 9), #TODO: for thesis add back
+    # ModeSpec("stable-queue-16s", 0, "SQ-16s-NB", "Stable-queue (non-blocking), 16s delay", 11, 11),
 ]
 
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}

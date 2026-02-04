@@ -1,5 +1,5 @@
 meta:
-  timestamp: 2026/02/04/06:19:16
+  timestamp: 2026/02/04/08:19:24
   git: {}
   kind: trace_replayer
   job_file: /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s.yaml
@@ -9,8 +9,8 @@ inputs:
     --kwok-runtime binary --job-file /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s.yaml
   args:
     job_file: /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s.yaml
-    result_dir: /work/2026-02-04-03/content/results/plugin/mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s
-    trace_dir: data/traces/nodes=16_prio=1_arrival=2s
+    result_dir: /work/2026-02-04-03/content/results/plugin/mode=schedulingfailure_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=2s/5809399052914872227
+    trace_dir: /work/2026-02-04-03/content/data/traces/nodes=16_prio=1_arrival=2s/5809399052914872227
     cluster_name: kwok1
     kwok_runtime: binary
     kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml

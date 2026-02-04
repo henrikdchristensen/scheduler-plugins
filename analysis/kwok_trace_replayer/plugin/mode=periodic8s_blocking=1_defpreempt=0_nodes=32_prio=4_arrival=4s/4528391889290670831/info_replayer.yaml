@@ -9,8 +9,8 @@ inputs:
     --kwok-runtime binary --job-file /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=periodic8s_blocking=1_defpreempt=0_nodes=32_prio=4_arrival=4s.yaml
   args:
     job_file: /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=periodic8s_blocking=1_defpreempt=0_nodes=32_prio=4_arrival=4s.yaml
-    result_dir: /work/2026-02-04-03/content/results/plugin/mode=periodic8s_blocking=1_defpreempt=0_nodes=32_prio=4_arrival=4s
-    trace_dir: data/traces/nodes=32_prio=4_arrival=4s
+    result_dir: /work/2026-02-04-03/content/results/plugin/mode=periodic8s_blocking=1_defpreempt=0_nodes=32_prio=4_arrival=4s/4528391889290670831
+    trace_dir: /work/2026-02-04-03/content/data/traces/nodes=32_prio=4_arrival=4s/4528391889290670831
     cluster_name: kwok1
     kwok_runtime: binary
     kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
