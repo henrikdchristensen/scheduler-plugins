@@ -1,7 +1,0 @@
-pod,planned_node,actual_node,expected_assignment
-sameprio-rs-101-bdbwc,,,false
-sameprio-rs-102-xl5fj,,kwok-node-2,true
-sameprio-rs-201-wqzmf,,kwok-node-1,true
-sameprio-rs-202-74xkj,,kwok-node-2,true
-sameprio-rs-203-4ffzn,,kwok-node-1,true
-sameprio-rs-204-hzhh5,,kwok-node-1,true

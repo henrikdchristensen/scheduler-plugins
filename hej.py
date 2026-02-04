@@ -18,11 +18,12 @@ ROOT/
 Rules per experiment directory (immediate child of ROOT):
   - Must contain at least --min-seeds seed folders (default 3).
   - Each seed folder must contain general_stats.csv (or general_stats.csv.gz if --allow-gz).
-  - Each general_stats file must contain a numeric 'time_s' column with max(time_s) >= --threshold (default 7200).
+  - Each general_stats file must contain a numeric 'time_s' column with
+    --threshold-min <= max(time_s) <= --threshold-max.
 
 Usage:
   python check_general_stats.py /path/to/root
-  python check_general_stats.py /path/to/root --threshold 7200 --min-seeds 3 --fail-only
+  python check_general_stats.py /path/to/root --threshold-min 7190 --threshold-max 7210 --min-seeds 3 --fail-only
   python check_general_stats.py /path/to/root --allow-gz --write-report report.csv
 
 Exit codes:
@@ -69,7 +70,7 @@ def open_maybe_gzip(path: Path) -> io.TextIOBase:
     return path.open("r", encoding="utf-8", newline="")
 
 
-def check_time_s_csv(path: Path, threshold: float, time_col: str = "time_s") -> tuple[bool, Optional[float], str]:
+def check_time_s_csv(path: Path, threshold_min: float, threshold_max: float, time_col: str = "time_s") -> tuple[bool, Optional[float], str]:
     """
     Stream-read a CSV and return:
       ok, max_time, reason_if_fail
@@ -97,12 +98,14 @@ def check_time_s_csv(path: Path, threshold: float, time_col: str = "time_s") -> 
                     continue
                 if (max_time is None) or (v > max_time):
                     max_time = v
-                    if max_time >= threshold:
-                        return True, max_time, ""
 
             if max_time is None:
                 return False, None, f"no numeric '{time_col}' values"
-            return False, max_time, f"max {time_col} < {threshold}"
+            if max_time < threshold_min:
+                return False, max_time, f"max {time_col} ({max_time}) < {threshold_min}"
+            if max_time > threshold_max:
+                return False, max_time, f"max {time_col} ({max_time}) > {threshold_max}"
+            return True, max_time, ""
     except Exception as e:
         return False, None, f"error: {type(e).__name__}: {e}"
 
@@ -118,21 +121,11 @@ def find_general_stats(seed_dir: Path, allow_gz: bool) -> Optional[Path]:
     return None
 
 
-def check_experiment_dir(exp_dir: Path, min_seeds: int, threshold: float, allow_gz: bool, time_col: str) -> ExperimentCheck:
+def check_experiment_dir(exp_dir: Path, min_seeds: int, threshold_min: float, threshold_max: float, allow_gz: bool, time_col: str) -> ExperimentCheck:
     seed_dirs = sorted([p for p in exp_dir.iterdir() if p.is_dir()])
     seed_results: List[SeedCheck] = []
 
-    if len(seed_dirs) < min_seeds:
-        return ExperimentCheck(
-            experiment_dir=str(exp_dir),
-            ok=False,
-            seed_dirs_found=len(seed_dirs),
-            seeds_checked=0,
-            seeds_ok=0,
-            reason=f"found {len(seed_dirs)} seed dirs, expected at least {min_seeds}",
-            seed_results=[],
-        )
-
+    # Check all seeds first, even if we don't have enough
     seeds_ok = 0
     for sd in seed_dirs:
         stats = find_general_stats(sd, allow_gz=allow_gz)
@@ -148,7 +141,7 @@ def check_experiment_dir(exp_dir: Path, min_seeds: int, threshold: float, allow_
             )
             continue
 
-        ok, max_time, reason = check_time_s_csv(stats, threshold=threshold, time_col=time_col)
+        ok, max_time, reason = check_time_s_csv(stats, threshold_min=threshold_min, threshold_max=threshold_max, time_col=time_col)
         if ok:
             seeds_ok += 1
         seed_results.append(
@@ -161,12 +154,15 @@ def check_experiment_dir(exp_dir: Path, min_seeds: int, threshold: float, allow_
             )
         )
 
-    exp_ok = (seeds_ok >= min_seeds) and all(r.ok for r in seed_results[:len(seed_dirs)])
+    exp_ok = (len(seed_dirs) >= min_seeds) and (seeds_ok >= min_seeds) and all(r.ok for r in seed_results)
     # Note: if there are >min_seeds dirs, we still require *all* seed dirs to pass.
     # If you instead want "any 3 seeds pass", I can adjust.
     if not exp_ok:
-        bad = [r for r in seed_results if not r.ok]
-        reason = f"{len(bad)}/{len(seed_results)} seed(s) failed"
+        if len(seed_dirs) < min_seeds:
+            reason = f"found {len(seed_dirs)} seed dirs, expected at least {min_seeds}"
+        else:
+            bad = [r for r in seed_results if not r.ok]
+            reason = f"{len(bad)}/{len(seed_results)} seed(s) failed"
     else:
         reason = ""
 
@@ -185,7 +181,8 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("root", type=Path, help="Root directory containing experiment subdirectories")
     ap.add_argument("--min-seeds", type=int, default=5, help="Minimum number of seed folders required per experiment")
-    ap.add_argument("--threshold", type=float, default=7190.0, help="Require max(time_s) >= threshold")
+    ap.add_argument("--threshold-min", type=float, default=7190.0, help="Require max(time_s) >= threshold-min")
+    ap.add_argument("--threshold-max", type=float, default=7220.0, help="Require max(time_s) <= threshold-max (default: inf)")
     ap.add_argument("--time-col", default="time_s", help="Time column name (default: time_s)")
     ap.add_argument("--allow-gz", action="store_true", help="Also accept general_stats.csv.gz")
     ap.add_argument("--fail-only", action="store_true", help="Only print failing experiments / seeds")
@@ -209,7 +206,8 @@ def main(argv: list[str]) -> int:
         chk = check_experiment_dir(
             exp_dir=exp,
             min_seeds=args.min_seeds,
-            threshold=args.threshold,
+            threshold_min=args.threshold_min,
+            threshold_max=args.threshold_max,
             allow_gz=args.allow_gz,
             time_col=args.time_col,
         )

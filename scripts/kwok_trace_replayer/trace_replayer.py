@@ -38,6 +38,9 @@ MAX_REPLAY_WORKERS = 5 # max concurrent kubectl apply/delete calls during replay
 LOGGER_NAME = "trace-replayer" # logger name
 LOG = logging.getLogger(LOGGER_NAME) # module logger
 
+# Timeout for kubectl futures (seconds) - prevents infinite hangs
+KUBECTL_FUTURE_TIMEOUT_S = 5.0
+
 # Plugin-exported optimization stats
 OPT_STATS_NS = "kube-system"
 OPT_STATS_CM = "optimization-stats"
@@ -778,11 +781,13 @@ class TraceReplayer:
         finally:
             for fut in futures:
                 try:
-                    fut.result()
+                    fut.result(timeout=KUBECTL_FUTURE_TIMEOUT_S)
+                except TimeoutError:
+                    LOG.warning("kubectl task timed out after %.1fs", KUBECTL_FUTURE_TIMEOUT_S)
                 except Exception as e:
                     LOG.error("kubectl task failed: %s", e)
             try:
-                executor.shutdown(wait=True)
+                executor.shutdown(wait=False, cancel_futures=True)
             except Exception:
                 pass
             LOG.info("all kubectl tasks completed")
@@ -1111,7 +1116,9 @@ class TraceReplayer:
                 elapsed = float(self.clock.time()) - loop_start
                 sleep_s = max(0.0, interval_s - elapsed)
                 if sleep_s > 0:
-                    self.clock.sleep(sleep_s)
+                    # Use stop_event.wait() for interruptible sleep
+                    if stop_event.wait(timeout=sleep_s):
+                        break  # stop was signaled during sleep
 
         LOG.info("monitor: stop signal received; exiting")
 
