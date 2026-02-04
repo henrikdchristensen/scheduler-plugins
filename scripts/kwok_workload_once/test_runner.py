@@ -4,7 +4,7 @@
 python -m scripts.kwok_workload_once.test_runner --job-file <job-file.yaml>
 """
 
-import sys, shutil, argparse, math, time, random, csv, json, logging, yaml, subprocess, traceback, shlex
+import sys, shutil, argparse, math, time, random, csv, json, logging, yaml, subprocess, traceback, shlex, os
 from argparse import BooleanOptionalAction
 from importlib import metadata as importlib_metadata
 from dataclasses import dataclass
@@ -84,7 +84,18 @@ SOLVER_TRIGGER_URL = "http://localhost:18080/solve"
 SOLVER_TRIGGER_TIMEOUT_S = 60
 SOLVER_ACTIVE_URL = "http://localhost:18080/active"
 
-SOLVER_CMD = "python3 scripts/python_solver/main.py"
+# Solver type: cp_sat (default) or glop
+# Can be overridden via --solver-type argument or SOLVER_TYPE env var
+SOLVER_SCRIPTS = {
+    "cp_sat": "scripts/python_solver/solver_cp_sat.py",
+    "glop": "scripts/python_solver/solver_glop.py",
+}
+DEFAULT_SOLVER_TYPE = "cp_sat"
+
+def get_solver_cmd(solver_type: str = DEFAULT_SOLVER_TYPE) -> str:
+    """Get the solver command based on solver type."""
+    script = SOLVER_SCRIPTS.get(solver_type, SOLVER_SCRIPTS[DEFAULT_SOLVER_TYPE])
+    return f"python3 {script}"
 
 # ===============================================================
 # Data classes
@@ -202,6 +213,8 @@ def build_argparser() -> argparse.ArgumentParser:
                     help="After applying all pods for a seed, POST the manual solver endpoint.")
 
     # Direct solver
+    ap.add_argument("--solver-type", dest="solver_type", default=None, choices=["cp_sat", "glop"],
+                    help="Solver type to use: cp_sat (default, constraint programming) or glop (linear programming).")
     ap.add_argument("--solver-directly", dest="solver_directly", action=BooleanOptionalAction, default=None,
                     help="Bypass cluster use; directly call the Python solver with generated nodes/pods.")
     ap.add_argument("--solver-timeout-ms", dest="solver_timeout_ms", type=int, default=None,
@@ -1567,10 +1580,12 @@ class TestRunner:
         _write_json(self.args.solver_input_export, instance)
 
         # Run solver
-        LOG.info("solving directly with %d nodes and %d pods (seed=%d)", len(nodes), len(pods), seed)
+        solver_type = getattr(self.args, "solver_type", None) or os.environ.get("SOLVER_TYPE", DEFAULT_SOLVER_TYPE)
+        solver_cmd = get_solver_cmd(solver_type)
+        LOG.info("solving directly with %d nodes and %d pods (seed=%d, solver=%s)", len(nodes), len(pods), seed, solver_type)
         t0 = time.time()
         completed = subprocess.run(
-            shlex.split(SOLVER_CMD),
+            shlex.split(solver_cmd),
             input=json.dumps(instance).encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

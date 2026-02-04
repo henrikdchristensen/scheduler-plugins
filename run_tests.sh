@@ -64,22 +64,35 @@ ensure_python_solver_env() {
   PYTHON_SOLVER_OUT_VENV_DIR="${PYTHON_SOLVER_OUT_VENV_DIR%$'\r'}"
   PYTHON_SOLVER_SCRIPT_PATH="${PYTHON_SOLVER_SCRIPT_PATH%$'\r'}"
 
-  # Provide sane defaults if unset/empty
-  if [[ -z "${PYTHON_SOLVER_OUT_SCRIPT_DIR:-}" ]]; then
+  # For local development/testing, use local directories instead of system paths
+  # This avoids requiring sudo for running tests
+  if [[ -z "${PYTHON_SOLVER_OUT_SCRIPT_DIR:-}" ]] || [[ "${PYTHON_SOLVER_OUT_SCRIPT_DIR}" == "/opt/"* ]]; then
     PYTHON_SOLVER_OUT_SCRIPT_DIR="${PWD}/.solver"
   fi
-  if [[ -z "${PYTHON_SOLVER_OUT_VENV_DIR:-}" ]]; then
-    PYTHON_SOLVER_OUT_VENV_DIR="${PWD}/.venv_solver}"
+  if [[ -z "${PYTHON_SOLVER_OUT_VENV_DIR:-}" ]] || [[ "${PYTHON_SOLVER_OUT_VENV_DIR}" == "/opt/"* ]]; then
+    PYTHON_SOLVER_OUT_VENV_DIR="${PWD}/.venv_solver"
   fi
   if [[ -z "${PYTHON_SOLVER_SCRIPT_PATH:-}" ]]; then
-    PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/main.py"
+    PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/solver_cp_sat.py"
   fi
+
+  # Support SOLVER_TYPE environment variable
+  SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
+  case "${SOLVER_TYPE}" in
+    glop)
+      PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/solver_glop.py"
+      ;;
+    cp_sat|*)
+      PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/solver_cp_sat.py"
+      ;;
+  esac
+  echo "Using solver: ${SOLVER_TYPE} (${PYTHON_SOLVER_SCRIPT_PATH})"
 
   # Try to create directories
   mkdir -p "${PYTHON_SOLVER_OUT_SCRIPT_DIR}" "${PYTHON_SOLVER_OUT_VENV_DIR}"
 
-  # Always copy latest solver code
-  cp "${PYTHON_SOLVER_SCRIPT_PATH}" "${PYTHON_SOLVER_OUT_SCRIPT_DIR}/main.py"
+  # Always copy latest solver code (to solver.py for consistency)
+  cp "${PYTHON_SOLVER_SCRIPT_PATH}" "${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver.py"
 
   # Create venv if missing
   if [[ ! -x "${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python" ]]; then
@@ -146,6 +159,12 @@ if "$RUN_INT_KWOK"; then
   make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64' VERSION=${SCHEDULER_VERSION}
 
   ensure_python_solver_env
+
+  # Export solver environment variables so Go scheduler can find the solver
+  export SOLVER_PATH="${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver.py"
+  export SOLVER_PYTHON_BIN="${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python"
+  echo "SOLVER_PATH=${SOLVER_PATH}"
+  echo "SOLVER_PYTHON_BIN=${SOLVER_PYTHON_BIN}"
 
   python -m pip install --upgrade pip
   if [ -f scripts/kwok_integration_tests/requirements.txt ]; then

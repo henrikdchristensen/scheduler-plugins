@@ -11,6 +11,9 @@ CONTENT_DIR_WAIT_INTERVAL_S="${CONTENT_DIR_WAIT_INTERVAL:-2}" # seconds
 PYTHON_SOLVER_OUT_VENV_DIR="/opt/venv"
 PYTHON_SOLVER_OUT_SCRIPT_DIR="/opt/solver"
 
+# Solver selection: cp_sat (default) or glop
+SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
+
 # Runner selection: test_runner (default) or trace_replayer
 RUNNER="${RUNNER:-test_runner}"
 
@@ -97,6 +100,7 @@ print_cfg() {
   log cfg "CONTENT_DIR=${CONTENT_DIR}"
   log cfg "KWOK_RUNTIME=${KWOK_RUNTIME}"
   log cfg "RUNNER=${RUNNER}"
+  log cfg "SOLVER_TYPE=${SOLVER_TYPE}"
 
   if [ -n "${JOB_FILE}" ]; then
     log cfg "JOB_FILE=${JOB_FILE}"
@@ -181,7 +185,19 @@ pip_install() {
 stage_solver_and_venv() {
   log init "staging solver to ${PYTHON_SOLVER_OUT_SCRIPT_DIR} (venv @ ${PYTHON_SOLVER_OUT_VENV_DIR})"
 
-  require_file "${CONTENT_DIR}/scripts/python_solver/main.py"
+  # Determine solver script based on SOLVER_TYPE
+  local solver_script
+  case "${SOLVER_TYPE}" in
+    glop)
+      solver_script="solver_glop.py"
+      ;;
+    cp_sat|*)
+      solver_script="solver_cp_sat.py"
+      ;;
+  esac
+  log cfg "SOLVER_TYPE=${SOLVER_TYPE} -> using ${solver_script}"
+
+  require_file "${CONTENT_DIR}/scripts/python_solver/${solver_script}"
   require_file "${CONTENT_DIR}/scripts/python_solver/requirements.txt"
 
   ensure_system_python
@@ -190,7 +206,7 @@ stage_solver_and_venv() {
     set -euo pipefail
     install -d -m 0755 '${PYTHON_SOLVER_OUT_SCRIPT_DIR}'
     install -d -m 0755 '${PYTHON_SOLVER_OUT_VENV_DIR}'
-    cp -a '${CONTENT_DIR}/scripts/python_solver/main.py' '${PYTHON_SOLVER_OUT_SCRIPT_DIR}/main.py'
+    cp -a '${CONTENT_DIR}/scripts/python_solver/${solver_script}' '${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver.py'
 
     python3 -m venv '${PYTHON_SOLVER_OUT_VENV_DIR}'
     '${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python' -m ensurepip --upgrade || true
@@ -316,6 +332,7 @@ FLAGS_SPEC=(
   "seed|SEED|value|"
   "repeats|REPEATS|value|"
   "job-file|JOB_FILE|value|"
+  "solver-type|SOLVER_TYPE|value|"
   "solver-trigger|SOLVER_TRIGGER|flag|--solver-trigger"
   "save-solver-stats|SAVE_SOLVER_STATS|flag|--save-solver-stats"
   "save-scheduler-logs|SAVE_SCHEDULER_LOGS|flag|--save-scheduler-logs"

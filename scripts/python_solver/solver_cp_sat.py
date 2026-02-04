@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py
+# solver_cp_sat.py
 
 import time, sys, json
 from dataclasses import dataclass
@@ -116,8 +116,11 @@ class CPSATSolver:
     def _status_str(cls, st: int) -> str:
         """
         Convert solver status to string.
-        Only accepts OR-Tools status integers.
+        Accepts OR-Tools status (int or CpSolverStatus enum).
         """
+        # OR-Tools may return either int or CpSolverStatus enum
+        if hasattr(st, 'value'):
+            st = st.value
         if not isinstance(st, int):
             raise TypeError(f"status must be int (OR-Tools CpSolver status), got {type(st).__name__}")
         return STATUS_MAP.get(st, "UNKNOWN")

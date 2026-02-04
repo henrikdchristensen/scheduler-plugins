@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # test_helpers.py
 
-import logging, yaml
+import logging, os, yaml
 
 from pathlib import Path
 from dataclasses import dataclass
@@ -266,6 +266,14 @@ def build_kwokctl_config_for_mode(
         {"name": "OPTIMIZE_MODE", "value": opt_mode},
         {"name": "OPTIMIZE_BLOCKING_SOLVING", "value": "true" if opt_sync else "false"},
     ]
+    # Add SOLVER_PATH from environment if set (for local development)
+    solver_path = os.environ.get("SOLVER_PATH")
+    if solver_path:
+        envs.append({"name": "SOLVER_PATH", "value": solver_path})
+    # Add SOLVER_PYTHON_BIN from environment if set (for local venv)
+    solver_python_bin = os.environ.get("SOLVER_PYTHON_BIN")
+    if solver_python_bin:
+        envs.append({"name": "SOLVER_PYTHON_BIN", "value": solver_python_bin})
     return merge_kwokctl_envs(base_doc, envs, component="kube-scheduler")
 
 def apply_workload_step(
