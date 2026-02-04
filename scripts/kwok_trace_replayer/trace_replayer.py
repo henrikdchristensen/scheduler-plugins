@@ -48,7 +48,7 @@ OPT_STATS_KEY = "optimization-stats.json"
 OPT_STATS_DUMP_INTERVAL_S = 30.0
 
 # Seeds to skip during replay for selective runs
-SKIP_SEEDS = {1420052706459400740, 2219457405427907235, 3848061858430934892}
+SKIP_SEEDS = {}
 
 # ---------------------------------------------------------------------
 # CLI + Job File
