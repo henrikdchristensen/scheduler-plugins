@@ -119,11 +119,12 @@ func buildBaselineScore(pods []*v1.Pod) SolverScore {
 // solverConfigArgs builds a list of key-value pairs representing the active
 // solver configuration. Add new config flags here as needed.
 func solverConfigArgs() []any {
-	args := make([]any, 0, 10)
+	args := make([]any, 0, 12)
 	if SolverPythonEnabled {
 		args = append(
 			args,
 			"pythonSolver", true,
+			"pythonScriptPath", SolverPythonScriptPath,
 			"pythonTimeout", SolverPythonTimeout.String(),
 			"pythonGapLimit", fmt.Sprintf("%.2f", SolverPythonGapLimit),
 			"pythonGuaranteedTierFraction", fmt.Sprintf("%.2f", SolverPythonGuaranteedTierFraction),

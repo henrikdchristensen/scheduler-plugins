@@ -176,14 +176,14 @@ Having set up the KWOK cluster configuration file, ensure you have built the lat
    sudo /opt/venv/bin/pip install --no-cache-dir -r scripts/python_solver/requirements.txt
    ```
 
-- Copy the Python solver code to the location expected by the plugin. You can choose between the CP-SAT solver (default) or the Glop LP solver:
+- Copy the Python solver code to the location expected by the plugin. You can choose between the CP-SAT solver (default) or the CBC MIP solver:
 
    ```bash
    sudo install -d -m 0755 /opt/solver/
    # For CP-SAT solver (default, constraint programming):
    sudo cp -a scripts/python_solver/solver_cp_sat.py /opt/solver/solver.py
-   # Or for Glop solver (linear programming):
-   # sudo cp -a scripts/python_solver/solver_glop.py /opt/solver/solver.py
+   # Or for CBC solver (mixed integer programming):
+   # sudo cp -a scripts/python_solver/solver_cbc.py /opt/solver/solver.py
    ```
 
    NOTE: If you change the code of the Python solver, you *must* copy it again.

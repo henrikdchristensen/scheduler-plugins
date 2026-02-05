@@ -181,10 +181,10 @@ jobs:
           set -euo pipefail
           sudo install -d -m 0755 "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}" "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_VENV_DIR }}"
           sudo chown -R "$USER:$USER" "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}" "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_VENV_DIR }}"
-          # Use CP-SAT solver by default; set SOLVER_TYPE=glop for Glop solver
+          # Use CP-SAT solver by default; set SOLVER_TYPE=cbc for CBC solver
           SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
-          if [ "$SOLVER_TYPE" = "glop" ]; then
-            cp scripts/python_solver/solver_glop.py "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}/solver.py"
+          if [ "$SOLVER_TYPE" = "cbc" ]; then
+            cp scripts/python_solver/solver_cbc.py "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}/solver.py"
           else
             cp scripts/python_solver/solver_cp_sat.py "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}/solver.py"
           fi

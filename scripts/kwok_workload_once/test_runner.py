@@ -84,11 +84,12 @@ SOLVER_TRIGGER_URL = "http://localhost:18080/solve"
 SOLVER_TRIGGER_TIMEOUT_S = 60
 SOLVER_ACTIVE_URL = "http://localhost:18080/active"
 
-# Solver type: cp_sat (default) or glop
+# Solver type: cp_sat (default), cbc (MIP solver), or gurobi
 # Can be overridden via --solver-type argument or SOLVER_TYPE env var
 SOLVER_SCRIPTS = {
     "cp_sat": "scripts/python_solver/solver_cp_sat.py",
-    "glop": "scripts/python_solver/solver_glop.py",
+    "cbc": "scripts/python_solver/solver_cbc.py",
+    "gurobi": "scripts/python_solver/solver_gurobi.py",
 }
 DEFAULT_SOLVER_TYPE = "cp_sat"
 
@@ -213,8 +214,8 @@ def build_argparser() -> argparse.ArgumentParser:
                     help="After applying all pods for a seed, POST the manual solver endpoint.")
 
     # Direct solver
-    ap.add_argument("--solver-type", dest="solver_type", default=None, choices=["cp_sat", "glop"],
-                    help="Solver type to use: cp_sat (default, constraint programming) or glop (linear programming).")
+    ap.add_argument("--solver-type", dest="solver_type", default=None, choices=["cp_sat", "cbc", "gurobi"],
+                    help="Solver type: cp_sat (constraint programming), cbc (MIP solver), or gurobi.")
     ap.add_argument("--solver-directly", dest="solver_directly", action=BooleanOptionalAction, default=None,
                     help="Bypass cluster use; directly call the Python solver with generated nodes/pods.")
     ap.add_argument("--solver-timeout-ms", dest="solver_timeout_ms", type=int, default=None,

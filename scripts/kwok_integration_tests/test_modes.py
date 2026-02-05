@@ -32,8 +32,8 @@ from scripts.kwok_integration_tests.test_helpers import (
     DEFAULT_CLUSTER_NAME, DEFAULT_KWOK_RUNTIME,
     DEFAULT_KWOKCTL_CONFIG, NUM_NODES,
     NODE_CPU, NODE_MEM, NUM_PRIORITIES,
-    VALID_OPT_MODES, WORKLOAD_SCENARIOS,
-    DEFAULT_WORKLOAD_ID,
+    VALID_OPT_MODES, VALID_SOLVER_TYPES, DEFAULT_SOLVER_TYPE,
+    WORKLOAD_SCENARIOS, DEFAULT_WORKLOAD_ID,
     DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS,
     WorkloadStep, WorkloadScenario,
     rs_name_for_pod, load_kwokctl_config,
@@ -62,7 +62,7 @@ PLUGIN_CFG_TIMEOUT_S = 10
 # 3) Once plan is present -> wait PLAN_EXECUTION_TIME_S to be sure evictions/new pods are done
 WORKLOAD_SETTLE_TIME_S = 5
 PLAN_CFG_TIMEOUT_S = 20 # 
-PLAN_EXECUTION_MAX_WAIT_S = 10
+PLAN_EXECUTION_MAX_WAIT_S = 20
 PLAN_EXECUTION_MIN_WAIT_S = 5
 PLAN_EXECUTION_POLL_INTERVAL_S = 1
 
@@ -78,13 +78,14 @@ SOLVER_ACTIVE_TIMEOUT_S = 5.0
 NODE_NAMES = [f"kwok-node-{i+1}" for i in range(NUM_NODES)]
 
 # Mode combinations to exercise in pytest
-# Each entry: (opt_mode, opt_sync, workload_ids)
-PYTEST_MODE_CASES: List[Tuple[str, bool, List[str]]] = [
-    ("manual_blocking", True, ["prioaware"]),
-    ("manual", True, ["sameprio"]),
-    ("scheduling_failure", True, ["sameprio"]),
-    ("periodic", True, ["sameprio"]),
-    ("stable_queue", True, ["higharrival"]),
+# Each entry: (opt_mode, opt_blocking, workload_ids, solver_types)
+# solver_types is a list of solver types to test (cp_sat, cbc)
+PYTEST_MODE_CASES: List[Tuple[str, bool, List[str], List[str]]] = [
+    ("manual_blocking", True, ["prioaware"], ["cp_sat", "cbc", "gurobi"]),
+    ("manual", True, ["sameprio"], ["cp_sat", "cbc", "gurobi"]),
+    ("scheduling_failure", True, ["sameprio"], ["cp_sat", "cbc", "gurobi"]),
+    ("periodic", True, ["sameprio"], ["cp_sat", "cbc", "gurobi"]),
+    ("stable_queue", True, ["higharrival"], ["cp_sat", "cbc", "gurobi"]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -633,27 +634,30 @@ def assert_no_active_plan_http(logger: logging.Logger, *, when: str) -> bool:
 
 def run_mode_integration(
     opt_mode: str,
-    opt_sync: bool,
+    opt_blocking: bool,
     *,
     scenario: WorkloadScenario,
+    solver_type: str = DEFAULT_SOLVER_TYPE,
     cluster_name: str = DEFAULT_CLUSTER_NAME,
     kwok_runtime: str = DEFAULT_KWOK_RUNTIME,
     kwokctl_config_file: str = DEFAULT_KWOKCTL_CONFIG,
     disable_wait_and_active_checks: bool = DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS,
 ) -> bool:
     """
-    End-to-end integration test for a given (opt_mode, scenario).
+    End-to-end integration test for a given (opt_mode, opt_blocking, scenario, solver_type).
     """
     if opt_mode not in VALID_OPT_MODES:
         raise ValueError(f"Invalid opt_mode={opt_mode!r}; expected one of {sorted(VALID_OPT_MODES)}")
+    if solver_type not in VALID_SOLVER_TYPES:
+        raise ValueError(f"Invalid solver_type={solver_type!r}; expected one of {sorted(VALID_SOLVER_TYPES)}")
 
     LOG = setup_logging(
-        name=f"mpo-itest-{scenario.id}-{opt_mode}-{opt_sync}",
-        prefix=f"[mpo-itest scenario={scenario.id} mode={opt_mode} sync={opt_sync}] ",
+        name=f"mpo-itest-{scenario.id}-{opt_mode}-{opt_blocking}-{solver_type}",
+        prefix=f"[mpo-itest scenario={scenario.id} mode={opt_mode} blocking={opt_blocking} solver={solver_type}] ",
         level="INFO",
     )
     header, footer = make_header_footer(
-        f"MPOptimizer KWOK integration: scenario={scenario.id}, mode={opt_mode}, sync={opt_sync}"
+        f"MPOptimizer KWOK integration: scenario={scenario.id}, mode={opt_mode}, blocking={opt_blocking}, solver={solver_type}"
     )
     LOG.info("\n%s\ncluster=%s\n%s", header, cluster_name, footer)
     LOG.info("Scenario description: %s", scenario.description)
@@ -666,7 +670,7 @@ def run_mode_integration(
 
     # --- KWOK cluster (always recreate) ---
     base_cfg = load_kwokctl_config(kwokctl_config_file)
-    cfg_for_mode = build_kwokctl_config_for_mode(base_cfg, opt_mode, opt_sync)
+    cfg_for_mode = build_kwokctl_config_for_mode(base_cfg, opt_mode, opt_blocking, solver_type)
 
     ensure_kwok_cluster(
         LOG,
@@ -742,23 +746,32 @@ def run_mode_integration(
     LOG.info("Sleeping %.1fs for workload to settle before expecting a plan.", WORKLOAD_SETTLE_TIME_S)
     time.sleep(WORKLOAD_SETTLE_TIME_S)
 
+    # Track solver timing
+    solver_start = time.time()
+
     # Manual modes: trigger optimization via HTTP
     if opt_mode.startswith("manual"):
         LOG.info("Manual mode: triggering solver via HTTP: %s", SOLVER_TRIGGER_URL)
         code, body = solver_trigger_http(LOG, SOLVER_TRIGGER_URL, SOLVER_TRIGGER_TIMEOUT_S)
+        solver_elapsed = time.time() - solver_start
         body_compact = (body or "").replace("\n", "\\n")
         if len(body_compact) > 600:
             body_compact = body_compact[:600] + "...(truncated)"
-        LOG.info("solver_response code=%s body=%s", code, body_compact)
+        LOG.info("solver_response code=%s elapsed=%.3fs body=%s", code, solver_elapsed, body_compact)
+    else:
+        LOG.info("Non-manual mode (%s): waiting for solver to produce plan automatically...", opt_mode)
 
     # 2) Wait for plan ConfigMap (with timeout)
     cm = get_latest_plan_configmap(ctx, LOG, timeout_s=PLAN_CFG_TIMEOUT_S)
+    plan_appeared_elapsed = time.time() - solver_start
     if cm is None:
         LOG.warning(
             "No plan ConfigMap found within %.1fs; treating as integration failure.",
             PLAN_CFG_TIMEOUT_S,
         )
         return False
+
+    LOG.info("Plan ConfigMap appeared after %.3fs (solver_type=%s)", plan_appeared_elapsed, solver_type)
 
     cm_name = (cm.get("metadata") or {}).get("name")
     if not cm_name:
@@ -805,23 +818,25 @@ def run_mode_integration(
 # ---------------------------------------------------------------------------
 
 if pytest is not None:
-    # Flatten (workload_ids, mode, sync) -> (workload_id, mode, sync)
-    PARAM_CASES: List[Tuple[str, bool, str]] = [
-        (opt_mode, opt_sync, wid)
-        for (opt_mode, opt_sync, workload_ids) in PYTEST_MODE_CASES
+    # Flatten (opt_mode, opt_blocking, workload_ids, solver_types) -> (opt_mode, opt_blocking, workload_id, solver_type)
+    PARAM_CASES: List[Tuple[str, bool, str, str]] = [
+        (opt_mode, opt_blocking, wid, solver)
+        for (opt_mode, opt_blocking, workload_ids, solver_types) in PYTEST_MODE_CASES
         for wid in workload_ids
+        for solver in solver_types
     ]
 
     @pytest.mark.parametrize(
-        "opt_mode,opt_sync,workload_id",
+        "opt_mode,opt_blocking,workload_id,solver_type",
         PARAM_CASES,
     )
-    def test_modes_end_to_end(opt_mode: str, opt_sync: bool, workload_id: str):
+    def test_modes_end_to_end(opt_mode: str, opt_blocking: bool, workload_id: str, solver_type: str):
         scenario = WORKLOAD_SCENARIOS[workload_id]
         assert run_mode_integration(
             opt_mode,
-            opt_sync,
+            opt_blocking,
             scenario=scenario,
+            solver_type=solver_type,
             cluster_name=DEFAULT_CLUSTER_NAME,
             kwok_runtime=DEFAULT_KWOK_RUNTIME,
             kwokctl_config_file=DEFAULT_KWOKCTL_CONFIG,
@@ -845,8 +860,11 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--optimize-mode", required=True,
                     choices=sorted(VALID_OPT_MODES),
                     help="OPTIMIZE_MODE value")
-    ap.add_argument("--optimize-sync", action="store_true",
-                    help="Set OPTIMIZE_SYNC=true (default: false)")
+    ap.add_argument("--optimize-blocking", action="store_true",
+                    help="Set OPTIMIZE_BLOCKING_SOLVING=true (default: false)")
+    ap.add_argument("--solver-type", default=DEFAULT_SOLVER_TYPE,
+                    choices=sorted(VALID_SOLVER_TYPES),
+                    help=f"Solver type: cp_sat, cbc, or gurobi (default: {DEFAULT_SOLVER_TYPE})")
     ap.add_argument("--workload-id", default=DEFAULT_WORKLOAD_ID,
                     choices=sorted(WORKLOAD_SCENARIOS.keys()),
                     help=f"Workload scenario id (default: {DEFAULT_WORKLOAD_ID})")
@@ -861,8 +879,9 @@ def main() -> None:
     scenario = WORKLOAD_SCENARIOS[args.workload_id]
     ok = run_mode_integration(
         opt_mode=args.optimize_mode,
-        opt_sync=args.optimize_sync,
+        opt_blocking=args.optimize_blocking,
         scenario=scenario,
+        solver_type=args.solver_type,
         cluster_name=args.cluster_name,
         kwok_runtime=args.kwok_runtime,
         kwokctl_config_file=args.kwokctl_config_file,

@@ -1,0 +1,15 @@
+{
+  "solver_a_name": "cp_sat",
+  "solver_a_dir": "plugin",
+  "solver_b_name": "gurobi",
+  "solver_b_dir": "plugin-gurobi",
+  "n_configs": 16,
+  "n_seeds": 1600,
+  "n_cp_sat_wins": 1306,
+  "n_gurobi_wins": 241,
+  "n_ties": 0,
+  "n_both_failed": 53,
+  "cp_sat_win_rate": 0.81625,
+  "gurobi_win_rate": 0.150625,
+  "overall_winner": "cp_sat"
+}

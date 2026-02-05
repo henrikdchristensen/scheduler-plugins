@@ -1,0 +1,17 @@
+config,nodes,pods,priorities,util,timeout_s,n_seeds,n_cp_sat_wins,n_gurobi_wins,n_ties,n_both_failed,cp_sat_win_rate,gurobi_win_rate,avg_cp_sat_duration_ms,avg_gurobi_duration_ms,speed_ratio,winner
+nodes16_pods64_prio2_util090_timeout01,16,64,2,90,1,100,90,8,0,2,0.9000,0.0800,nan,nan,inf,cp_sat
+nodes16_pods64_prio2_util090_timeout10,16,64,2,90,10,100,98,1,0,1,0.9800,0.0100,nan,nan,inf,cp_sat
+nodes16_pods64_prio2_util090_timeout20,16,64,2,90,20,100,99,0,0,1,0.9900,0.0000,nan,nan,inf,cp_sat
+nodes16_pods64_prio2_util090_timeout60,16,64,2,90,60,100,92,7,0,1,0.9200,0.0700,nan,nan,inf,cp_sat
+nodes16_pods64_prio2_util095_timeout01,16,64,2,95,1,100,91,9,0,0,0.9100,0.0900,1726.5,nan,inf,cp_sat
+nodes16_pods64_prio2_util095_timeout10,16,64,2,95,10,100,97,3,0,0,0.9700,0.0300,10220.4,nan,inf,cp_sat
+nodes16_pods64_prio2_util095_timeout20,16,64,2,95,20,100,98,2,0,0,0.9800,0.0200,18591.4,nan,inf,cp_sat
+nodes16_pods64_prio2_util095_timeout60,16,64,2,95,60,100,24,72,0,4,0.2400,0.7200,nan,nan,inf,gurobi
+nodes16_pods64_prio2_util100_timeout01,16,64,2,100,1,100,90,5,0,5,0.9000,0.0500,1677.7,nan,inf,cp_sat
+nodes16_pods64_prio2_util100_timeout10,16,64,2,100,10,100,99,0,0,1,0.9900,0.0000,10267.3,nan,inf,cp_sat
+nodes16_pods64_prio2_util100_timeout20,16,64,2,100,20,100,100,0,0,0,1.0000,0.0000,19396.0,nan,inf,cp_sat
+nodes16_pods64_prio2_util100_timeout60,16,64,2,100,60,100,18,58,0,24,0.1800,0.5800,nan,nan,inf,gurobi
+nodes16_pods64_prio2_util105_timeout01,16,64,2,105,1,100,91,4,0,5,0.9100,0.0400,1670.2,nan,inf,cp_sat
+nodes16_pods64_prio2_util105_timeout10,16,64,2,105,10,100,100,0,0,0,1.0000,0.0000,10297.5,nan,inf,cp_sat
+nodes16_pods64_prio2_util105_timeout20,16,64,2,105,20,100,100,0,0,0,1.0000,0.0000,19415.5,nan,inf,cp_sat
+nodes16_pods64_prio2_util105_timeout60,16,64,2,105,60,100,19,72,0,9,0.1900,0.7200,nan,nan,inf,gurobi

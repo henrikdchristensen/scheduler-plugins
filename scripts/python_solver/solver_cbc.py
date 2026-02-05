@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-# solver_glop.py
+# solver_cbc.py
 """
-Glop LP Solver for Kubernetes Pod Scheduling Optimization.
+CBC MIP Solver for Kubernetes Pod Scheduling Optimization.
 
-This solver uses OR-Tools' Glop (linear programming) to solve the pod placement
-problem. Unlike CP-SAT which uses constraint programming with discrete variables,
-Glop uses continuous relaxation and linear constraints.
+This solver uses OR-Tools' CBC (Coin-or Branch and Cut) mixed-integer programming
+solver. It uses the SAME tiered lexicographic optimization approach as the CP-SAT
+solver (solver_cp_sat.py):
+
+1. Iterates over priority tiers (highest to lowest)
+2. For each tier, maximizes placements for pods with priority >= tier
+3. Then minimizes disruption (evictions + moves) for running pods
+4. Locks in achieved values as constraints before moving to next tier
 
 Key differences from CP-SAT:
-1. Variables are continuous (0.0-1.0) instead of binary
-2. Uses simplex algorithm for optimization
-3. Solutions may need rounding to get integer assignments
-4. Generally faster but may produce fractional solutions
+1. Uses MIP (Mixed Integer Programming) instead of constraint programming
+2. Binary integer variables (0 or 1) via IntVar - no rounding needed
+3. Uses branch-and-cut algorithm for optimization
+4. CBC with SCIP fallback for solver availability
 
 This solver uses the SAME Go contract as the CP-SAT solver (solver_cp_sat.py).
-It can be used by setting SOLVER_TYPE=glop or SOLVER_PATH to point to this script.
+It can be used by setting SOLVER_TYPE=cbc or SOLVER_PATH to point to this script.
 """
 
 # Suppress SWIG deprecation warnings from ortools
@@ -34,7 +39,7 @@ from ortools.linear_solver import pywraplp
 NO_NODES: Final[str] = "NO_NODES"
 NO_PODS: Final[str] = "NO_PODS"
 
-# Glop solver status codes mapped to the same strings as CP-SAT
+# CBC/MIP solver status codes mapped to the same strings as CP-SAT
 STATUS_MAP: Final[dict[int, str]] = {
     pywraplp.Solver.OPTIMAL: "OPTIMAL",
     pywraplp.Solver.FEASIBLE: "FEASIBLE",
@@ -45,8 +50,8 @@ STATUS_MAP: Final[dict[int, str]] = {
     pywraplp.Solver.MODEL_INVALID: "MODEL_INVALID",
 }
 
-# Threshold for rounding LP solutions to binary
-ROUNDING_THRESHOLD: Final[float] = 0.5
+# Binary variable threshold (CBC returns exact 0/1, but we use 0.5 for safety)
+BINARY_THRESHOLD: Final[float] = 0.5
 
 #################################################
 # --- Solver Options Class ----------------------
@@ -121,10 +126,10 @@ class Problem:
 
 @dataclass(frozen=True)
 class DecisionVars:
-    """Decision variables for the Glop LP model.
+    """Decision variables for the CBC MIP model.
 
-    Uses continuous variables in [0,1] range which are interpreted
-    as binary after rounding.
+    Uses true binary integer variables (0 or 1) for exact solutions.
+    No rounding is needed since CBC solves the integer program directly.
     """
 
     # placed[i] = 1 if pod i is placed somewhere, 0 otherwise
@@ -134,11 +139,14 @@ class DecisionVars:
 
 
 #################################################
-# --- Glop LP Solver Class ----------------------
+# --- CBC MIP Solver Class ----------------------
 #################################################
 
-class GlopSolver:
-    """Linear Programming solver using OR-Tools Glop for pod scheduling."""
+class CBCSolver:
+    """Mixed Integer Programming solver using OR-Tools CBC for pod scheduling.
+    
+    Uses true binary integer variables for exact 0/1 solutions without rounding.
+    """
 
     #################################################
     # --- Helpers -----------------------------------
@@ -146,9 +154,9 @@ class GlopSolver:
 
     @classmethod
     def _status_str(cls, st: int) -> str:
-        """Convert Glop solver status to string."""
+        """Convert CBC solver status to string."""
         if not isinstance(st, int):
-            raise TypeError(f"status must be int (Glop solver status), got {type(st).__name__}")
+            raise TypeError(f"status must be int (CBC solver status), got {type(st).__name__}")
         return STATUS_MAP.get(st, "UNKNOWN")
 
     def solve(self, instance: dict) -> dict:
@@ -217,7 +225,7 @@ class GlopSolver:
         problem: Problem = frozen_or_err
 
         #################################################
-        # --- Create Glop Solver ------------------------
+        # --- Create CBC Solver ------------------------
         #################################################
         solver = self._create_solver(options)
         if solver is None:
@@ -250,12 +258,12 @@ class GlopSolver:
         #################################################
         # --- Solve with lexicographic optimization -----
         #################################################
-        st, phases = self._solve_lexicographically(solver, problem, vars, options)
+        st, phases, solution = self._solve_lexicographically(solver, problem, vars, options)
 
         #################################################
         # --- Extract and return plan -------------------
         #################################################
-        placements, evictions = self._extract_plan(problem, vars, solver)
+        placements, evictions = self._extract_plan(problem, vars, solution)
         total_time = max(0.0, time.monotonic() - started_at)
 
         overall_status = self._compute_overall_status(phases, st)
@@ -302,8 +310,11 @@ class GlopSolver:
         )
 
     def _create_solver(self, options: SolverOptions) -> Optional[pywraplp.Solver]:
-        """Create and configure the Glop solver."""
-        solver = pywraplp.Solver.CreateSolver("GLOP")
+        """Create and configure the CBC MIP solver."""
+        # Try CBC first (preferred), fall back to SCIP if not available
+        solver = pywraplp.Solver.CreateSolver("CBC")
+        if solver is None:
+            solver = pywraplp.Solver.CreateSolver("SCIP")
         if solver is None:
             return None
         # Set time limit in milliseconds
@@ -440,18 +451,18 @@ class GlopSolver:
     # --- Model building ----------------------------
     #################################################
     def _build_decision_vars(self, solver: pywraplp.Solver, problem: Problem) -> DecisionVars:
-        """Build decision variables for the LP model.
+        """Build decision variables for the MIP model.
 
-        In LP relaxation, we use continuous variables in [0, 1] instead of binary.
-        The final solution is rounded to get integer assignments.
+        Uses true binary integer variables (0 or 1) for exact solutions.
+        CBC/SCIP will solve the integer program directly without rounding.
         """
         placed = [
-            solver.NumVar(0.0, 1.0, f"placed_{i}")
+            solver.IntVar(0, 1, f"placed_{i}")
             for i in range(problem.num_pods)
         ]
         assign = [
             [
-                solver.NumVar(0.0, 1.0, f"assign_{i}_{j}")
+                solver.IntVar(0, 1, f"assign_{i}_{j}")
                 for j in problem.eligible_nodes[i]
             ]
             for i in range(problem.num_pods)
@@ -521,79 +532,261 @@ class GlopSolver:
         problem: Problem,
         vars: DecisionVars,
         options: SolverOptions,
-    ) -> tuple[int, list[dict]]:
-        """Run optimization using weighted objectives.
+    ) -> tuple[int, list[dict], dict]:
+        """Run the tiered lexicographic optimization.
 
-        For LP, we use a weighted objective approach instead of true
-        lexicographic solving since Glop doesn't support incremental solving
-        well. We combine:
-        1. Maximize placements (weighted by priority)
-        2. Minimize disruption (evictions + moves)
+        This mirrors the CP-SAT approach:
+        1. Iterate over priority tiers (highest to lowest)
+        2. For each tier, maximize placements for pods with priority >= tier
+        3. Then minimize disruption for running pods with priority >= tier
+        4. Lock in achieved values as constraints before moving to next tier
 
-        The weights are chosen to ensure priority ordering is respected.
+        For MIP, we rebuild objectives for each stage and add constraints
+        to lock in previously achieved values.
+
+        Returns:
+            tuple of (status, phases, solution_dict)
+            solution_dict contains 'placed' and 'assign' values captured after the final solve
         """
+
+        #########################
+        # Solution storage - we must capture values BEFORE adding new constraints
+        #########################
+        solution: dict = {"placed": {}, "assign": {}}
+
+        def capture_solution():
+            """Capture current solution values before modifying the model."""
+            for i in range(problem.num_pods):
+                try:
+                    solution["placed"][i] = vars.placed[i].solution_value()
+                except Exception:
+                    solution["placed"][i] = 0.0
+                solution["assign"][i] = {}
+                for local, j in enumerate(problem.eligible_nodes[i]):
+                    try:
+                        solution["assign"][i][local] = vars.assign[i][local].solution_value()
+                    except Exception:
+                        solution["assign"][i][local] = 0.0
+
+        #########################
+        # Solver helpers
+        #########################
         total_sec = max(0.0, options.timeout_ms / 1000.0)
-        phases: list[dict] = []
+        usable_sec = max(0.0, total_sec)
+        deadline = time.monotonic() + total_sec
 
-        # Build weighted objective
-        # Higher priority pods get higher placement weight
-        priorities = sorted(
-            {problem.pod_priority[i] for i in range(problem.num_pods)}, reverse=True
-        )
-        
-        # Create priority weights - each priority level gets exponentially higher weight
-        # to ensure lexicographic-like behavior
-        max_prio = max(priorities) if priorities else 0
-        min_prio = min(priorities) if priorities else 0
-        prio_range = max(1, max_prio - min_prio + 1)
-        
-        def get_priority_weight(prio: int) -> float:
-            """Get weight for a priority level. Higher priority = higher weight."""
-            # Use exponential weighting to ensure strict priority ordering
-            level = prio - min_prio  # 0 to prio_range-1
-            return float(10 ** level)
+        def remaining_wall() -> float:
+            """Remaining wall time in seconds."""
+            return max(0.0, deadline - time.monotonic())
 
-        def orig_node_var(i: int):
-            """Get the assignment variable for pod i on its original node."""
+        def relative_gap(sense: str, obj: float, bound: float) -> Optional[float]:
+            """Compute the relative gap between the objective and the bound."""
+            if obj is None or bound is None:
+                return None
+            denom = max(1.0, abs(obj))
+            if sense == "max":
+                return max(0.0, (bound - obj) / denom)
+            else:
+                return max(0.0, (obj - bound) / denom)
+
+        def orig_node(i: int):
+            """Get the assignment variable for pod i on its original node, or 0."""
             orig = problem.pod_node_j[i]
             pos = problem.eligible_pos[i].get(orig)
-            return vars.assign[i][pos] if pos is not None else None
+            return vars.assign[i][pos] if pos is not None else 0
 
-        # Build combined objective:
-        # Maximize: sum(priority_weight * placed[i]) - small_penalty * disruption
-        # Disruption penalty is smaller than placement benefit to prioritize placement
-        objective = solver.Objective()
-        
-        # Placement terms (positive = maximize placement)
-        for i in range(problem.num_pods):
-            weight = get_priority_weight(problem.pod_priority[i])
-            objective.SetCoefficient(vars.placed[i], weight)
-        
-        # Disruption terms for running pods (negative = minimize disruption)
-        # Use a smaller weight to not override placement decisions
-        disruption_penalty = 0.1  # Small penalty for disruption
-        for i in problem.running_idxs:
-            orig_var = orig_node_var(i)
-            if orig_var is not None:
-                # Reward staying on original node
-                objective.SetCoefficient(orig_var, disruption_penalty)
-        
-        objective.SetMaximization()
-        solver.SetTimeLimit(int(total_sec * 1000))
+        def run_stage(obj_vars: list, coeffs: list, sense: str, cap_sec: float) -> dict:
+            """Run a single optimization stage.
 
-        t0 = time.monotonic()
-        st = solver.Solve()
-        time_spent = min(total_sec, max(0.0, time.monotonic() - t0))
+            Args:
+                obj_vars: List of decision variables for the objective
+                coeffs: List of coefficients for each variable
+                sense: 'max' or 'min'
+                cap_sec: Maximum time in seconds for this stage
+            """
+            result = {
+                "status": pywraplp.Solver.NOT_SOLVED,
+                "time_spent": 0.0,
+                "relative_gap": None,
+                "objective_value": None,
+            }
+            if cap_sec <= 1e-3:
+                return result
 
-        phases.append({
-            "tier": 0,
-            "stage": "combined",
-            "status": self._status_str(st),
-            "duration_ms": round(time_spent * 1000),
-            "relative_gap": "",
-        })
+            budget = min(cap_sec, remaining_wall())
+            if budget <= 1e-3:
+                return result
 
-        return st, phases
+            # Clear and set new objective
+            objective = solver.Objective()
+            objective.Clear()
+            for var, coeff in zip(obj_vars, coeffs):
+                if hasattr(var, 'solution_value'):  # It's a variable
+                    objective.SetCoefficient(var, coeff)
+                # Skip constants (like 0 for orig_node when no eligible position)
+
+            if sense == "max":
+                objective.SetMaximization()
+            else:
+                objective.SetMinimization()
+
+            solver.SetTimeLimit(int(budget * 1000))
+
+            t0 = time.monotonic()
+            st = solver.Solve()
+            time_spent = min(budget, max(0.0, time.monotonic() - t0))
+
+            result["status"] = st
+            result["time_spent"] = time_spent
+
+            # Get objective value
+            if st in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+                try:
+                    obj_val = objective.Value()
+                    result["objective_value"] = obj_val
+                    # For MIP solvers, best bound may not be available
+                    try:
+                        bnd = objective.BestBound()
+                        result["relative_gap"] = relative_gap(sense, obj_val, bnd)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            return result
+
+        def gap_str(g: Optional[float]) -> str:
+            return f"{g:.4f}" if isinstance(g, (int, float)) else ""
+
+        #########################
+        # Time management
+        #########################
+        reserved_total = usable_sec * max(0.0, min(1.0, options.guaranteed_tier_fraction))
+        unreserved_pool = max(0.0, usable_sec - reserved_total)
+        floor_left = reserved_total
+
+        #########################
+        # Build priorities and tiers
+        #########################
+        priorities = sorted({problem.pod_priority[i] for i in range(problem.num_pods)}, reverse=True)
+        tiers = [p for p in priorities if any(problem.pod_priority[i] >= p for i in range(problem.num_pods))]
+        remaining_tiers = max(1, len(tiers))
+
+        #########################
+        # Solve per priority tier
+        #########################
+        st = pywraplp.Solver.NOT_SOLVED
+        phases: list[dict] = []
+
+        for p in tiers:
+            # Indices of pods with priority >= p
+            idxs_ge = [i for i in range(problem.num_pods) if problem.pod_priority[i] >= p]
+
+            if not idxs_ge:
+                remaining_tiers = max(0, remaining_tiers - 1)
+                continue
+
+            rem_wall = remaining_wall()
+            if rem_wall <= 0.0:
+                break
+
+            tier_min = floor_left / max(1, remaining_tiers)
+            tier_cap = min(rem_wall, tier_min + unreserved_pool)
+            if tier_cap <= 1e-3:
+                remaining_tiers = max(0, remaining_tiers - 1)
+                continue
+
+            place_cap = tier_cap * (1.0 - options.move_fraction_of_tier)
+
+            # --- PLACEMENT stage ---
+            # Maximize the number of placed pods with priority >= p
+            place_vars = [vars.placed[i] for i in idxs_ge]
+            place_coeffs = [1.0 for _ in idxs_ge]
+            place_result = run_stage(place_vars, place_coeffs, "max", place_cap)
+            st = place_result["status"]
+            time_spent_place = place_result["time_spent"]
+
+            phases.append({
+                "tier": p,
+                "stage": "place",
+                "status": self._status_str(st),
+                "duration_ms": round(time_spent_place * 1000),
+                "relative_gap": gap_str(place_result["relative_gap"]),
+            })
+
+            if st not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+                break
+
+            # Capture solution BEFORE adding constraints (model modification invalidates solution)
+            capture_solution()
+
+            # Lock in placement: add constraint to maintain achieved placement count
+            placed_p = int(round(place_result["objective_value"])) if place_result["objective_value"] is not None else 0
+            placed_sum = solver.Sum([vars.placed[i] for i in idxs_ge])
+            if st == pywraplp.Solver.OPTIMAL:
+                solver.Add(placed_sum == placed_p)
+            else:
+                solver.Add(placed_sum >= placed_p)
+
+            # pools deduction for placement
+            use_unreserve = min(unreserved_pool, time_spent_place)
+            unreserved_pool -= use_unreserve
+            floor_left = max(0.0, floor_left - (time_spent_place - use_unreserve))
+
+            # --- DISRUPTION stage ---
+            # Minimize disruption for running pods with priority >= p
+            rem_tiers = max(0.0, tier_cap - time_spent_place)
+            if remaining_wall() > 1e-3 and rem_tiers > 1e-3:
+                running_ge = [i for i in problem.running_idxs if problem.pod_priority[i] >= p]
+                if running_ge:
+                    # Disruption = placed[i] - 2 * orig_node(i) for each running pod
+                    # We need to handle this differently since orig_node can be 0 (constant)
+                    disr_vars = []
+                    disr_coeffs = []
+                    for i in running_ge:
+                        disr_vars.append(vars.placed[i])
+                        disr_coeffs.append(1.0)
+                        orig_var = orig_node(i)
+                        if hasattr(orig_var, 'solution_value'):  # It's a variable
+                            disr_vars.append(orig_var)
+                            disr_coeffs.append(-2.0)
+
+                    disr_result = run_stage(disr_vars, disr_coeffs, "min", min(rem_tiers, remaining_wall()))
+                    st = disr_result["status"]
+                    time_spent_disr = disr_result["time_spent"]
+
+                    phases.append({
+                        "tier": p,
+                        "stage": "disruption",
+                        "status": self._status_str(st),
+                        "duration_ms": round(time_spent_disr * 1000),
+                        "relative_gap": gap_str(disr_result["relative_gap"]),
+                    })
+
+                    if st not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+                        break
+
+                    # Capture solution BEFORE adding constraints
+                    capture_solution()
+
+                    # Lock in disruption: add constraint to maintain achieved disruption level
+                    best_disr = int(round(disr_result["objective_value"])) if disr_result["objective_value"] is not None else 0
+                    disr_expr = solver.Sum([vars.placed[i] for i in running_ge]) - 2 * solver.Sum([
+                        orig_node(i) for i in running_ge if hasattr(orig_node(i), 'solution_value')
+                    ])
+                    if st == pywraplp.Solver.OPTIMAL:
+                        solver.Add(disr_expr == best_disr)
+                    else:
+                        solver.Add(disr_expr <= best_disr)
+
+                    # pools deduction for disruption
+                    use_unreserve = min(unreserved_pool, time_spent_disr)
+                    unreserved_pool -= use_unreserve
+                    floor_left = max(0.0, floor_left - (time_spent_disr - use_unreserve))
+
+            remaining_tiers = max(0, remaining_tiers - 1)
+
+        return st, phases, solution
 
     #################################################
     # --- Output extraction -------------------------
@@ -602,35 +795,37 @@ class GlopSolver:
         self,
         problem: Problem,
         vars: DecisionVars,
-        solver: pywraplp.Solver,
+        solution: dict,
     ) -> tuple[list[dict], list[dict]]:
-        """Extract placements/evictions from the LP solution.
+        """Extract placements/evictions from the captured MIP solution.
 
-        Uses rounding to convert continuous solutions to binary decisions.
+        The solution dict contains variable values captured immediately after
+        solving, before any model modifications that would invalidate the solution.
         """
 
-        def get_var_value(var: pywraplp.Variable) -> float:
-            """Get variable value, handling potential solver issues."""
-            try:
-                return var.solution_value()
-            except Exception:
-                return 0.0
+        def get_placed_value(i: int) -> float:
+            """Get placed value from captured solution."""
+            return solution.get("placed", {}).get(i, 0.0)
+
+        def get_assign_value(i: int, local: int) -> float:
+            """Get assign value from captured solution."""
+            return solution.get("assign", {}).get(i, {}).get(local, 0.0)
 
         def is_pod_placed(i: int) -> bool:
-            """Return whether pod i is placed (after rounding)."""
-            return get_var_value(vars.placed[i]) >= ROUNDING_THRESHOLD
+            """Return whether pod i is placed (exact binary from MIP)."""
+            return get_placed_value(i) >= BINARY_THRESHOLD
 
         def chosen_node_for_pod(i: int) -> Optional[int]:
             """Return the chosen node index for pod i based on highest assignment value."""
             best_j = None
             best_val = -1.0
             for local, j in enumerate(problem.eligible_nodes[i]):
-                val = get_var_value(vars.assign[i][local])
+                val = get_assign_value(i, local)
                 if val > best_val:
                     best_val = val
                     best_j = j
             # Only return if the best value is above threshold
-            if best_val >= ROUNDING_THRESHOLD:
+            if best_val >= BINARY_THRESHOLD:
                 return best_j
             return None
 
@@ -639,7 +834,7 @@ class GlopSolver:
             orig = problem.pod_node_j[i]
             pos = problem.eligible_pos[i].get(orig)
             if pos is not None:
-                return get_var_value(vars.assign[i][pos]) >= ROUNDING_THRESHOLD
+                return get_assign_value(i, pos) >= BINARY_THRESHOLD
             return False
 
         placements: list[dict] = []
@@ -684,6 +879,8 @@ class GlopSolver:
 
         Uses the same priority as CP-SAT solver for Go contract compatibility:
         MODEL_INVALID > UNKNOWN > INFEASIBLE > FEASIBLE > OPTIMAL
+        
+        Note: CBC MIP solver provides exact integer solutions.
         """
         seen = {s.get("status") for s in phases or []}
         if "MODEL_INVALID" in seen:
@@ -706,7 +903,7 @@ def main():
     try:
         raw = sys.stdin.read()
         inst = json.loads(raw or "{}")
-        solver = GlopSolver()
+        solver = CBCSolver()
         out = solver.solve(inst if isinstance(inst, dict) else {})
         print(json.dumps(out))
     except Exception as e:

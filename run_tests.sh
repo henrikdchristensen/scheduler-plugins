@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Can be run as: ./run_tests.sh [all|unit_py|unit_go|unit_all|int_kwok|integration]
+# Can be run as: ./run_tests.sh [all|unit_py|unit_go|unit_all|int_kwok|integration] [--solver cp_sat|cbc|both]
 
 # Load environment variables
 ENV_FILE="opt-prio.env"
@@ -13,6 +13,21 @@ echo "Environment variables loaded."
 
 # Default: run all tests
 MODE="${1:-all}"
+
+# Parse optional --solver argument (for integration tests)
+INT_SOLVER_FILTER="all"  # default: run all solvers (cp_sat, cbc, gurobi)
+shift || true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --solver)
+      INT_SOLVER_FILTER="${2:-both}"
+      shift 2 || true
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
 RUN_UNIT_PY=false
 RUN_UNIT_GO=false
@@ -38,7 +53,7 @@ case "$MODE" in
     RUN_INT_KWOK=true
     ;;
   *)
-    echo "Usage: $0 [all|unit_py|unit_go|unit_all|int_kwok|integration]" >&2
+    echo "Usage: $0 [all|unit_py|unit_go|unit_all|int_kwok|integration] [--solver cp_sat|cbc|both]" >&2
     echo "  all         - run unit tests + integration tests" >&2
     echo "  unit_all    - run Python and Go unit tests (default)" >&2
     echo "  unit        - alias for unit_all" >&2
@@ -49,6 +64,9 @@ case "$MODE" in
     echo "  int         - alias for int_all" >&2
     echo "  int_kwok    - run only integration tests with KWOK" >&2
     echo "  integration - alias for int_kwok" >&2
+    echo "" >&2
+    echo "Options:" >&2
+    echo "  --solver    - solver for integration tests: cp_sat, cbc, gurobi, or all (default: all)" >&2
     exit 1
     ;;
 esac
@@ -76,23 +94,19 @@ ensure_python_solver_env() {
     PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/solver_cp_sat.py"
   fi
 
-  # Support SOLVER_TYPE environment variable
-  SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
-  case "${SOLVER_TYPE}" in
-    glop)
-      PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/solver_glop.py"
-      ;;
-    cp_sat|*)
-      PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/solver_cp_sat.py"
-      ;;
-  esac
-  echo "Using solver: ${SOLVER_TYPE} (${PYTHON_SOLVER_SCRIPT_PATH})"
+  # Note: Integration tests run both solvers via pytest parametrization.
+  # We copy all solver scripts so SOLVER_PATH can be dynamically selected per-test.
+  echo "Copying solver scripts: solver_cp_sat.py, solver_cbc.py, solver_gurobi.py"
 
   # Try to create directories
   mkdir -p "${PYTHON_SOLVER_OUT_SCRIPT_DIR}" "${PYTHON_SOLVER_OUT_VENV_DIR}"
 
-  # Always copy latest solver code (to solver.py for consistency)
-  cp "${PYTHON_SOLVER_SCRIPT_PATH}" "${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver.py"
+  # Copy all solver scripts so integration tests can select dynamically
+  cp "scripts/python_solver/solver_cp_sat.py" "${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver_cp_sat.py"
+  cp "scripts/python_solver/solver_cbc.py" "${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver_cbc.py"
+  cp "scripts/python_solver/solver_gurobi.py" "${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver_gurobi.py"
+  # Also copy to solver.py for backward compatibility (uses cp_sat as default)
+  cp "scripts/python_solver/solver_cp_sat.py" "${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver.py"
 
   # Create venv if missing
   if [[ ! -x "${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python" ]]; then
@@ -171,7 +185,28 @@ if "$RUN_INT_KWOK"; then
     python -m pip install -r scripts/kwok_integration_tests/requirements.txt
   fi
 
-  python -m pytest -s scripts/kwok_integration_tests/test_modes.py
+  # Build pytest filter based on solver selection
+  PYTEST_SOLVER_FILTER=""
+  case "${INT_SOLVER_FILTER}" in
+    cp_sat)
+      PYTEST_SOLVER_FILTER="-k cp_sat"
+      echo "Running integration tests with CP-SAT solver only"
+      ;;
+    cbc)
+      PYTEST_SOLVER_FILTER="-k cbc"
+      echo "Running integration tests with CBC solver only"
+      ;;
+    gurobi)
+      PYTEST_SOLVER_FILTER="-k gurobi"
+      echo "Running integration tests with Gurobi solver only"
+      ;;
+    all|*)
+      echo "Running integration tests with all solvers (cp_sat, cbc, gurobi)"
+      ;;
+  esac
+
+  # shellcheck disable=SC2086
+  python -m pytest -s scripts/kwok_integration_tests/test_modes.py ${PYTEST_SOLVER_FILTER}
 
   echo "Integration tests with KWOK completed."
 fi
