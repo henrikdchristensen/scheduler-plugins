@@ -1,10 +1,11 @@
 name: CI (Unit + Integration)
 
 on:
-  push:
-    branches: [ "opt-prio-main" ]
-  pull_request:
-    branches: [ "opt-prio-main" ]
+  workflow_dispatch: # TODO: right now only manual trigger; uncomment below to enable on push/pr
+  # push:
+  #   branches: [ "opt-prio-main" ]
+  # pull_request:
+  #   branches: [ "opt-prio-main" ]
 
 jobs:
   # -------------------------------------------------------

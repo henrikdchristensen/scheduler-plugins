@@ -1,34 +1,6 @@
 #!/usr/bin/env python3
 """
-check_general_stats.py
-
-Validate a directory structure like:
-
-ROOT/
-  experiment_A/
-    seed_1/
-      general_stats.csv
-    seed_2/
-      general_stats.csv
-    seed_3/
-      general_stats.csv
-  experiment_B/
-    ...
-
-Rules per experiment directory (immediate child of ROOT):
-  - Must contain at least --min-seeds seed folders (default 3).
-  - Each seed folder must contain general_stats.csv (or general_stats.csv.gz if --allow-gz).
-  - Each general_stats file must contain a numeric 'time_s' column with
-    --threshold-min <= max(time_s) <= --threshold-max.
-
-Usage:
-  python check_general_stats.py /path/to/root
-  python check_general_stats.py /path/to/root --threshold-min 7190 --threshold-max 7210 --min-seeds 3 --fail-only
-  python check_general_stats.py /path/to/root --allow-gz --write-report report.csv
-
-Exit codes:
-  0 = all experiment dirs pass (or none found)
-  1 = at least one experiment dir fails
+python hej.py analysis/kwok_trace_replayer/plugin --fail-only
 """
 
 from __future__ import annotations
