@@ -44,15 +44,6 @@ NODE_CPU="${NODE_CPU:-}"
 NODE_MEM="${NODE_MEM:-}"
 MONITOR_INTERVAL="${MONITOR_INTERVAL:-}"
 
-# Gurobi WLS license (required when SOLVER_TYPE=gurobi)
-# Hardcode your WLS credentials here, or override via CLI args / env vars
-# To get WLS credentials: https://license.gurobi.com/manager/licenses
-GRB_WLSACCESSID="${GRB_WLSACCESSID:-YOUR_ACCESS_ID}"
-GRB_WLSSECRET="${GRB_WLSSECRET:-YOUR_SECRET}"
-GRB_LICENSEID="${GRB_LICENSEID:-YOUR_LICENSE_ID}"
-# Alternative: local license file path (leave empty to use WLS)
-GRB_LICENSE_FILE="${GRB_LICENSE_FILE:-}"
-
 ########################## Helpers ##########################
 log(){ printf '[%s] %s\n' "$1" "$2"; }
 die(){ log error "$1"; exit 1; }
@@ -64,55 +55,7 @@ run_root(){
   else
     command -v sudo >/dev/null 2>&1 || die "need root (sudo not found)"
     # Preserve env so variables like CONTENT_DIR/RUNNER/etc survive.
-    # Also preserves Gurobi license vars: GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID, GRB_LICENSE_FILE
     sudo -E bash -lc "${cmd}"
-  fi
-}
-
-validate_gurobi_license() {
-  # Validate Gurobi license configuration when SOLVER_TYPE=gurobi
-  if [ "${SOLVER_TYPE}" != "gurobi" ]; then
-    return 0
-  fi
-
-  # Helper to check if a value is set (not empty and not a placeholder)
-  is_set() {
-    local val="$1"
-    [[ -n "$val" && "$val" != YOUR_* ]]
-  }
-
-  # Check for WLS credentials (all three required together)
-  local has_wls=false
-  if is_set "${GRB_WLSACCESSID}" && is_set "${GRB_WLSSECRET}" && is_set "${GRB_LICENSEID}"; then
-    has_wls=true
-    log cfg "Gurobi WLS license configured (GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID)"
-  fi
-
-  # Check for license file
-  local has_file=false
-  if [ -n "${GRB_LICENSE_FILE}" ]; then
-    has_file=true
-    log cfg "Gurobi license file configured: GRB_LICENSE_FILE=${GRB_LICENSE_FILE}"
-  fi
-
-  # Warn if neither is configured
-  if [ "$has_wls" = false ] && [ "$has_file" = false ]; then
-    log warn "SOLVER_TYPE=gurobi but no license configured!"
-    log warn "Set WLS credentials via CLI: --grb-wlsaccessid, --grb-wlssecret, --grb-licenseid"
-    log warn "Or hardcode them in bootstrap.sh (replace YOUR_ACCESS_ID, YOUR_SECRET, YOUR_LICENSE_ID)"
-    log warn "Or set GRB_LICENSE_FILE for a local license file"
-    die "Gurobi requires a valid license to run"
-  fi
-
-  # Warn if partial WLS config
-  if [ "$has_wls" = false ] && [ "$has_file" = false ]; then
-    local partial=false
-    is_set "${GRB_WLSACCESSID}" && partial=true
-    is_set "${GRB_WLSSECRET}" && partial=true
-    is_set "${GRB_LICENSEID}" && partial=true
-    if [ "$partial" = true ]; then
-      log warn "Partial WLS config detected - all three vars required: GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID"
-    fi
   fi
 }
 
@@ -302,7 +245,6 @@ stage_setup() {
   log init "setup starting"
   resolve_paths_relative_to_folder
   print_cfg
-  validate_gurobi_license
 
   ensure_shipped_k8s_tools
   stage_solver_and_venv
@@ -411,11 +353,6 @@ FLAGS_SPEC=(
   "node-cpu|NODE_CPU|value|"
   "node-mem|NODE_MEM|value|"
   "monitor-interval|MONITOR_INTERVAL|value|"
-  # Gurobi WLS license args
-  "grb-wlsaccessid|GRB_WLSACCESSID|value|"
-  "grb-wlssecret|GRB_WLSSECRET|value|"
-  "grb-licenseid|GRB_LICENSEID|value|"
-  "grb-license-file|GRB_LICENSE_FILE|value|"
 )
 
 get_spec_field() { # usage: get_spec_field "<name>" <idx>

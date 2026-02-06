@@ -178,7 +178,7 @@ def compare_seed(row_a: pd.Series, row_b: pd.Series, solver_a_name: str, solver_
         winner = "B"
         reason = f"{solver_b_name} succeeded ({b_status}), {solver_a_name} failed ({a_status})"
     else:
-        # Both succeeded - compare by placement quality
+        # Both succeeded - compare by placement quality only
         placement_cmp = compare_placements(a_placed, b_placed)
         
         if placement_cmp > 0:
@@ -188,27 +188,8 @@ def compare_seed(row_a: pd.Series, row_b: pd.Series, solver_a_name: str, solver_
             winner = "B"
             reason = f"{solver_b_name} placed more/better pods"
         else:
-            # Same placement - compare by optimality
-            a_optimal = a_status == "OPTIMAL"
-            b_optimal = b_status == "OPTIMAL"
-            
-            if a_optimal and not b_optimal:
-                winner = "A"
-                reason = f"{solver_a_name} reached OPTIMAL, {solver_b_name} only FEASIBLE"
-            elif b_optimal and not a_optimal:
-                winner = "B"
-                reason = f"{solver_b_name} reached OPTIMAL, {solver_a_name} only FEASIBLE"
-            else:
-                # Same optimality - compare by speed
-                if a_duration < b_duration * 0.9:  # 10% tolerance
-                    winner = "A"
-                    reason = f"{solver_a_name} faster ({a_duration:.0f}ms vs {b_duration:.0f}ms)"
-                elif b_duration < a_duration * 0.9:
-                    winner = "B"
-                    reason = f"{solver_b_name} faster ({b_duration:.0f}ms vs {a_duration:.0f}ms)"
-                else:
-                    winner = "tie"
-                    reason = "Equal placement and similar speed"
+            winner = "tie"
+            reason = "Equal placement"
     
     return SeedComparison(
         seed=str(row_a["seed"]),
@@ -273,8 +254,8 @@ def compare_config(
     seed_comparisons: List[SeedComparison] = []
     
     for _, row in merged.iterrows():
-        row_a = {k.replace("_a", ""): v for k, v in row.items() if k.endswith("_a") or k == "seed"}
-        row_b = {k.replace("_b", ""): v for k, v in row.items() if k.endswith("_b") or k == "seed"}
+        row_a = {k.removesuffix("_a"): v for k, v in row.items() if k.endswith("_a") or k == "seed"}
+        row_b = {k.removesuffix("_b"): v for k, v in row.items() if k.endswith("_b") or k == "seed"}
         row_a["seed"] = row["seed"]
         row_b["seed"] = row["seed"]
         
@@ -502,6 +483,61 @@ class SolverComparator:
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
         print(f"[ok] Wrote summary: {summary_path}")
+
+        # Print examples of differences
+        self._print_examples(all_seed_comparisons)
+
+    def _print_examples(self, all_seed_comparisons: List[Dict[str, Any]], max_examples: int = 5) -> None:
+        """Print example cases where solvers differed."""
+        a_name = self.args.solver_a_name
+        b_name = self.args.solver_b_name
+        
+        # Filter for cases where there was a winner (not tie, not both_failed)
+        a_wins = [s for s in all_seed_comparisons if s["winner"] == a_name]
+        b_wins = [s for s in all_seed_comparisons if s["winner"] == b_name]
+        both_failed = [s for s in all_seed_comparisons if s["winner"] == "both_failed"]
+        
+        if not a_wins and not b_wins:
+            print("\n[info] No differences found between solvers.")
+            return
+        
+        print("\n" + "=" * 60)
+        print("EXAMPLE DIFFERENCES")
+        print("=" * 60)
+        
+        if a_wins:
+            print(f"\n{a_name} wins ({len(a_wins)} total):")
+            print("-" * 60)
+            for ex in a_wins[:max_examples]:
+                print(f"  Config: {ex['config']}, Seed: {ex['seed']}")
+                print(f"    {a_name}: placed={ex[f'{a_name}_placed']}, status={ex[f'{a_name}_status']}, time={ex[f'{a_name}_duration_ms']:.0f}ms")
+                print(f"    {b_name}: placed={ex[f'{b_name}_placed']}, status={ex[f'{b_name}_status']}, time={ex[f'{b_name}_duration_ms']:.0f}ms")
+                print(f"    Reason: {ex['reason']}")
+            if len(a_wins) > max_examples:
+                print(f"  ... and {len(a_wins) - max_examples} more")
+        
+        if b_wins:
+            print(f"\n{b_name} wins ({len(b_wins)} total):")
+            print("-" * 60)
+            for ex in b_wins[:max_examples]:
+                print(f"  Config: {ex['config']}, Seed: {ex['seed']}")
+                print(f"    {a_name}: placed={ex[f'{a_name}_placed']}, status={ex[f'{a_name}_status']}, time={ex[f'{a_name}_duration_ms']:.0f}ms")
+                print(f"    {b_name}: placed={ex[f'{b_name}_placed']}, status={ex[f'{b_name}_status']}, time={ex[f'{b_name}_duration_ms']:.0f}ms")
+                print(f"    Reason: {ex['reason']}")
+            if len(b_wins) > max_examples:
+                print(f"  ... and {len(b_wins) - max_examples} more")
+        
+        if both_failed:
+            print(f"\nBoth failed ({len(both_failed)} total):")
+            print("-" * 60)
+            for ex in both_failed[:max_examples]:
+                print(f"  Config: {ex['config']}, Seed: {ex['seed']}")
+                print(f"    {a_name}: status={ex[f'{a_name}_status']}")
+                print(f"    {b_name}: status={ex[f'{b_name}_status']}")
+            if len(both_failed) > max_examples:
+                print(f"  ... and {len(both_failed) - max_examples} more")
+        
+        print("=" * 60)
 
 
 def main(argv: Optional[List[str]] = None) -> None:

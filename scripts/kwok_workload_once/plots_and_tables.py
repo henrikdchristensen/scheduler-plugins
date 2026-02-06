@@ -2,10 +2,13 @@
 # scripts/kwok_workload_once/plots_and_tables.py
 """
 python -m scripts.kwok_workload_once.plots_and_tables
+python -m scripts.kwok_workload_once.plots_and_tables --solver gurobi
+python -m scripts.kwok_workload_once.plots_and_tables --solver cbc
 """
 
+import argparse
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import pandas as pd
 import numpy as np
@@ -34,16 +37,25 @@ from scripts.helpers.table_helpers import fmt_pct
 # CONFIG (constants)
 #################################################################
 
-DF_PER_COMBO_PATH = Path("analysis/kwok_workload_once/results_per_combo.csv")
+# Default paths (can be overridden by --solver argument)
+DEFAULT_RESULTS_ROOT = Path("analysis/kwok_workload_once")
+DEFAULT_SOLVER = "cp_sat"  # Default solver name
 
-OUT_DIR = Path("analysis/kwok_workload_once")
-OUT_FIGURES_DIR = OUT_DIR / "figures"
-OUT_TABLES_DIR = OUT_DIR / "tables"
 
-# filters
+def get_paths_for_solver(solver: str, results_root: Path = DEFAULT_RESULTS_ROOT):
+    """Get input/output paths for a specific solver."""
+    # All solvers use consistent naming: results_per_combo_{solver}.csv, figures_{solver}/, tables_{solver}/
+    df_path = results_root / f"results_per_combo_{solver}.csv"
+    figures_dir = results_root / f"figures_{solver}"
+    tables_dir = results_root / f"tables_{solver}"
+    return df_path, figures_dir, tables_dir
+
+# filters - FIXED configurations (always show these even if data is missing)
 PLOT_PPNS = [4, 8]
 PLOT_PRIORITIES = [1, 2, 4]
-PLOT_TIMEOUTS = [1, 10, 20, 60]
+PLOT_TIMEOUTS = [1, 10, 20]#, 60]  # Fixed timeouts to show in plots
+PLOT_NODES = [4, 8, 16, 32]#, 64]  # Fixed node counts for x-axis
+PLOT_UTILS = [90, 95, 100, 105]  # Fixed target utilizations for 3D plots
 
 # precision
 EPS = 1e-9
@@ -58,7 +70,6 @@ INSTANCES_LABEL = "% of instances"
 PODS_PER_NODE_LABEL = "pods/node"
 
 # figure saving
-
 
 # 2d sizes
 GRID_2D_CELL_FIGSIZE = (2.6, 1.6)
@@ -321,6 +332,9 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
     priorities: list[int],
     out_path: Path,
     cell_figsize: tuple[float, float],
+    *,
+    fixed_nodes: list[int] = PLOT_NODES,
+    fixed_timeouts: list[int] = PLOT_TIMEOUTS,
 ) -> None:
     nrows, ncols = len(ppns), len(priorities)
     fig, axes = plt.subplots(
@@ -341,32 +355,37 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
             ax = axes[r][c]
             panel = df_util_agg[(df_util_agg["pods_per_node"] == ppn) & (df_util_agg["priorities"] == prio)].copy()
 
-            if panel.empty:
-                ax.axis("off")
-                continue
+            # Always use fixed nodes and timeouts for consistent x-axis
+            nodes_vals = fixed_nodes
+            ts = fixed_timeouts
+            
+            if not panel.empty:
+                panel = panel.groupby(["nodes", "timeout_s"], as_index=False)[
+                    [s["col"] for s in CATEGORIES if s["col"].endswith("_rate")]
+                ].mean()
 
-            panel = panel.groupby(["nodes", "timeout_s"], as_index=False)[
-                [s["col"] for s in CATEGORIES if s["col"].endswith("_rate")]
-            ].mean()
-
-            nodes_vals = sorted(panel["nodes"].unique().tolist())
-            ts = sorted(panel["timeout_s"].unique().tolist())
             bars_per_group = max(1, len(ts))
             width = GRID_2D_BAR_WIDTH / bars_per_group
             x = np.arange(len(nodes_vals))
 
             for j, timeout in enumerate(ts):
-                sub = panel[panel["timeout_s"] == timeout].set_index("nodes")
+                if not panel.empty:
+                    sub = panel[panel["timeout_s"] == timeout].set_index("nodes")
+                else:
+                    sub = pd.DataFrame()
                 xj = x + (j - (bars_per_group - 1) / 2.0) * width
                 bar_height = np.zeros(len(nodes_vals), dtype=float)
 
                 for category in CATEGORIES:
-                    vals = (
-                        sub.get(category["col"], pd.Series(0.0, index=sub.index))
-                        .reindex(nodes_vals)
-                        .fillna(0.0)
-                        .values
-                    )
+                    if not sub.empty:
+                        vals = (
+                            sub.get(category["col"], pd.Series(0.0, index=sub.index))
+                            .reindex(nodes_vals)
+                            .fillna(0.0)
+                            .values
+                        )
+                    else:
+                        vals = np.zeros(len(nodes_vals))
                     h = vals * 100.0
                     if np.any(h > EPS):
                         ax.bar(
@@ -382,14 +401,15 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
                         seen_keys.add(category["key"])
 
                 for xi, top in zip(xj, bar_height):
-                    ax.text(
-                        float(xi),
-                        float(top) + 1.0,
-                        f"{int(timeout)}s",
-                        ha="center",
-                        va="bottom",
-                        fontsize=ANNOT_FS,
-                    )
+                    if top > EPS:  # Only show label if there's a bar
+                        ax.text(
+                            float(xi),
+                            float(top) + 1.0,
+                            f"{int(timeout)}s",
+                            ha="center",
+                            va="bottom",
+                            fontsize=ANNOT_FS,
+                        )
 
             ax.set_xticks(x)
             ax.set_xticklabels([str(n) for n in nodes_vals], fontsize=PLOT_TICK_FONTSIZE)
@@ -441,9 +461,15 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
 
     save_figure(fig, out_path)
 
-def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path) -> None:
-    utils = sorted(df["util"].unique().tolist())
-    nodes = sorted(int(n) for n in df["nodes"].unique().tolist())
+def plot_3d_ppn_prio_timeout(
+    df: pd.DataFrame,
+    title: str,
+    out_path: Path,
+    fixed_utils: List[int] = PLOT_UTILS,
+    fixed_nodes: List[int] = PLOT_NODES,
+) -> None:
+    utils = fixed_utils
+    nodes = fixed_nodes
 
     def get_rate(df_: pd.DataFrame, util_val, nodes_val, col):
         df_idx = df_.set_index(["util", "nodes"])
@@ -545,15 +571,42 @@ def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path) -> No
 # main
 #################################################################
 
-def main() -> None:
-    print("Generating tables and figures...")
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = argparse.ArgumentParser(description="Generate plots and tables from solver results")
+    parser.add_argument(
+        "--solver", 
+        type=str, 
+        default=DEFAULT_SOLVER,
+        choices=["cp_sat", "cbc", "gurobi"],
+        help="Solver name (determines input/output paths)"
+    )
+    parser.add_argument(
+        "--results-root",
+        type=Path,
+        default=DEFAULT_RESULTS_ROOT,
+        help="Root directory for results"
+    )
+    args = parser.parse_args(argv)
+    
+    solver = args.solver
+    df_path, out_figures_dir, out_tables_dir = get_paths_for_solver(solver, args.results_root)
+    
+    print(f"Generating tables and figures for solver={solver}...")
+    print(f"  Input: {df_path}")
+    print(f"  Figures: {out_figures_dir}")
+    print(f"  Tables: {out_tables_dir}")
+    
+    if not df_path.exists():
+        print(f"[error] Input file not found: {df_path}")
+        print(f"  Run: python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-{solver}")
+        return
     
     configure_matplotlib()
 
-    OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    OUT_TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    out_figures_dir.mkdir(parents=True, exist_ok=True)
+    out_tables_dir.mkdir(parents=True, exist_ok=True)
 
-    df_per_combo = pd.read_csv(DF_PER_COMBO_PATH)
+    df_per_combo = pd.read_csv(df_path)
 
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
@@ -562,7 +615,7 @@ def main() -> None:
     df_table = aggregate_keep_util(df_per_combo)
     present_prios = set(df_table["priorities"].astype(int).unique().tolist())
     for prio in [p for p in PLOT_PRIORITIES if p in present_prios]:
-        out_tex = OUT_TABLES_DIR / f"table_outcomes_priorities={int(prio)}.tex"
+        out_tex = out_tables_dir / f"table_outcomes_priorities={int(prio)}.tex"
         write_outcome_breakdown_table_tex(
             df_table=df_table,
             out_path=out_tex,
@@ -576,7 +629,7 @@ def main() -> None:
     # --- PLOTS
     df_util_agg = aggregate_over_util(df_per_combo)
 
-    out_path_2d = OUT_FIGURES_DIR / "2d_grid_ppn_prio"
+    out_path_2d = out_figures_dir / "2d_grid_ppn_prio"
     plot_2d_grid_ppn_prio_with_aggregated_util(
         df_util_agg=df_util_agg,
         ppns=PLOT_PPNS,
@@ -598,7 +651,7 @@ def main() -> None:
                     print(f"[skip] no per-combo rows for ppn={ppn}, prio={prio}, t={t}")
                     continue
                 title = rf"{PODS_PER_NODE_LABEL}={ppn}, #priorities={prio}, timeout={t}s"
-                out_file = OUT_FIGURES_DIR / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
+                out_file = out_figures_dir / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
                 plot_3d_ppn_prio_timeout(sub, title, out_file)
                 produced_figs.extend([out_file.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
     for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:

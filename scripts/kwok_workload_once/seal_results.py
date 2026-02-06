@@ -22,7 +22,7 @@ from scripts.helpers.general_helpers import (
 # ============================================================
 
 RESULTS_ROOT: Path = Path("analysis/kwok_workload_once")
-SOLVER_DIRNAME: str = "plugin"
+SOLVER_DIRNAME: str = "plugin-cp_sat"
 DEFAULT_DIRNAME: str = "default"
 RESULTS_CSV_NAME: str = "results.csv"
 OUT_DIR: Path = Path("analysis/kwok_workload_once")
@@ -431,7 +431,13 @@ class CombineResultsAnalyzer:
             if c in per_combo_df.columns:
                 per_combo_df[c] = pd.to_numeric(per_combo_df[c], errors="coerce")
 
-        out_per_combo = out_dir / "results_per_combo.csv"
+        # Derive output filename from solver_dir (e.g., plugin -> cp_sat, plugin-gurobi -> gurobi)
+        solver_suffix = self.args.solver_dir.replace("plugin-", "").replace("plugin", "cp_sat")
+        if not solver_suffix:
+            solver_suffix = "cp_sat"
+        out_filename = f"results_per_combo_{solver_suffix}.csv"
+        
+        out_per_combo = out_dir / out_filename
         per_combo_df.sort_values(
             ["util", "nodes", "pods_per_node", "priorities", "timeout_s", "config_dir"]
         ).to_csv(out_per_combo, index=False)

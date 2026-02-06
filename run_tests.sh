@@ -79,7 +79,6 @@ ensure_python_solver_env() {
 
   # Strip possible Windows \r from env file values
   PYTHON_SOLVER_OUT_SCRIPT_DIR="${PYTHON_SOLVER_OUT_SCRIPT_DIR%$'\r'}"
-  PYTHON_SOLVER_OUT_VENV_DIR="${PYTHON_SOLVER_OUT_VENV_DIR%$'\r'}"
   PYTHON_SOLVER_SCRIPT_PATH="${PYTHON_SOLVER_SCRIPT_PATH%$'\r'}"
 
   # For local development/testing, use local directories instead of system paths
@@ -87,9 +86,8 @@ ensure_python_solver_env() {
   if [[ -z "${PYTHON_SOLVER_OUT_SCRIPT_DIR:-}" ]] || [[ "${PYTHON_SOLVER_OUT_SCRIPT_DIR}" == "/opt/"* ]]; then
     PYTHON_SOLVER_OUT_SCRIPT_DIR="${PWD}/.solver"
   fi
-  if [[ -z "${PYTHON_SOLVER_OUT_VENV_DIR:-}" ]] || [[ "${PYTHON_SOLVER_OUT_VENV_DIR}" == "/opt/"* ]]; then
-    PYTHON_SOLVER_OUT_VENV_DIR="${PWD}/.venv_solver"
-  fi
+  # Venv lives inside the solver directory
+  PYTHON_SOLVER_OUT_VENV_DIR="${PYTHON_SOLVER_OUT_SCRIPT_DIR}/venv"
   if [[ -z "${PYTHON_SOLVER_SCRIPT_PATH:-}" ]]; then
     PYTHON_SOLVER_SCRIPT_PATH="scripts/python_solver/solver_cp_sat.py"
   fi

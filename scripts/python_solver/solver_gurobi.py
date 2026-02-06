@@ -1,36 +1,16 @@
 #!/usr/bin/env python3
 # solver_gurobi.py
 """
-Gurobi MIP Solver for Kubernetes Pod Scheduling Optimization.
-
-This solver uses Gurobi's native Python API (gurobipy) for mixed-integer programming.
-It uses the SAME tiered lexicographic optimization approach as the CP-SAT solver:
-
-1. Iterates over priority tiers (highest to lowest)
-2. For each tier, maximizes placements for pods with priority >= tier
-3. Then minimizes disruption (evictions + moves) for running pods
-4. Locks in achieved values as constraints before moving to next tier
-
-Key advantages of Gurobi:
-1. Industry-leading MIP solver performance
-2. Excellent warm start support via MIP starts (var.Start attribute)
-3. Strong presolve and cutting plane algorithms
-4. Parallel branch-and-bound by default
-5. Academic WLS (Web License Service) for cloud deployments
-
-License options for cloud/multi-machine deployments:
-- Academic WLS: Set GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID env vars
-- Token Server: For enterprise floating licenses
-- Compute Server: For shared cluster deployments
-
-This solver uses the SAME Go contract as the CP-SAT solver (solver_cp_sat.py).
+This solver uses Gurobi's Python API (gurobipy) for mixed-integer programming. It uses the same optimization approach as the CP-SAT solver.
 It can be used by setting SOLVER_TYPE=gurobi or SOLVER_PATH to point to this script.
 
 Requirements:
     pip install gurobipy
     A valid Gurobi license (academic WLS, trial, or commercial)
+    We noted that the using the WLS license a maximum of 5 jobs can run concurrently, properly due to token and session limits.
 """
 
+import os
 import time
 import sys
 import json
@@ -54,7 +34,6 @@ NO_NODES: Final[str] = "NO_NODES"
 NO_PODS: Final[str] = "NO_PODS"
 
 # Gurobi status codes mapped to the same strings as CP-SAT
-# https://www.gurobi.com/documentation/current/refman/optimization_status_codes.html
 STATUS_MAP: Final[dict] = {}
 if GUROBI_AVAILABLE:
     STATUS_MAP.update({
@@ -346,6 +325,17 @@ class GurobiSolver:
             # Create model with suppressed console output
             env = gp.Env(empty=True)
             env.setParam('OutputFlag', 0)  # Suppress console output
+
+            # WLS license credentials (academic Web License Service)
+            # Override via env vars GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID if needed. Parameters can be found in the license file.
+            wls_access_id = os.environ.get('GRB_WLSACCESSID', '37aa0377-597c-43ee-95f7-4b2667d3627f')
+            wls_secret = os.environ.get('GRB_WLSSECRET', '1b9fc6f6-aaf2-459b-99a9-f05e86900443')
+            wls_license_id = os.environ.get('GRB_LICENSEID', '2776142')
+            if wls_access_id and wls_secret and wls_license_id:
+                env.setParam('WLSACCESSID', wls_access_id)
+                env.setParam('WLSSECRET', wls_secret)
+                env.setParam('LICENSEID', int(wls_license_id))
+
             env.start()
             model = gp.Model("pod_scheduler", env=env)
             # Set time limit in seconds

@@ -1,12 +1,12 @@
 meta:
-  timestamp: 2026/02/05/11:34:48
+  timestamp: 2026/02/06/09:20:53
   git: {}
-  job_file: /work/2026-02-05-01/content/data/jobs/kwok_workload_once/plugin/nodes16_pods64_prio2_util100_timeout01.yaml
+  job_file: /work/2026-02-06-cbc/content/data/jobs/kwok_workload_once/plugin/nodes16_pods64_prio2_util100_timeout01.yaml
   workload_config_file: data/configs-workload/base.yaml
   kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 inputs:
-  cli-cmd: python /work/2026-02-05-01/content/scripts/kwok_workload_once/test_runner.py
-    --kwok-runtime binary --job-file /work/2026-02-05-01/content/data/jobs/kwok_workload_once/plugin/nodes16_pods64_prio2_util100_timeout01.yaml
+  cli-cmd: python /work/2026-02-06-cbc/content/scripts/kwok_workload_once/test_runner.py
+    --kwok-runtime binary --job-file /work/2026-02-06-cbc/content/data/jobs/kwok_workload_once/plugin/nodes16_pods64_prio2_util100_timeout01.yaml
     --solver-type cbc
   job:
     workload-config-file: data/configs-workload/base.yaml
