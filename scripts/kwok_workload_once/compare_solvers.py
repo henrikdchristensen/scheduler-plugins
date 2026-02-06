@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # scripts/kwok_workload_once/compare_solvers.py
 """
-Compare solver results (CP-SAT, CBC) and report which is better for each configuration.
+Compare solver results (CP-SAT, CBC, Gurobi) and report which is better for each configuration.
 
-Supported solvers: cp_sat, cbc
+Supported solvers: cp_sat, cbc, gurobi
 
 Usage:
     # Default: CP-SAT vs CBC
@@ -35,7 +35,7 @@ from scripts.helpers.general_helpers import parse_json_cell
 RESULTS_ROOT = Path("analysis/kwok_workload_once")
 
 # Solver directory and name mappings
-# Available solvers: cp_sat, cbc
+# Available solvers: cp_sat, cbc, gurobi
 SOLVER_A_DIR = "plugin"          # CP-SAT (default)
 SOLVER_A_NAME = "cp_sat"
 SOLVER_B_DIR = "plugin-cbc"      # CBC (default comparison)
@@ -48,7 +48,7 @@ OUT_DIR = Path("analysis/kwok_workload_once/comparison")
 DECIMALS = 4
 
 # Valid solver types for validation
-VALID_SOLVER_NAMES = {"cp_sat", "cbc"}
+VALID_SOLVER_NAMES = {"cp_sat", "cbc", "gurobi"}
 
 # ============================================================
 # Helpers
