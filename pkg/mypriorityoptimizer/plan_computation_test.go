@@ -54,8 +54,9 @@ func TestPlanComputation_NilOutputNoError(t *testing.T) {
 	mustEq(t, attempts[0].Status, "FAILED", "attempt status")
 	mustEq(t, attempts[0].Score, (SolverScore{}), "attempt score should be zero")
 
-	// TimeoutMs should include grace (10ms + 7ms = 17ms).
-	mustEq(t, gotTimeoutMs, int64(17), "TimeoutMs should include grace")
+	// TimeoutMs should be SolverTimeout only (10ms), not including grace.
+	// Grace period (7ms) is reserved for I/O overhead and used in the context timeout.
+	mustEq(t, gotTimeoutMs, int64(10), "TimeoutMs should be SolverTimeout only (no grace)")
 }
 
 func TestPlanComputation_ErrorWithNonNilOutput(t *testing.T) {

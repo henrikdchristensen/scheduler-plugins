@@ -11,14 +11,8 @@ CONTENT_DIR_WAIT_INTERVAL_S="${CONTENT_DIR_WAIT_INTERVAL:-2}" # seconds
 PYTHON_SOLVER_OUT_VENV_DIR="/opt/venv"
 PYTHON_SOLVER_OUT_SCRIPT_DIR="/opt/solver"
 
-# Solver selection: cp_sat (default), cbc, or gurobi
+# Solver selection: cp_sat (default), cbc
 SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
-
-# Gurobi WLS license credentials (for cloud deployments)
-# Set these environment variables for Gurobi Web License Service
-GRB_WLSACCESSID="${GRB_WLSACCESSID:-}"
-GRB_WLSSECRET="${GRB_WLSSECRET:-}"
-GRB_LICENSEID="${GRB_LICENSEID:-}"
 
 # Runner selection: test_runner (default) or trace_replayer
 RUNNER="${RUNNER:-test_runner}"
@@ -197,9 +191,6 @@ stage_solver_and_venv() {
     cbc)
       solver_script="solver_cbc.py"
       ;;
-    gurobi)
-      solver_script="solver_gurobi.py"
-      ;;
     cp_sat|*)
       solver_script="solver_cp_sat.py"
       ;;
@@ -229,20 +220,6 @@ PY
   "
 
   pip_install "${PYTHON_SOLVER_OUT_VENV_DIR}/bin/pip" "${CONTENT_DIR}/scripts/python_solver/requirements.txt"
-
-  # Install gurobipy if using gurobi solver
-  if [ "${SOLVER_TYPE}" = "gurobi" ]; then
-    log init "installing gurobipy for Gurobi solver"
-    run_root "'${PYTHON_SOLVER_OUT_VENV_DIR}/bin/pip' install --no-cache-dir gurobipy"
-    
-    # Verify Gurobi WLS credentials are set for cloud deployments
-    if [ -n "${GRB_WLSACCESSID}" ] && [ -n "${GRB_WLSSECRET}" ] && [ -n "${GRB_LICENSEID}" ]; then
-      log ok "Gurobi WLS credentials configured"
-    else
-      log warn "Gurobi WLS credentials not fully set (GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID)"
-      log warn "Ensure a valid Gurobi license is available on this machine"
-    fi
-  fi
 
   log ok "staged solver + venv"
 }
@@ -282,11 +259,6 @@ stage_test() {
     set -euo pipefail
 
     export PATH='${CONTENT_DIR}/bin':\"\$PATH\"
-
-    # Export Gurobi WLS credentials for cloud license validation
-    [ -n '${GRB_WLSACCESSID}' ] && export GRB_WLSACCESSID='${GRB_WLSACCESSID}'
-    [ -n '${GRB_WLSSECRET}' ] && export GRB_WLSSECRET='${GRB_WLSSECRET}'
-    [ -n '${GRB_LICENSEID}' ] && export GRB_LICENSEID='${GRB_LICENSEID}'
 
     # Debug
     echo '[dbg] root id:' \$(id)

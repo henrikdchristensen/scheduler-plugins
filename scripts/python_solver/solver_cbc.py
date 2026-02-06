@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
 # solver_cbc.py
-"""
-CBC MIP Solver for Kubernetes Pod Scheduling Optimization.
-
-This solver uses OR-Tools' CBC (Coin-or Branch and Cut) mixed-integer programming
-solver. It uses the SAME tiered lexicographic optimization approach as the CP-SAT
-solver (solver_cp_sat.py):
-
-1. Iterates over priority tiers (highest to lowest)
-2. For each tier, maximizes placements for pods with priority >= tier
-3. Then minimizes disruption (evictions + moves) for running pods
-4. Locks in achieved values as constraints before moving to next tier
-
-Key differences from CP-SAT:
-1. Uses MIP (Mixed Integer Programming) instead of constraint programming
-2. Binary integer variables (0 or 1) via IntVar - no rounding needed
-3. Uses branch-and-cut algorithm for optimization
-4. CBC with SCIP fallback for solver availability
-
-This solver uses the SAME Go contract as the CP-SAT solver (solver_cp_sat.py).
-It can be used by setting SOLVER_TYPE=cbc or SOLVER_PATH to point to this script.
-"""
 
 # Suppress SWIG deprecation warnings from ortools
 import warnings
@@ -59,8 +38,6 @@ BINARY_THRESHOLD: Final[float] = 0.5
 
 @dataclass(frozen=True)
 class SolverOptions:
-    """Parsed solver options - same as CP-SAT solver for compatibility."""
-
     timeout_ms: int
     ignore_affinity: bool
     log_progress: bool
@@ -68,17 +45,13 @@ class SolverOptions:
     move_fraction_of_tier: float
     gap_limit: float
 
-
 #################################################
 # --- Problem Class -----------------------------
 #################################################
 
 @dataclass(frozen=True)
 class Problem:
-    """A frozen, index-based view of the input.
-
-    Identical to the CP-SAT solver's Problem class for compatibility.
-    """
+    """A frozen, index-based view of the input."""
 
     # Raw payload
     nodes: list[dict]
@@ -119,33 +92,27 @@ class Problem:
     preemptor_uid: Optional[str]
     preemptor_idx: Optional[int]
 
-
 #################################################
 # --- Decision Vars Class -----------------------
 #################################################
 
 @dataclass(frozen=True)
 class DecisionVars:
-    """Decision variables for the CBC MIP model.
-
-    Uses true binary integer variables (0 or 1) for exact solutions.
-    No rounding is needed since CBC solves the integer program directly.
     """
-
+    Decision variables for the CBC MIP model.
+    """
     # placed[i] = 1 if pod i is placed somewhere, 0 otherwise
     placed: list[pywraplp.Variable]
     # assign[i][local] = 1 if pod i is assigned to eligible_nodes[i][local]
     assign: list[list[pywraplp.Variable]]
-
 
 #################################################
 # --- CBC MIP Solver Class ----------------------
 #################################################
 
 class CBCSolver:
-    """Mixed Integer Programming solver using OR-Tools CBC for pod scheduling.
-    
-    Uses true binary integer variables for exact 0/1 solutions without rounding.
+    """
+    Mixed Integer Programming solver using OR-Tools CBC for pod scheduling.
     """
 
     #################################################
@@ -227,9 +194,10 @@ class CBCSolver:
         #################################################
         # --- Create CBC Solver ------------------------
         #################################################
-        solver = self._create_solver(options)
+        solver = pywraplp.Solver.CreateSolver("CBC")
         if solver is None:
             return {"status": "SOLVER_CREATION_FAILED"}
+        solver.SetTimeLimit(max(0, options.timeout_ms)) # set time limit in milliseconds
 
         #################################################
         # --- Decision Variables ------------------------
@@ -308,18 +276,6 @@ class CBCSolver:
             move_fraction_of_tier=move_fraction_of_tier,
             gap_limit=gap_limit,
         )
-
-    def _create_solver(self, options: SolverOptions) -> Optional[pywraplp.Solver]:
-        """Create and configure the CBC MIP solver."""
-        # Try CBC first (preferred), fall back to SCIP if not available
-        solver = pywraplp.Solver.CreateSolver("CBC")
-        if solver is None:
-            solver = pywraplp.Solver.CreateSolver("SCIP")
-        if solver is None:
-            return None
-        # Set time limit in milliseconds
-        solver.SetTimeLimit(max(0, options.timeout_ms))
-        return solver
 
     def _dedupe_pods_by_uid(self, pods: list[dict]) -> dict[str, dict]:
         """Deduplicate pod records by UID."""
@@ -451,11 +407,7 @@ class CBCSolver:
     # --- Model building ----------------------------
     #################################################
     def _build_decision_vars(self, solver: pywraplp.Solver, problem: Problem) -> DecisionVars:
-        """Build decision variables for the MIP model.
-
-        Uses true binary integer variables (0 or 1) for exact solutions.
-        CBC/SCIP will solve the integer program directly without rounding.
-        """
+        """Build decision variables for the MIP model."""
         placed = [
             solver.IntVar(0, 1, f"placed_{i}")
             for i in range(problem.num_pods)
@@ -534,23 +486,14 @@ class CBCSolver:
         options: SolverOptions,
     ) -> tuple[int, list[dict], dict]:
         """Run the tiered lexicographic optimization.
-
-        This mirrors the CP-SAT approach:
-        1. Iterate over priority tiers (highest to lowest)
-        2. For each tier, maximize placements for pods with priority >= tier
-        3. Then minimize disruption for running pods with priority >= tier
-        4. Lock in achieved values as constraints before moving to next tier
-
-        For MIP, we rebuild objectives for each stage and add constraints
-        to lock in previously achieved values.
-
+        
         Returns:
             tuple of (status, phases, solution_dict)
             solution_dict contains 'placed' and 'assign' values captured after the final solve
         """
 
         #########################
-        # Solution storage - we must capture values BEFORE adding new constraints
+        # Solution storage
         #########################
         solution: dict = {"placed": {}, "assign": {}}
 

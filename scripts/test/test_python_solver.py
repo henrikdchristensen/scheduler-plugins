@@ -2,10 +2,6 @@
 # test_python_solver_main.py
 """
 Tests for the Python solvers (CP-SAT and CBC).
-
-This file contains:
-1. Solver-specific unit tests for internal methods
-2. Shared integration tests that run against BOTH solvers using pytest parametrization
 """
 
 import pytest

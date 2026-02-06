@@ -1,31 +1,13 @@
 #!/usr/bin/env python3
 # scripts/kwok_workload_once/compare_solvers.py
 """
-Compare solver results (CP-SAT, CBC, SCIP, Gurobi) and report which is better for each configuration.
+Compare solver results (CP-SAT, CBC) and report which is better for each configuration.
 
-Supported solvers: cp_sat, cbc, scip, gurobi
+Supported solvers: cp_sat, cbc
 
 Usage:
     # Default: CP-SAT vs CBC
     python -m scripts.kwok_workload_once.compare_solvers
-
-    # CP-SAT vs SCIP
-    python -m scripts.kwok_workload_once.compare_solvers \
-        --solver-a-dir plugin --solver-a-name cp_sat \
-        --solver-b-dir plugin-scip --solver-b-name scip \
-        --out-dir analysis/kwok_workload_once/comparison-cpsat-vs-scip
-
-    # CP-SAT vs Gurobi
-    python -m scripts.kwok_workload_once.compare_solvers \
-        --solver-a-dir plugin --solver-a-name cp_sat \
-        --solver-b-dir plugin-gurobi --solver-b-name gurobi \
-        --out-dir analysis/kwok_workload_once/comparison-cpsat-vs-gurobi
-
-    # CBC vs SCIP
-    python -m scripts.kwok_workload_once.compare_solvers \
-        --solver-a-dir plugin-cbc --solver-a-name cbc \
-        --solver-b-dir plugin-scip --solver-b-name scip \
-        --out-dir analysis/kwok_workload_once/comparison-cbc-vs-scip
 
     # Full custom comparison
     python -m scripts.kwok_workload_once.compare_solvers \
@@ -53,19 +35,11 @@ from scripts.helpers.general_helpers import parse_json_cell
 RESULTS_ROOT = Path("analysis/kwok_workload_once")
 
 # Solver directory and name mappings
-# Available solvers: cp_sat, cbc, scip, gurobi
+# Available solvers: cp_sat, cbc
 SOLVER_A_DIR = "plugin"          # CP-SAT (default)
 SOLVER_A_NAME = "cp_sat"
 SOLVER_B_DIR = "plugin-cbc"      # CBC (default comparison)
 SOLVER_B_NAME = "cbc"
-
-# Alternative: SCIP comparison
-# SOLVER_B_DIR = "plugin-scip"
-# SOLVER_B_NAME = "scip"
-
-# Alternative: Gurobi comparison
-# SOLVER_B_DIR = "plugin-gurobi"
-# SOLVER_B_NAME = "gurobi"
 
 DEFAULT_DIR = "default"
 RESULTS_CSV_NAME = "results.csv"
@@ -74,7 +48,7 @@ OUT_DIR = Path("analysis/kwok_workload_once/comparison")
 DECIMALS = 4
 
 # Valid solver types for validation
-VALID_SOLVER_NAMES = {"cp_sat", "cbc", "scip", "gurobi"}
+VALID_SOLVER_NAMES = {"cp_sat", "cbc"}
 
 # ============================================================
 # Helpers
@@ -537,11 +511,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--solver-a-dir", type=str, default=SOLVER_A_DIR,
                         help="Solver A directory name (default: plugin)")
     parser.add_argument("--solver-a-name", type=str, default=SOLVER_A_NAME,
-                        help="Solver A display name. Options: cp_sat, cbc, scip, gurobi (default: cp_sat)")
+                        help="Solver A display name. Options: cp_sat, cbc (default: cp_sat)")
     parser.add_argument("--solver-b-dir", type=str, default=SOLVER_B_DIR,
                         help="Solver B directory name (default: plugin-cbc)")
     parser.add_argument("--solver-b-name", type=str, default=SOLVER_B_NAME,
-                        help="Solver B display name. Options: cp_sat, cbc, scip, gurobi (default: cbc)")
+                        help="Solver B display name. Options: cp_sat, cbc (default: cbc)")
     parser.add_argument("--results-csv", type=str, default=RESULTS_CSV_NAME,
                         help="Results CSV filename")
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR,
