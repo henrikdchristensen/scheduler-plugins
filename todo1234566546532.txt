@@ -1,7 +1,6 @@
 
-nodes32_pods256_prio2_util095_timeout10.yaml
+nodes32_pods256_prio1_util095_timeout01.yaml
 
-nodes32_pods256_prio4_util095_timeout01.yaml
 nodes32_pods256_prio4_util095_timeout10.yaml
 nodes32_pods256_prio4_util095_timeout20.yaml
 
