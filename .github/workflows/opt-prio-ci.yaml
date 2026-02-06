@@ -1,11 +1,10 @@
 name: CI (Unit + Integration)
 
 on:
-  workflow_dispatch: # TODO: right now only manual trigger; uncomment below to enable on push/pr
-  # push:
-  #   branches: [ "opt-prio-main" ]
-  # pull_request:
-  #   branches: [ "opt-prio-main" ]
+  push:
+    branches: [ "opt-prio-main" ]
+  pull_request:
+    branches: [ "opt-prio-main" ]
 
 jobs:
   # -------------------------------------------------------
@@ -19,6 +18,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            /*
+            !analysis
+          sparse-checkout-cone-mode: false
 
       - id: load-env
         name: Load envs from file
@@ -108,6 +112,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            /*
+            !analysis
+          sparse-checkout-cone-mode: false
 
       - id: load-env
         name: Load envs from file
