@@ -1,0 +1,15 @@
+2026/02/08/19:40:24	seed	6994672214887366847	snapshot_validation_after	pod count mismatch: expected 128, got 112+10=122
+2026/02/08/19:45:02	seed	6994672214887366847	snapshot_validation_after	pod count mismatch: expected 128, got 108+8=116
+2026/02/08/20:08:53	seed	3896010399170147587	snapshot_validation_after	pod count mismatch: expected 128, got 117+7=124
+2026/02/08/20:54:50	seed	55411538136720492	snapshot_validation_after	pod count mismatch: expected 128, got 114+3=117
+2026/02/08/20:59:29	seed	55411538136720492	snapshot_validation_after	pod count mismatch: expected 128, got 116+10=126
+2026/02/08/21:09:53	seed	2120090046821723763	snapshot_validation_after	pod count mismatch: expected 128, got 113+7=120
+2026/02/08/21:29:20	seed	4291706568640266163	snapshot_validation_after	pod count mismatch: expected 128, got 118+8=126
+2026/02/08/21:34:52	seed	7194306251949794638	snapshot_validation_after	pod count mismatch: expected 128, got 105+4=109
+2026/02/08/21:39:46	seed	7194306251949794638	snapshot_validation_after	pod count mismatch: expected 128, got 109+7=116
+2026/02/08/21:48:16	seed	8869018158643600458	snapshot_validation_after	pod count mismatch: expected 128, got 115+9=124
+2026/02/08/21:59:14	seed	6791828356968382696	snapshot_validation_after	pod count mismatch: expected 128, got 117+7=124
+2026/02/08/22:06:05	seed	4245042552790771277	snapshot_validation_after	pod count mismatch: expected 128, got 118+6=124
+2026/02/08/22:10:32	seed	4245042552790771277	snapshot_validation_after	pod count mismatch: expected 128, got 111+3=114
+2026/02/08/22:15:06	seed	4245042552790771277	snapshot_validation_after	pod count mismatch: expected 128, got 119+3=122
+2026/02/08/22:19:56	seed	4245042552790771277	snapshot_validation_after	pod count mismatch: expected 128, got 112+3=115

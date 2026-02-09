@@ -1,29 +1,29 @@
 meta:
-  timestamp: 2026/02/07/09:27:04
+  timestamp: 2026/02/08/23:02:13
   git: {}
-  job_file: /work/2026-02-06-gurobi2/content/data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio1_util095_timeout01.yaml
+  job_file: /work/2026-02-06-gurobi2/content/data/jobs/kwok_workload_once/plugin/nodes32_pods128_prio2_util095_timeout20.yaml
   workload_config_file: data/configs-workload/base.yaml
   kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 inputs:
   cli-cmd: python /work/2026-02-06-gurobi2/content/scripts/kwok_workload_once/test_runner.py
-    --kwok-runtime binary --job-file /work/2026-02-06-gurobi2/content/data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio1_util095_timeout01.yaml
+    --kwok-runtime binary --job-file /work/2026-02-06-gurobi2/content/data/jobs/kwok_workload_once/plugin/nodes32_pods128_prio2_util095_timeout20.yaml
     --solver-type gurobi
   job:
     workload-config-file: data/configs-workload/base.yaml
     kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
-    seed-file: data/seeds/kwok_workload_once/nodes32_pods256_prio1_util095.txt
-    output-dir: results/plugin/nodes32_pods256_prio1_util095_timeout01
+    seed-file: data/seeds/kwok_workload_once/nodes32_pods128_prio2_util095.txt
+    output-dir: results/plugin/nodes32_pods128_prio2_util095_timeout20
     solver-trigger: true
     override-workload-config:
       num_nodes: 32
-      num_pods: 256
-      num_priorities: 1
+      num_pods: 128
+      num_priorities: 2
       util: 0.95
     override-kwokctl-envs:
     - name: OPTIMIZE_MODE
       value: manual
     - name: SOLVER_PYTHON_TIMEOUT
-      value: 1s
+      value: 20s
   workload:
     kind: WorkloadConfiguration
     namespace: test
@@ -41,8 +41,8 @@ inputs:
     settle_timeout_min: 3s
     settle_timeout_max: 10s
     num_nodes: 32
-    num_pods: 256
-    num_priorities: 1
+    num_pods: 128
+    num_priorities: 2
     util: 0.95
   kwokctl:
     kind: KwokctlConfiguration
@@ -65,4 +65,4 @@ inputs:
       - name: SOLVER_PYTHON_ENABLED
         value: 'true'
       - name: SOLVER_PYTHON_TIMEOUT
-        value: 1s
+        value: 20s

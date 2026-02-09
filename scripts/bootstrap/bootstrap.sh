@@ -21,6 +21,7 @@ RUNNER="${RUNNER:-test_runner}"
 CLUSTER_NAME="${CLUSTER_NAME:-}"
 KWOK_RUNTIME="${KWOK_RUNTIME:-binary}"  # binary | docker
 JOB_FILE="${JOB_FILE:-}"                # can be relative to CONTENT_DIR
+JOB_LIST="${JOB_LIST:-}"                # can be relative to CONTENT_DIR
 LOG_LEVEL="${LOG_LEVEL:-}"
 CLEAN_START="${CLEAN_START:-}"
 
@@ -92,6 +93,7 @@ resolve_paths_relative_to_folder() {
   RESULTS_DIR="$(to_abs_under_folder "$RESULTS_DIR")"
   SEED_FILE="$(to_abs_under_folder "$SEED_FILE")"
   JOB_FILE="$(to_abs_under_folder "$JOB_FILE")"
+  JOB_LIST="$(to_abs_under_folder "$JOB_LIST")"
   TRACE_DIR="$(to_abs_under_folder "$TRACE_DIR")"
   KWOKCTL_CONFIG_FILE="$(to_abs_under_folder "$KWOKCTL_CONFIG_FILE")"
 }
@@ -102,7 +104,9 @@ print_cfg() {
   log cfg "RUNNER=${RUNNER}"
   log cfg "SOLVER_TYPE=${SOLVER_TYPE}"
 
-  if [ -n "${JOB_FILE}" ]; then
+  if [ -n "${JOB_LIST}" ]; then
+    log cfg "JOB_LIST=${JOB_LIST}"
+  elif [ -n "${JOB_FILE}" ]; then
     log cfg "JOB_FILE=${JOB_FILE}"
   else
     log cfg "CLUSTER_NAME=${CLUSTER_NAME:-<unset>}"
@@ -307,6 +311,7 @@ stage_test() {
         [ -n '${REPEATS:-}'           ] && args+=( --repeats '${REPEATS:-}' )
         [ -n '${LOG_LEVEL}'           ] && args+=( --log-level '${LOG_LEVEL}' )
         [ -n '${JOB_FILE}'            ] && args+=( --job-file '${JOB_FILE}' )
+        [ -n '${JOB_LIST}'            ] && args+=( --job-list '${JOB_LIST}' )
         [ -n '${SEEDS_NOT_ALL_RUNNING}' ] && args+=( --seeds-not-all-running '${SEEDS_NOT_ALL_RUNNING}' )
         [ -n '${DEFAULT_SCHEDULER}'   ] && args+=( --default-scheduler '${DEFAULT_SCHEDULER}' )
         [ -n '${KWOKCTL_CONFIG_FILE}' ] && args+=( --kwokctl-config-file '${KWOKCTL_CONFIG_FILE}' )
@@ -337,6 +342,7 @@ FLAGS_SPEC=(
   "seed|SEED|value|"
   "repeats|REPEATS|value|"
   "job-file|JOB_FILE|value|"
+  "job-list|JOB_LIST|value|"
   "solver-type|SOLVER_TYPE|value|"
   "solver-trigger|SOLVER_TRIGGER|flag|--solver-trigger"
   "save-solver-stats|SAVE_SOLVER_STATS|flag|--save-solver-stats"

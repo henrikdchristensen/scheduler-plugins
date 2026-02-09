@@ -2,6 +2,7 @@
 # test_runner.py
 """
 python -m scripts.kwok_workload_once.test_runner --job-file <job-file.yaml>
+python -m scripts.kwok_workload_once.test_runner --job-list <job-list.txt>
 """
 
 import sys, shutil, argparse, math, time, random, csv, json, logging, yaml, subprocess, traceback, shlex, os
@@ -172,6 +173,10 @@ def build_argparser() -> argparse.ArgumentParser:
                     help="KWOK runtime")
     ap.add_argument("--job-file", dest="job_file", default=None,
                     help="Path to a YAML job file describing one job and optional in-memory config overrides.")
+    ap.add_argument("--job-list", dest="job_list", default=None,
+                    help="Path to a text file listing job-file paths (one per line). "
+                         "Jobs are processed sequentially in file order. "
+                         "Lines starting with '#' and blank lines are ignored.")
     ap.add_argument("--workload-config-file", dest="workload_config_file", required=False,
                     help="Path to a single workload YAML (WorkloadConfiguration)")
     ap.add_argument("--kwokctl-config-file", dest="kwokctl_config_file", required=False,
@@ -2160,6 +2165,58 @@ class TestRunner:
         elif self.args.seed_file:
             self.run_mode_seed_file()
 
+def _read_job_list(path: str) -> List[str]:
+    """
+    Read a job-list file and return an ordered list of job-file paths.
+    Blank lines and lines starting with '#' are skipped.
+    Paths are resolved relative to the job-list file's parent directory.
+    """
+    job_list_path = Path(path).resolve()
+    if not job_list_path.exists():
+        raise SystemExit(f"--job-list file not found: {job_list_path}")
+    base_dir = job_list_path.parent
+    jobs: List[str] = []
+    with open(job_list_path, "r", encoding="utf-8") as f:
+        for line_no, raw_line in enumerate(f, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            p = Path(line)
+            if not p.is_absolute():
+                p = base_dir / p
+            p = p.resolve()
+            if not p.exists():
+                raise SystemExit(f"--job-list line {line_no}: job file not found: {p} (raw: {line!r})")
+            jobs.append(str(p))
+    if not jobs:
+        raise SystemExit(f"--job-list file is empty (no job paths found): {job_list_path}")
+    return jobs
+
+def _run_job_list(args: argparse.Namespace) -> None:
+    """
+    Process a job-list file: iterate over each job-file path in order,
+    create a fresh TestRunner for each, and run it.
+    """
+    job_paths = _read_job_list(args.job_list)
+    total = len(job_paths)
+    LOG.info("job-list: %d job(s) to process", total)
+    for idx, job_path in enumerate(job_paths, start=1):
+        header, footer = make_header_footer(f"JOB {idx}/{total}")
+        LOG.info("\n%s\njob-file=%s\n%s", header, job_path, footer)
+        # Build a per-job copy of args with the current job-file set
+        job_args = argparse.Namespace(**vars(args))
+        job_args.job_file = job_path
+        job_args.job_list = None  # prevent recursion
+        try:
+            runner = TestRunner(job_args)
+            runner.run()
+        except SystemExit as e:
+            LOG.error("job %d/%d failed (job-file=%s): %s", idx, total, job_path, e)
+        except Exception as e:
+            LOG.error("job %d/%d unexpected error (job-file=%s): %s", idx, total, job_path, e)
+            LOG.debug(traceback.format_exc())
+        LOG.info("job %d/%d finished (job-file=%s)", idx, total, job_path)
+
 def main():
     # Parse args
     args = build_argparser().parse_args()
@@ -2169,7 +2226,16 @@ def main():
         generate_seeds(args.gen_seeds_to_file)
         return
 
-    # TestRunner instance
+    # Job-list mode: process multiple job files sequentially
+    if getattr(args, "job_list", None):
+        # Set up logging early so _run_job_list can log
+        log_level = getattr(args, "log_level", None) or "INFO"
+        setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=log_level)
+        _run_job_list(args)
+        print("done (job-list).")
+        return
+
+    # Single job / direct mode
     test_runner = TestRunner(args)
     test_runner.run()
 
