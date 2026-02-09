@@ -1,15 +1,8 @@
-data/jobs/kwok_workload_once/plugin/nodes32_pods128_prio1_util095_timeout20.yaml
-data/jobs/kwok_workload_once/plugin/nodes32_pods128_prio4_util095_timeout20.yaml
-
-data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio2_util090_timeout10.yaml
-data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio4_util090_timeout10.yaml
-data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio2_util100_timeout10.yaml
 
 data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio2_util100_timeout01.yaml
 data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio2_util105_timeout01.yaml
 data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio4_util100_timeout01.yaml
 
-data/jobs/kwok_workload_once/plugin/nodes32_pods128_prio4_util095_timeout20.yaml
 data/jobs/kwok_workload_once/plugin/nodes32_pods128_prio2_util100_timeout20.yaml
 data/jobs/kwok_workload_once/plugin/nodes32_pods128_prio4_util100_timeout20.yaml
 

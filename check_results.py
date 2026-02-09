@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 """
-Recursively find all results.csv files under a root directory and verify
-that each one contains exactly 100 unique seeds.  Reports failures.
-
-Usage:
-    python scripts/check_results.py [ROOT_DIR]
-
-If ROOT_DIR is omitted it defaults to the `analysis/` folder next to this script's
-repo root.
+python check_results.py analysis/kwok_workload_once/plugin-gurobi/
 """
 
 import csv

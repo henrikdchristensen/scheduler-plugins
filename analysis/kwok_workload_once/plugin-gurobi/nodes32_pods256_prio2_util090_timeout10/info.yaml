@@ -1,7 +1,7 @@
 meta:
-  timestamp: 2026/02/09/12:39:59
+  timestamp: 2026/02/09/09:07:07
   git: {}
-  job_file: /work/2026-02-06-gurobi2/content/data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio2_util100_timeout10.yaml
+  job_file: /work/2026-02-06-gurobi2/content/data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio2_util090_timeout10.yaml
   workload_config_file: data/configs-workload/base.yaml
   kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 inputs:
@@ -11,14 +11,14 @@ inputs:
   job:
     workload-config-file: data/configs-workload/base.yaml
     kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
-    seed-file: data/seeds/kwok_workload_once/seeds_100.txt
-    output-dir: results/plugin/nodes32_pods256_prio2_util100_timeout10
+    seed-file: data/seeds/kwok_workload_once/nodes32_pods256_prio2_util090.txt
+    output-dir: results/plugin/nodes32_pods256_prio2_util090_timeout10
     solver-trigger: true
     override-workload-config:
       num_nodes: 32
       num_pods: 256
       num_priorities: 2
-      util: 1.0
+      util: 0.9
     override-kwokctl-envs:
     - name: OPTIMIZE_MODE
       value: manual
@@ -43,7 +43,7 @@ inputs:
     num_nodes: 32
     num_pods: 256
     num_priorities: 2
-    util: 1.0
+    util: 0.9
   kwokctl:
     kind: KwokctlConfiguration
     apiVersion: config.kwok.x-k8s.io/v1alpha1
