@@ -1,12 +1,12 @@
 meta:
-  timestamp: 2026/02/09/10:51:51
+  timestamp: 2026/02/10/07:54:07
   git: {}
   job_file: /work/2026-02-06-gurobi2/content/data/jobs/kwok_workload_once/plugin/nodes32_pods256_prio1_util105_timeout10.yaml
   workload_config_file: data/configs-workload/base.yaml
   kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 inputs:
   cli-cmd: python /work/2026-02-06-gurobi2/content/scripts/kwok_workload_once/test_runner.py
-    --kwok-runtime binary --job-list /work/2026-02-06-gurobi2/content/job1.txt --solver-type
+    --kwok-runtime binary --job-list /work/2026-02-06-gurobi2/content/job2.txt --solver-type
     gurobi
   job:
     workload-config-file: data/configs-workload/base.yaml

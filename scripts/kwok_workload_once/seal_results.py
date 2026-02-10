@@ -2,6 +2,10 @@
 # scripts/kwok_workload_once/seal_results.py
 """
 python -m scripts.kwok_workload_once.seal_results
+
+or
+
+python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-gurobi
 """
 
 import argparse, json, re
