@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-python hej.py analysis/kwok_trace_replayer/plugin --fail-only
+python check_trace_results.py analysis/kwok_trace_replayer/plugin --fail-only
 """
 
 from __future__ import annotations

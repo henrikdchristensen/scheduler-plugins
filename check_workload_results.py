@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-python check_results.py analysis/kwok_workload_once/plugin-gurobi/
+python check_workload_results.py analysis/kwok_workload_once/plugin-gurobi/
 """
 
 import csv
@@ -43,12 +43,29 @@ def main():
 
     results_files = sorted(root_dir.rglob("results.csv"))
 
-    if not results_files:
+    # Find subdirectories that have no results.csv (empty/incomplete runs)
+    all_subdirs = sorted(
+        d for d in root_dir.rglob("*")
+        if d.is_dir() and not any(d.iterdir())  # completely empty
+        or (d.is_dir() and not (d / "results.csv").exists() and not any(c.is_dir() for c in d.iterdir()))
+    )
+    # Filter out dirs that are parents of other dirs (only leaf dirs matter)
+    missing_dirs = [
+        d for d in all_subdirs
+        if d.is_dir() and not (d / "results.csv").exists()
+    ]
+
+    if not results_files and not missing_dirs:
         print(f"No results.csv files found under {root_dir}")
         sys.exit(0)
 
     failures = []
     passes = 0
+
+    for d in missing_dirs:
+        rel = d.relative_to(root_dir)
+        failures.append((rel, 0, 0, "missing results.csv"))
+        print(f"  FAIL  {rel}  (missing results.csv)")
 
     for path in results_files:
         rel = path.relative_to(root_dir)
@@ -60,8 +77,9 @@ def main():
             failures.append((rel, unique, total, msg))
             print(f"  FAIL  {rel}  ({msg}, {total} rows)")
 
+    total_checked = len(results_files) + len(missing_dirs)
     print()
-    print(f"Checked {len(results_files)} file(s): {passes} passed, {len(failures)} failed")
+    print(f"Checked {total_checked} location(s): {passes} passed, {len(failures)} failed")
 
     if failures:
         print()

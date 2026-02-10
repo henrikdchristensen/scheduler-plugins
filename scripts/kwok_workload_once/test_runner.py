@@ -1992,11 +1992,22 @@ class TestRunner:
         
         phase = "status_snapshot_before_solver"
         LOG.info("phase=%s", phase)
-        snap_before = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods)
-        running_count_before = len(snap_before.pods_running)
-        unsched_count_before = len(snap_before.pods_unscheduled)
+        snap_before = None
+        for _snap_try in range(1, RETRIES_ON_FAIL + 1):
+            snap_timeout = 10 + 2 * _snap_try
+            snap_before = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods, timeout=snap_timeout)
+            running_count_before = len(snap_before.pods_running)
+            unsched_count_before = len(snap_before.pods_unscheduled)
+            if running_count_before + unsched_count_before == ta.num_pods:
+                break
+            LOG.warning(
+                "snapshot_before attempt %d/%d (timeout=%ds): pod count mismatch: expected %d, got %d+%d=%d; retrying",
+                _snap_try, RETRIES_ON_FAIL, snap_timeout,
+                ta.num_pods, running_count_before, unsched_count_before,
+                running_count_before + unsched_count_before,
+            )
         
-        # validate counts
+        # validate counts after retries
         if running_count_before + unsched_count_before != ta.num_pods:
             phase = "snapshot_validation_before"
             self._record_failure("seed", seed, phase,
@@ -2036,11 +2047,22 @@ class TestRunner:
         # status snapshot
         phase = "status_snapshot_after_settle"
         LOG.info("phase=%s", phase)
-        snap_now = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods)
-        running_count_now = len(snap_now.pods_running)
-        unsched_count_now = len(snap_now.pods_unscheduled)
+        snap_now = None
+        for _snap_try in range(1, RETRIES_ON_FAIL + 1):
+            snap_timeout = 10 + 2 * _snap_try
+            snap_now = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods, timeout=snap_timeout)
+            running_count_now = len(snap_now.pods_running)
+            unsched_count_now = len(snap_now.pods_unscheduled)
+            if running_count_now + unsched_count_now == ta.num_pods:
+                break
+            LOG.warning(
+                "snapshot_after attempt %d/%d (timeout=%ds): pod count mismatch: expected %d, got %d+%d=%d; retrying",
+                _snap_try, RETRIES_ON_FAIL, snap_timeout,
+                ta.num_pods, running_count_now, unsched_count_now,
+                running_count_now + unsched_count_now,
+            )
         
-        # validate counts
+        # validate counts after retries
         if running_count_now + unsched_count_now != ta.num_pods:
             phase = "snapshot_validation_after"
             self._record_failure("seed", seed, phase,
