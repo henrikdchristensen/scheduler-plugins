@@ -129,6 +129,17 @@ PLOT_MARKER_SIZE = 2.0
 PLOT_MARKER_SEED_ALPHA = 0.5
 PLOT_MEAN_MARKER_SIZE = 3.5
 PLOT_MARKER_LINEWIDTH = 0.4
+
+# Shape legend: (marker, label_template, marker_size, facecolor)
+#   label_template may contain "{nodes}" which will be replaced with the actual node count.
+#   Set facecolor to "none" for outline-only markers, or any color string to fill.
+SHAPE_LEGEND_SPECS: List[Tuple[str, str, float, str]] = [
+    ("o", "run with {nodes} nodes", 3.3, "none"),  # nodes_order[0]
+    ("s", "run with {nodes} nodes", 3.2, "none"),  # nodes_order[1]
+    ("D", "avg. for all runs", 3.6, "none"),       # mean
+]
+SHAPE_LEGEND_EDGE_COLOR = "black"
+SHAPE_LEGEND_EDGE_WIDTH = 0.5
 PLOT_MIN_LINEAR_YTICKS = 5
 PLOT_COUNT_MAX_TICKS = 7
 PLOT_COUNT_MAX_TICKS_SYMMETRIC = 8
@@ -138,15 +149,17 @@ PLOT_HEIGHT = 8.3
 GRID_FIGSIZE_MAIN = (5.4, PLOT_HEIGHT)
 GRID_FIGSIZE_DELTAS = (4.1, PLOT_HEIGHT)
 
-GRID_LEGEND_NCOL_MAIN = 3
-GRID_LEGEND_NCOL_DELTAS = 2
+GRID_LEGEND_NCOL_COLORS = 2
+GRID_LEGEND_NCOL_SHAPES = 1
 
-GRID_LEGEND_PAD = 0.033
+GRID_LEGEND_GAP = 0.01       # horizontal gap between the two legend boxes (figure fraction)
+GRID_LEGEND_X_OFFSET = -0.01 # manual horizontal offset to nudge legends left(−) or right(+)
+GRID_LEGEND_PAD = 0.096
 GRID_LEFT_MAIN = 0.08
 GRID_LEFT_DELTAS = 0.11
 GRID_RIGHT = 0.99
 GRID_BOTTOM = 0.03
-GRID_TOP = 0.925
+GRID_TOP = 0.905
 GRID_WSPACE = 0.10
 GRID_HSPACE = 0.10
 GRID_YLABEL_PAD_PT = 23.0
@@ -582,13 +595,6 @@ def arrival_tick_label(arrival: float) -> str:
     a_i = fmt_arrival_value(arrival)
     return f"{a_i}s"
 
-def arrival_tick_label_with_axis(arrival: float, xi: int, n_arrivals: int) -> str:
-    """
-    Arrival tick label, with extra axis label in the middle tick.
-    """
-    base = arrival_tick_label(arrival)
-    return base + ("\ninter-arrival (s)" if xi == n_arrivals // 2 else "")
-
 def x_from_left_with_pad_points(fig: plt.Figure, left: float, pad_pt: float) -> float:
     """
     Compute x coordinate from left with padding in points.
@@ -705,14 +711,25 @@ def draw_points_on_ax(
             ax.text(
                 x_base[xi],
                 -0.03,
-                arrival_tick_label_with_axis(arrival, xi, len(arrivals_order)),
+                arrival_tick_label(arrival),
                 transform=ax.get_xaxis_transform(),
                 ha="center",
                 va="top",
                 fontsize=PLOT_TICK_FONTSIZE,
                 clip_on=False,
-                linespacing=1.35 if xi == len(arrivals_order) // 2 else 1.0,
             )
+        # Centered inter-arrival axis label below tick labels
+        x_mid = 0.5 * (boundaries[0] + boundaries[-1])
+        ax.text(
+            x_mid,
+            -0.12,
+            "inter-arrival (s)",
+            transform=ax.get_xaxis_transform(),
+            ha="center",
+            va="top",
+            fontsize=PLOT_TICK_FONTSIZE,
+            clip_on=False,
+        )
     else:
         ax.tick_params(labelbottom=False)
 
@@ -790,7 +807,6 @@ def make_grid(
     figsize: Tuple[float, float],
     grid_left: float,
     mode_x_spacing: float,
-    legend_ncol: int,
     y_tick_symmetric: bool = False,
 ) -> None:
     """
@@ -841,31 +857,77 @@ def make_grid(
         hspace=GRID_HSPACE,
     )
 
-    # Legend
+    # Color legend handles
     if color_override:
-        # Custom colors for delta plots
-        legend_handles = [Line2D([0], [0], color=color_override(row_key), linewidth=1.8) for row_key in series]
+        color_handles = [Line2D([0], [0], color=color_override(row_key), linewidth=1.8) for row_key in series]
     else:
-        # Standard colors from RowKey
-        legend_handles = [Line2D([0], [0], color=row_key_color(row_key), linewidth=1.8) for row_key in series]
+        color_handles = [Line2D([0], [0], color=row_key_color(row_key), linewidth=1.8) for row_key in series]
+
+    # Shape legend handles
+    shape_handles = []
+    shape_labels = []
+    for idx, (marker, label_tmpl, msize, mfc) in enumerate(SHAPE_LEGEND_SPECS):
+        shape_handles.append(
+            Line2D([0], [0], marker=marker, color="none",
+                   markerfacecolor=mfc,
+                   markeredgecolor=SHAPE_LEGEND_EDGE_COLOR,
+                   markeredgewidth=SHAPE_LEGEND_EDGE_WIDTH,
+                   markersize=msize, linestyle="None")
+        )
+        if "{nodes}" in label_tmpl and idx < len(nodes_order):
+            shape_labels.append(label_tmpl.format(nodes=nodes_order[idx]))
+        else:
+            shape_labels.append(label_tmpl)
 
     bbox_l = axes[0, 0].get_position()
     bbox_r = axes[0, 1].get_position()
     x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
     y_top_grid = max(bbox_l.y1, bbox_r.y1)
-    legend_y = min(0.98, y_top_grid + float(GRID_LEGEND_PAD))
+    legend_y = y_top_grid + float(GRID_LEGEND_PAD)
 
-    fig.legend(
-        legend_handles,
-        legend_labels,
-        loc="lower center",
-        bbox_to_anchor=(x_center_grid, legend_y),
-        ncol=min(legend_ncol, len(legend_labels)),
+    legend_kwargs = dict(
         fontsize=PLOT_LEGEND_FONTSIZE,
         handlelength=PLOT_LEGEND_HANDLE_LENGTH,
         handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
         columnspacing=PLOT_LEGEND_COLUMN_SPACING,
     )
+
+    # Place color legend first (off-screen) to measure its width
+    leg_colors = fig.legend(
+        color_handles,
+        legend_labels,
+        title="Colors",
+        title_fontproperties={"size": PLOT_LEGEND_FONTSIZE, "weight": "bold"},
+        loc="upper left",
+        bbox_to_anchor=(0, legend_y),
+        ncol=GRID_LEGEND_NCOL_COLORS,
+        **legend_kwargs,
+    )
+
+    # Place shape legend (off-screen) to measure its width
+    leg_shapes = fig.legend(
+        shape_handles,
+        shape_labels,
+        title="Shapes",
+        title_fontproperties={"size": PLOT_LEGEND_FONTSIZE, "weight": "bold"},
+        loc="upper left",
+        bbox_to_anchor=(0, legend_y),
+        ncol=GRID_LEGEND_NCOL_SHAPES,
+        **legend_kwargs,
+    )
+
+    # Measure widths in figure-fraction coordinates and reposition centered
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    w_colors = leg_colors.get_window_extent(renderer).transformed(fig.transFigure.inverted()).width
+    w_shapes = leg_shapes.get_window_extent(renderer).transformed(fig.transFigure.inverted()).width
+    total_w = w_colors + GRID_LEGEND_GAP + w_shapes
+    x_start = x_center_grid - total_w / 2 + GRID_LEGEND_X_OFFSET
+
+    leg_colors.set_bbox_to_anchor((x_start, legend_y), transform=fig.transFigure)
+    leg_colors._loc = leg_colors.codes["upper left"]
+    leg_shapes.set_bbox_to_anchor((x_start + w_colors + GRID_LEGEND_GAP, legend_y), transform=fig.transFigure)
+    leg_shapes._loc = leg_shapes.codes["upper left"]
     
     x_text = x_from_left_with_pad_points(fig, grid_left, GRID_YLABEL_PAD_PT)
     for r, row_spec in enumerate(GRID_ROW_SPECS):
@@ -918,7 +980,6 @@ def make_grid_main(
         figsize=GRID_FIGSIZE_MAIN,
         grid_left=GRID_LEFT_MAIN,
         mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
-        legend_ncol=GRID_LEGEND_NCOL_MAIN,
         y_tick_symmetric=False,
     )
 
@@ -999,7 +1060,6 @@ def make_grid_periodic_vs_stable(
         figsize=GRID_FIGSIZE_DELTAS,
         grid_left=GRID_LEFT_DELTAS,
         mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
-        legend_ncol=GRID_LEGEND_NCOL_DELTAS,
         y_tick_symmetric=True,
     )
 
