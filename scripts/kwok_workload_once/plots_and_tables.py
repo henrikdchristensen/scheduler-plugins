@@ -455,9 +455,9 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
 
             if c == 0:
                 if nrows % 2 == 1 and r == nrows // 2:
-                    axis_text = f"{INSTANCES_LABEL}\n{PODS_PER_NODE_LABEL} = {ppn}"
+                    axis_text = f"{INSTANCES_LABEL}\n{PODS_PER_NODE_LABEL}={ppn}"
                 else:
-                    axis_text = f"\n{PODS_PER_NODE_LABEL} = {ppn}"
+                    axis_text = f"\n{PODS_PER_NODE_LABEL}={ppn}"
                 lbl = ax.set_ylabel(axis_text, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=10)
                 lbl.set_va("center")
                 lbl.set_ha("center")
