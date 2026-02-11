@@ -17,6 +17,7 @@ require (
 	github.com/paypal/load-watcher v0.2.4
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0
+	golang.org/x/sync v0.12.0
 	gonum.org/v1/gonum v0.12.0
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
@@ -116,7 +117,6 @@ require (
 	golang.org/x/mod v0.22.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/term v0.30.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
