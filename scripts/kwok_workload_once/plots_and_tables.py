@@ -113,12 +113,12 @@ DOT_NTICKS_SOLVER_DUR: Optional[int] = 7
 DOT_YLABEL_X_DIFF: float = 0.03   # figure-fraction x for supylabel
 DOT_YLABEL_PAD_DIFF: float = 10.0  # axis labelpad (pts) for per-row ylabel
 
-# Timeout colours (tab10 provides enough distinct hues)
-_tab10 = plt.get_cmap("tab10").colors
-TIMEOUT_COLORS = {t: _tab10[i % len(_tab10)] for i, t in enumerate(PLOT_TIMEOUTS)}
-
 # colors / series (stack order = bottom -> top)
 set2, set3 = plt.get_cmap("Set2").colors, plt.get_cmap("Set3").colors
+
+# Timeout colours (Set2 to match 2D/3D grid plots)
+TIMEOUT_COLORS = {t: set2[i % len(set2)] for i, t in enumerate(PLOT_TIMEOUTS)}
+
 CATEGORIES = [
     {"key": "other", "label": "Other", "col": "other_rate", "color": set2[3]},
     {"key": "solver_optimal", "label": "Better&Optimal", "col": "solver_optimal_rate", "color": set2[0]},
@@ -467,7 +467,7 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
                 ax.set_xlabel(NODES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
     legends = [s for s in CATEGORIES if s["key"] in seen_keys][::-1]
-    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"]) for s in legends]
+    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"], ec="black", linewidth=0.4) for s in legends]
     legend_labels = [s["label"] for s in legends]
     fig.legend(
         legend_handles,
@@ -583,7 +583,7 @@ def plot_3d_ppn_prio_timeout(
                     seen_keys.add(key)
 
     legends = [s for s in CATEGORIES if s["key"] in seen_keys][::-1]
-    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"]) for s in legends]
+    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"], ec="black", linewidth=0.6) for s in legends]
     legend_labels = [s["label"] for s in legends]
     fig.legend(
         legend_handles,

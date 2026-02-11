@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -857,11 +858,11 @@ def make_grid(
         hspace=GRID_HSPACE,
     )
 
-    # Color legend handles
+    # Color legend handles (square patches to match workload_once style)
     if color_override:
-        color_handles = [Line2D([0], [0], color=color_override(row_key), linewidth=1.8) for row_key in series]
+        color_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=color_override(row_key), ec="black", linewidth=0.6) for row_key in series]
     else:
-        color_handles = [Line2D([0], [0], color=row_key_color(row_key), linewidth=1.8) for row_key in series]
+        color_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=row_key_color(row_key), ec="black", linewidth=0.6) for row_key in series]
 
     # Shape legend handles
     shape_handles = []
