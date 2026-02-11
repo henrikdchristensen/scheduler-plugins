@@ -659,3 +659,86 @@ func assertPlanActiveReleased(t *testing.T, pl *SharedState) {
 		t.Fatalf("expected ActivePlan gate to be released")
 	}
 }
+
+func assertPlanActiveStillHeld(t *testing.T, pl *SharedState) {
+	t.Helper()
+	if pl.ActivePlanInProgress.Load() != true {
+		t.Fatalf("expected ActivePlanInProgress to still be held (true), but it was released")
+	}
+}
+
+// TestRunOptimizationFlow_NonBlocking_DoesNotReleaseOtherActivePlan verifies
+// that in non-blocking mode, early exit paths do NOT release an
+// ActivePlanInProgress lock that was acquired by another goroutine.
+func TestRunOptimizationFlow_NonBlocking_DoesNotReleaseOtherActivePlan(t *testing.T) {
+	scenarios := []struct {
+		name string
+		h    flowHarness
+	}{
+		{
+			name: "planContext error does not release foreign lock",
+			h: flowHarness{
+				nonblocking:  true,
+				planCtxError: errors.New("boom"),
+			},
+		},
+		{
+			name: "no pending pods does not release foreign lock",
+			h: flowHarness{
+				nonblocking:   true,
+				nodes:         []*v1.Node{},
+				pods:          []*v1.Pod{},
+				baselineEvict: 1,
+			},
+		},
+		{
+			name: "no improving solution does not release foreign lock",
+			h: flowHarness{
+				nonblocking:    true,
+				nodes:          nil,
+				pods:           []*v1.Pod{pod("default", "p", withPhase(v1.PodPending))},
+				baselineEvict:  1,
+				bestName:       "s",
+				hadImprovement: false,
+				bestAttempt:    &SolverResult{Name: "a"},
+				bestOut:        nil,
+				attempts:       []SolverResult{{Name: "s"}},
+			},
+		},
+		{
+			name: "plan not applicable does not release foreign lock",
+			h: flowHarness{
+				nonblocking:    true,
+				nodes:          []*v1.Node{},
+				pods:           []*v1.Pod{pod("default", "p", withPhase(v1.PodPending))},
+				baselineEvict:  1,
+				bestName:       "s",
+				hadImprovement: true,
+				bestAttempt:    &SolverResult{Name: "a"},
+				bestOut:        &SolverOutput{Status: "OPTIMAL"},
+				attempts:       []SolverResult{{Name: "s"}},
+				applicable:     false,
+				applicableWhy:  "stale",
+			},
+		},
+	}
+
+	for _, tc := range scenarios {
+		t.Run(tc.name, func(t *testing.T) {
+			pl := &SharedState{}
+			tc.h.t = t
+			tc.h.pl = pl
+			tc.h.install(t)
+
+			// Simulate another goroutine holding the active plan lock.
+			pl.ActivePlanInProgress.Store(true)
+
+			_, _, _, _, _, _ = pl.runOptimizationFlow(context.Background(), nil)
+
+			// The key assertion: the lock must still be held because
+			// the non-blocking flow never acquired it and therefore
+			// must not release it.
+			assertPlanActiveStillHeld(t, pl)
+		})
+	}
+}

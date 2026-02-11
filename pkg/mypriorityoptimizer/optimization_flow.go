@@ -28,16 +28,29 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 
 	// Sync modes: take PlanActive now.
 	// Async modes: will take PlanActive later, after plan computation.
+	holdingActivePlan := false
 	if !isNonBlockingSolvingFn() {
 		if !pl.tryEnterActivePlan() {
 			klog.InfoS(msg(strategy, InfoActivePlanInProgress))
 			return nil, nil, "", nil, nil, ErrActiveInProgress
+		}
+		holdingActivePlan = true
+	}
+
+	// leaveActivePlanIfHeld releases the active-plan lock only when we
+	// actually acquired it, preventing a non-blocking flow from
+	// accidentally releasing another goroutine's lock.
+	leaveActivePlanIfHeld := func() {
+		if holdingActivePlan {
+			pl.tryLeaveActivePlan()
+			holdingActivePlan = false
 		}
 	}
 
 	// Ensure only one optimization flow at a time.
 	if !pl.tryEnterOptimizationFlow() {
 		klog.InfoS(msg(strategy, InfoOptimizationInProgress))
+		leaveActivePlanIfHeld()
 		return nil, nil, "", nil, nil, ErrOptimizationInProgress
 	}
 	delta.OptimizationFlowEntered = 1
@@ -49,7 +62,7 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 	nodes, pods, inp, err := planContextFn(pl, preemptor)
 	if err != nil {
 		klog.Error(msg(strategy, InfoPlanContextFailed), "err", err)
-		pl.tryLeaveActivePlan()
+		leaveActivePlanIfHeld()
 		return nil, nil, "", nil, nil, err
 	}
 	baselineScore := inp.BaselineScore
@@ -58,7 +71,7 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 	pendingPrePlan := countPendingPods(pods)
 	if pendingPrePlan == 0 {
 		klog.InfoS(msg(strategy, InfoNoPendingPods))
-		pl.tryLeaveActivePlan()
+		leaveActivePlanIfHeld()
 		return nil, &baselineScore, "", nil, nil, ErrNoPendingPods
 	}
 
@@ -71,7 +84,7 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 	// Check if any solver solution was improving, if not, exit early.
 	if !hadImp {
 		klog.Error(msg(strategy, InfoNoImprovingSolutionFromAnySolver))
-		pl.tryLeaveActivePlan()
+		leaveActivePlanIfHeld()
 		if len(attempts) > 0 {
 			delta.BestSolverFailed = 1
 		}
@@ -93,7 +106,7 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 	ok, why := isSolutionApplicableFn(pl, bestOut, nodes, pods)
 	if !ok {
 		klog.Error(msg(strategy, InfoPlanNotApplicable), "solver", bestName, "status", bestOut.Status, "reason", why)
-		pl.tryLeaveActivePlan()
+		leaveActivePlanIfHeld()
 		delta.PlanNotApplicable = 1
 		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrPlanNotApplicable.Error())
 		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrPlanNotApplicable
@@ -106,13 +119,14 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 			exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrActiveInProgress.Error())
 			return nil, nil, "", nil, nil, ErrActiveInProgress
 		}
+		holdingActivePlan = true
 	}
 
 	// How much is actually schedulable?
 	pendingScheduled, totalPrePlan, totalPostPlan := computePlanPodCountsFn(bestOut, pods)
 	if pendingScheduled == 0 {
 		klog.InfoS(msg(strategy, InfoNoPendingPodsScheduled))
-		pl.tryLeaveActivePlan()
+		leaveActivePlanIfHeld()
 		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrNoPendingPodsScheduled.Error())
 		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrNoPendingPodsScheduled
 	}
