@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mtick
 
+from matplotlib.lines import Line2D
+
 from scripts.helpers.plot_config import (
     PLOT_TITLE_FONTSIZE,
     PLOT_AXIS_LABEL_FONTSIZE,
@@ -65,7 +67,7 @@ ANNOT_FS = 3.5
 
 # labels
 TARGET_UTIL_LABEL = "target util (%)"
-NODES_LABEL = "# of nodes"
+NODES_LABEL = "#nodes"
 INSTANCES_LABEL = "% of instances"
 PODS_PER_NODE_LABEL = "pods/node"
 
@@ -86,6 +88,34 @@ GRID_2D_YLABEL_XPOS = 0.015
 FIGSIZE_3D = (8, 4)
 BAR_WIDTH_3D = 0.13
 ELEV_3D, AZIM_3D = 20.0, -54.0
+
+# faceted dot-chart sizes / style
+DOT_CELL_FIGSIZE = (2.2, 1.4)
+DOT_MARKER_SIZE = 4.0
+DOT_MARKER_LINEWIDTH = 0.5
+DOT_WSPACE = 0.12
+DOT_HSPACE = 0.16
+DOT_LEFT = 0.11
+DOT_RIGHT = 0.99
+DOT_BOTTOM = 0.07
+DOT_TOP = 0.84
+DOT_YLABEL_XPOS = 0.02
+
+# Fixed y-axis limits for faceted dot charts (None = auto-scale)
+DOT_YLIM_DIFF_USAGE: Optional[Tuple[float, float]] = (-5.0, 15.0)   # e.g. (-1.0, 5.0) in %
+DOT_YLIM_SOLVER_DUR: Optional[Tuple[float, float]] = (-5.0, 25.0)   # e.g. (0.0, 25.0) in s
+
+# Number of horizontal grid lines / y-ticks (None = matplotlib auto)
+DOT_NTICKS_DIFF_USAGE: Optional[int] = 5   # e.g. 6 ticks → 5 intervals
+DOT_NTICKS_SOLVER_DUR: Optional[int] = 7
+
+# Y-label positioning per plot (supylabel x-position and per-axis labelpad)
+DOT_YLABEL_X_DIFF: float = 0.03   # figure-fraction x for supylabel
+DOT_YLABEL_PAD_DIFF: float = 10.0  # axis labelpad (pts) for per-row ylabel
+
+# Timeout colours (tab10 provides enough distinct hues)
+_tab10 = plt.get_cmap("tab10").colors
+TIMEOUT_COLORS = {t: _tab10[i % len(_tab10)] for i, t in enumerate(PLOT_TIMEOUTS)}
 
 # colors / series (stack order = bottom -> top)
 set2, set3 = plt.get_cmap("Set2").colors, plt.get_cmap("Set3").colors
@@ -142,6 +172,8 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     g["solver_duration_ms_mean"] = safe_div(g["solver_duration_ms_sum"], g["n_solver_called"])
     g["cpu_delta_mean"] = safe_div(g["cpu_delta_sum"], g["n_seeds"])
     g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
+    # effective usage: max of cpu and mem deltas per parameter combination
+    g["eff_delta_mean"] = np.maximum(g["cpu_delta_mean"], g["mem_delta_mean"])
     return g.copy()
 
 def aggregate_over_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
@@ -567,6 +599,151 @@ def plot_3d_ppn_prio_timeout(
 
     save_figure(fig, out_path)
 
+
+def plot_faceted_dot(
+    df_util_agg: pd.DataFrame,
+    *,
+    metric_col: str,
+    y_label: str,
+    ppns: List[int],
+    priorities: List[int],
+    out_path: Path,
+    cell_figsize: Tuple[float, float] = DOT_CELL_FIGSIZE,
+    fixed_nodes: List[int] = PLOT_NODES,
+    fixed_timeouts: List[int] = PLOT_TIMEOUTS,
+    y_scale: float = 1.0,
+    y_lim: Optional[Tuple[float, float]] = None,
+    y_nticks: Optional[int] = None,
+    y_label_x: float = DOT_YLABEL_XPOS,
+    y_label_pad: float = 10.0,
+) -> None:
+    nrows, ncols = len(ppns), len(priorities)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * cell_figsize[0], nrows * cell_figsize[1]),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+
+    x = np.arange(len(fixed_nodes))
+    n_timeouts = len(fixed_timeouts)
+    jitter_width = 0.6          # total width to spread dots across
+    offsets = np.linspace(
+        -jitter_width / 2, jitter_width / 2, n_timeouts
+    ) if n_timeouts > 1 else np.array([0.0])
+
+    for r, ppn in enumerate(ppns):
+        for c, prio in enumerate(priorities):
+            ax = axes[r][c]
+            panel = df_util_agg[
+                (df_util_agg["pods_per_node"] == ppn)
+                & (df_util_agg["priorities"] == prio)
+            ].copy()
+
+            for j, timeout in enumerate(fixed_timeouts):
+                sub = panel[panel["timeout_s"] == timeout].set_index("nodes") if not panel.empty else pd.DataFrame()
+                vals = (
+                    sub[metric_col].reindex(fixed_nodes).values
+                    if not sub.empty and metric_col in sub.columns
+                    else np.full(len(fixed_nodes), np.nan)
+                )
+                ax.plot(
+                    x + offsets[j],
+                    vals * y_scale,
+                    marker="D",
+                    linestyle="None",
+                    markersize=DOT_MARKER_SIZE,
+                    markerfacecolor=TIMEOUT_COLORS.get(timeout, "grey"),
+                    markeredgecolor="black",
+                    markeredgewidth=DOT_MARKER_LINEWIDTH,
+                    zorder=5,
+                )
+
+            # cosmetics
+            ax.set_xticks(x)
+            ax.set_xticklabels([str(n) for n in fixed_nodes], fontsize=PLOT_TICK_FONTSIZE)
+            ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
+            ax.grid(axis="y", linewidth=0.4, alpha=0.4)
+
+            # horizontal reference line at zero (same style as trace replayer)
+            ax.axhline(0.0, linewidth=0.8, color="black", linestyle="-", alpha=0.7)
+
+            # fixed y-axis limits (shared across all panels)
+            if y_lim is not None:
+                ax.set_ylim(y_lim)
+
+            # fixed number of y-ticks / horizontal grid lines
+            if y_nticks is not None and y_nticks >= 2:
+                lo, hi = ax.get_ylim()
+                ticks = np.linspace(lo, hi, y_nticks)
+                # round to integers when all ticks are close to whole numbers
+                if all(abs(t - round(t)) < 1e-9 for t in ticks):
+                    ticks = [int(round(t)) for t in ticks]
+                ax.set_yticks(ticks)
+
+            # vertical boundary lines between node groups (same style as trace replayer)
+            for bx in [xi - 0.5 for xi in range(len(fixed_nodes) + 1)]:
+                ax.axvline(bx, linewidth=0.8, color="black", linestyle="--", alpha=0.7, zorder=0)
+            ax.set_xlim(-0.5, len(fixed_nodes) - 0.5)
+
+            if r == 0:
+                ax.set_title(rf"#priorities = {prio}", fontsize=PLOT_TITLE_FONTSIZE)
+            if c == 0:
+                ppn_text = f"{PODS_PER_NODE_LABEL} = {ppn}"
+                if nrows % 2 == 1 and r == nrows // 2:
+                    axis_text = f"{y_label}\n{ppn_text}"
+                else:
+                    axis_text = f"\n{ppn_text}"
+                lbl = ax.set_ylabel(axis_text, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=y_label_pad)
+                lbl.set_va("center")
+                lbl.set_ha("center")
+                lbl.set_linespacing(1.8)
+            if r == nrows - 1:
+                ax.set_xlabel(NODES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    # shared y-label for cases where the per-axis label is only the ppn tag
+    fig.supylabel(y_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=y_label_x)
+
+    # legend (one entry per timeout)
+    legend_handles = [
+        Line2D(
+            [0], [0],
+            marker="D",
+            linestyle="None",
+            markersize=DOT_MARKER_SIZE,
+            markerfacecolor=TIMEOUT_COLORS.get(t, "grey"),
+            markeredgecolor="black",
+            markeredgewidth=DOT_MARKER_LINEWIDTH,
+        )
+        for t in fixed_timeouts
+    ]
+    legend_labels = [f"solver timeout = {t}s" for t in fixed_timeouts]
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="upper center",
+        bbox_to_anchor=(0.51, 1.02),
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        ncol=len(legend_labels),
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+
+    fig.subplots_adjust(
+        left=DOT_LEFT,
+        right=DOT_RIGHT,
+        bottom=DOT_BOTTOM,
+        top=DOT_TOP,
+        wspace=DOT_WSPACE,
+        hspace=DOT_HSPACE,
+    )
+
+    save_figure(fig, out_path)
+
+
 #################################################################
 # main
 #################################################################
@@ -638,6 +815,40 @@ def main(argv: Optional[List[str]] = None) -> None:
         cell_figsize=GRID_2D_CELL_FIGSIZE,
     )
     produced_figs.extend([out_path_2d.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    # --- Faceted dot chart: diff. usage (plugin − baseline)
+    out_dot_usage = out_figures_dir / "dot_diff_usage"
+    plot_faceted_dot(
+        df_util_agg,
+        metric_col="eff_delta_mean",
+        y_label="diff. usage (%)",
+        ppns=PLOT_PPNS,
+        priorities=PLOT_PRIORITIES,
+        out_path=out_dot_usage,
+        y_scale=100.0,
+        y_lim=DOT_YLIM_DIFF_USAGE,
+        y_nticks=DOT_NTICKS_DIFF_USAGE,
+        y_label_x=DOT_YLABEL_X_DIFF,
+        y_label_pad=DOT_YLABEL_PAD_DIFF,
+    )
+    produced_figs.extend([out_dot_usage.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    # --- Faceted dot chart: solver duration
+    out_dot_solver = out_figures_dir / "dot_solver_duration"
+    plot_faceted_dot(
+        df_util_agg,
+        metric_col="solver_duration_ms_mean",
+        y_label=r"solver duration (s)",
+        ppns=PLOT_PPNS,
+        priorities=PLOT_PRIORITIES,
+        out_path=out_dot_solver,
+        y_scale=1.0 / 1000.0,
+        y_lim=DOT_YLIM_SOLVER_DUR,
+        y_nticks=DOT_NTICKS_SOLVER_DUR,
+        y_label_x=DOT_YLABEL_X_DIFF,
+        y_label_pad=DOT_YLABEL_PAD_DIFF,
+    )
+    produced_figs.extend([out_dot_solver.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     for ppn in PLOT_PPNS:
         for prio in PLOT_PRIORITIES:
