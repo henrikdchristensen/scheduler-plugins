@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -147,7 +148,7 @@ PLOT_COUNT_MAX_TICKS_SYMMETRIC = 8
 PLOT_HEIGHT = 8.3
 
 GRID_FIGSIZE_MAIN = (5.4, PLOT_HEIGHT)
-GRID_FIGSIZE_DELTAS = (4.1, PLOT_HEIGHT)
+GRID_FIGSIZE_DELTAS = (4.9, PLOT_HEIGHT)
 
 GRID_LEGEND_NCOL_COLORS = 2
 GRID_LEGEND_NCOL_SHAPES = 1
@@ -156,7 +157,7 @@ GRID_LEGEND_GAP = 0.01       # horizontal gap between the two legend boxes (figu
 GRID_LEGEND_X_OFFSET = -0.01 # manual horizontal offset to nudge legends left(−) or right(+)
 GRID_LEGEND_PAD = 0.096
 GRID_LEFT_MAIN = 0.08
-GRID_LEFT_DELTAS = 0.11
+GRID_LEFT_DELTAS = 0.09
 GRID_RIGHT = 0.99
 GRID_BOTTOM = 0.03
 GRID_TOP = 0.905
@@ -813,8 +814,8 @@ def make_grid(
     Grid plotting used by both main and delta grids.
     """
     fig, axes = plt.subplots(nrows=5, ncols=2, figsize=figsize, sharex=True)
-    axes[0, 0].set_title(f"#priorities = {priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
-    axes[0, 1].set_title(f"#priorities = {priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 0].set_title(f"#priorities={priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
+    axes[0, 1].set_title(f"#priorities={priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
 
     # Build y-axis configs for solver and plans rows
     y_config_with_limits = dict(y_config)
@@ -857,11 +858,11 @@ def make_grid(
         hspace=GRID_HSPACE,
     )
 
-    # Color legend handles
+    # Color legend handles (square patches to match workload_once style)
     if color_override:
-        color_handles = [Line2D([0], [0], color=color_override(row_key), linewidth=1.8) for row_key in series]
+        color_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=color_override(row_key), ec="black", linewidth=0.6) for row_key in series]
     else:
-        color_handles = [Line2D([0], [0], color=row_key_color(row_key), linewidth=1.8) for row_key in series]
+        color_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=row_key_color(row_key), ec="black", linewidth=0.6) for row_key in series]
 
     # Shape legend handles
     shape_handles = []
