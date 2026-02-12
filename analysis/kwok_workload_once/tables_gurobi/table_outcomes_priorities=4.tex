@@ -1,118 +1,118 @@
 % Values are percent of instances (%).
-\begin{tabular}{l cccc}
+\begin{tabular}{l cccccccc}
 \toprule
-\multicolumn{5}{l}{\textbf{\#priorities = 4}} \\
+\multicolumn{9}{l}{\textbf{\#priorities = 4}} \\
 \addlinespace[0.2em]
-\makecell[l]{Outcome\\(\%)} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{32} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}
-\makecell[l]{} & 4 & 8 & 4 & 8 \\
+\makecell[l]{Outcome\\(\%)} & \multicolumn{2}{c}{4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+\makecell[l]{} & 4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 1\,s, util = 90\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 1\,s, util = 90\%}} \\
 \midrule
-Failures & 7.0 & 3.0 & \text{--} & \text{--} \\
-No Calls & 4.0 & 65.0 & \text{--} & \text{--} \\
-KWOK Optimal & 30.0 & 22.0 & \text{--} & \text{--} \\
-Better & 1.0 & 0.0 & \text{--} & \text{--} \\
-Better\&Optimal & 58.0 & 10.0 & \text{--} & \text{--} \\
-Other & 0.0 & 0.0 & \text{--} & \text{--} \\
+Failures & \text{--} & \text{--} & 7.0 & 3.0 & 14.0 & 12.0 & 8.0 & \text{--} \\
+No Calls & \text{--} & \text{--} & 4.0 & 65.0 & 1.0 & 50.0 & 0.0 & \text{--} \\
+KWOK Optimal & \text{--} & \text{--} & 30.0 & 22.0 & 8.0 & 25.0 & 1.0 & \text{--} \\
+Better & \text{--} & \text{--} & 1.0 & 0.0 & 7.0 & 1.0 & 43.0 & \text{--} \\
+Better\&Optimal & \text{--} & \text{--} & 58.0 & 10.0 & 70.0 & 12.0 & 48.0 & \text{--} \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & \text{--} \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 1\,s, util = 95\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 1\,s, util = 95\%}} \\
 \midrule
-Failures & 4.0 & 3.0 & \text{--} & 41.0 \\
-No Calls & 0.0 & 0.0 & \text{--} & 0.0 \\
-KWOK Optimal & 22.0 & 11.0 & \text{--} & 0.0 \\
-Better & 5.0 & 6.0 & \text{--} & 58.0 \\
-Better\&Optimal & 69.0 & 80.0 & \text{--} & 1.0 \\
-Other & 0.0 & 0.0 & \text{--} & 0.0 \\
+Failures & \text{--} & 11.0 & 4.0 & 3.0 & 14.0 & 15.0 & 18.0 & 41.0 \\
+No Calls & \text{--} & 17.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & 22.0 & 22.0 & 11.0 & 6.0 & 1.0 & 2.0 & 0.0 \\
+Better & \text{--} & 0.0 & 5.0 & 6.0 & 26.0 & 25.0 & 69.0 & 58.0 \\
+Better\&Optimal & \text{--} & 50.0 & 69.0 & 80.0 & 54.0 & 59.0 & 11.0 & 1.0 \\
+Other & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 1\,s, util = 100\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 1\,s, util = 100\%}} \\
 \midrule
-Failures & 4.0 & 2.0 & \text{--} & 62.0 \\
-No Calls & 0.0 & 0.0 & \text{--} & 0.0 \\
-KWOK Optimal & 25.0 & 5.0 & \text{--} & 0.0 \\
-Better & 6.0 & 41.0 & \text{--} & 38.0 \\
-Better\&Optimal & 65.0 & 52.0 & \text{--} & 0.0 \\
-Other & 0.0 & 0.0 & \text{--} & 0.0 \\
+Failures & \text{--} & 11.1 & 4.0 & 2.0 & 14.0 & 19.0 & 14.0 & 62.0 \\
+No Calls & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & 27.8 & 25.0 & 5.0 & 5.0 & 0.0 & 0.0 & 0.0 \\
+Better & \text{--} & 0.0 & 6.0 & 41.0 & 31.0 & 73.0 & 74.0 & 38.0 \\
+Better\&Optimal & \text{--} & 61.1 & 65.0 & 52.0 & 50.0 & 8.0 & 12.0 & 0.0 \\
+Other & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 1\,s, util = 105\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 1\,s, util = 105\%}} \\
 \midrule
-Failures & 12.0 & 3.0 & \text{--} & 51.0 \\
-No Calls & 0.0 & 0.0 & \text{--} & 0.0 \\
-KWOK Optimal & 28.0 & 7.0 & \text{--} & 0.0 \\
-Better & 4.0 & 46.0 & \text{--} & 49.0 \\
-Better\&Optimal & 56.0 & 44.0 & \text{--} & 0.0 \\
-Other & 0.0 & 0.0 & \text{--} & 0.0 \\
+Failures & \text{--} & \text{--} & 12.0 & 3.0 & 12.0 & 18.0 & 23.0 & 51.0 \\
+No Calls & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & \text{--} & 28.0 & 7.0 & 6.0 & 0.0 & 0.0 & 0.0 \\
+Better & \text{--} & \text{--} & 4.0 & 46.0 & 40.0 & 79.0 & 69.0 & 49.0 \\
+Better\&Optimal & \text{--} & \text{--} & 56.0 & 44.0 & 42.0 & 3.0 & 8.0 & 0.0 \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 10\,s, util = 90\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 10\,s, util = 90\%}} \\
 \midrule
-Failures & 7.0 & 1.0 & \text{--} & \text{--} \\
-No Calls & 5.0 & 66.0 & \text{--} & \text{--} \\
-KWOK Optimal & 29.0 & 21.0 & \text{--} & \text{--} \\
-Better & 0.0 & 0.0 & \text{--} & \text{--} \\
-Better\&Optimal & 59.0 & 12.0 & \text{--} & \text{--} \\
-Other & 0.0 & 0.0 & \text{--} & \text{--} \\
+Failures & \text{--} & \text{--} & 7.0 & 1.0 & 3.8 & 4.0 & 1.0 & \text{--} \\
+No Calls & \text{--} & \text{--} & 5.0 & 66.0 & 0.0 & 47.0 & 0.0 & \text{--} \\
+KWOK Optimal & \text{--} & \text{--} & 29.0 & 21.0 & 7.7 & 33.0 & 1.0 & \text{--} \\
+Better & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 7.0 & \text{--} \\
+Better\&Optimal & \text{--} & \text{--} & 59.0 & 12.0 & 88.5 & 16.0 & 91.0 & \text{--} \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & \text{--} \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 10\,s, util = 95\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 10\,s, util = 95\%}} \\
 \midrule
-Failures & 4.0 & 1.0 & \text{--} & 2.0 \\
-No Calls & 0.0 & 1.0 & \text{--} & 0.0 \\
-KWOK Optimal & 22.0 & 9.0 & \text{--} & 0.0 \\
-Better & 1.0 & 0.0 & \text{--} & 40.0 \\
-Better\&Optimal & 73.0 & 89.0 & \text{--} & 58.0 \\
-Other & 0.0 & 0.0 & \text{--} & 0.0 \\
+Failures & \text{--} & 7.0 & 4.0 & 1.0 & 2.0 & 1.0 & 0.0 & 2.0 \\
+No Calls & \text{--} & 17.0 & 0.0 & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & 24.0 & 22.0 & 9.0 & 10.0 & 0.0 & 0.0 & 0.0 \\
+Better & \text{--} & 0.0 & 1.0 & 0.0 & 5.0 & 4.0 & 54.0 & 40.0 \\
+Better\&Optimal & \text{--} & 52.0 & 73.0 & 89.0 & 83.0 & 95.0 & 46.0 & 58.0 \\
+Other & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 10\,s, util = 100\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 10\,s, util = 100\%}} \\
 \midrule
-Failures & 3.0 & 1.0 & \text{--} & \text{--} \\
-No Calls & 0.0 & 0.0 & \text{--} & \text{--} \\
-KWOK Optimal & 25.0 & 3.0 & \text{--} & \text{--} \\
-Better & 0.0 & 11.0 & \text{--} & \text{--} \\
-Better\&Optimal & 72.0 & 85.0 & \text{--} & \text{--} \\
-Other & 0.0 & 0.0 & \text{--} & \text{--} \\
+Failures & \text{--} & \text{--} & 3.0 & 1.0 & 4.0 & 0.0 & 0.0 & 12.0 \\
+No Calls & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & \text{--} & 25.0 & 3.0 & 8.0 & 0.0 & 0.0 & 0.0 \\
+Better & \text{--} & \text{--} & 0.0 & 11.0 & 5.0 & 78.0 & 50.0 & 88.0 \\
+Better\&Optimal & \text{--} & \text{--} & 72.0 & 85.0 & 83.0 & 22.0 & 50.0 & 0.0 \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 10\,s, util = 105\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 10\,s, util = 105\%}} \\
 \midrule
-Failures & 11.0 & 1.0 & \text{--} & \text{--} \\
-No Calls & 0.0 & 0.0 & \text{--} & \text{--} \\
-KWOK Optimal & 29.0 & 7.0 & \text{--} & \text{--} \\
-Better & 1.0 & 10.0 & \text{--} & \text{--} \\
-Better\&Optimal & 59.0 & 82.0 & \text{--} & \text{--} \\
-Other & 0.0 & 0.0 & \text{--} & \text{--} \\
+Failures & \text{--} & \text{--} & 11.0 & 1.0 & 3.0 & 0.0 & 2.0 & 4.0 \\
+No Calls & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & \text{--} & 29.0 & 7.0 & 9.0 & 2.0 & 0.0 & 0.0 \\
+Better & \text{--} & \text{--} & 1.0 & 10.0 & 10.0 & 79.0 & 62.0 & 96.0 \\
+Better\&Optimal & \text{--} & \text{--} & 59.0 & 82.0 & 78.0 & 19.0 & 36.0 & 0.0 \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 20\,s, util = 90\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 20\,s, util = 90\%}} \\
 \midrule
-Failures & 7.0 & 3.0 & 1.0 & \text{--} \\
-No Calls & 4.0 & 64.0 & 0.0 & \text{--} \\
-KWOK Optimal & 29.0 & 23.0 & 3.0 & \text{--} \\
-Better & 0.0 & 0.0 & 1.0 & \text{--} \\
-Better\&Optimal & 60.0 & 10.0 & 95.0 & \text{--} \\
-Other & 0.0 & 0.0 & 0.0 & \text{--} \\
+Failures & \text{--} & \text{--} & 7.0 & 3.0 & \text{--} & 2.0 & 1.0 & \text{--} \\
+No Calls & \text{--} & \text{--} & 4.0 & 64.0 & \text{--} & 49.0 & 0.0 & \text{--} \\
+KWOK Optimal & \text{--} & \text{--} & 29.0 & 23.0 & \text{--} & 31.0 & 3.0 & \text{--} \\
+Better & \text{--} & \text{--} & 0.0 & 0.0 & \text{--} & 0.0 & 1.0 & \text{--} \\
+Better\&Optimal & \text{--} & \text{--} & 60.0 & 10.0 & \text{--} & 18.0 & 95.0 & \text{--} \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & \text{--} & 0.0 & 0.0 & \text{--} \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 20\,s, util = 95\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 20\,s, util = 95\%}} \\
 \midrule
-Failures & 5.0 & 4.0 & 2.0 & 0.0 \\
-No Calls & 0.0 & 0.0 & 0.0 & 0.0 \\
-KWOK Optimal & 21.0 & 12.0 & 1.0 & 0.0 \\
-Better & 0.0 & 0.0 & 40.0 & 19.0 \\
-Better\&Optimal & 74.0 & 84.0 & 57.0 & 81.0 \\
-Other & 0.0 & 0.0 & 0.0 & 0.0 \\
+Failures & \text{--} & 6.0 & 5.0 & 4.0 & 5.0 & 2.0 & 2.0 & 0.0 \\
+No Calls & \text{--} & 17.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & 25.0 & 21.0 & 12.0 & 8.0 & 0.0 & 1.0 & 0.0 \\
+Better & \text{--} & 0.0 & 0.0 & 0.0 & 4.0 & 1.0 & 40.0 & 19.0 \\
+Better\&Optimal & \text{--} & 52.0 & 74.0 & 84.0 & 83.0 & 97.0 & 57.0 & 81.0 \\
+Other & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 20\,s, util = 100\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 20\,s, util = 100\%}} \\
 \midrule
-Failures & 3.0 & 3.0 & 0.0 & 10.0 \\
-No Calls & 0.0 & 0.0 & 0.0 & 0.0 \\
-KWOK Optimal & 25.0 & 5.0 & 1.0 & 0.0 \\
-Better & 0.0 & 6.0 & 38.0 & 90.0 \\
-Better\&Optimal & 72.0 & 86.0 & 61.0 & 0.0 \\
-Other & 0.0 & 0.0 & 0.0 & 0.0 \\
+Failures & \text{--} & \text{--} & 3.0 & 3.0 & 7.0 & 2.0 & 0.0 & 10.0 \\
+No Calls & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & \text{--} & 25.0 & 5.0 & 4.0 & 0.0 & 1.0 & 0.0 \\
+Better & \text{--} & \text{--} & 0.0 & 6.0 & 6.0 & 70.0 & 38.0 & 90.0 \\
+Better\&Optimal & \text{--} & \text{--} & 72.0 & 86.0 & 83.0 & 28.0 & 61.0 & 0.0 \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
-\multicolumn{5}{l}{\textbf{timeout = 20\,s, util = 105\%}} \\
+\multicolumn{9}{l}{\textbf{timeout = 20\,s, util = 105\%}} \\
 \midrule
-Failures & 12.0 & 1.0 & \text{--} & 6.0 \\
-No Calls & 0.0 & 0.0 & \text{--} & 0.0 \\
-KWOK Optimal & 27.0 & 7.0 & \text{--} & 0.0 \\
-Better & 1.0 & 9.0 & \text{--} & 94.0 \\
-Better\&Optimal & 60.0 & 83.0 & \text{--} & 0.0 \\
-Other & 0.0 & 0.0 & \text{--} & 0.0 \\
+Failures & \text{--} & \text{--} & 12.0 & 1.0 & 1.0 & 1.0 & 0.0 & 6.0 \\
+No Calls & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & \text{--} & \text{--} & 27.0 & 7.0 & 10.0 & 0.0 & 0.0 & 0.0 \\
+Better & \text{--} & \text{--} & 1.0 & 9.0 & 9.0 & 74.0 & 44.0 & 94.0 \\
+Better\&Optimal & \text{--} & \text{--} & 60.0 & 83.0 & 80.0 & 25.0 & 56.0 & 0.0 \\
+Other & \text{--} & \text{--} & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
 \bottomrule
 \end{tabular}
