@@ -72,29 +72,59 @@ SEED_COLS_NEEDED = [
 
 KEY_COLS_MAIN = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
 
+# Blocking types to generate plots for
+BLOCKING_TYPES: List[int] = [0, 1]
+
 # Main grids show only a subset (but tables include ALL MODE_SPECS)
-MAIN_PLOT_MODES: List[Tuple[str, int]] = [
-    ("schedulingfailure", 0),
-    ("periodic8s", 0),
-    ("stable-queue-8s", 0),
-]
+# Keyed by blocking type: {blocking: [(mode, blocking), ...]}
+MAIN_PLOT_MODES: Dict[int, List[Tuple[str, int]]] = {
+    0: [
+        ("schedulingfailure", 0),
+        ("periodic8s", 0),
+        ("stable-queue-8s", 0),
+    ],
+    1: [
+        ("schedulingfailure", 1),
+        ("periodic8s", 1),
+        ("stable-queue-8s", 1),
+    ],
+}
 
 # Periodic vs stable deltas (fixed)
 # Each tuple: (delta label, mode1, mode2, blocking)
-DELTA_SERIES: List[Tuple[str, str, str, int]] = [
-    ("Periodic, 8→4s interval", "periodic8s", "periodic4s", 0),
-    ("Periodic, 8→16s interval", "periodic8s", "periodic16s", 0),
-    # ("Periodic, 8→2s interval", "periodic8s", "periodic2s", 0), TODO:
-    # ("Periodic, 8→32s interval", "periodic8s", "periodic32s", 0), TODO:
-    # ("Periodic, 8→64s interval", "periodic8s", "periodic64s", 0), TODO:
-    ("Stable-queue, 8→4s delay", "stable-queue-8s", "stable-queue-4s", 0),
-    ("Stable-queue, 8→16s delay", "stable-queue-8s", "stable-queue-16s", 0),
-    # ("Stable-queue, 8→2s delay", "stable-queue-8s", "stable-queue-2s", 0), TODO: 
-    # ("Stable-queue, 8→32s delay", "stable-queue-8s", "stable-queue-32s", 0), TODO: 
-    # ("Stable-queue, 8→64s delay", "stable-queue-8s", "stable-queue-64s", 0), TODO: 
-]
+# Keyed by blocking type
+DELTA_SERIES: Dict[int, List[Tuple[str, str, str, int]]] = {
+    0: [
+        ("Periodic, 8→4s interval", "periodic8s", "periodic4s", 0),
+        ("Periodic, 8→16s interval", "periodic8s", "periodic16s", 0),
+        # ("Periodic, 8→2s interval", "periodic8s", "periodic2s", 0), TODO:
+        # ("Periodic, 8→32s interval", "periodic8s", "periodic32s", 0), TODO:
+        # ("Periodic, 8→64s interval", "periodic8s", "periodic64s", 0), TODO:
+        ("Stable-queue, 8→4s delay", "stable-queue-8s", "stable-queue-4s", 0),
+        ("Stable-queue, 8→16s delay", "stable-queue-8s", "stable-queue-16s", 0),
+        # ("Stable-queue, 8→2s delay", "stable-queue-8s", "stable-queue-2s", 0), TODO: 
+        # ("Stable-queue, 8→32s delay", "stable-queue-8s", "stable-queue-32s", 0), TODO: 
+        # ("Stable-queue, 8→64s delay", "stable-queue-8s", "stable-queue-64s", 0), TODO: 
+    ],
+    1: [
+        ("Periodic, 8→4s interval", "periodic8s", "periodic4s", 1),
+        ("Periodic, 8→16s interval", "periodic8s", "periodic16s", 1),
+        # ("Periodic, 8→2s interval", "periodic8s", "periodic2s", 1), TODO:
+        # ("Periodic, 8→32s interval", "periodic8s", "periodic32s", 1), TODO:
+        # ("Periodic, 8→64s interval", "periodic8s", "periodic64s", 1), TODO:
+        ("Stable-queue, 8→4s delay", "stable-queue-8s", "stable-queue-4s", 1),
+        ("Stable-queue, 8→16s delay", "stable-queue-8s", "stable-queue-16s", 1),
+        # ("Stable-queue, 8→2s delay", "stable-queue-8s", "stable-queue-2s", 1), TODO: 
+        # ("Stable-queue, 8→32s delay", "stable-queue-8s", "stable-queue-32s", 1), TODO: 
+        # ("Stable-queue, 8→64s delay", "stable-queue-8s", "stable-queue-64s", 1), TODO: 
+    ],
+}
 
-DELTA_NAMES = [d[0] for d in DELTA_SERIES]
+# Flatten all delta series (all blocking types) for build_delta_seeds
+ALL_DELTA_SERIES: List[Tuple[str, str, str, int]] = [entry for entries in DELTA_SERIES.values() for entry in entries]
+
+# Delta names per blocking type
+DELTA_NAMES: Dict[int, List[str]] = {b: [d[0] for d in entries] for b, entries in DELTA_SERIES.items()}
 
 # Delta color indices: Index into PLOT_COLORS for each delta series
 # Users can modify these to use different colors from the unified palette
@@ -151,7 +181,14 @@ GRID_LEGEND_NCOL_COLORS = 1
 GRID_LEGEND_NCOL_SHAPES = 1
 
 GRID_LEGEND_GAP = 0.01       # horizontal gap between the two legend boxes (figure fraction)
-GRID_LEGEND_X_OFFSET = -0.01 # manual horizontal offset to nudge legends left(−) or right(+)
+GRID_LEGEND_X_OFFSET_MAIN: Dict[int, float] = {
+    0: -0.03,  # non-blocking
+    1: -0.02,  # blocking
+}
+GRID_LEGEND_X_OFFSET_DELTAS: Dict[int, float] = {
+    0: -0.012,   # non-blocking
+    1: -0.012,   # blocking
+}
 GRID_LEGEND_PAD_MAIN = 0.113
 GRID_LEGEND_PAD_DELTAS = 0.13
 GRID_LEFT_MAIN = 0.14
@@ -239,27 +276,27 @@ class ModeSpec:
 # Specify: mode, blocking, abbreviation, label, rank, color_idx
 MODE_SPECS: List[ModeSpec] = [
     ModeSpec("schedulingfailure", 1, "SF-B", "Scheduling-failure (blocking)", 0, 1),
-    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, 2),
+    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, 1),
     ModeSpec("periodic4s", 1, "PR-4s-B", "Periodic (blocking), 4s interval", 2, 5),
-    ModeSpec("periodic4s", 0, "PR-4s-NB", "Periodic (non-blocking), 4s interval", 3, 7),
-    ModeSpec("periodic8s", 1, "PR-8s-B", "Periodic (blocking), 8s interval", 4, 5),
+    ModeSpec("periodic4s", 0, "PR-4s-NB", "Periodic (non-blocking), 4s interval", 3, 5),
+    ModeSpec("periodic8s", 1, "PR-8s-B", "Periodic (blocking), 8s interval", 4, 6),
     ModeSpec("periodic8s", 0, "PR-8s-NB", "Periodic (non-blocking), 8s interval", 5, 6),
-    ModeSpec("periodic16s", 1, "PR-16s-B", "Periodic (blocking), 16s interval", 6, 5),
+    ModeSpec("periodic16s", 1, "PR-16s-B", "Periodic (blocking), 16s interval", 6, 7),
     ModeSpec("periodic16s", 0, "PR-16s-NB", "Periodic (non-blocking), 16s interval", 7, 7),
     # ModeSpec("periodic32s", 1, "PR-32s-B", "Periodic (blocking), 32s interval", 6, 5), TODO: 
-    # ModeSpec("periodic32s", 0, "PR-32s-NB", "Periodic (non-blocking), 32s interval", 7, 7),
+    # ModeSpec("periodic32s", 0, "PR-32s-NB", "Periodic (non-blocking), 32s interval", 7, 5),
     # ModeSpec("periodic64s", 1, "PR-64s-B", "Periodic (blocking), 64s interval", 6, 5), TODO: 
-    # ModeSpec("periodic64s", 0, "PR-64s-NB", "Periodic (non-blocking), 64s interval", 7, 7),
+    # ModeSpec("periodic64s", 0, "PR-64s-NB", "Periodic (non-blocking), 64s interval", 7, 5),
     ModeSpec("stable-queue-4s", 1, "SQ-4s-B", "Stable-queue (blocking), 4s delay", 8, 9), 
-    ModeSpec("stable-queue-4s", 0, "SQ-4s-NB", "Stable-queue (non-blocking), 4s delay", 9, 11),
-    ModeSpec("stable-queue-8s", 1, "SQ-8s-B", "Stable-queue (blocking), 8s delay", 10, 9),
+    ModeSpec("stable-queue-4s", 0, "SQ-4s-NB", "Stable-queue (non-blocking), 4s delay", 9, 9),
+    ModeSpec("stable-queue-8s", 1, "SQ-8s-B", "Stable-queue (blocking), 8s delay", 10, 10),
     ModeSpec("stable-queue-8s", 0, "SQ-8s-NB", "Stable-queue (non-blocking), 8s delay", 11, 10),
-    ModeSpec("stable-queue-16s", 1, "SQ-16s-B", "Stable-queue (blocking), 16s delay", 12, 9), 
+    ModeSpec("stable-queue-16s", 1, "SQ-16s-B", "Stable-queue (blocking), 16s delay", 12, 11), 
     ModeSpec("stable-queue-16s", 0, "SQ-16s-NB", "Stable-queue (non-blocking), 16s delay", 13, 11),
     # ModeSpec("stable-queue-32s", 1, "SQ-32s-B", "Stable-queue (blocking), 32s delay", 10, 9), TODO: 
-    # ModeSpec("stable-queue-32s", 0, "SQ-32s-NB", "Stable-queue (non-blocking), 32s delay", 11, 11),
+    # ModeSpec("stable-queue-32s", 0, "SQ-32s-NB", "Stable-queue (non-blocking), 32s delay", 11, 9),
     # ModeSpec("stable-queue-64s", 1, "SQ-64s-B", "Stable-queue (blocking), 64s delay", 10, 9), TODO: 
-    # ModeSpec("stable-queue-64s", 0, "SQ-64s-NB", "Stable-queue (non-blocking), 64s delay", 11, 11),
+    # ModeSpec("stable-queue-64s", 0, "SQ-64s-NB", "Stable-queue (non-blocking), 64s delay", 11, 9),
 ]
 
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
@@ -273,8 +310,10 @@ def row_key_label(row_key: RowKey) -> str:
     return mode_spec.label if mode_spec else f"{row_key.mode}:{row_key.blocking}"
 
 def row_key_plot_label(row_key: RowKey) -> str:
-    """Label for plots: strips '(non-blocking)' / '(blocking)' from the label."""
-    return row_key_label(row_key).replace(" (non-blocking)", "").replace(" (blocking)", "")
+    """Label for plots: includes '(blocking)' or '(non-blocking)' in the label."""
+    label = row_key_label(row_key)
+    # The full label already contains blocking info, just return it as-is
+    return label
 
 def row_key_color(row_key: RowKey):
     mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
@@ -449,7 +488,7 @@ def lookup_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arriva
 # Delta data (periodic vs stable) - computed from seed rows
 # =============================================================================
 
-DELTA_KEY_COLS = ["nodes", "priorities", "arrival_s", "defpreempt", "delta_name"]
+DELTA_KEY_COLS = ["nodes", "priorities", "arrival_s", "defpreempt", "blocking", "delta_name"]
 
 def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
     """
@@ -459,7 +498,7 @@ def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
 
     base_cols = ["nodes", "priorities", "arrival_s", "defpreempt", SEED_COL]
 
-    for (delta_name, left_mode, right_mode, blocking) in DELTA_SERIES:
+    for (delta_name, left_mode, right_mode, blocking) in ALL_DELTA_SERIES:
         left = df_seeds[(df_seeds["mode"] == canonical_mode(left_mode)) & (df_seeds["blocking"] == int(blocking))].copy()
         right = df_seeds[(df_seeds["mode"] == canonical_mode(right_mode)) & (df_seeds["blocking"] == int(blocking))].copy()
 
@@ -471,6 +510,7 @@ def build_delta_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
             continue
 
         d = merged[base_cols].copy()
+        d["blocking"] = int(blocking)
         d["delta_name"] = delta_name
         for c in DELTA_METRIC_COLS:
             d[c] = merged[f"{c}_R"] - merged[f"{c}_L"]
@@ -495,11 +535,11 @@ def build_lookup_deltas(df_delta_meanstd: pd.DataFrame) -> pd.DataFrame:
     """
     return _build_lookup_from_df(df_delta_meanstd, DELTA_KEY_COLS)
 
-def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, defpreempt: int, delta_name: str, col_mean: str) -> Tuple[float, float]:
+def lookup_delta_mean_std(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, defpreempt: int, blocking: int, delta_name: str, col_mean: str) -> Tuple[float, float]:
     """
     Lookup delta mean and std from delta lookup DataFrame.
     """
-    key = (int(nodes), int(priorities), float(arrival_s), int(defpreempt), str(delta_name))
+    key = (int(nodes), int(priorities), float(arrival_s), int(defpreempt), int(blocking), str(delta_name))
     return _safe_lookup(lookup, key, col_mean), _safe_lookup(lookup, key, f"{col_mean}_std")
 
 # =============================================================================
@@ -813,6 +853,7 @@ def make_grid(
     grid_top: float,
     legend_pad: float,
     mode_x_spacing: float,
+    legend_x_offset: float = 0.0,
     y_tick_symmetric: bool = False,
 ) -> None:
     """
@@ -928,7 +969,7 @@ def make_grid(
     w_colors = leg_colors.get_window_extent(renderer).transformed(fig.transFigure.inverted()).width
     w_shapes = leg_shapes.get_window_extent(renderer).transformed(fig.transFigure.inverted()).width
     total_w = w_colors + GRID_LEGEND_GAP + w_shapes
-    x_start = x_center_grid - total_w / 2 + GRID_LEGEND_X_OFFSET
+    x_start = x_center_grid - total_w / 2 + legend_x_offset
 
     leg_colors.set_bbox_to_anchor((x_start, legend_y), transform=fig.transFigure)
     leg_colors._loc = leg_colors.codes["upper left"]
@@ -951,18 +992,20 @@ def make_grid_main(
     lookup_main: pd.DataFrame,
     plot_seeds: bool,
     defpreempt: int,
+    plot_modes: List[Tuple[str, int]],
     nodes_order: List[int],
     arrivals_order: List[float],
     priorities_cols: List[int],
     ylim_solver: Tuple[float, float],
     ylim_plans: Tuple[float, float],
     out_stem: str,
+    legend_x_offset: float = 0.0,
 ) -> None:
     """
     Make main grid plot.
     Each mode/blocking combination is a separate series.
     """
-    series = sort_row_keys([RowKey(mode=m, blocking=b, defpreempt=defpreempt) for (m, b) in MAIN_PLOT_MODES])
+    series = sort_row_keys([RowKey(mode=m, blocking=b, defpreempt=defpreempt) for (m, b) in plot_modes])
 
     def y_function_factory(col: str) -> YOfFn:
         if plot_seeds:
@@ -988,6 +1031,7 @@ def make_grid_main(
         grid_top=GRID_TOP_MAIN,
         legend_pad=GRID_LEGEND_PAD_MAIN,
         mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
+        legend_x_offset=legend_x_offset,
         y_tick_symmetric=False,
     )
 
@@ -997,19 +1041,22 @@ def make_grid_periodic_vs_stable(
     lookup_deltas: pd.DataFrame,
     plot_seeds: bool,
     defpreempt: int,
+    blocking: int,
+    delta_series_names: List[str],
     nodes_order: List[int],
     arrivals_order: List[float],
     priorities_cols: List[int],
     ylim_solver: Tuple[float, float],
     ylim_plans: Tuple[float, float],
     out_stem: str,
+    legend_x_offset: float = 0.0,
 ) -> None:
     """
     Make grid plot comparing periodic vs stable scheduling deltas.
     Each delta metric is a separate series, with custom coloring.
     """
     # Create fake series for coloring
-    fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(DELTA_NAMES))]
+    fake_series = [RowKey(mode=f"custom{i}", blocking=0, defpreempt=defpreempt) for i in range(len(delta_series_names))]
 
     def _extract_custom_index(row_key: RowKey) -> int:
         """
@@ -1038,6 +1085,7 @@ def make_grid_periodic_vs_stable(
                 def _y(_row_key: RowKey, nodes: int, a: float, priorities: int) -> List[float]:
                     sub = df_delta_seeds[
                         (df_delta_seeds["defpreempt"] == defpreempt) &
+                        (df_delta_seeds["blocking"] == blocking) &
                         (df_delta_seeds["nodes"] == nodes) &
                         (df_delta_seeds["priorities"] == priorities) &
                         (df_delta_seeds["arrival_s"] == a) &
@@ -1046,18 +1094,22 @@ def make_grid_periodic_vs_stable(
                     return [float(v) for v in sub[col].tolist() if is_finite(v)]
             else:
                 def _y(_row_key: RowKey, nodes: int, a: float, priorities: int) -> float:
-                    m, _ = lookup_delta_mean_std(lookup_deltas, nodes=nodes, priorities=priorities, arrival_s=a, defpreempt=defpreempt, delta_name=delta_name, col_mean=col)
+                    m, _ = lookup_delta_mean_std(lookup_deltas, nodes=nodes, priorities=priorities, arrival_s=a, defpreempt=defpreempt, blocking=blocking, delta_name=delta_name, col_mean=col)
                     return float(m)
             return _y
         
-        delta_fns = {i: make_delta_func(dn) for i, dn in enumerate(DELTA_NAMES)}
+        delta_fns = {i: make_delta_func(dn) for i, dn in enumerate(delta_series_names)}
         return lambda row_key, nodes, a, priorities: delta_fns[_extract_custom_index(row_key)](row_key, nodes, a, priorities)
+
+    # Build legend labels with blocking type annotation
+    blocking_suffix = "(blocking)" if blocking == 1 else "(non-blocking)"
+    legend_labels = [f"{name} {blocking_suffix}" for name in delta_series_names]
 
     make_grid(
         y_function_factory=y_function_factory,
         series=fake_series,
         color_override=color_override,
-        legend_labels=DELTA_NAMES,
+        legend_labels=legend_labels,
         nodes_order=nodes_order,
         arrivals_order=arrivals_order,
         priorities_cols=priorities_cols,
@@ -1070,6 +1122,7 @@ def make_grid_periodic_vs_stable(
         grid_top=GRID_TOP_DELTAS,
         legend_pad=GRID_LEGEND_PAD_DELTAS,
         mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
+        legend_x_offset=legend_x_offset,
         y_tick_symmetric=True,
     )
 
@@ -1263,12 +1316,12 @@ def main() -> None:
     df_delta_mean_std = aggregate_delta_mean_std(df_delta_seeds) if not df_delta_seeds.empty else pd.DataFrame(columns=DELTA_KEY_COLS)
     lookup_deltas = build_lookup_deltas(df_delta_mean_std) if not df_delta_mean_std.empty else pd.DataFrame().set_index(DELTA_KEY_COLS)
 
-    # Shared y-lims (main counters) across defpreempt=0/1
-    series_all_for_limits = sort_row_keys([RowKey(mode=m, blocking=b, defpreempt=d) for d in (0, 1) for (m, b) in MAIN_PLOT_MODES])
+    # Shared y-lims (main counters) across defpreempt=0/1 and all blocking types
+    series_all_for_limits = sort_row_keys([RowKey(mode=m, blocking=b, defpreempt=d) for d in (0, 1) for blocking_modes in MAIN_PLOT_MODES.values() for (m, b) in blocking_modes])
     ylim_solver_main = YLIM_SOLVER_MAIN if YLIM_SOLVER_MAIN is not None else compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean")
     ylim_plans_main = YLIM_PLANS_MAIN if YLIM_PLANS_MAIN is not None else compute_nonnegative_ylim_main(lookup_main, series_all=series_all_for_limits, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean")
 
-    # Shared y-lims (delta counters) across defpreempt=0/1 (symmetric)
+    # Shared y-lims (delta counters) across defpreempt=0/1 and all blocking types (symmetric)
     ylim_solver_deltas = YLIM_SOLVER_DELTAS if YLIM_SOLVER_DELTAS is not None else (compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="solver_attempts_mean") if not df_delta_mean_std.empty else (-1.0, 1.0))
     ylim_plans_deltas = YLIM_PLANS_DELTAS if YLIM_PLANS_DELTAS is not None else (compute_symmetric_ylim_deltas(df_delta_mean_std, priorities_cols=PRIORITIES_TO_SHOW, col="plan_activated_mean") if not df_delta_mean_std.empty else (-1.0, 1.0))
 
@@ -1297,15 +1350,23 @@ def main() -> None:
                     produced_tables.append(out_tex)
 
     # Generate all figures (always with seeds)
-    for defpreempt in (1, 0):
-        out_stem = f"grid_main_defaultpreemption={defpreempt}"
-        make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=True, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=out_stem)
-        produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
+    for blocking in BLOCKING_TYPES:
+        for defpreempt in (1, 0):
+            modes = MAIN_PLOT_MODES.get(blocking, [])
+            if not modes:
+                continue
+            out_stem = f"grid_main_defaultpreemption={defpreempt}_blocking={blocking}"
+            make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=True, defpreempt=defpreempt, plot_modes=modes, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=out_stem, legend_x_offset=GRID_LEGEND_X_OFFSET_MAIN.get(blocking, 0.0))
+            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
     
-    for defpreempt in (1, 0):
-        out_stem = f"grid_periodic_vs_stable_defaultpreemption={defpreempt}"
-        make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=True, defpreempt=defpreempt, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=out_stem)
-        produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
+    for blocking in BLOCKING_TYPES:
+        for defpreempt in (1, 0):
+            delta_names = DELTA_NAMES.get(blocking, [])
+            if not delta_names:
+                continue
+            out_stem = f"grid_periodic_vs_stable_defaultpreemption={defpreempt}_blocking={blocking}"
+            make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=True, defpreempt=defpreempt, blocking=blocking, delta_series_names=delta_names, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=out_stem, legend_x_offset=GRID_LEGEND_X_OFFSET_DELTAS.get(blocking, 0.0))
+            produced_figs.extend([OUT_FIGURES_DIR / f"{out_stem}.{fmt}" for fmt in PLOT_FORMATS])
 
     # Summary
     for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
