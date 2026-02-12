@@ -74,27 +74,24 @@ KEY_COLS_MAIN = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpre
 
 # Main grids show only a subset (but tables include ALL MODE_SPECS)
 MAIN_PLOT_MODES: List[Tuple[str, int]] = [
-    ("schedulingfailure", 1),
     ("schedulingfailure", 0),
-    ("periodic8s", 1),
     ("periodic8s", 0),
-    ("stable-queue-8s", 1),
     ("stable-queue-8s", 0),
 ]
 
 # Periodic vs stable deltas (fixed)
 # Each tuple: (delta label, mode1, mode2, blocking)
 DELTA_SERIES: List[Tuple[str, str, str, int]] = [
-    ("Periodic (blocking), 8→4s interval", "periodic8s", "periodic4s", 1),
-    ("Periodic (blocking), 8→16s interval", "periodic8s", "periodic16s", 1),
-    # ("Periodic (blocking), 8→2s interval", "periodic8s", "periodic2s", 1), TODO:
-    # ("Periodic (blocking), 8→32s interval", "periodic8s", "periodic32s", 1), TODO:
-    # ("Periodic (blocking), 8→64s interval", "periodic8s", "periodic64s", 1), TODO:
-    ("Stable-queue (blocking), 8→4s delay", "stable-queue-8s", "stable-queue-4s", 1),
-    ("Stable-queue (blocking), 8→16s delay", "stable-queue-8s", "stable-queue-16s", 1),
-    # ("Stable-queue (blocking), 8→2s delay", "stable-queue-8s", "stable-queue-2s", 1), TODO: 
-    # ("Stable-queue (blocking), 8→32s delay", "stable-queue-8s", "stable-queue-32s", 1), TODO: 
-    # ("Stable-queue (blocking), 8→64s delay", "stable-queue-8s", "stable-queue-64s", 1), TODO: 
+    ("Periodic, 8→4s interval", "periodic8s", "periodic4s", 0),
+    ("Periodic, 8→16s interval", "periodic8s", "periodic16s", 0),
+    # ("Periodic, 8→2s interval", "periodic8s", "periodic2s", 0), TODO:
+    # ("Periodic, 8→32s interval", "periodic8s", "periodic32s", 0), TODO:
+    # ("Periodic, 8→64s interval", "periodic8s", "periodic64s", 0), TODO:
+    ("Stable-queue, 8→4s delay", "stable-queue-8s", "stable-queue-4s", 0),
+    ("Stable-queue, 8→16s delay", "stable-queue-8s", "stable-queue-16s", 0),
+    # ("Stable-queue, 8→2s delay", "stable-queue-8s", "stable-queue-2s", 0), TODO: 
+    # ("Stable-queue, 8→32s delay", "stable-queue-8s", "stable-queue-32s", 0), TODO: 
+    # ("Stable-queue, 8→64s delay", "stable-queue-8s", "stable-queue-64s", 0), TODO: 
 ]
 
 DELTA_NAMES = [d[0] for d in DELTA_SERIES]
@@ -102,10 +99,10 @@ DELTA_NAMES = [d[0] for d in DELTA_SERIES]
 # Delta color indices: Index into PLOT_COLORS for each delta series
 # Users can modify these to use different colors from the unified palette
 DELTA_COLOR_INDICES: List[int] = [
-    4,  # Periodic (blocking), 8→4s interval
-    7,  # Periodic (blocking), 8→16s interval
-    8,  # Stable-queue (blocking), 8→4s delay
-    11,  # Stable-queue (blocking), 8→16s delay
+    4,  # Periodic, 8→4s interval
+    7,  # Periodic, 8→16s interval
+    8,  # Stable-queue, 8→4s delay
+    11,  # Stable-queue, 8→16s delay
 ]
 
 # Metric columns used in delta computations
@@ -135,38 +132,40 @@ PLOT_MARKER_LINEWIDTH = 0.4
 #   label_template may contain "{nodes}" which will be replaced with the actual node count.
 #   Set facecolor to "none" for outline-only markers, or any color string to fill.
 SHAPE_LEGEND_SPECS: List[Tuple[str, str, float, str]] = [
-    ("o", "run with {nodes} nodes", 3.3, "none"),  # nodes_order[0]
-    ("s", "run with {nodes} nodes", 3.2, "none"),  # nodes_order[1]
+    ("o", "run with {nodes} nodes", 3.5, "none"),  # nodes_order[0]
+    ("s", "run with {nodes} nodes", 3.4, "none"),  # nodes_order[1]
     ("D", "avg. for all runs", 3.6, "none"),       # mean
 ]
 SHAPE_LEGEND_EDGE_COLOR = "black"
-SHAPE_LEGEND_EDGE_WIDTH = 0.5
+SHAPE_LEGEND_EDGE_WIDTH = 0.6
 PLOT_MIN_LINEAR_YTICKS = 5
 PLOT_COUNT_MAX_TICKS = 7
 PLOT_COUNT_MAX_TICKS_SYMMETRIC = 8
 
-PLOT_HEIGHT = 8.3
+PLOT_HEIGHT = 7.0
 
-GRID_FIGSIZE_MAIN = (5.4, PLOT_HEIGHT)
-GRID_FIGSIZE_DELTAS = (4.9, PLOT_HEIGHT)
+GRID_FIGSIZE_MAIN = (3.2, PLOT_HEIGHT)
+GRID_FIGSIZE_DELTAS = (3.6, PLOT_HEIGHT)
 
-GRID_LEGEND_NCOL_COLORS = 2
+GRID_LEGEND_NCOL_COLORS = 1
 GRID_LEGEND_NCOL_SHAPES = 1
 
 GRID_LEGEND_GAP = 0.01       # horizontal gap between the two legend boxes (figure fraction)
 GRID_LEGEND_X_OFFSET = -0.01 # manual horizontal offset to nudge legends left(−) or right(+)
-GRID_LEGEND_PAD = 0.096
-GRID_LEFT_MAIN = 0.08
-GRID_LEFT_DELTAS = 0.09
+GRID_LEGEND_PAD_MAIN = 0.113
+GRID_LEGEND_PAD_DELTAS = 0.13
+GRID_LEFT_MAIN = 0.14
+GRID_LEFT_DELTAS = 0.125
 GRID_RIGHT = 0.99
 GRID_BOTTOM = 0.03
-GRID_TOP = 0.905
+GRID_TOP_MAIN = 0.89
+GRID_TOP_DELTAS = 0.873
 GRID_WSPACE = 0.10
 GRID_HSPACE = 0.10
 GRID_YLABEL_PAD_PT = 23.0
 
 PLOT_ARRIVAL_X_SPACING = 0.35
-PLOT_MODE_X_SPACING_MAIN = 0.05
+PLOT_MODE_X_SPACING_MAIN = 0.09
 PLOT_MODE_X_SPACING_DELTAS = 0.08
 
 SYMLOG_BASE = 10.0
@@ -240,11 +239,11 @@ class ModeSpec:
 # Specify: mode, blocking, abbreviation, label, rank, color_idx
 MODE_SPECS: List[ModeSpec] = [
     ModeSpec("schedulingfailure", 1, "SF-B", "Scheduling-failure (blocking)", 0, 1),
-    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, 3),
+    ModeSpec("schedulingfailure", 0, "SF-NB", "Scheduling-failure (non-blocking)", 1, 2),
     ModeSpec("periodic4s", 1, "PR-4s-B", "Periodic (blocking), 4s interval", 2, 5),
     ModeSpec("periodic4s", 0, "PR-4s-NB", "Periodic (non-blocking), 4s interval", 3, 7),
     ModeSpec("periodic8s", 1, "PR-8s-B", "Periodic (blocking), 8s interval", 4, 5),
-    ModeSpec("periodic8s", 0, "PR-8s-NB", "Periodic (non-blocking), 8s interval", 5, 7),
+    ModeSpec("periodic8s", 0, "PR-8s-NB", "Periodic (non-blocking), 8s interval", 5, 6),
     ModeSpec("periodic16s", 1, "PR-16s-B", "Periodic (blocking), 16s interval", 6, 5),
     ModeSpec("periodic16s", 0, "PR-16s-NB", "Periodic (non-blocking), 16s interval", 7, 7),
     # ModeSpec("periodic32s", 1, "PR-32s-B", "Periodic (blocking), 32s interval", 6, 5), TODO: 
@@ -254,7 +253,7 @@ MODE_SPECS: List[ModeSpec] = [
     ModeSpec("stable-queue-4s", 1, "SQ-4s-B", "Stable-queue (blocking), 4s delay", 8, 9), 
     ModeSpec("stable-queue-4s", 0, "SQ-4s-NB", "Stable-queue (non-blocking), 4s delay", 9, 11),
     ModeSpec("stable-queue-8s", 1, "SQ-8s-B", "Stable-queue (blocking), 8s delay", 10, 9),
-    ModeSpec("stable-queue-8s", 0, "SQ-8s-NB", "Stable-queue (non-blocking), 8s delay", 11, 11),
+    ModeSpec("stable-queue-8s", 0, "SQ-8s-NB", "Stable-queue (non-blocking), 8s delay", 11, 10),
     ModeSpec("stable-queue-16s", 1, "SQ-16s-B", "Stable-queue (blocking), 16s delay", 12, 9), 
     ModeSpec("stable-queue-16s", 0, "SQ-16s-NB", "Stable-queue (non-blocking), 16s delay", 13, 11),
     # ModeSpec("stable-queue-32s", 1, "SQ-32s-B", "Stable-queue (blocking), 32s delay", 10, 9), TODO: 
@@ -272,6 +271,10 @@ def row_key_rank(row_key: RowKey) -> int:
 def row_key_label(row_key: RowKey) -> str:
     mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
     return mode_spec.label if mode_spec else f"{row_key.mode}:{row_key.blocking}"
+
+def row_key_plot_label(row_key: RowKey) -> str:
+    """Label for plots: strips '(non-blocking)' / '(blocking)' from the label."""
+    return row_key_label(row_key).replace(" (non-blocking)", "").replace(" (blocking)", "")
 
 def row_key_color(row_key: RowKey):
     mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
@@ -807,6 +810,8 @@ def make_grid(
     y_config: Dict[str, YAxisCfg],
     figsize: Tuple[float, float],
     grid_left: float,
+    grid_top: float,
+    legend_pad: float,
     mode_x_spacing: float,
     y_tick_symmetric: bool = False,
 ) -> None:
@@ -853,7 +858,7 @@ def make_grid(
         left=grid_left,
         right=GRID_RIGHT,
         bottom=GRID_BOTTOM,
-        top=GRID_TOP,
+        top=grid_top,
         wspace=GRID_WSPACE,
         hspace=GRID_HSPACE,
     )
@@ -884,7 +889,7 @@ def make_grid(
     bbox_r = axes[0, 1].get_position()
     x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
     y_top_grid = max(bbox_l.y1, bbox_r.y1)
-    legend_y = y_top_grid + float(GRID_LEGEND_PAD)
+    legend_y = y_top_grid + float(legend_pad)
 
     legend_kwargs = dict(
         fontsize=PLOT_LEGEND_FONTSIZE,
@@ -964,7 +969,7 @@ def make_grid_main(
             return lambda row_key, n, a, k: values_from_df_seeds(df_seeds, nodes=n, priorities=k, arrival_s=a, row_key=row_key, col=col)
         return lambda row_key, n, a, k: lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, row_key=row_key, col=col)
 
-    legend_labels = [row_key_label(row_key) for row_key in series]
+    legend_labels = [row_key_plot_label(row_key) for row_key in series]
 
     make_grid(
         y_function_factory=y_function_factory,
@@ -980,6 +985,8 @@ def make_grid_main(
         y_config=Y_MAIN,
         figsize=GRID_FIGSIZE_MAIN,
         grid_left=GRID_LEFT_MAIN,
+        grid_top=GRID_TOP_MAIN,
+        legend_pad=GRID_LEGEND_PAD_MAIN,
         mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
         y_tick_symmetric=False,
     )
@@ -1060,6 +1067,8 @@ def make_grid_periodic_vs_stable(
         y_config=Y_DELTAS,
         figsize=GRID_FIGSIZE_DELTAS,
         grid_left=GRID_LEFT_DELTAS,
+        grid_top=GRID_TOP_DELTAS,
+        legend_pad=GRID_LEGEND_PAD_DELTAS,
         mode_x_spacing=PLOT_MODE_X_SPACING_DELTAS,
         y_tick_symmetric=True,
     )
@@ -1198,7 +1207,7 @@ def latex_table_metric(
 
     # Generate caption based on parameters
     prio_desc = "one priority" if priorities == 1 else f"{priorities} priorities"
-    preempt_desc = "with default preemption enabled" if defpreempt else "without default preemption"
+    preempt_desc = "with DefaultPreemption enabled" if defpreempt else "with DefaultPreemption disabled"
     std_desc = " (mean ± std)" if std else ""
     # Metric-specific caption descriptions
     metric_captions = {

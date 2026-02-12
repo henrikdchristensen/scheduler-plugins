@@ -3,7 +3,7 @@
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean paired differences in number of solver runs between the plugin with default preemption enabled and the default scheduler for runs with 4 priorities.}
+\caption{Mean paired differences in number of solver runs between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities.}
 \label{tab:solver_runs-defpreempt1-prio4-std0}
 \begin{tabular}{l c c c c @{\hspace{1.5em}} c c c c}
 \toprule
@@ -11,7 +11,7 @@
 \cmidrule(lr){2-5} \cmidrule(lr){6-9}
  & \llap{inter-arrival =\,}2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
 \midrule
-\makecell[tl]{Scheduling-failure (blocking)} & 364 & 260 & 193 & 123 & 283 & 197 & 123 & 80 \\
+\makecell[tl]{Scheduling-failure (blocking)} & 364 & 260 & 193 & 123 & 283 & 181 & 123 & 80 \\
 \makecell[tl]{Scheduling-failure (non-blocking)} & 373 & 266 & 190 & 118 & 286 & 190 & 127 & 84 \\
 \makecell[tl]{Periodic (blocking), 4s interval} & 98 & 104 & 95 & 94 & 92 & 86 & 71 & 57 \\
 \makecell[tl]{Periodic (non-blocking), 4s interval} & 112 & 109 & 117 & 78 & 98 & 84 & 69 & 54 \\
