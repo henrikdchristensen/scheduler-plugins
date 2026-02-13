@@ -7,9 +7,9 @@
 \label{tab:latency-defpreempt0-prio1}
 \begin{tabular}{l c c c c @{\hspace{1.5em}} c c c c}
 \toprule
- & \multicolumn{4}{c}{\textbf{\llap{\#nodes =\,}16}} & \multicolumn{4}{c}{\textbf{32}} \\
+\multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
 \cmidrule(lr){2-5}\cmidrule(lr){6-9}
- & \textbf{\llap{inter-arrival =\,}2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} & \textbf{2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} \\
+ & \textbf{\llap{Inter-arrival =\,}2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} & \textbf{2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} \\
 \midrule
 Scheduling-failure (blocking) & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2370 & 452\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2349 & 992\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2954 & 1988\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}-865 & 1938\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+3530 & 1311\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2904 & 1329\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+5572 & 3599\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}-51 & 5367\end{tabular} \\
 Scheduling-failure (non-blocking) & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2394 & 410\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2499 & 1056\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2832 & 1825\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}-1013 & 1854\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+3710 & 1252\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2762 & 1748\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+6153 & 4018\end{tabular} & \begin{tabular}[t]{@{}r@{$\,\pm\,$}l@{}}+2771 & 6931\end{tabular} \\

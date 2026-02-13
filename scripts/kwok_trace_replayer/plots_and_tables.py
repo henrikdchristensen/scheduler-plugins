@@ -1110,11 +1110,10 @@ def latex_table_metric(
 
     # First header row: node counts (each spans n_arrivals columns)
     node_headers = [
-        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\llap{{\#nodes =\,}}{n}}}}}" if i == 0
-        else rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{{n}}}}}"
-        for i, n in enumerate(nodes_order)
+        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\# Nodes =\,{n}}}}}"
+        for n in nodes_order
     ]
-    lines.append(" & " + " & ".join(node_headers) + r" \\")
+    lines.append(r"\multirow{2}{*}{\textbf{Trigger Mode}} & " + " & ".join(node_headers) + r" \\")
 
     # Add cmidrule under each node group for distinction
     lines.append(latex_cmidrules(n_nodes, n_arrivals))
@@ -1124,7 +1123,7 @@ def latex_table_metric(
     for _ in nodes_order:
         for i, a in enumerate(arrivals_order):
             if i == 0 and is_first_overall:
-                arrival_headers.append(rf"\textbf{{\llap{{inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
+                arrival_headers.append(rf"\textbf{{\llap{{Inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
                 is_first_overall = False
             else:
                 arrival_headers.append(rf"\textbf{{{fmt_arrival_value(a)}s}}")

@@ -5,43 +5,35 @@
 \centering
 \caption{Outcome breakdown for runs with 4 priorities and 10\,s solver timeout (\% of instances).}
 \label{tab:outcomes-prio4-timeout10}
-\begin{tabular}{l cccccccc}
+\begin{tabular}{c l c c c c c c c c}
 \toprule
- & \multicolumn{4}{c}{\textbf{\llap{pods/node =\,}4}} & \multicolumn{4}{c}{\textbf{8}} \\
-\cmidrule(lr){2-5}\cmidrule(lr){6-9}
- & \textbf{\llap{\#nodes =\,}4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} \\
+\multirow{2}{*}{\textbf{Usage}} & \multirow{2}{*}{\textbf{Outcome}} & \multicolumn{4}{c}{\textbf{Pods/Node =\,4}} & \multicolumn{4}{c}{\textbf{Pods/Node =\,8}} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+ &  & \textbf{\llap{\# Nodes =\,}4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} \\
 \midrule
-\multicolumn{9}{l}{\textbf{util = 90\%}} \\
+\multirow{5}{*}{90\%} & Failures (\%) & 1.0 & 2.0 & 3.0 & 2.0 & 1.0 & 2.0 & 3.0 & 0.0 \\
+ & No Calls (\%) & 23.0 & 4.0 & 1.0 & 0.0 & 82.0 & 63.0 & 51.0 & 100.0 \\
+ & KWOK Optimal (\%) & 48.0 & 33.0 & 13.0 & 2.0 & 11.0 & 24.0 & 29.0 & 0.0 \\
+ & Better (\%) & 0.0 & 1.0 & 5.0 & 18.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+ & Better\&Optimal (\%) & 28.0 & 60.0 & 78.0 & 78.0 & 6.0 & 11.0 & 17.0 & 0.0 \\
 \midrule
-Failures (\%) & 1.0 & 2.0 & 3.0 & 2.0 & 1.0 & 2.0 & 3.0 & 0.0 \\
-No Calls (\%) & 23.0 & 4.0 & 1.0 & 0.0 & 82.0 & 63.0 & 51.0 & 100.0 \\
-KWOK Optimal (\%) & 48.0 & 33.0 & 13.0 & 2.0 & 11.0 & 24.0 & 29.0 & 0.0 \\
-Better (\%) & 0.0 & 1.0 & 5.0 & 18.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
-Better\&Optimal (\%) & 28.0 & 60.0 & 78.0 & 78.0 & 6.0 & 11.0 & 17.0 & 0.0 \\
+\multirow{5}{*}{95\%} & Failures (\%) & 2.0 & 1.0 & 3.0 & 4.0 & 5.0 & 1.0 & 3.0 & 54.0 \\
+ & No Calls (\%) & 2.0 & 0.0 & 0.0 & 0.0 & 16.0 & 0.0 & 0.0 & 0.0 \\
+ & KWOK Optimal (\%) & 57.0 & 25.0 & 6.0 & 0.0 & 28.0 & 10.0 & 0.0 & 0.0 \\
+ & Better (\%) & 0.0 & 5.0 & 31.0 & 79.0 & 0.0 & 1.0 & 7.0 & 18.0 \\
+ & Better\&Optimal (\%) & 39.0 & 69.0 & 60.0 & 17.0 & 51.0 & 88.0 & 90.0 & 28.0 \\
 \midrule
-\multicolumn{9}{l}{\textbf{util = 95\%}} \\
+\multirow{5}{*}{100\%} & Failures (\%) & 1.0 & 2.0 & 4.0 & 6.0 & 4.0 & 2.0 & 0.0 & 8.0 \\
+ & No Calls (\%) & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+ & KWOK Optimal (\%) & 57.0 & 26.0 & 5.0 & 0.0 & 39.0 & 4.0 & 0.0 & 0.0 \\
+ & Better (\%) & 0.0 & 4.0 & 30.0 & 78.0 & 0.0 & 32.0 & 93.0 & 92.0 \\
+ & Better\&Optimal (\%) & 41.0 & 68.0 & 61.0 & 16.0 & 57.0 & 62.0 & 7.0 & 0.0 \\
 \midrule
-Failures (\%) & 2.0 & 1.0 & 3.0 & 4.0 & 5.0 & 1.0 & 3.0 & 54.0 \\
-No Calls (\%) & 2.0 & 0.0 & 0.0 & 0.0 & 16.0 & 0.0 & 0.0 & 0.0 \\
-KWOK Optimal (\%) & 57.0 & 25.0 & 6.0 & 0.0 & 28.0 & 10.0 & 0.0 & 0.0 \\
-Better (\%) & 0.0 & 5.0 & 31.0 & 79.0 & 0.0 & 1.0 & 7.0 & 18.0 \\
-Better\&Optimal (\%) & 39.0 & 69.0 & 60.0 & 17.0 & 51.0 & 88.0 & 90.0 & 28.0 \\
-\midrule
-\multicolumn{9}{l}{\textbf{util = 100\%}} \\
-\midrule
-Failures (\%) & 1.0 & 2.0 & 4.0 & 6.0 & 4.0 & 2.0 & 0.0 & 8.0 \\
-No Calls (\%) & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
-KWOK Optimal (\%) & 57.0 & 26.0 & 5.0 & 0.0 & 39.0 & 4.0 & 0.0 & 0.0 \\
-Better (\%) & 0.0 & 4.0 & 30.0 & 78.0 & 0.0 & 32.0 & 93.0 & 92.0 \\
-Better\&Optimal (\%) & 41.0 & 68.0 & 61.0 & 16.0 & 57.0 & 62.0 & 7.0 & 0.0 \\
-\midrule
-\multicolumn{9}{l}{\textbf{util = 105\%}} \\
-\midrule
-Failures (\%) & 2.0 & 7.0 & 1.0 & 15.0 & 0.0 & 3.0 & 3.0 & 41.0 \\
-No Calls (\%) & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
-KWOK Optimal (\%) & 63.0 & 30.0 & 10.0 & 2.0 & 38.0 & 7.0 & 0.0 & 0.0 \\
-Better (\%) & 0.0 & 2.0 & 37.0 & 72.0 & 0.0 & 44.0 & 91.0 & 59.0 \\
-Better\&Optimal (\%) & 35.0 & 61.0 & 52.0 & 11.0 & 62.0 & 46.0 & 6.0 & 0.0 \\
+\multirow{5}{*}{105\%} & Failures (\%) & 2.0 & 7.0 & 1.0 & 15.0 & 0.0 & 3.0 & 3.0 & 41.0 \\
+ & No Calls (\%) & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+ & KWOK Optimal (\%) & 63.0 & 30.0 & 10.0 & 2.0 & 38.0 & 7.0 & 0.0 & 0.0 \\
+ & Better (\%) & 0.0 & 2.0 & 37.0 & 72.0 & 0.0 & 44.0 & 91.0 & 59.0 \\
+ & Better\&Optimal (\%) & 35.0 & 61.0 & 52.0 & 11.0 & 62.0 & 46.0 & 6.0 & 0.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
