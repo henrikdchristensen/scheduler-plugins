@@ -1,0 +1,17 @@
+% Values are percent of instances (%), aggregated over utilization.
+\begin{tabular}{l cccccccc}
+\toprule
+\multicolumn{9}{l}{\textbf{\#priorities = 4, timeout = 10\,s}} \\
+\addlinespace[0.2em]
+Outcome (\%) & \multicolumn{2}{c}{4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+ & 4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
+\midrule
+Failures & 1.5 & 2.5 & 3.0 & 2.0 & 2.8 & 2.2 & 6.8 & 34.3 \\
+No Calls & 6.5 & 24.5 & 1.0 & 15.8 & 0.2 & 12.8 & 0.0 & 0.0 \\
+KWOK Optimal & 56.2 & 29.0 & 28.5 & 11.2 & 8.5 & 7.2 & 1.0 & 0.0 \\
+Better & 0.0 & 0.0 & 3.0 & 19.2 & 25.8 & 47.8 & 61.8 & 56.3 \\
+Better\&Optimal & 35.8 & 44.0 & 64.5 & 51.7 & 62.7 & 30.0 & 30.5 & 9.3 \\
+Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+\bottomrule
+\end{tabular}

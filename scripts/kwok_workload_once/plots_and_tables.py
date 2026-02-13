@@ -181,6 +181,11 @@ def aggregate_over_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
     keys = ["pods_per_node", "priorities", "timeout_s", "nodes"]
     return _aggregate_counts_to_rates(per_combo_df, keys)
 
+def aggregate_over_util_and_priorities(per_combo_df: pd.DataFrame) -> pd.DataFrame:
+    # Aggregated over both util and priorities -> one row per (ppn, timeout, nodes)
+    keys = ["pods_per_node", "timeout_s", "nodes"]
+    return _aggregate_counts_to_rates(per_combo_df, keys)
+
 def aggregate_keep_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
     # Used by tables: keep util so breaker can show (timeout, util)
     keys = ["util", "pods_per_node", "priorities", "timeout_s", "nodes"]
@@ -228,19 +233,20 @@ def write_outcome_breakdown_table_tex(
     df_table: pd.DataFrame,
     out_path: Path,
     priorities: int,
+    timeout: int,
     ppns: List[int],
-    timeouts: List[int],
     decimals: int = 1,
 ) -> None:
-    nodes_order, ppn_order, timeout_order, util_order = _infer_orders_for_table(
+    """Write one table per (priorities, timeout) with util as breaker."""
+    nodes_order, ppn_order, _timeout_order, util_order = _infer_orders_for_table(
         df_table,
         priorities=priorities,
         ppns=ppns,
-        timeouts=timeouts,
+        timeouts=[timeout],
     )
 
-    if not nodes_order or not ppn_order or not timeout_order or not util_order:
-        out_path.write_text("% empty: no nodes/ppn/timeout/util after filters\n", encoding="utf-8")
+    if not nodes_order or not ppn_order or not util_order:
+        out_path.write_text("% empty: no nodes/ppn/util after filters\n", encoding="utf-8")
         print(f"[warn] table empty after filters -> {out_path}")
         return
 
@@ -250,7 +256,10 @@ def write_outcome_breakdown_table_tex(
     if missing:
         raise SystemExit(f"[table] missing columns in aggregated df: {missing}")
 
-    dff = df_table[df_table["priorities"].astype(int) == int(priorities)].copy()
+    dff = df_table[
+        (df_table["priorities"].astype(int) == int(priorities))
+        & (df_table["timeout_s"].astype(int) == int(timeout))
+    ].copy()
     dff["timeout_s"] = dff["timeout_s"].astype(int)
     dff["nodes"] = dff["nodes"].astype(int)
     dff["pods_per_node"] = dff["pods_per_node"].astype(int)
@@ -260,8 +269,8 @@ def write_outcome_breakdown_table_tex(
     dff = dff[keep_cols].drop_duplicates(subset=idx_cols, keep="last")
     dff = dff.set_index(idx_cols).sort_index()
 
-    def get_rate(timeout_s: int, util: int, nodes: int, ppn: int, col: str) -> float:
-        key = (int(priorities), int(timeout_s), int(util), int(nodes), int(ppn))
+    def get_rate(util: int, nodes: int, ppn: int, col: str) -> float:
+        key = (int(priorities), int(timeout), int(util), int(nodes), int(ppn))
         try:
             return float(dff.at[key, col])
         except Exception:
@@ -278,11 +287,13 @@ def write_outcome_breakdown_table_tex(
     lines.append(r"\begin{tabular}{" + colspec + "}")
     lines.append(r"\toprule")
 
-    lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{\#priorities = {int(priorities)}}}}} \\")
+    lines.append(
+        rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{\#priorities = {int(priorities)}, timeout = {int(timeout)}\,s}}}} \\"
+    )
     lines.append(r"\addlinespace[0.2em]")
 
     header_nodes = " & " + " & ".join([rf"\multicolumn{{{n_ppn}}}{{c}}{{{n}}}" for n in nodes_order]) + r" \\"
-    lines.append(rf"\makecell[l]{{Outcome\\(\%)}}{header_nodes}")
+    lines.append(rf"Outcome (\%){header_nodes}")
 
     cmid = []
     start = 2
@@ -293,36 +304,34 @@ def write_outcome_breakdown_table_tex(
     lines.append("".join(cmid))
 
     ppn_hdr = " & " + " & ".join([str(ppn) for _n in nodes_order for ppn in ppn_order]) + r" \\"
-    lines.append(rf"\makecell[l]{{}}{ppn_hdr}")
+    lines.append(rf"{ppn_hdr}")
     lines.append(r"\midrule")
 
-    # Breaker: timeout, util
+    # Breaker: util
     first_block = True
-    for timeout in timeout_order:
-        for util in util_order:
-            # skip blocks that do not exist in data
-            try:
-                _ = dff.loc[(int(priorities), int(timeout), int(util))]
-            except Exception:
-                continue
+    for util in util_order:
+        try:
+            _ = dff.loc[(int(priorities), int(timeout), int(util))]
+        except Exception:
+            continue
 
-            if not first_block:
-                lines.append(r"\midrule")
-            first_block = False
-
-            lines.append(
-                rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{timeout = {int(timeout)}\,s, util = {int(util)}\%}}}} \\"
-            )
+        if not first_block:
             lines.append(r"\midrule")
+        first_block = False
 
-            for label, col in OUTCOME_ROWS:
-                cells: List[str] = []
-                for n in nodes_order:
-                    for ppn in ppn_order:
-                        r_ = get_rate(timeout_s=timeout, util=util, nodes=n, ppn=ppn, col=col)
-                        pct = 100.0 * r_ if is_finite(r_) else float("nan")
-                        cells.append(fmt_pct(pct, decimals=decimals))
-                lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+        lines.append(
+            rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{util = {int(util)}\%}}}} \\"
+        )
+        lines.append(r"\midrule")
+
+        for label, col in OUTCOME_ROWS:
+            cells: List[str] = []
+            for n in nodes_order:
+                for ppn in ppn_order:
+                    r_ = get_rate(util=util, nodes=n, ppn=ppn, col=col)
+                    pct = 100.0 * r_ if is_finite(r_) else float("nan")
+                    cells.append(fmt_pct(pct, decimals=decimals))
+            lines.append(f"{label} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -330,6 +339,206 @@ def write_outcome_breakdown_table_tex(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _infer_orders_for_table_agg(
+    df_table: pd.DataFrame,
+    *,
+    priorities: int,
+    ppns: List[int],
+    timeouts: List[int],
+) -> Tuple[List[int], List[int], List[int]]:
+    dff = df_table[df_table["priorities"].astype(int) == int(priorities)].copy()
+    nodes_order = sorted(int(x) for x in dff["nodes"].dropna().unique().tolist())
+    ppn_present = set(int(x) for x in dff["pods_per_node"].dropna().unique().tolist())
+    ppn_order = [p for p in ppns if p in ppn_present]
+    timeout_present = set(int(x) for x in dff["timeout_s"].dropna().unique().tolist())
+    timeout_order = [t for t in timeouts if t in timeout_present]
+    return nodes_order, ppn_order, timeout_order
+
+
+def write_outcome_breakdown_table_agg_util_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    priorities: int,
+    timeout: int,
+    ppns: List[int],
+    decimals: int = 1,
+) -> None:
+    """Write one table per (priorities, timeout), aggregated over utilization."""
+    nodes_order, ppn_order, _timeout_order = _infer_orders_for_table_agg(
+        df_table,
+        priorities=priorities,
+        ppns=ppns,
+        timeouts=[timeout],
+    )
+
+    if not nodes_order or not ppn_order:
+        out_path.write_text("% empty: no nodes/ppn after filters\n", encoding="utf-8")
+        print(f"[warn] agg table empty after filters -> {out_path}")
+        return
+
+    idx_cols = ["priorities", "timeout_s", "nodes", "pods_per_node"]
+    keep_cols = idx_cols + [c for _lbl, c in OUTCOME_ROWS]
+    missing = [c for c in keep_cols if c not in df_table.columns]
+    if missing:
+        raise SystemExit(f"[table-agg] missing columns in aggregated df: {missing}")
+
+    dff = df_table[
+        (df_table["priorities"].astype(int) == int(priorities))
+        & (df_table["timeout_s"].astype(int) == int(timeout))
+    ].copy()
+    dff["timeout_s"] = dff["timeout_s"].astype(int)
+    dff["nodes"] = dff["nodes"].astype(int)
+    dff["pods_per_node"] = dff["pods_per_node"].astype(int)
+    dff["priorities"] = dff["priorities"].astype(int)
+
+    dff = dff[keep_cols].drop_duplicates(subset=idx_cols, keep="last")
+    dff = dff.set_index(idx_cols).sort_index()
+
+    def get_rate(nodes: int, ppn: int, col: str) -> float:
+        key = (int(priorities), int(timeout), int(nodes), int(ppn))
+        try:
+            return float(dff.at[key, col])
+        except Exception:
+            return float("nan")
+
+    n_nodes = len(nodes_order)
+    n_ppn = len(ppn_order)
+    data_cols = n_nodes * n_ppn
+    total_cols = 1 + data_cols
+
+    colspec = "l" + (" " + "c" * data_cols if data_cols > 0 else "")
+    lines: List[str] = []
+    lines.append("% Values are percent of instances (%), aggregated over utilization.")
+    lines.append(r"\begin{tabular}{" + colspec + "}")
+    lines.append(r"\toprule")
+
+    lines.append(
+        rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{\#priorities = {int(priorities)}, timeout = {int(timeout)}\,s}}}} \\"
+    )
+    lines.append(r"\addlinespace[0.2em]")
+
+    header_nodes = " & " + " & ".join([rf"\multicolumn{{{n_ppn}}}{{c}}{{{n}}}" for n in nodes_order]) + r" \\"
+    lines.append(rf"Outcome (\%){header_nodes}")
+
+    cmid = []
+    start = 2
+    for _ in nodes_order:
+        end = start + n_ppn - 1
+        cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
+        start = end + 1
+    lines.append("".join(cmid))
+
+    ppn_hdr = " & " + " & ".join([str(ppn) for _n in nodes_order for ppn in ppn_order]) + r" \\"
+    lines.append(rf"{ppn_hdr}")
+    lines.append(r"\midrule")
+
+    for label, col in OUTCOME_ROWS:
+        cells: List[str] = []
+        for n in nodes_order:
+            for ppn in ppn_order:
+                r_ = get_rate(nodes=n, ppn=ppn, col=col)
+                pct = 100.0 * r_ if is_finite(r_) else float("nan")
+                cells.append(fmt_pct(pct, decimals=decimals))
+        lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    lines.append("")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_outcome_breakdown_table_agg_util_prio_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    timeout: int,
+    ppns: List[int],
+    decimals: int = 1,
+) -> None:
+    """Write one table per timeout, aggregated over both utilization and priorities."""
+    dff = df_table[df_table["timeout_s"].astype(int) == int(timeout)].copy()
+
+    nodes_order = sorted(int(x) for x in dff["nodes"].dropna().unique().tolist())
+    ppn_present = set(int(x) for x in dff["pods_per_node"].dropna().unique().tolist())
+    ppn_order = [p for p in ppns if p in ppn_present]
+
+    if not nodes_order or not ppn_order:
+        out_path.write_text("% empty: no nodes/ppn after filters\n", encoding="utf-8")
+        print(f"[warn] agg-prio table empty after filters -> {out_path}")
+        return
+
+    idx_cols = ["timeout_s", "nodes", "pods_per_node"]
+    keep_cols = idx_cols + [c for _lbl, c in OUTCOME_ROWS]
+    missing = [c for c in keep_cols if c not in df_table.columns]
+    if missing:
+        raise SystemExit(f"[table-agg-prio] missing columns in aggregated df: {missing}")
+
+    dff["timeout_s"] = dff["timeout_s"].astype(int)
+    dff["nodes"] = dff["nodes"].astype(int)
+    dff["pods_per_node"] = dff["pods_per_node"].astype(int)
+
+    dff = dff[keep_cols].drop_duplicates(subset=idx_cols, keep="last")
+    dff = dff.set_index(idx_cols).sort_index()
+
+    def get_rate(nodes: int, ppn: int, col: str) -> float:
+        key = (int(timeout), int(nodes), int(ppn))
+        try:
+            return float(dff.at[key, col])
+        except Exception:
+            return float("nan")
+
+    n_nodes = len(nodes_order)
+    n_ppn = len(ppn_order)
+    data_cols = n_nodes * n_ppn
+    total_cols = 1 + data_cols
+
+    colspec = "l" + (" " + "c" * data_cols if data_cols > 0 else "")
+    lines: List[str] = []
+    lines.append("% Values are percent of instances (%), aggregated over utilization and priorities.")
+    lines.append(r"\begin{tabular}{" + colspec + "}")
+    lines.append(r"\toprule")
+
+    lines.append(
+        rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{timeout = {int(timeout)}\,s}}}} \\"
+    )
+    lines.append(r"\addlinespace[0.2em]")
+
+    header_nodes = " & " + " & ".join([rf"\multicolumn{{{n_ppn}}}{{c}}{{{n}}}" for n in nodes_order]) + r" \\"
+    lines.append(rf"Outcome (\%){header_nodes}")
+
+    cmid = []
+    start = 2
+    for _ in nodes_order:
+        end = start + n_ppn - 1
+        cmid.append(rf"\cmidrule(lr){{{start}-{end}}}")
+        start = end + 1
+    lines.append("".join(cmid))
+
+    ppn_hdr = " & " + " & ".join([str(ppn) for _n in nodes_order for ppn in ppn_order]) + r" \\"
+    lines.append(rf"{ppn_hdr}")
+    lines.append(r"\midrule")
+
+    for label, col in OUTCOME_ROWS:
+        cells: List[str] = []
+        for n in nodes_order:
+            for ppn in ppn_order:
+                r_ = get_rate(nodes=n, ppn=ppn, col=col)
+                pct = 100.0 * r_ if is_finite(r_) else float("nan")
+                cells.append(fmt_pct(pct, decimals=decimals))
+        lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    lines.append("")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
 
 #################################################################
 # Plots
@@ -788,20 +997,49 @@ def main(argv: Optional[List[str]] = None) -> None:
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
 
-    # --- TABLES
+    # --- TABLES (per util, split by timeout)
     df_table = aggregate_keep_util(df_per_combo)
     present_prios = set(df_table["priorities"].astype(int).unique().tolist())
     for prio in [p for p in PLOT_PRIORITIES if p in present_prios]:
-        out_tex = out_tables_dir / f"table_outcomes_priorities={int(prio)}.tex"
-        write_outcome_breakdown_table_tex(
-            df_table=df_table,
-            out_path=out_tex,
-            priorities=int(prio),
+        for t in PLOT_TIMEOUTS:
+            out_tex = out_tables_dir / f"table_outcomes_priorities={int(prio)}_timeout={int(t)}.tex"
+            write_outcome_breakdown_table_tex(
+                df_table=df_table,
+                out_path=out_tex,
+                priorities=int(prio),
+                timeout=int(t),
+                ppns=PLOT_PPNS,
+                decimals=1,
+            )
+            produced_tables.append(out_tex)
+
+    # --- TABLES (aggregated over util, split by timeout)
+    df_table_agg = aggregate_over_util(df_per_combo)
+    for prio in [p for p in PLOT_PRIORITIES if p in present_prios]:
+        for t in PLOT_TIMEOUTS:
+            out_tex_agg = out_tables_dir / f"table_outcomes_agg_util_priorities={int(prio)}_timeout={int(t)}.tex"
+            write_outcome_breakdown_table_agg_util_tex(
+                df_table=df_table_agg,
+                out_path=out_tex_agg,
+                priorities=int(prio),
+                timeout=int(t),
+                ppns=PLOT_PPNS,
+                decimals=1,
+            )
+            produced_tables.append(out_tex_agg)
+
+    # --- TABLES (aggregated over util AND priorities, one per timeout)
+    df_table_agg_prio = aggregate_over_util_and_priorities(df_per_combo)
+    for t in PLOT_TIMEOUTS:
+        out_tex_agg_prio = out_tables_dir / f"table_outcomes_agg_util_prio_timeout={int(t)}.tex"
+        write_outcome_breakdown_table_agg_util_prio_tex(
+            df_table=df_table_agg_prio,
+            out_path=out_tex_agg_prio,
+            timeout=int(t),
             ppns=PLOT_PPNS,
-            timeouts=PLOT_TIMEOUTS,
             decimals=1,
         )
-        produced_tables.append(out_tex)
+        produced_tables.append(out_tex_agg_prio)
 
     # --- PLOTS
     df_util_agg = aggregate_over_util(df_per_combo)

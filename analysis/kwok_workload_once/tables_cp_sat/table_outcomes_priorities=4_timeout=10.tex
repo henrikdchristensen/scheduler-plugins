@@ -1,0 +1,46 @@
+% Values are percent of instances (%).
+\begin{tabular}{l cccccccc}
+\toprule
+\multicolumn{9}{l}{\textbf{\#priorities = 4, timeout = 10\,s}} \\
+\addlinespace[0.2em]
+Outcome (\%) & \multicolumn{2}{c}{4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+ & 4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 90\%}} \\
+\midrule
+Failures & 1.0 & 1.0 & 2.0 & 2.0 & 3.0 & 3.0 & 2.0 & \text{--} \\
+No Calls & 23.0 & 82.0 & 4.0 & 63.0 & 1.0 & 51.0 & 0.0 & \text{--} \\
+KWOK Optimal & 48.0 & 11.0 & 33.0 & 24.0 & 13.0 & 29.0 & 2.0 & \text{--} \\
+Better & 0.0 & 0.0 & 1.0 & 0.0 & 5.0 & 0.0 & 18.0 & \text{--} \\
+Better\&Optimal & 28.0 & 6.0 & 60.0 & 11.0 & 78.0 & 17.0 & 78.0 & \text{--} \\
+Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & \text{--} \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 95\%}} \\
+\midrule
+Failures & 2.0 & 5.0 & 1.0 & 1.0 & 3.0 & 3.0 & 4.0 & 54.0 \\
+No Calls & 2.0 & 16.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & 57.0 & 28.0 & 25.0 & 10.0 & 6.0 & 0.0 & 0.0 & 0.0 \\
+Better & 0.0 & 0.0 & 5.0 & 1.0 & 31.0 & 7.0 & 79.0 & 18.0 \\
+Better\&Optimal & 39.0 & 51.0 & 69.0 & 88.0 & 60.0 & 90.0 & 17.0 & 28.0 \\
+Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 100\%}} \\
+\midrule
+Failures & 1.0 & 4.0 & 2.0 & 2.0 & 4.0 & 0.0 & 6.0 & 8.0 \\
+No Calls & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & 57.0 & 39.0 & 26.0 & 4.0 & 5.0 & 0.0 & 0.0 & 0.0 \\
+Better & 0.0 & 0.0 & 4.0 & 32.0 & 30.0 & 93.0 & 78.0 & 92.0 \\
+Better\&Optimal & 41.0 & 57.0 & 68.0 & 62.0 & 61.0 & 7.0 & 16.0 & 0.0 \\
+Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 105\%}} \\
+\midrule
+Failures & 2.0 & 0.0 & 7.0 & 3.0 & 1.0 & 3.0 & 15.0 & 41.0 \\
+No Calls & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal & 63.0 & 38.0 & 30.0 & 7.0 & 10.0 & 0.0 & 2.0 & 0.0 \\
+Better & 0.0 & 0.0 & 2.0 & 44.0 & 37.0 & 91.0 & 72.0 & 59.0 \\
+Better\&Optimal & 35.0 & 62.0 & 61.0 & 46.0 & 52.0 & 6.0 & 11.0 & 0.0 \\
+Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+\bottomrule
+\end{tabular}

@@ -54,8 +54,8 @@ def fmt_mean_std(
         return nan_str()
     m = f"{float(mean_v):+.{mean_dec}f}" if mean_signed else f"{float(mean_v):.{mean_dec}f}"
     if not is_finite(std_v):
-        return rf"\ensuremath{{{m}}}"
-    return rf"\ensuremath{{{m}\,\pm\,{abs(float(std_v)):.{std_dec}f}}}"
+        return m
+    return rf"${m}\,\pm\,{abs(float(std_v)):.{std_dec}f}$"
 
 def fmt_mean_std_split(
     mean_v: object,

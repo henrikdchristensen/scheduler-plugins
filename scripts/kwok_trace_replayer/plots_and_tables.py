@@ -97,26 +97,14 @@ DELTA_SERIES: Dict[int, List[Tuple[str, str, str, int]]] = {
     0: [
         ("Periodic, 8→4s interval", "periodic8s", "periodic4s", 0),
         ("Periodic, 8→16s interval", "periodic8s", "periodic16s", 0),
-        # ("Periodic, 8→2s interval", "periodic8s", "periodic2s", 0), TODO:
-        # ("Periodic, 8→32s interval", "periodic8s", "periodic32s", 0), TODO:
-        # ("Periodic, 8→64s interval", "periodic8s", "periodic64s", 0), TODO:
         ("Stable-queue, 8→4s delay", "stable-queue-8s", "stable-queue-4s", 0),
         ("Stable-queue, 8→16s delay", "stable-queue-8s", "stable-queue-16s", 0),
-        # ("Stable-queue, 8→2s delay", "stable-queue-8s", "stable-queue-2s", 0), TODO: 
-        # ("Stable-queue, 8→32s delay", "stable-queue-8s", "stable-queue-32s", 0), TODO: 
-        # ("Stable-queue, 8→64s delay", "stable-queue-8s", "stable-queue-64s", 0), TODO: 
     ],
     1: [
         ("Periodic, 8→4s interval", "periodic8s", "periodic4s", 1),
         ("Periodic, 8→16s interval", "periodic8s", "periodic16s", 1),
-        # ("Periodic, 8→2s interval", "periodic8s", "periodic2s", 1), TODO:
-        # ("Periodic, 8→32s interval", "periodic8s", "periodic32s", 1), TODO:
-        # ("Periodic, 8→64s interval", "periodic8s", "periodic64s", 1), TODO:
         ("Stable-queue, 8→4s delay", "stable-queue-8s", "stable-queue-4s", 1),
         ("Stable-queue, 8→16s delay", "stable-queue-8s", "stable-queue-16s", 1),
-        # ("Stable-queue, 8→2s delay", "stable-queue-8s", "stable-queue-2s", 1), TODO: 
-        # ("Stable-queue, 8→32s delay", "stable-queue-8s", "stable-queue-32s", 1), TODO: 
-        # ("Stable-queue, 8→64s delay", "stable-queue-8s", "stable-queue-64s", 1), TODO: 
     ],
 }
 
@@ -283,20 +271,12 @@ MODE_SPECS: List[ModeSpec] = [
     ModeSpec("periodic8s", 0, "PR-8s-NB", "Periodic (non-blocking), 8s interval", 5, 6),
     ModeSpec("periodic16s", 1, "PR-16s-B", "Periodic (blocking), 16s interval", 6, 7),
     ModeSpec("periodic16s", 0, "PR-16s-NB", "Periodic (non-blocking), 16s interval", 7, 7),
-    # ModeSpec("periodic32s", 1, "PR-32s-B", "Periodic (blocking), 32s interval", 6, 5), TODO: 
-    # ModeSpec("periodic32s", 0, "PR-32s-NB", "Periodic (non-blocking), 32s interval", 7, 5),
-    # ModeSpec("periodic64s", 1, "PR-64s-B", "Periodic (blocking), 64s interval", 6, 5), TODO: 
-    # ModeSpec("periodic64s", 0, "PR-64s-NB", "Periodic (non-blocking), 64s interval", 7, 5),
     ModeSpec("stable-queue-4s", 1, "SQ-4s-B", "Stable-queue (blocking), 4s delay", 8, 9), 
     ModeSpec("stable-queue-4s", 0, "SQ-4s-NB", "Stable-queue (non-blocking), 4s delay", 9, 9),
     ModeSpec("stable-queue-8s", 1, "SQ-8s-B", "Stable-queue (blocking), 8s delay", 10, 10),
     ModeSpec("stable-queue-8s", 0, "SQ-8s-NB", "Stable-queue (non-blocking), 8s delay", 11, 10),
     ModeSpec("stable-queue-16s", 1, "SQ-16s-B", "Stable-queue (blocking), 16s delay", 12, 11), 
     ModeSpec("stable-queue-16s", 0, "SQ-16s-NB", "Stable-queue (non-blocking), 16s delay", 13, 11),
-    # ModeSpec("stable-queue-32s", 1, "SQ-32s-B", "Stable-queue (blocking), 32s delay", 10, 9), TODO: 
-    # ModeSpec("stable-queue-32s", 0, "SQ-32s-NB", "Stable-queue (non-blocking), 32s delay", 11, 9),
-    # ModeSpec("stable-queue-64s", 1, "SQ-64s-B", "Stable-queue (blocking), 64s delay", 10, 9), TODO: 
-    # ModeSpec("stable-queue-64s", 0, "SQ-64s-NB", "Stable-queue (non-blocking), 64s delay", 11, 9),
 ]
 
 _SPEC_BY_MODE_BLOCK: Dict[Tuple[str, int], ModeSpec] = {(s.mode, int(s.blocking)): s for s in MODE_SPECS}
@@ -449,6 +429,20 @@ def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
     group_cols = ["job_name", "plugin_config"] + KEY_COLS_MAIN
     return _aggregate_mean_std(df_seeds, group_cols)
 
+def aggregate_mean_std_over_arrival(df_seeds: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate per-seed DataFrame to mean+std, aggregated over inter-arrival.
+    """
+    group_cols = ["nodes", "priorities", "mode", "blocking", "defpreempt"]
+    return _aggregate_mean_std(df_seeds, group_cols)
+
+def aggregate_mean_std_over_arrival_and_priorities(df_seeds: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate per-seed DataFrame to mean+std, aggregated over inter-arrival and priorities.
+    """
+    group_cols = ["nodes", "mode", "blocking", "defpreempt"]
+    return _aggregate_mean_std(df_seeds, group_cols)
+
 def _build_lookup_from_df(df: pd.DataFrame, key_cols: List[str]) -> pd.DataFrame:
     """
     Build a lookup DataFrame indexed by key columns for fast access.
@@ -460,6 +454,14 @@ def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
     Build a lookup DataFrame from the main aggregated DataFrame.
     """
     return _build_lookup_from_df(df, KEY_COLS_MAIN)
+
+def build_lookup_agg_arrival(df: pd.DataFrame) -> pd.DataFrame:
+    key_cols = ["nodes", "priorities", "mode", "blocking", "defpreempt"]
+    return _build_lookup_from_df(df, key_cols)
+
+def build_lookup_agg_arrival_prio(df: pd.DataFrame) -> pd.DataFrame:
+    key_cols = ["nodes", "mode", "blocking", "defpreempt"]
+    return _build_lookup_from_df(df, key_cols)
 
 def _safe_lookup(lookup: pd.DataFrame, key: Tuple, col: str) -> float:
     """
@@ -1245,7 +1247,7 @@ def latex_table_metric(
                 elif std:
                     # Single value with std - align by ± sign across rows
                     # Use fixed-width columns for both mean and std parts to align ± across rows
-                    val_parts = total_str.replace(r'\ensuremath{', '').replace('}', '').replace(r'\,\pm\,', ' & ')
+                    val_parts = total_str.strip('$').replace(r'\,\pm\,', ' & ')
                     cell = rf"\makecell{{\begin{{tabular}}{{@{{}}w{{r}}{{3.5em}}@{{$\,\pm\,$}}w{{l}}{{2.5em}}@{{}}}}{val_parts}\end{{tabular}}}}"
                 else:
                     # Just the total value without std
@@ -1291,6 +1293,171 @@ def latex_table_metric(
     ]
     out_path.write_text("\n".join(wrapped_lines), encoding="utf-8")
 
+
+def latex_table_metric_agg_arrival(
+    *,
+    out_path: Path,
+    lookup_agg: pd.DataFrame,
+    spec: MetricSpecV2,
+    defpreempt: int,
+    priorities: int,
+    std: int,
+    nodes_order: List[int],
+) -> None:
+    """
+    Generate a LaTeX table for one metric, aggregated over inter-arrival.
+    Rows = modes, columns = nodes.
+    """
+    modes = sort_row_keys([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(defpreempt)) for s in MODE_SPECS])
+    n_nodes = len(nodes_order)
+
+    lines: List[str] = []
+    colspec = "l " + " ".join(["c"] * n_nodes)
+    lines.append(rf"\begin{{tabular}}{{{colspec}}}")
+    lines.append(r"\toprule")
+
+    # Header: node counts
+    node_headers = [rf"\#nodes = {n}" for n in nodes_order]
+    lines.append(" & " + " & ".join(node_headers) + r" \\")
+    lines.append(r"\midrule")
+
+    def _lookup(nodes: int, col: str) -> float:
+        key = (int(nodes), int(priorities), str(row_key.mode), int(row_key.blocking), int(row_key.defpreempt))
+        try:
+            return float(lookup_agg.at[key, col])
+        except (KeyError, TypeError):
+            return float("nan")
+
+    for row_key in modes:
+        cells: List[str] = []
+        for nodes in nodes_order:
+            col_total = spec.col_total
+            col_total_std = f"{col_total}_std"
+            key = (int(nodes), int(priorities), str(row_key.mode), int(row_key.blocking), int(row_key.defpreempt))
+            try:
+                mean_total = float(lookup_agg.at[key, col_total])
+            except (KeyError, TypeError):
+                mean_total = float("nan")
+            try:
+                std_total = float(lookup_agg.at[key, col_total_std]) if std else None
+            except (KeyError, TypeError):
+                std_total = None
+            total_str = spec.format_val(mean_total, std_total, bool(std))
+            cells.append(total_str)
+        mode_label = row_key_label(row_key)
+        lines.append(rf"\makecell[tl]{{{mode_label}}} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    prio_desc = "one priority" if priorities == 1 else f"{priorities} priorities"
+    preempt_desc = "with DefaultPreemption enabled" if defpreempt else "with DefaultPreemption disabled"
+    std_desc = " (mean \\pm std)" if std else ""
+    metric_captions = {
+        "latency": "scheduling latency (ms)",
+        "deletions": "number of pod deletions",
+        "solver_runs": "number of solver runs",
+        "plan_activations": "number of plan activations",
+    }
+    metric_desc = metric_captions.get(spec.name, spec.name)
+    caption = (
+        f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler "
+        f"for runs with {prio_desc}, aggregated over inter-arrival times{std_desc}."
+    )
+    label = f"tab:{spec.name}-defpreempt{defpreempt}-prio{priorities}-std{std}-agg-arrival"
+
+    wrapped_lines: List[str] = [
+        r"\begin{table*}[t]",
+        TABLE_FONT_SIZE,
+        rf"\setlength{{\tabcolsep}}{{{TABLE_TABCOLSEP}}}",
+        rf"\renewcommand{{\arraystretch}}{{{TABLE_ARRAYSTRETCH}}}",
+        r"\centering",
+        rf"\caption{{{caption}}}",
+        rf"\label{{{label}}}",
+        *lines,
+        r"\end{table*}",
+        "",
+    ]
+    out_path.write_text("\n".join(wrapped_lines), encoding="utf-8")
+
+
+def latex_table_metric_agg_arrival_prio(
+    *,
+    out_path: Path,
+    lookup_agg: pd.DataFrame,
+    spec: MetricSpecV2,
+    defpreempt: int,
+    std: int,
+    nodes_order: List[int],
+) -> None:
+    """
+    Generate a LaTeX table for one metric, aggregated over inter-arrival and priorities.
+    Rows = modes, columns = nodes.
+    """
+    modes = sort_row_keys([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(defpreempt)) for s in MODE_SPECS])
+    n_nodes = len(nodes_order)
+
+    lines: List[str] = []
+    colspec = "l " + " ".join(["c"] * n_nodes)
+    lines.append(rf"\begin{{tabular}}{{{colspec}}}")
+    lines.append(r"\toprule")
+
+    node_headers = [rf"\#nodes = {n}" for n in nodes_order]
+    lines.append(" & " + " & ".join(node_headers) + r" \\")
+    lines.append(r"\midrule")
+
+    for row_key in modes:
+        cells: List[str] = []
+        for nodes in nodes_order:
+            col_total = spec.col_total
+            col_total_std = f"{col_total}_std"
+            key = (int(nodes), str(row_key.mode), int(row_key.blocking), int(row_key.defpreempt))
+            try:
+                mean_total = float(lookup_agg.at[key, col_total])
+            except (KeyError, TypeError):
+                mean_total = float("nan")
+            try:
+                std_total = float(lookup_agg.at[key, col_total_std]) if std else None
+            except (KeyError, TypeError):
+                std_total = None
+            total_str = spec.format_val(mean_total, std_total, bool(std))
+            cells.append(total_str)
+        mode_label = row_key_label(row_key)
+        lines.append(rf"\makecell[tl]{{{mode_label}}} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    preempt_desc = "with DefaultPreemption enabled" if defpreempt else "with DefaultPreemption disabled"
+    std_desc = " (mean \\pm std)" if std else ""
+    metric_captions = {
+        "latency": "scheduling latency (ms)",
+        "deletions": "number of pod deletions",
+        "solver_runs": "number of solver runs",
+        "plan_activations": "number of plan activations",
+    }
+    metric_desc = metric_captions.get(spec.name, spec.name)
+    caption = (
+        f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler, "
+        f"aggregated over inter-arrival times and priorities{std_desc}."
+    )
+    label = f"tab:{spec.name}-defpreempt{defpreempt}-std{std}-agg-arrival-prio"
+
+    wrapped_lines: List[str] = [
+        r"\begin{table*}[t]",
+        TABLE_FONT_SIZE,
+        rf"\setlength{{\tabcolsep}}{{{TABLE_TABCOLSEP}}}",
+        rf"\renewcommand{{\arraystretch}}{{{TABLE_ARRAYSTRETCH}}}",
+        r"\centering",
+        rf"\caption{{{caption}}}",
+        rf"\label{{{label}}}",
+        *lines,
+        r"\end{table*}",
+        "",
+    ]
+    out_path.write_text("\n".join(wrapped_lines), encoding="utf-8")
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -1306,6 +1473,12 @@ def main() -> None:
 
     df_mean_std = aggregate_mean_std(df_seeds)
     lookup_main = build_lookup(df_mean_std)
+
+    df_mean_std_agg_arr = aggregate_mean_std_over_arrival(df_seeds)
+    lookup_agg_arrival = build_lookup_agg_arrival(df_mean_std_agg_arr)
+
+    df_mean_std_agg_arr_prio = aggregate_mean_std_over_arrival_and_priorities(df_seeds)
+    lookup_agg_arrival_prio = build_lookup_agg_arrival_prio(df_mean_std_agg_arr_prio)
 
     nodes_order = sorted(df_mean_std["nodes"].unique().tolist())
     arrivals_order_all = df_mean_std["arrival_s"].unique().tolist()
@@ -1348,6 +1521,42 @@ def main() -> None:
                         arrivals_order=arrivals_order,
                     )
                     produced_tables.append(out_tex)
+
+    # Generate per-metric tables aggregated over inter-arrival
+    for spec in METRIC_SPECS_ALL:
+        for defpreempt in (0, 1):
+            for k in PRIORITIES_TO_SHOW:
+                for std in (0, 1):
+                    std_subdir = OUT_TABLES_DIR / f"std{std}"
+                    std_subdir.mkdir(parents=True, exist_ok=True)
+                    out_tex = std_subdir / f"table_{spec.name}_defpreempt={defpreempt}_priorities={k}_agg_arrival.tex"
+                    latex_table_metric_agg_arrival(
+                        out_path=out_tex,
+                        lookup_agg=lookup_agg_arrival,
+                        spec=spec,
+                        defpreempt=defpreempt,
+                        priorities=k,
+                        std=std,
+                        nodes_order=nodes_order,
+                    )
+                    produced_tables.append(out_tex)
+
+    # Generate per-metric tables aggregated over inter-arrival AND priorities
+    for spec in METRIC_SPECS_ALL:
+        for defpreempt in (0, 1):
+            for std in (0, 1):
+                std_subdir = OUT_TABLES_DIR / f"std{std}"
+                std_subdir.mkdir(parents=True, exist_ok=True)
+                out_tex = std_subdir / f"table_{spec.name}_defpreempt={defpreempt}_agg_arrival_prio.tex"
+                latex_table_metric_agg_arrival_prio(
+                    out_path=out_tex,
+                    lookup_agg=lookup_agg_arrival_prio,
+                    spec=spec,
+                    defpreempt=defpreempt,
+                    std=std,
+                    nodes_order=nodes_order,
+                )
+                produced_tables.append(out_tex)
 
     # Generate all figures (always with seeds)
     for blocking in BLOCKING_TYPES:

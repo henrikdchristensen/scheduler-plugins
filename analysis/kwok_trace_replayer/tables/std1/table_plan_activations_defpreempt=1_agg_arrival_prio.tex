@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in number of plan activations between the plugin with DefaultPreemption enabled and the default scheduler, aggregated over inter-arrival times and priorities (mean \pm std).}
+\label{tab:plan_activations-defpreempt1-std1-agg-arrival-prio}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes = 16 & \#nodes = 32 \\
+\midrule
+\makecell[tl]{Scheduling-failure (blocking)} & $154\,\pm\,111.4$ & $122\,\pm\,96.3$ \\
+\makecell[tl]{Scheduling-failure (non-blocking)} & $155\,\pm\,107.9$ & $121\,\pm\,98.3$ \\
+\makecell[tl]{Periodic (blocking), 4s interval} & $51\,\pm\,20.9$ & $47\,\pm\,23.0$ \\
+\makecell[tl]{Periodic (non-blocking), 4s interval} & $52\,\pm\,21.8$ & $46\,\pm\,23.0$ \\
+\makecell[tl]{Periodic (blocking), 8s interval} & $31\,\pm\,12.0$ & $28\,\pm\,12.2$ \\
+\makecell[tl]{Periodic (non-blocking), 8s interval} & $30\,\pm\,13.0$ & $28\,\pm\,11.9$ \\
+\makecell[tl]{Periodic (blocking), 16s interval} & $16\,\pm\,8.1$ & $17\,\pm\,7.2$ \\
+\makecell[tl]{Periodic (non-blocking), 16s interval} & $17\,\pm\,8.3$ & $18\,\pm\,7.4$ \\
+\makecell[tl]{Stable-queue (blocking), 4s delay} & $43\,\pm\,17.9$ & $29\,\pm\,12.9$ \\
+\makecell[tl]{Stable-queue (non-blocking), 4s delay} & $42\,\pm\,17.9$ & $30\,\pm\,13.5$ \\
+\makecell[tl]{Stable-queue (blocking), 8s delay} & $26\,\pm\,12.0$ & $21\,\pm\,9.6$ \\
+\makecell[tl]{Stable-queue (non-blocking), 8s delay} & $27\,\pm\,11.0$ & $21\,\pm\,8.7$ \\
+\makecell[tl]{Stable-queue (blocking), 16s delay} & $15\,\pm\,7.8$ & $14\,\pm\,7.0$ \\
+\makecell[tl]{Stable-queue (non-blocking), 16s delay} & $15\,\pm\,7.7$ & $15\,\pm\,6.6$ \\
+\bottomrule
+\end{tabular}
+\end{table*}

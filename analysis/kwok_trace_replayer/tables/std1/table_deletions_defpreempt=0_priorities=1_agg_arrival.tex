@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in number of pod deletions between the plugin with DefaultPreemption disabled and the default scheduler for runs with one priority, aggregated over inter-arrival times (mean \pm std).}
+\label{tab:deletions-defpreempt0-prio1-std1-agg-arrival}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes = 16 & \#nodes = 32 \\
+\midrule
+\makecell[tl]{Scheduling-failure (blocking)} & $-911.9\,\pm\,1352.9$ & $-1127.4\,\pm\,1579.3$ \\
+\makecell[tl]{Scheduling-failure (non-blocking)} & $-931.2\,\pm\,1396.2$ & $-1127.7\,\pm\,1556.5$ \\
+\makecell[tl]{Periodic (blocking), 4s interval} & $+20.4\,\pm\,156.2$ & $+34.6\,\pm\,81.1$ \\
+\makecell[tl]{Periodic (non-blocking), 4s interval} & $+43.3\,\pm\,75.8$ & $+13.5\,\pm\,194.4$ \\
+\makecell[tl]{Periodic (blocking), 8s interval} & $-13.6\,\pm\,78.2$ & $+15.1\,\pm\,56.1$ \\
+\makecell[tl]{Periodic (non-blocking), 8s interval} & $+4.9\,\pm\,64.9$ & $+21.9\,\pm\,46.6$ \\
+\makecell[tl]{Periodic (blocking), 16s interval} & $-15.2\,\pm\,63.4$ & $+16.5\,\pm\,48.0$ \\
+\makecell[tl]{Periodic (non-blocking), 16s interval} & $-7.4\,\pm\,48.2$ & $+2.7\,\pm\,50.3$ \\
+\makecell[tl]{Stable-queue (blocking), 4s delay} & $+19.3\,\pm\,73.0$ & $+33.3\,\pm\,58.2$ \\
+\makecell[tl]{Stable-queue (non-blocking), 4s delay} & $+18.0\,\pm\,77.1$ & $+32.1\,\pm\,52.4$ \\
+\makecell[tl]{Stable-queue (blocking), 8s delay} & $+2.1\,\pm\,53.3$ & $+13.2\,\pm\,55.2$ \\
+\makecell[tl]{Stable-queue (non-blocking), 8s delay} & $+3.0\,\pm\,63.5$ & $+17.2\,\pm\,49.8$ \\
+\makecell[tl]{Stable-queue (blocking), 16s delay} & $-30.1\,\pm\,71.7$ & $+2.2\,\pm\,52.4$ \\
+\makecell[tl]{Stable-queue (non-blocking), 16s delay} & $-15.1\,\pm\,51.0$ & $+2.8\,\pm\,57.9$ \\
+\bottomrule
+\end{tabular}
+\end{table*}

@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in number of plan activations between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities, aggregated over inter-arrival times.}
+\label{tab:plan_activations-defpreempt1-prio4-std0-agg-arrival}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes = 16 & \#nodes = 32 \\
+\midrule
+\makecell[tl]{Scheduling-failure (blocking)} & 171 & 144 \\
+\makecell[tl]{Scheduling-failure (non-blocking)} & 172 & 143 \\
+\makecell[tl]{Periodic (blocking), 4s interval} & 58 & 53 \\
+\makecell[tl]{Periodic (non-blocking), 4s interval} & 58 & 52 \\
+\makecell[tl]{Periodic (blocking), 8s interval} & 35 & 31 \\
+\makecell[tl]{Periodic (non-blocking), 8s interval} & 34 & 32 \\
+\makecell[tl]{Periodic (blocking), 16s interval} & 18 & 19 \\
+\makecell[tl]{Periodic (non-blocking), 16s interval} & 19 & 20 \\
+\makecell[tl]{Stable-queue (blocking), 4s delay} & 50 & 34 \\
+\makecell[tl]{Stable-queue (non-blocking), 4s delay} & 49 & 34 \\
+\makecell[tl]{Stable-queue (blocking), 8s delay} & 30 & 25 \\
+\makecell[tl]{Stable-queue (non-blocking), 8s delay} & 30 & 24 \\
+\makecell[tl]{Stable-queue (blocking), 16s delay} & 17 & 15 \\
+\makecell[tl]{Stable-queue (non-blocking), 16s delay} & 17 & 16 \\
+\bottomrule
+\end{tabular}
+\end{table*}
