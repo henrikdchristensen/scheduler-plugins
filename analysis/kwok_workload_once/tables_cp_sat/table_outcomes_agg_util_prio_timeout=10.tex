@@ -1,17 +1,21 @@
-% Values are percent of instances (%), aggregated over utilization and priorities.
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Outcome breakdown (aggregated over utilization and priorities) for runs with 10\,s solver timeout (\% of instances).}
+\label{tab:outcomes-agg-util-prio-timeout10}
 \begin{tabular}{l cccccccc}
 \toprule
-\multicolumn{9}{l}{\textbf{timeout = 10\,s}} \\
-\addlinespace[0.2em]
-Outcome (\%) & \multicolumn{2}{c}{4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
+ & \multicolumn{2}{c}{\llap{\#nodes =\,}4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
- & 4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
+ & \llap{pods/node =\,}4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
 \midrule
-Failures & 2.2 & 2.2 & 1.3 & 2.3 & 1.8 & 2.6 & 11.1 & 46.0 \\
-No Calls & 6.5 & 24.2 & 1.1 & 15.7 & 0.2 & 12.4 & 0.0 & 0.0 \\
-KWOK Optimal & 32.2 & 12.9 & 12.4 & 6.0 & 2.8 & 5.3 & 0.3 & 0.1 \\
-Better & 4.0 & 11.1 & 31.8 & 38.5 & 60.9 & 53.9 & 74.3 & 50.6 \\
-Better\&Optimal & 55.1 & 49.6 & 53.4 & 37.5 & 34.2 & 25.8 & 14.2 & 3.3 \\
-Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+Failures (\%) & 2.2 & 2.2 & 1.3 & 2.3 & 1.8 & 2.6 & 11.1 & 46.0 \\
+No Calls (\%) & 6.5 & 24.2 & 1.1 & 15.7 & 0.2 & 12.4 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 32.2 & 12.9 & 12.4 & 6.0 & 2.8 & 5.3 & 0.3 & 0.1 \\
+Better (\%) & 4.0 & 11.1 & 31.8 & 38.5 & 60.9 & 53.9 & 74.3 & 50.6 \\
+Better\&Optimal (\%) & 55.1 & 49.6 & 53.4 & 37.5 & 34.2 & 25.8 & 14.2 & 3.3 \\
 \bottomrule
 \end{tabular}
+\end{table*}

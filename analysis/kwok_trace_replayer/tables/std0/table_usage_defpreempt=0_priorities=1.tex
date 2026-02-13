@@ -7,24 +7,24 @@
 \label{tab:usage-defpreempt0-prio1-std0}
 \begin{tabular}{l c c c c @{\hspace{1.5em}} c c c c}
 \toprule
- & \multicolumn{4}{c}{\#nodes = 16} & \multicolumn{4}{c}{\#nodes = 32} \\
-\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+ & \multicolumn{4}{c}{\llap{\#nodes =\,}16} & \multicolumn{4}{c}{32} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
  & \llap{inter-arrival =\,}2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
 \midrule
-\makecell[tl]{Scheduling-failure (blocking)} & -0.16 & +1.22 & +1.92 & +2.98 & +0.01 & +1.37 & +1.46 & +2.68 \\
-\makecell[tl]{Scheduling-failure (non-blocking)} & -0.16 & +1.18 & +1.92 & +2.97 & -0.05 & +1.24 & +1.37 & +2.49 \\
-\makecell[tl]{Periodic (blocking), 4s interval} & +1.11 & +1.95 & +2.18 & +3.09 & +1.00 & +1.54 & +1.93 & +2.36 \\
-\makecell[tl]{Periodic (non-blocking), 4s interval} & +1.09 & +1.81 & +2.16 & +3.12 & +0.41 & +1.68 & +1.75 & +2.26 \\
-\makecell[tl]{Periodic (blocking), 8s interval} & +0.98 & +1.53 & +2.09 & +2.99 & +0.70 & +1.60 & +1.72 & +2.43 \\
-\makecell[tl]{Periodic (non-blocking), 8s interval} & +0.92 & +1.57 & +2.10 & +3.04 & +0.69 & +1.63 & +1.76 & +2.61 \\
-\makecell[tl]{Periodic (blocking), 16s interval} & +0.61 & +1.49 & +1.86 & +2.91 & +0.55 & +1.37 & +1.47 & +2.37 \\
-\makecell[tl]{Periodic (non-blocking), 16s interval} & +0.65 & +1.31 & +1.81 & +2.85 & +0.50 & +1.24 & +1.49 & +2.32 \\
-\makecell[tl]{Stable-queue (blocking), 4s delay} & +1.10 & +1.74 & +2.21 & +3.05 & +0.63 & +1.45 & +1.76 & +2.68 \\
-\makecell[tl]{Stable-queue (non-blocking), 4s delay} & +1.07 & +1.75 & +2.23 & +3.07 & +0.71 & +1.53 & +1.50 & +2.63 \\
-\makecell[tl]{Stable-queue (blocking), 8s delay} & +0.85 & +1.54 & +2.08 & +3.00 & +0.63 & +1.39 & +1.42 & +2.50 \\
-\makecell[tl]{Stable-queue (non-blocking), 8s delay} & +0.95 & +1.57 & +2.08 & +3.09 & +0.64 & +1.48 & +1.63 & +2.30 \\
-\makecell[tl]{Stable-queue (blocking), 16s delay} & +0.92 & +1.23 & +1.95 & +2.79 & +0.48 & +1.24 & +1.52 & +2.62 \\
-\makecell[tl]{Stable-queue (non-blocking), 16s delay} & +0.66 & +1.30 & +1.88 & +2.83 & +0.45 & +1.22 & +1.62 & +2.61 \\
+Scheduling-failure (blocking) & -0.16 & +1.22 & +1.92 & +2.98 & +0.01 & +1.37 & +1.46 & +2.68 \\
+Scheduling-failure (non-blocking) & -0.16 & +1.18 & +1.92 & +2.97 & -0.05 & +1.24 & +1.37 & +2.49 \\
+Periodic (blocking), 4s interval & +1.11 & +1.95 & +2.18 & +3.09 & +1.00 & +1.54 & +1.93 & +2.36 \\
+Periodic (non-blocking), 4s interval & +1.09 & +1.81 & +2.16 & +3.12 & +0.41 & +1.68 & +1.75 & +2.26 \\
+Periodic (blocking), 8s interval & +0.98 & +1.53 & +2.09 & +2.99 & +0.70 & +1.60 & +1.72 & +2.43 \\
+Periodic (non-blocking), 8s interval & +0.92 & +1.57 & +2.10 & +3.04 & +0.69 & +1.63 & +1.76 & +2.61 \\
+Periodic (blocking), 16s interval & +0.61 & +1.49 & +1.86 & +2.91 & +0.55 & +1.37 & +1.47 & +2.37 \\
+Periodic (non-blocking), 16s interval & +0.65 & +1.31 & +1.81 & +2.85 & +0.50 & +1.24 & +1.49 & +2.32 \\
+Stable-queue (blocking), 4s delay & +1.10 & +1.74 & +2.21 & +3.05 & +0.63 & +1.45 & +1.76 & +2.68 \\
+Stable-queue (non-blocking), 4s delay & +1.07 & +1.75 & +2.23 & +3.07 & +0.71 & +1.53 & +1.50 & +2.63 \\
+Stable-queue (blocking), 8s delay & +0.85 & +1.54 & +2.08 & +3.00 & +0.63 & +1.39 & +1.42 & +2.50 \\
+Stable-queue (non-blocking), 8s delay & +0.95 & +1.57 & +2.08 & +3.09 & +0.64 & +1.48 & +1.63 & +2.30 \\
+Stable-queue (blocking), 16s delay & +0.92 & +1.23 & +1.95 & +2.79 & +0.48 & +1.24 & +1.52 & +2.62 \\
+Stable-queue (non-blocking), 16s delay & +0.66 & +1.30 & +1.88 & +2.83 & +0.45 & +1.22 & +1.62 & +2.61 \\
 \bottomrule
 \end{tabular}
 \end{table*}

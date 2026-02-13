@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 # scripts/helpers/table_helpers.py
 
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 from scripts.helpers.data_helpers import is_finite
+
+# ---------------------------------------------------------------------------
+# LaTeX table formatting defaults
+# ---------------------------------------------------------------------------
+
+DEFAULT_TABLE_FONT_SIZE = r"\tiny"
+DEFAULT_TABLE_TABCOLSEP = "1.2pt"
+DEFAULT_TABLE_ARRAYSTRETCH = "1.12"
 
 def nan_str() -> str:
     """
@@ -104,3 +113,45 @@ def metric_header_tex(label: str) -> str:
         return rf"\makecell{{{s}}}"
     left, right = parts
     return rf"\makecell{{{left}\\{right}}}"
+
+
+# ---------------------------------------------------------------------------
+# Shared LaTeX table structure helpers
+# ---------------------------------------------------------------------------
+
+def latex_cmidrules(n_groups: int, cols_per_group: int, *, start_col: int = 2) -> str:
+    """Generate ``\\cmidrule(lr)`` separators for *n_groups* column groups."""
+    parts: List[str] = []
+    col = start_col
+    for _ in range(n_groups):
+        end = col + cols_per_group - 1
+        parts.append(rf"\cmidrule(lr){{{col}-{end}}}")
+        col = end + 1
+    return "".join(parts)
+
+
+def write_latex_table(
+    out_path: Path,
+    tabular_lines: List[str],
+    *,
+    caption: str = "",
+    label: str = "",
+    font_size: str = DEFAULT_TABLE_FONT_SIZE,
+    tabcolsep: str = DEFAULT_TABLE_TABCOLSEP,
+    arraystretch: str = DEFAULT_TABLE_ARRAYSTRETCH,
+) -> None:
+    """Wrap *tabular_lines* in a ``table*`` float and write to *out_path*."""
+    wrapped: List[str] = [
+        r"\begin{table*}[t]",
+        font_size,
+        rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}",
+        rf"\renewcommand{{\arraystretch}}{{{arraystretch}}}",
+        r"\centering",
+        rf"\caption{{{caption}}}",
+        rf"\label{{{label}}}",
+        *tabular_lines,
+        r"\end{table*}",
+        "",
+    ]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(wrapped), encoding="utf-8")

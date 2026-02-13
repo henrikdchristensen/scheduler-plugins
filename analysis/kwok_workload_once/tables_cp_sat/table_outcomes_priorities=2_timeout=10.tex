@@ -1,46 +1,47 @@
-% Values are percent of instances (%).
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Outcome breakdown for runs with 2 priorities and 10\,s solver timeout (\% of instances).}
+\label{tab:outcomes-prio2-timeout10}
 \begin{tabular}{l cccccccc}
 \toprule
-\multicolumn{9}{l}{\textbf{\#priorities = 2, timeout = 10\,s}} \\
-\addlinespace[0.2em]
-Outcome (\%) & \multicolumn{2}{c}{4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
+ & \multicolumn{2}{c}{\llap{\#nodes =\,}4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
- & 4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
+ & \llap{pods/node =\,}4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
 \midrule
 \multicolumn{9}{l}{\textbf{util = 90\%}} \\
 \midrule
-Failures & 2.0 & 2.0 & 0.0 & 5.0 & 1.0 & 5.0 & 22.0 & \text{--} \\
-No Calls & 24.0 & 81.0 & 5.0 & 64.0 & 1.0 & 49.0 & 0.0 & \text{--} \\
-KWOK Optimal & 23.0 & 7.0 & 5.0 & 18.0 & 0.0 & 21.0 & 0.0 & \text{--} \\
-Better & 0.0 & 0.0 & 3.0 & 0.0 & 16.0 & 0.0 & 37.0 & \text{--} \\
-Better\&Optimal & 51.0 & 10.0 & 87.0 & 13.0 & 82.0 & 25.0 & 41.0 & \text{--} \\
-Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & \text{--} \\
+Failures (\%) & 2.0 & 2.0 & 0.0 & 5.0 & 1.0 & 5.0 & 22.0 & 0.0 \\
+No Calls (\%) & 24.0 & 81.0 & 5.0 & 64.0 & 1.0 & 49.0 & 0.0 & 100.0 \\
+KWOK Optimal (\%) & 23.0 & 7.0 & 5.0 & 18.0 & 0.0 & 21.0 & 0.0 & 0.0 \\
+Better (\%) & 0.0 & 0.0 & 3.0 & 0.0 & 16.0 & 0.0 & 37.0 & 0.0 \\
+Better\&Optimal (\%) & 51.0 & 10.0 & 87.0 & 13.0 & 82.0 & 25.0 & 41.0 & 0.0 \\
 \midrule
 \multicolumn{9}{l}{\textbf{util = 95\%}} \\
 \midrule
-Failures & 2.0 & 3.0 & 0.0 & 1.0 & 3.0 & 6.0 & 14.0 & 74.0 \\
-No Calls & 2.0 & 16.0 & 0.0 & 1.0 & 0.0 & 1.0 & 0.0 & 0.0 \\
-KWOK Optimal & 38.0 & 7.0 & 7.0 & 5.0 & 0.0 & 2.0 & 0.0 & 1.0 \\
-Better & 1.0 & 0.0 & 33.0 & 1.0 & 91.0 & 20.0 & 86.0 & 23.0 \\
-Better\&Optimal & 57.0 & 74.0 & 60.0 & 92.0 & 6.0 & 71.0 & 0.0 & 2.0 \\
-Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+Failures (\%) & 2.0 & 3.0 & 0.0 & 1.0 & 3.0 & 6.0 & 14.0 & 74.0 \\
+No Calls (\%) & 2.0 & 16.0 & 0.0 & 1.0 & 0.0 & 1.0 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 38.0 & 7.0 & 7.0 & 5.0 & 0.0 & 2.0 & 0.0 & 1.0 \\
+Better (\%) & 1.0 & 0.0 & 33.0 & 1.0 & 91.0 & 20.0 & 86.0 & 23.0 \\
+Better\&Optimal (\%) & 57.0 & 74.0 & 60.0 & 92.0 & 6.0 & 71.0 & 0.0 & 2.0 \\
 \midrule
 \multicolumn{9}{l}{\textbf{util = 100\%}} \\
 \midrule
-Failures & 1.0 & 0.0 & 0.0 & 4.0 & 1.0 & 0.0 & 1.0 & 47.0 \\
-No Calls & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
-KWOK Optimal & 37.0 & 13.0 & 7.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
-Better & 1.0 & 6.0 & 33.0 & 88.0 & 94.0 & 100.0 & 99.0 & 53.0 \\
-Better\&Optimal & 61.0 & 81.0 & 60.0 & 8.0 & 5.0 & 0.0 & 0.0 & 0.0 \\
-Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+Failures (\%) & 1.0 & 0.0 & 0.0 & 4.0 & 1.0 & 0.0 & 1.0 & 47.0 \\
+No Calls (\%) & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 37.0 & 13.0 & 7.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+Better (\%) & 1.0 & 6.0 & 33.0 & 88.0 & 94.0 & 100.0 & 99.0 & 53.0 \\
+Better\&Optimal (\%) & 61.0 & 81.0 & 60.0 & 8.0 & 5.0 & 0.0 & 0.0 & 0.0 \\
 \midrule
 \multicolumn{9}{l}{\textbf{util = 105\%}} \\
 \midrule
-Failures & 0.0 & 0.0 & 2.0 & 1.0 & 0.0 & 1.0 & 5.0 & 31.0 \\
-No Calls & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
-KWOK Optimal & 43.0 & 10.0 & 16.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
-Better & 0.0 & 3.0 & 32.0 & 94.0 & 95.0 & 99.0 & 95.0 & 69.0 \\
-Better\&Optimal & 57.0 & 87.0 & 50.0 & 5.0 & 5.0 & 0.0 & 0.0 & 0.0 \\
-Other & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+Failures (\%) & 0.0 & 0.0 & 2.0 & 1.0 & 0.0 & 1.0 & 5.0 & 31.0 \\
+No Calls (\%) & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 43.0 & 10.0 & 16.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+Better (\%) & 0.0 & 3.0 & 32.0 & 94.0 & 95.0 & 99.0 & 95.0 & 69.0 \\
+Better\&Optimal (\%) & 57.0 & 87.0 & 50.0 & 5.0 & 5.0 & 0.0 & 0.0 & 0.0 \\
 \bottomrule
 \end{tabular}
+\end{table*}
