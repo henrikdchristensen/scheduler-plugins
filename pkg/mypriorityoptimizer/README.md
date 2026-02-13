@@ -165,7 +165,7 @@ componentsPatches:
 
 As can be seen this file can be used to set environment variables to configure the plugin.
 
-Having set up the KWOK cluster configuration file, ensure you have built the latest scheduler binary or Docker image (see [Building](#building)). Also if using the binary setup, ensure the the latest Python solver is available at `/opt/solver/main.py` and that the Python environment is set up, by following these steps:
+Having set up the KWOK cluster configuration file, ensure you have built the latest scheduler binary or Docker image (see [Building](#building)). Also if using the binary setup, ensure the the latest Python solver is available at `/opt/solver/solver.py` and that the Python environment is set up, by following these steps:
 
 - From the root of the repo, run the following commands to set up the Python environment with the required dependencies:
 
@@ -176,11 +176,14 @@ Having set up the KWOK cluster configuration file, ensure you have built the lat
    sudo /opt/venv/bin/pip install --no-cache-dir -r scripts/python_solver/requirements.txt
    ```
 
-- Copy the Python solver code to the location expected used by the plugin:
+- Copy the Python solver code to the location expected by the plugin. You can choose between the CP-SAT solver (default) or the CBC MIP solver:
 
    ```bash
    sudo install -d -m 0755 /opt/solver/
-   sudo cp -a scripts/python_solver/main.py /opt/solver/main.py
+   # For CP-SAT solver (default, constraint programming):
+   sudo cp -a scripts/python_solver/solver_cp_sat.py /opt/solver/solver.py
+   # Or for CBC solver (mixed integer programming):
+   # sudo cp -a scripts/python_solver/solver_cbc.py /opt/solver/solver.py
    ```
 
    NOTE: If you change the code of the Python solver, you *must* copy it again.

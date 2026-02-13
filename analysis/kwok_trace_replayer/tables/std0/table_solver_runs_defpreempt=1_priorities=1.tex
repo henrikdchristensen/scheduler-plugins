@@ -3,28 +3,28 @@
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean paired differences in number of solver runs between the plugin with default preemption enabled and the default scheduler for runs with one priority.}
+\caption{Mean paired differences in number of solver runs between the plugin with DefaultPreemption enabled and the default scheduler for runs with one priority.}
 \label{tab:solver_runs-defpreempt1-prio1-std0}
 \begin{tabular}{l c c c c @{\hspace{1.5em}} c c c c}
 \toprule
- & \multicolumn{4}{c}{\#nodes = 16} & \multicolumn{4}{c}{\#nodes = 32} \\
-\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+ & \multicolumn{4}{c}{\llap{\#nodes =\,}16} & \multicolumn{4}{c}{32} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
  & \llap{inter-arrival =\,}2s & 4s & 8s & 16s & 2s & 4s & 8s & 16s \\
 \midrule
-\makecell[tl]{Scheduling-failure (blocking)} & 314 & 218 & 152 & 108 & 270 & 191 & 147 & 109 \\
-\makecell[tl]{Scheduling-failure (non-blocking)} & 320 & 226 & 156 & 114 & 264 & 184 & 149 & 110 \\
-\makecell[tl]{Periodic (blocking), 4s interval} & 85 & 86 & 80 & 75 & 103 & 101 & 92 & 96 \\
-\makecell[tl]{Periodic (non-blocking), 4s interval} & 88 & 87 & 76 & 80 & 101 & 96 & 95 & 93 \\
-\makecell[tl]{Periodic (blocking), 8s interval} & 38 & 47 & 45 & 51 & 52 & 65 & 71 & 61 \\
-\makecell[tl]{Periodic (non-blocking), 8s interval} & 41 & 47 & 46 & 50 & 50 & 63 & 76 & 70 \\
-\makecell[tl]{Periodic (blocking), 16s interval} & 16 & 23 & 26 & 27 & 26 & 37 & 44 & 42 \\
-\makecell[tl]{Periodic (non-blocking), 16s interval} & 17 & 25 & 25 & 30 & 25 & 34 & 44 & 44 \\
-\makecell[tl]{Stable-queue (blocking), 4s delay} & 129 & 129 & 110 & 98 & 189 & 162 & 155 & 120 \\
-\makecell[tl]{Stable-queue (non-blocking), 4s delay} & 128 & 131 & 111 & 132 & 190 & 173 & 157 & 123 \\
-\makecell[tl]{Stable-queue (blocking), 8s delay} & 49 & 62 & 57 & 74 & 88 & 92 & 101 & 93 \\
-\makecell[tl]{Stable-queue (non-blocking), 8s delay} & 50 & 65 & 60 & 69 & 96 & 99 & 102 & 83 \\
-\makecell[tl]{Stable-queue (blocking), 16s delay} & 21 & 31 & 33 & 40 & 38 & 49 & 70 & 65 \\
-\makecell[tl]{Stable-queue (non-blocking), 16s delay} & 22 & 28 & 31 & 45 & 39 & 47 & 66 & 57 \\
+Scheduling-failure (blocking) & 314 & 218 & 152 & 108 & 270 & 191 & 147 & 109 \\
+Scheduling-failure (non-blocking) & 320 & 226 & 156 & 114 & 264 & 184 & 149 & 110 \\
+Periodic (blocking), 4s interval & 85 & 86 & 80 & 75 & 103 & 101 & 92 & 96 \\
+Periodic (non-blocking), 4s interval & 88 & 87 & 76 & 80 & 101 & 96 & 95 & 93 \\
+Periodic (blocking), 8s interval & 38 & 47 & 45 & 51 & 52 & 65 & 71 & 61 \\
+Periodic (non-blocking), 8s interval & 41 & 47 & 46 & 50 & 50 & 63 & 76 & 70 \\
+Periodic (blocking), 16s interval & 16 & 23 & 26 & 27 & 26 & 37 & 44 & 42 \\
+Periodic (non-blocking), 16s interval & 17 & 25 & 25 & 30 & 25 & 34 & 44 & 44 \\
+Stable-queue (blocking), 4s delay & 129 & 129 & 110 & 98 & 189 & 162 & 155 & 120 \\
+Stable-queue (non-blocking), 4s delay & 128 & 131 & 111 & 132 & 190 & 173 & 157 & 123 \\
+Stable-queue (blocking), 8s delay & 49 & 62 & 57 & 74 & 88 & 92 & 101 & 93 \\
+Stable-queue (non-blocking), 8s delay & 50 & 65 & 60 & 69 & 96 & 99 & 102 & 83 \\
+Stable-queue (blocking), 16s delay & 21 & 31 & 33 & 40 & 38 & 49 & 70 & 65 \\
+Stable-queue (non-blocking), 16s delay & 22 & 28 & 31 & 45 & 39 & 47 & 66 & 39 \\
 \bottomrule
 \end{tabular}
 \end{table*}

@@ -1,5 +1,0 @@
-1,2,3 (2026-02-04-01)
-mode=periodic64s_blocking=0_defpreempt=0_nodes=16_prio=1_arrival=16s.yaml
-
-3,4,5 (2026-02-04-02)
-mode=schedulingfailure_blocking=1_defpreempt=1_nodes=16_prio=1_arrival=1s.yaml

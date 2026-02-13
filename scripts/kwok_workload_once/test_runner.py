@@ -2,9 +2,10 @@
 # test_runner.py
 """
 python -m scripts.kwok_workload_once.test_runner --job-file <job-file.yaml>
+python -m scripts.kwok_workload_once.test_runner --job-list <job-list.txt>
 """
 
-import sys, shutil, argparse, math, time, random, csv, json, logging, yaml, subprocess, traceback, shlex
+import sys, shutil, argparse, math, time, random, csv, json, logging, yaml, subprocess, traceback, shlex, os
 from argparse import BooleanOptionalAction
 from importlib import metadata as importlib_metadata
 from dataclasses import dataclass
@@ -84,7 +85,19 @@ SOLVER_TRIGGER_URL = "http://localhost:18080/solve"
 SOLVER_TRIGGER_TIMEOUT_S = 60
 SOLVER_ACTIVE_URL = "http://localhost:18080/active"
 
-SOLVER_CMD = "python3 scripts/python_solver/main.py"
+# Solver type: cp_sat (default), cbc (MIP solver), or gurobi
+# Can be overridden via --solver-type argument or SOLVER_TYPE env var
+SOLVER_SCRIPTS = {
+    "cp_sat": "scripts/python_solver/solver_cp_sat.py",
+    "cbc": "scripts/python_solver/solver_cbc.py",
+    "gurobi": "scripts/python_solver/solver_gurobi.py",
+}
+DEFAULT_SOLVER_TYPE = "cp_sat"
+
+def get_solver_cmd(solver_type: str = DEFAULT_SOLVER_TYPE) -> str:
+    """Get the solver command based on solver type."""
+    script = SOLVER_SCRIPTS.get(solver_type, SOLVER_SCRIPTS[DEFAULT_SOLVER_TYPE])
+    return f"python3 {script}"
 
 # ===============================================================
 # Data classes
@@ -160,6 +173,10 @@ def build_argparser() -> argparse.ArgumentParser:
                     help="KWOK runtime")
     ap.add_argument("--job-file", dest="job_file", default=None,
                     help="Path to a YAML job file describing one job and optional in-memory config overrides.")
+    ap.add_argument("--job-list", dest="job_list", default=None,
+                    help="Path to a text file listing job-file paths (one per line). "
+                         "Jobs are processed sequentially in file order. "
+                         "Lines starting with '#' and blank lines are ignored.")
     ap.add_argument("--workload-config-file", dest="workload_config_file", required=False,
                     help="Path to a single workload YAML (WorkloadConfiguration)")
     ap.add_argument("--kwokctl-config-file", dest="kwokctl_config_file", required=False,
@@ -202,6 +219,8 @@ def build_argparser() -> argparse.ArgumentParser:
                     help="After applying all pods for a seed, POST the manual solver endpoint.")
 
     # Direct solver
+    ap.add_argument("--solver-type", dest="solver_type", default=None, choices=["cp_sat", "cbc", "gurobi"],
+                    help="Solver type: cp_sat (constraint programming), cbc (MIP solver), or gurobi.")
     ap.add_argument("--solver-directly", dest="solver_directly", action=BooleanOptionalAction, default=None,
                     help="Bypass cluster use; directly call the Python solver with generated nodes/pods.")
     ap.add_argument("--solver-timeout-ms", dest="solver_timeout_ms", type=int, default=None,
@@ -1567,10 +1586,12 @@ class TestRunner:
         _write_json(self.args.solver_input_export, instance)
 
         # Run solver
-        LOG.info("solving directly with %d nodes and %d pods (seed=%d)", len(nodes), len(pods), seed)
+        solver_type = getattr(self.args, "solver_type", None) or os.environ.get("SOLVER_TYPE", DEFAULT_SOLVER_TYPE)
+        solver_cmd = get_solver_cmd(solver_type)
+        LOG.info("solving directly with %d nodes and %d pods (seed=%d, solver=%s)", len(nodes), len(pods), seed, solver_type)
         t0 = time.time()
         completed = subprocess.run(
-            shlex.split(SOLVER_CMD),
+            shlex.split(solver_cmd),
             input=json.dumps(instance).encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1971,11 +1992,22 @@ class TestRunner:
         
         phase = "status_snapshot_before_solver"
         LOG.info("phase=%s", phase)
-        snap_before = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods)
-        running_count_before = len(snap_before.pods_running)
-        unsched_count_before = len(snap_before.pods_unscheduled)
+        snap_before = None
+        for _snap_try in range(1, RETRIES_ON_FAIL + 1):
+            snap_timeout = 10 + 2 * _snap_try
+            snap_before = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods, timeout=snap_timeout)
+            running_count_before = len(snap_before.pods_running)
+            unsched_count_before = len(snap_before.pods_unscheduled)
+            if running_count_before + unsched_count_before == ta.num_pods:
+                break
+            LOG.warning(
+                "snapshot_before attempt %d/%d (timeout=%ds): pod count mismatch: expected %d, got %d+%d=%d; retrying",
+                _snap_try, RETRIES_ON_FAIL, snap_timeout,
+                ta.num_pods, running_count_before, unsched_count_before,
+                running_count_before + unsched_count_before,
+            )
         
-        # validate counts
+        # validate counts after retries
         if running_count_before + unsched_count_before != ta.num_pods:
             phase = "snapshot_validation_before"
             self._record_failure("seed", seed, phase,
@@ -2015,11 +2047,22 @@ class TestRunner:
         # status snapshot
         phase = "status_snapshot_after_settle"
         LOG.info("phase=%s", phase)
-        snap_now = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods)
-        running_count_now = len(snap_now.pods_running)
-        unsched_count_now = len(snap_now.pods_unscheduled)
+        snap_now = None
+        for _snap_try in range(1, RETRIES_ON_FAIL + 1):
+            snap_timeout = 10 + 2 * _snap_try
+            snap_now = stat_snapshot(self.ctx, ta.namespace, expected=ta.num_pods, timeout=snap_timeout)
+            running_count_now = len(snap_now.pods_running)
+            unsched_count_now = len(snap_now.pods_unscheduled)
+            if running_count_now + unsched_count_now == ta.num_pods:
+                break
+            LOG.warning(
+                "snapshot_after attempt %d/%d (timeout=%ds): pod count mismatch: expected %d, got %d+%d=%d; retrying",
+                _snap_try, RETRIES_ON_FAIL, snap_timeout,
+                ta.num_pods, running_count_now, unsched_count_now,
+                running_count_now + unsched_count_now,
+            )
         
-        # validate counts
+        # validate counts after retries
         if running_count_now + unsched_count_now != ta.num_pods:
             phase = "snapshot_validation_after"
             self._record_failure("seed", seed, phase,
@@ -2144,6 +2187,58 @@ class TestRunner:
         elif self.args.seed_file:
             self.run_mode_seed_file()
 
+def _read_job_list(path: str) -> List[str]:
+    """
+    Read a job-list file and return an ordered list of job-file paths.
+    Blank lines and lines starting with '#' are skipped.
+    Paths are resolved relative to the job-list file's parent directory.
+    """
+    job_list_path = Path(path).resolve()
+    if not job_list_path.exists():
+        raise SystemExit(f"--job-list file not found: {job_list_path}")
+    base_dir = job_list_path.parent
+    jobs: List[str] = []
+    with open(job_list_path, "r", encoding="utf-8") as f:
+        for line_no, raw_line in enumerate(f, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            p = Path(line)
+            if not p.is_absolute():
+                p = base_dir / p
+            p = p.resolve()
+            if not p.exists():
+                raise SystemExit(f"--job-list line {line_no}: job file not found: {p} (raw: {line!r})")
+            jobs.append(str(p))
+    if not jobs:
+        raise SystemExit(f"--job-list file is empty (no job paths found): {job_list_path}")
+    return jobs
+
+def _run_job_list(args: argparse.Namespace) -> None:
+    """
+    Process a job-list file: iterate over each job-file path in order,
+    create a fresh TestRunner for each, and run it.
+    """
+    job_paths = _read_job_list(args.job_list)
+    total = len(job_paths)
+    LOG.info("job-list: %d job(s) to process", total)
+    for idx, job_path in enumerate(job_paths, start=1):
+        header, footer = make_header_footer(f"JOB {idx}/{total}")
+        LOG.info("\n%s\njob-file=%s\n%s", header, job_path, footer)
+        # Build a per-job copy of args with the current job-file set
+        job_args = argparse.Namespace(**vars(args))
+        job_args.job_file = job_path
+        job_args.job_list = None  # prevent recursion
+        try:
+            runner = TestRunner(job_args)
+            runner.run()
+        except SystemExit as e:
+            LOG.error("job %d/%d failed (job-file=%s): %s", idx, total, job_path, e)
+        except Exception as e:
+            LOG.error("job %d/%d unexpected error (job-file=%s): %s", idx, total, job_path, e)
+            LOG.debug(traceback.format_exc())
+        LOG.info("job %d/%d finished (job-file=%s)", idx, total, job_path)
+
 def main():
     # Parse args
     args = build_argparser().parse_args()
@@ -2153,7 +2248,16 @@ def main():
         generate_seeds(args.gen_seeds_to_file)
         return
 
-    # TestRunner instance
+    # Job-list mode: process multiple job files sequentially
+    if getattr(args, "job_list", None):
+        # Set up logging early so _run_job_list can log
+        log_level = getattr(args, "log_level", None) or "INFO"
+        setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=log_level)
+        _run_job_list(args)
+        print("done (job-list).")
+        return
+
+    # Single job / direct mode
     test_runner = TestRunner(args)
     test_runner.run()
 

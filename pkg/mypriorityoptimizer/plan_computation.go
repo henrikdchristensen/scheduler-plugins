@@ -36,9 +36,10 @@ func (pl *SharedState) planComputation(
 	// =====================================
 	solverAttempts := []SolverAttempt{
 		{
-			Name:    "python",
-			Enabled: SolverPythonEnabled,
-			Timeout: SolverPythonTimeout + time.Duration(SolverPythonGraceMs)*time.Millisecond,
+			Name:          "python",
+			Enabled:       SolverPythonEnabled,
+			SolverTimeout: SolverPythonTimeout,
+			Timeout:       SolverPythonTimeout + time.Duration(SolverPythonGraceMs)*time.Millisecond,
 			Run: func(ctx context.Context, in SolverInput) (*SolverOutput, error) {
 				// Use hook if present (unit tests); otherwise call real solver.
 				if runPythonSolverHook != nil {
@@ -75,8 +76,11 @@ func (pl *SharedState) planComputation(
 		}
 
 		inAttempt := solverInput
-		inAttempt.TimeoutMs = att.Timeout.Milliseconds()
+		// Pass SolverTimeout to the solver (without grace).
+		// The grace period (Timeout - SolverTimeout) is reserved for I/O overhead.
+		inAttempt.TimeoutMs = att.SolverTimeout.Milliseconds()
 
+		// Context includes grace period for I/O overhead.
 		ctxAtt, cancel := context.WithTimeout(ctx, att.Timeout)
 		start := time.Now()
 		out, err := att.Run(ctxAtt, inAttempt)

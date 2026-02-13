@@ -1,0 +1,21 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Outcome breakdown (aggregated over utilization) for runs with 4 priorities and 20\,s solver timeout (\% of instances).}
+\label{tab:outcomes-agg-util-prio4-timeout20}
+\begin{tabular}{l cccccccc}
+\toprule
+ & \multicolumn{2}{c}{\llap{\#nodes =\,}4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+ & \llap{pods/node =\,}4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
+\midrule
+Failures (\%) & 15.8 & 5.8 & 6.8 & 2.8 & 4.0 & 1.8 & 0.8 & 5.3 \\
+No Calls (\%) & 6.5 & 24.8 & 1.0 & 16.0 & 0.2 & 12.2 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 45.5 & 24.2 & 25.5 & 11.8 & 8.8 & 7.8 & 1.2 & 0.0 \\
+Better (\%) & 0.0 & 0.0 & 0.2 & 3.8 & 4.8 & 36.2 & 30.8 & 67.7 \\
+Better\&Optimal (\%) & 32.2 & 45.2 & 66.5 & 65.8 & 82.2 & 42.0 & 67.2 & 27.0 \\
+\bottomrule
+\end{tabular}
+\end{table*}

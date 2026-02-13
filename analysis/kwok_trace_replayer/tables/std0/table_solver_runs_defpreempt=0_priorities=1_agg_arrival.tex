@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in number of solver runs between the plugin with DefaultPreemption disabled and the default scheduler for runs with one priority, aggregated over inter-arrival times.}
+\label{tab:solver_runs-defpreempt0-prio1-std0-agg-arrival}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes=16 & \#nodes=32 \\
+\midrule
+Scheduling-failure (blocking) & 218 & 192 \\
+Scheduling-failure (non-blocking) & 218 & 195 \\
+Periodic (blocking), 4s interval & 78 & 91 \\
+Periodic (non-blocking), 4s interval & 76 & 89 \\
+Periodic (blocking), 8s interval & 43 & 56 \\
+Periodic (non-blocking), 8s interval & 42 & 56 \\
+Periodic (blocking), 16s interval & 23 & 33 \\
+Periodic (non-blocking), 16s interval & 23 & 36 \\
+Stable-queue (blocking), 4s delay & 117 & 152 \\
+Stable-queue (non-blocking), 4s delay & 114 & 157 \\
+Stable-queue (blocking), 8s delay & 64 & 92 \\
+Stable-queue (non-blocking), 8s delay & 65 & 93 \\
+Stable-queue (blocking), 16s delay & 33 & 55 \\
+Stable-queue (non-blocking), 16s delay & 32 & 50 \\
+\bottomrule
+\end{tabular}
+\end{table*}

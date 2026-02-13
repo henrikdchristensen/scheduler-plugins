@@ -25,11 +25,11 @@ const (
 
 	// PlanRealizationTimeout is the maximum duration a plan may being realized
 	// by scheduling pinning workers before being terminated and marked as failed.
-	PlanRealizationTimeout = 4 * time.Second
+	PlanRealizationTimeout = 8 * time.Second
 	// PlanCompletionCheckInterval is how often we check whether an active plan has reached its desired state.
 	PlanCompletionCheckInterval = 250 * time.Millisecond
 	// The overall timeout for plan activation operations (like evictions and recreations).
-	PlanActivationTimeout = 4 * time.Second
+	PlanActivationTimeout = 8 * time.Second
 	// Interval for waiting for pods to be gone after eviction.
 	WaitPodsGoneInterval = 250 * time.Millisecond
 	// Degree of parallelism for eviction and recreate operations.

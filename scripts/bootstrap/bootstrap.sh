@@ -11,6 +11,9 @@ CONTENT_DIR_WAIT_INTERVAL_S="${CONTENT_DIR_WAIT_INTERVAL:-2}" # seconds
 PYTHON_SOLVER_OUT_VENV_DIR="/opt/venv"
 PYTHON_SOLVER_OUT_SCRIPT_DIR="/opt/solver"
 
+# Solver selection: cp_sat (default), cbc, gurobi
+SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
+
 # Runner selection: test_runner (default) or trace_replayer
 RUNNER="${RUNNER:-test_runner}"
 
@@ -18,6 +21,7 @@ RUNNER="${RUNNER:-test_runner}"
 CLUSTER_NAME="${CLUSTER_NAME:-}"
 KWOK_RUNTIME="${KWOK_RUNTIME:-binary}"  # binary | docker
 JOB_FILE="${JOB_FILE:-}"                # can be relative to CONTENT_DIR
+JOB_LIST="${JOB_LIST:-}"                # can be relative to CONTENT_DIR
 LOG_LEVEL="${LOG_LEVEL:-}"
 CLEAN_START="${CLEAN_START:-}"
 
@@ -89,6 +93,7 @@ resolve_paths_relative_to_folder() {
   RESULTS_DIR="$(to_abs_under_folder "$RESULTS_DIR")"
   SEED_FILE="$(to_abs_under_folder "$SEED_FILE")"
   JOB_FILE="$(to_abs_under_folder "$JOB_FILE")"
+  JOB_LIST="$(to_abs_under_folder "$JOB_LIST")"
   TRACE_DIR="$(to_abs_under_folder "$TRACE_DIR")"
   KWOKCTL_CONFIG_FILE="$(to_abs_under_folder "$KWOKCTL_CONFIG_FILE")"
 }
@@ -97,8 +102,11 @@ print_cfg() {
   log cfg "CONTENT_DIR=${CONTENT_DIR}"
   log cfg "KWOK_RUNTIME=${KWOK_RUNTIME}"
   log cfg "RUNNER=${RUNNER}"
+  log cfg "SOLVER_TYPE=${SOLVER_TYPE}"
 
-  if [ -n "${JOB_FILE}" ]; then
+  if [ -n "${JOB_LIST}" ]; then
+    log cfg "JOB_LIST=${JOB_LIST}"
+  elif [ -n "${JOB_FILE}" ]; then
     log cfg "JOB_FILE=${JOB_FILE}"
   else
     log cfg "CLUSTER_NAME=${CLUSTER_NAME:-<unset>}"
@@ -181,7 +189,22 @@ pip_install() {
 stage_solver_and_venv() {
   log init "staging solver to ${PYTHON_SOLVER_OUT_SCRIPT_DIR} (venv @ ${PYTHON_SOLVER_OUT_VENV_DIR})"
 
-  require_file "${CONTENT_DIR}/scripts/python_solver/main.py"
+  # Determine solver script based on SOLVER_TYPE
+  local solver_script
+  case "${SOLVER_TYPE}" in
+    cbc)
+      solver_script="solver_cbc.py"
+      ;;
+    gurobi)
+      solver_script="solver_gurobi.py"
+      ;;
+    cp_sat|*)
+      solver_script="solver_cp_sat.py"
+      ;;
+  esac
+  log cfg "SOLVER_TYPE=${SOLVER_TYPE} -> using ${solver_script}"
+
+  require_file "${CONTENT_DIR}/scripts/python_solver/${solver_script}"
   require_file "${CONTENT_DIR}/scripts/python_solver/requirements.txt"
 
   ensure_system_python
@@ -190,7 +213,7 @@ stage_solver_and_venv() {
     set -euo pipefail
     install -d -m 0755 '${PYTHON_SOLVER_OUT_SCRIPT_DIR}'
     install -d -m 0755 '${PYTHON_SOLVER_OUT_VENV_DIR}'
-    cp -a '${CONTENT_DIR}/scripts/python_solver/main.py' '${PYTHON_SOLVER_OUT_SCRIPT_DIR}/main.py'
+    cp -a '${CONTENT_DIR}/scripts/python_solver/${solver_script}' '${PYTHON_SOLVER_OUT_SCRIPT_DIR}/solver.py'
 
     python3 -m venv '${PYTHON_SOLVER_OUT_VENV_DIR}'
     '${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python' -m ensurepip --upgrade || true
@@ -204,6 +227,7 @@ PY
   "
 
   pip_install "${PYTHON_SOLVER_OUT_VENV_DIR}/bin/pip" "${CONTENT_DIR}/scripts/python_solver/requirements.txt"
+
   log ok "staged solver + venv"
 }
 
@@ -287,9 +311,11 @@ stage_test() {
         [ -n '${REPEATS:-}'           ] && args+=( --repeats '${REPEATS:-}' )
         [ -n '${LOG_LEVEL}'           ] && args+=( --log-level '${LOG_LEVEL}' )
         [ -n '${JOB_FILE}'            ] && args+=( --job-file '${JOB_FILE}' )
+        [ -n '${JOB_LIST}'            ] && args+=( --job-list '${JOB_LIST}' )
         [ -n '${SEEDS_NOT_ALL_RUNNING}' ] && args+=( --seeds-not-all-running '${SEEDS_NOT_ALL_RUNNING}' )
         [ -n '${DEFAULT_SCHEDULER}'   ] && args+=( --default-scheduler '${DEFAULT_SCHEDULER}' )
         [ -n '${KWOKCTL_CONFIG_FILE}' ] && args+=( --kwokctl-config-file '${KWOKCTL_CONFIG_FILE}' )
+        [ -n '${SOLVER_TYPE}'         ] && args+=( --solver-type '${SOLVER_TYPE}' )
 
         # passthrough flags (computed outside root) isn't reliable; re-compute inside if you need it,
         # or just keep it simple for now.
@@ -316,6 +342,8 @@ FLAGS_SPEC=(
   "seed|SEED|value|"
   "repeats|REPEATS|value|"
   "job-file|JOB_FILE|value|"
+  "job-list|JOB_LIST|value|"
+  "solver-type|SOLVER_TYPE|value|"
   "solver-trigger|SOLVER_TRIGGER|flag|--solver-trigger"
   "save-solver-stats|SAVE_SOLVER_STATS|flag|--save-solver-stats"
   "save-scheduler-logs|SAVE_SCHEDULER_LOGS|flag|--save-scheduler-logs"

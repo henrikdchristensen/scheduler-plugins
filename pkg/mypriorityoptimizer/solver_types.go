@@ -82,7 +82,9 @@ type SolverAttempt struct {
 	Name string
 	// Whether the solver attempt is enabled
 	Enabled bool
-	// Timeout for the solver attempt
+	// SolverTimeout is the time given to the solver for computation.
+	SolverTimeout time.Duration
+	// Timeout is the overall timeout including grace period for I/O overhead.
 	Timeout time.Duration
 	// Function to run the solver attempt
 	Run func(ctx context.Context, in SolverInput) (*SolverOutput, error)

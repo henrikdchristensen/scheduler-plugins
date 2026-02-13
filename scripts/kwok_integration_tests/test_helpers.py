@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # test_helpers.py
 
-import logging, yaml
+import logging, os, yaml
 
 from pathlib import Path
 from dataclasses import dataclass
@@ -38,6 +38,10 @@ POD_TIMEOUT_S = 10
 
 # Valid optimization modes (just for CLI/pytest validation)
 VALID_OPT_MODES = {"scheduling_failure", "periodic", "stable_queue", "manual", "manual_blocking"}
+
+# Valid solver types
+VALID_SOLVER_TYPES = {"cp_sat", "cbc", "gurobi"}
+DEFAULT_SOLVER_TYPE = "cp_sat"
 
 # Global default: by default we DO NOT disable waits & active checks.
 DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS = False
@@ -257,15 +261,33 @@ def build_kwokctl_config_for_mode(
     base_doc: Dict[str, Any],
     opt_mode: str,
     opt_sync: bool,
+    solver_type: str = DEFAULT_SOLVER_TYPE,
 ) -> Dict[str, Any]:
     """
-    Return a copy of base_doc that injects OPTIMIZE_MODE
+    Return a copy of base_doc that injects OPTIMIZE_MODE and SOLVER_TYPE
     envs into the kube-scheduler component.
     """
     envs = [
         {"name": "OPTIMIZE_MODE", "value": opt_mode},
         {"name": "OPTIMIZE_BLOCKING_SOLVING", "value": "true" if opt_sync else "false"},
+        {"name": "SOLVER_TYPE", "value": solver_type},
     ]
+    # Add SOLVER_PATH from environment if set (for local development)
+    # If SOLVER_PATH is set, derive the solver-specific path based on solver_type
+    solver_path_base = os.environ.get("SOLVER_PATH")
+    if solver_path_base:
+        # If pointing to a specific solver.py, derive the directory and select the right script
+        solver_dir = os.path.dirname(solver_path_base)
+        solver_script = f"solver_{solver_type}.py"
+        solver_path = os.path.join(solver_dir, solver_script)
+        # Always use the solver-specific path - run_tests.sh copies both solvers
+        # Log which path we're using for debugging
+        print(f"[build_kwokctl_config] solver_type={solver_type} solver_path={solver_path} exists={os.path.exists(solver_path)}")
+        envs.append({"name": "SOLVER_PATH", "value": solver_path})
+    # Add SOLVER_PYTHON_BIN from environment if set (for local venv)
+    solver_python_bin = os.environ.get("SOLVER_PYTHON_BIN")
+    if solver_python_bin:
+        envs.append({"name": "SOLVER_PYTHON_BIN", "value": solver_python_bin})
     return merge_kwokctl_envs(base_doc, envs, component="kube-scheduler")
 
 def apply_workload_step(

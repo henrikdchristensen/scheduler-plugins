@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in usage between the plugin with DefaultPreemption enabled and the default scheduler, aggregated over inter-arrival times and priorities.}
+\label{tab:usage-defpreempt1-std0-agg-arrival-prio}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes=16 & \#nodes=32 \\
+\midrule
+Scheduling-failure (blocking) & +0.50 & +0.57 \\
+Scheduling-failure (non-blocking) & +0.54 & +0.57 \\
+Periodic (blocking), 4s interval & +1.54 & +1.25 \\
+Periodic (non-blocking), 4s interval & +1.54 & +1.24 \\
+Periodic (blocking), 8s interval & +1.39 & +1.13 \\
+Periodic (non-blocking), 8s interval & +1.40 & +1.12 \\
+Periodic (blocking), 16s interval & +1.19 & +1.05 \\
+Periodic (non-blocking), 16s interval & +1.21 & +0.99 \\
+Stable-queue (blocking), 4s delay & +1.52 & -0.27 \\
+Stable-queue (non-blocking), 4s delay & +1.59 & +1.17 \\
+Stable-queue (blocking), 8s delay & +1.39 & +1.12 \\
+Stable-queue (non-blocking), 8s delay & +1.36 & +1.10 \\
+Stable-queue (blocking), 16s delay & +1.20 & +0.99 \\
+Stable-queue (non-blocking), 16s delay & -0.25 & -0.45 \\
+\bottomrule
+\end{tabular}
+\end{table*}

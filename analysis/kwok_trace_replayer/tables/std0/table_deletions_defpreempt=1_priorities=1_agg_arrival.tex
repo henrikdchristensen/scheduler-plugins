@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in number of pod deletions between the plugin with DefaultPreemption enabled and the default scheduler for runs with one priority, aggregated over inter-arrival times.}
+\label{tab:deletions-defpreempt1-prio1-std0-agg-arrival}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes=16 & \#nodes=32 \\
+\midrule
+Scheduling-failure (blocking) & -953.8 & -1148.0 \\
+Scheduling-failure (non-blocking) & -928.0 & -1149.5 \\
+Periodic (blocking), 4s interval & +35.1 & +40.8 \\
+Periodic (non-blocking), 4s interval & +37.7 & +25.0 \\
+Periodic (blocking), 8s interval & +3.9 & +21.0 \\
+Periodic (non-blocking), 8s interval & -2.0 & +20.2 \\
+Periodic (blocking), 16s interval & -21.3 & -11.4 \\
+Periodic (non-blocking), 16s interval & -21.6 & +2.3 \\
+Stable-queue (blocking), 4s delay & +18.2 & -391.0 \\
+Stable-queue (non-blocking), 4s delay & +25.1 & +29.2 \\
+Stable-queue (blocking), 8s delay & -3.5 & +8.3 \\
+Stable-queue (non-blocking), 8s delay & +2.1 & +25.0 \\
+Stable-queue (blocking), 16s delay & -10.9 & +17.6 \\
+Stable-queue (non-blocking), 16s delay & -10.6 & -0.4 \\
+\bottomrule
+\end{tabular}
+\end{table*}

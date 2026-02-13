@@ -1,0 +1,47 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Outcome breakdown for runs with 4 priorities and 1\,s solver timeout (\% of instances).}
+\label{tab:outcomes-prio4-timeout1}
+\begin{tabular}{l cccccccc}
+\toprule
+ & \multicolumn{2}{c}{\llap{\#nodes =\,}4} & \multicolumn{2}{c}{8} & \multicolumn{2}{c}{16} & \multicolumn{2}{c}{32} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+ & \llap{pods/node =\,}4 & 8 & 4 & 8 & 4 & 8 & 4 & 8 \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 90\%}} \\
+\midrule
+Failures (\%) & 20.0 & 3.0 & 7.0 & 3.0 & 14.0 & 12.0 & 8.0 & 0.0 \\
+No Calls (\%) & 23.0 & 82.0 & 4.0 & 65.0 & 1.0 & 50.0 & 0.0 & 100.0 \\
+KWOK Optimal (\%) & 34.0 & 9.0 & 30.0 & 22.0 & 8.0 & 25.0 & 1.0 & 0.0 \\
+Better (\%) & 0.0 & 0.0 & 1.0 & 0.0 & 7.0 & 1.0 & 43.0 & 0.0 \\
+Better\&Optimal (\%) & 23.0 & 6.0 & 58.0 & 10.0 & 70.0 & 12.0 & 48.0 & 0.0 \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 95\%}} \\
+\midrule
+Failures (\%) & 18.0 & 11.0 & 4.0 & 3.0 & 14.0 & 15.0 & 18.0 & 41.0 \\
+No Calls (\%) & 2.0 & 17.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 45.0 & 22.0 & 22.0 & 11.0 & 6.0 & 1.0 & 2.0 & 0.0 \\
+Better (\%) & 0.0 & 0.0 & 5.0 & 6.0 & 26.0 & 25.0 & 69.0 & 58.0 \\
+Better\&Optimal (\%) & 35.0 & 50.0 & 69.0 & 80.0 & 54.0 & 59.0 & 11.0 & 1.0 \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 100\%}} \\
+\midrule
+Failures (\%) & 20.0 & 13.0 & 4.0 & 2.0 & 14.0 & 19.0 & 14.0 & 62.0 \\
+No Calls (\%) & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 44.0 & 31.0 & 25.0 & 5.0 & 5.0 & 0.0 & 0.0 & 0.0 \\
+Better (\%) & 0.0 & 0.0 & 6.0 & 41.0 & 31.0 & 73.0 & 74.0 & 38.0 \\
+Better\&Optimal (\%) & 35.0 & 56.0 & 65.0 & 52.0 & 50.0 & 8.0 & 12.0 & 0.0 \\
+\midrule
+\multicolumn{9}{l}{\textbf{util = 105\%}} \\
+\midrule
+Failures (\%) & 19.0 & 14.0 & 12.0 & 3.0 & 12.0 & 18.0 & 23.0 & 51.0 \\
+No Calls (\%) & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+KWOK Optimal (\%) & 49.0 & 28.0 & 28.0 & 7.0 & 6.0 & 0.0 & 0.0 & 0.0 \\
+Better (\%) & 0.0 & 1.0 & 4.0 & 46.0 & 40.0 & 79.0 & 69.0 & 49.0 \\
+Better\&Optimal (\%) & 32.0 & 57.0 & 56.0 & 44.0 & 42.0 & 3.0 & 8.0 & 0.0 \\
+\bottomrule
+\end{tabular}
+\end{table*}

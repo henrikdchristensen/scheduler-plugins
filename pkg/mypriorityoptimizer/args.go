@@ -37,7 +37,9 @@ var SolverPythonEnabled = parseBool(getEnv("SOLVER_PYTHON_ENABLED", "false"))
 var SolverPythonTimeout = parseTime(getEnv("SOLVER_PYTHON_TIMEOUT", "16s"))
 
 // SolverPythonScriptPath is the path to the solver executable.
-var SolverPythonScriptPath = getEnv("SOLVER_PATH", "/opt/solver/main.py")
+// Default is /opt/solver/solver.py which is populated by bootstrap.sh based on SOLVER_TYPE.
+// Can be overridden to use a specific solver script directly.
+var SolverPythonScriptPath = getEnv("SOLVER_PATH", "/opt/solver/solver.py")
 
 // Path to the Python binary to use for running the solver.
 var SolverPythonBin = getEnv("SOLVER_PYTHON_BIN", "/opt/venv/bin/python")

@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in scheduling latency (ms) between the plugin with DefaultPreemption disabled and the default scheduler for runs with 4 priorities, aggregated over inter-arrival times (mean \pm std).}
+\label{tab:latency-defpreempt0-prio4-std1-agg-arrival}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes=16 & \#nodes=32 \\
+\midrule
+Scheduling-failure (blocking) & $+5225\,\pm\,4490$ & $+4711\,\pm\,4458$ \\
+Scheduling-failure (non-blocking) & $+4652\,\pm\,2790$ & $+4858\,\pm\,3491$ \\
+Periodic (blocking), 4s interval & $+2185\,\pm\,2181$ & $+1709\,\pm\,2216$ \\
+Periodic (non-blocking), 4s interval & $+2339\,\pm\,2735$ & $+1857\,\pm\,2876$ \\
+Periodic (blocking), 8s interval & $+2795\,\pm\,3050$ & $+2173\,\pm\,3051$ \\
+Periodic (non-blocking), 8s interval & $+2794\,\pm\,3163$ & $+1888\,\pm\,1850$ \\
+Periodic (blocking), 16s interval & $+2849\,\pm\,2702$ & $+2462\,\pm\,2235$ \\
+Periodic (non-blocking), 16s interval & $+3347\,\pm\,4126$ & $+2393\,\pm\,2728$ \\
+Stable-queue (blocking), 4s delay & $+2323\,\pm\,2277$ & $+1996\,\pm\,2873$ \\
+Stable-queue (non-blocking), 4s delay & $+2383\,\pm\,2548$ & $+1863\,\pm\,2337$ \\
+Stable-queue (blocking), 8s delay & $+2410\,\pm\,2478$ & $+1810\,\pm\,1865$ \\
+Stable-queue (non-blocking), 8s delay & $+2513\,\pm\,2310$ & $+1879\,\pm\,2074$ \\
+Stable-queue (blocking), 16s delay & $+2549\,\pm\,2166$ & $+2348\,\pm\,2635$ \\
+Stable-queue (non-blocking), 16s delay & $+3298\,\pm\,3703$ & $+1960\,\pm\,2007$ \\
+\bottomrule
+\end{tabular}
+\end{table*}

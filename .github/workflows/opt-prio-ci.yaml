@@ -13,7 +13,7 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -107,7 +107,7 @@ jobs:
     name: Integration Tests
     needs: ["unit-tests"]
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
 
     steps:
       - name: Checkout code
@@ -190,7 +190,13 @@ jobs:
           set -euo pipefail
           sudo install -d -m 0755 "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}" "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_VENV_DIR }}"
           sudo chown -R "$USER:$USER" "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}" "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_VENV_DIR }}"
-          cp scripts/python_solver/main.py "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}/main.py"
+          # Use CP-SAT solver by default; set SOLVER_TYPE=cbc for CBC solver
+          SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
+          if [ "$SOLVER_TYPE" = "cbc" ]; then
+            cp scripts/python_solver/solver_cbc.py "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}/solver.py"
+          else
+            cp scripts/python_solver/solver_cp_sat.py "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_SCRIPT_DIR }}/solver.py"
+          fi
           python -m venv "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_VENV_DIR }}"
           "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_VENV_DIR }}/bin/python" -m pip install --upgrade pip
           "${{ steps.load-env.outputs.PYTHON_SOLVER_OUT_VENV_DIR }}/bin/pip" install --no-cache-dir -r scripts/python_solver/requirements.txt

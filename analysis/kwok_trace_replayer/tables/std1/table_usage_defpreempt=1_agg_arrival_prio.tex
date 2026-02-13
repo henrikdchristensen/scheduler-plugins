@@ -1,0 +1,28 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean paired differences in usage between the plugin with DefaultPreemption enabled and the default scheduler, aggregated over inter-arrival times and priorities (mean \pm std).}
+\label{tab:usage-defpreempt1-std1-agg-arrival-prio}
+\begin{tabular}{l c c}
+\toprule
+ & \#nodes=16 & \#nodes=32 \\
+\midrule
+Scheduling-failure (blocking) & $+0.50\,\pm\,2.07$ & $+0.57\,\pm\,1.56$ \\
+Scheduling-failure (non-blocking) & $+0.54\,\pm\,2.16$ & $+0.57\,\pm\,1.54$ \\
+Periodic (blocking), 4s interval & $+1.54\,\pm\,1.23$ & $+1.25\,\pm\,0.96$ \\
+Periodic (non-blocking), 4s interval & $+1.54\,\pm\,1.26$ & $+1.24\,\pm\,1.00$ \\
+Periodic (blocking), 8s interval & $+1.39\,\pm\,1.27$ & $+1.13\,\pm\,1.00$ \\
+Periodic (non-blocking), 8s interval & $+1.40\,\pm\,1.27$ & $+1.12\,\pm\,0.95$ \\
+Periodic (blocking), 16s interval & $+1.19\,\pm\,1.27$ & $+1.05\,\pm\,1.04$ \\
+Periodic (non-blocking), 16s interval & $+1.21\,\pm\,1.29$ & $+0.99\,\pm\,0.98$ \\
+Stable-queue (blocking), 4s delay & $+1.52\,\pm\,1.26$ & $-0.27\,\pm\,11.41$ \\
+Stable-queue (non-blocking), 4s delay & $+1.59\,\pm\,1.50$ & $+1.17\,\pm\,0.98$ \\
+Stable-queue (blocking), 8s delay & $+1.39\,\pm\,1.27$ & $+1.12\,\pm\,1.08$ \\
+Stable-queue (non-blocking), 8s delay & $+1.36\,\pm\,1.24$ & $+1.10\,\pm\,1.05$ \\
+Stable-queue (blocking), 16s delay & $+1.20\,\pm\,1.26$ & $+0.99\,\pm\,1.02$ \\
+Stable-queue (non-blocking), 16s delay & $-0.25\,\pm\,11.35$ & $-0.45\,\pm\,11.55$ \\
+\bottomrule
+\end{tabular}
+\end{table*}

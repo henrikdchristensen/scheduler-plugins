@@ -4,6 +4,8 @@ options:
   kubeSchedulerConfig: manifests/mypriorityoptimizer/plugin-scheduler-config-defpreempt=0.yaml
   kubeSchedulerBinary: bin/kube-scheduler
   kubeSchedulerImage: localhost:5000/scheduler-plugins/kube-scheduler:dev
+  kubeApiserverBinary: bin/kube-apiserver
+  kubeControllerManagerBinary: bin/kube-controller-manager
 componentsPatches:
   - name: kube-scheduler
     # uncomment for more verbose logging
@@ -12,14 +14,12 @@ componentsPatches:
     #     value: "10"
     extraEnvs:
       - name: OPTIMIZE_BLOCKING_SOLVING
-        value: "false"
-      - name: PLAN_EXECUTION_TIMEOUT
-        value: "30s"
+        value: "true"
       - name: SOLVER_PYTHON_ENABLED
         value: "true"
       - name: SOLVER_PYTHON_TIMEOUT
-        value: 10s
+        value: 20s
       - name: OPTIMIZE_PERIODIC_INTERVAL
         value: 10s
-      - name: OPTIMIZE_STABLE_QUEUE_DELAY # time cluster state must be stable before solving
+      - name: OPTIMIZE_STABLE_QUEUE_DELAY
         value: 5s
