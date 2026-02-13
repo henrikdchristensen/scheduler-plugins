@@ -3,7 +3,6 @@
 """
 python -m scripts.kwok_workload_once.plots_and_tables
 python -m scripts.kwok_workload_once.plots_and_tables --solver gurobi
-python -m scripts.kwok_workload_once.plots_and_tables --solver cbc
 """
 
 import argparse
@@ -759,7 +758,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         "--solver", 
         type=str, 
         default=DEFAULT_SOLVER,
-        choices=["cp_sat", "cbc", "gurobi"],
+        choices=["cp_sat", "gurobi"],
         help="Solver name (determines input/output paths)"
     )
     parser.add_argument(

@@ -40,7 +40,7 @@ POD_TIMEOUT_S = 10
 VALID_OPT_MODES = {"scheduling_failure", "periodic", "stable_queue", "manual", "manual_blocking"}
 
 # Valid solver types
-VALID_SOLVER_TYPES = {"cp_sat", "cbc", "gurobi"}
+VALID_SOLVER_TYPES = {"cp_sat", "gurobi"}
 DEFAULT_SOLVER_TYPE = "cp_sat"
 
 # Global default: by default we DO NOT disable waits & active checks.

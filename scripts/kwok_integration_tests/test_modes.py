@@ -79,13 +79,13 @@ NODE_NAMES = [f"kwok-node-{i+1}" for i in range(NUM_NODES)]
 
 # Mode combinations to exercise in pytest
 # Each entry: (opt_mode, opt_blocking, workload_ids, solver_types)
-# solver_types is a list of solver types to test (cp_sat, cbc)
+# solver_types is a list of solver types to test (cp_sat, gurobi)
 PYTEST_MODE_CASES: List[Tuple[str, bool, List[str], List[str]]] = [
-    ("manual_blocking", True, ["prioaware"], ["cp_sat", "cbc", "gurobi"]),
-    ("manual", True, ["sameprio"], ["cp_sat", "cbc", "gurobi"]),
-    ("scheduling_failure", True, ["sameprio"], ["cp_sat", "cbc", "gurobi"]),
-    ("periodic", True, ["sameprio"], ["cp_sat", "cbc", "gurobi"]),
-    ("stable_queue", True, ["higharrival"], ["cp_sat", "cbc", "gurobi"]),
+    ("manual_blocking", True, ["prioaware"], ["cp_sat", "gurobi"]),
+    ("manual", True, ["sameprio"], ["cp_sat", "gurobi"]),
+    ("scheduling_failure", True, ["sameprio"], ["cp_sat", "gurobi"]),
+    ("periodic", True, ["sameprio"], ["cp_sat", "gurobi"]),
+    ("stable_queue", True, ["higharrival"], ["cp_sat", "gurobi"]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -864,7 +864,7 @@ def build_argparser() -> argparse.ArgumentParser:
                     help="Set OPTIMIZE_BLOCKING_SOLVING=true (default: false)")
     ap.add_argument("--solver-type", default=DEFAULT_SOLVER_TYPE,
                     choices=sorted(VALID_SOLVER_TYPES),
-                    help=f"Solver type: cp_sat, cbc, gurobi (default: {DEFAULT_SOLVER_TYPE})")
+                    help=f"Solver type: cp_sat, gurobi (default: {DEFAULT_SOLVER_TYPE})")
     ap.add_argument("--workload-id", default=DEFAULT_WORKLOAD_ID,
                     choices=sorted(WORKLOAD_SCENARIOS.keys()),
                     help=f"Workload scenario id (default: {DEFAULT_WORKLOAD_ID})")

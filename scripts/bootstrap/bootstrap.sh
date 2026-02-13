@@ -11,7 +11,7 @@ CONTENT_DIR_WAIT_INTERVAL_S="${CONTENT_DIR_WAIT_INTERVAL:-2}" # seconds
 PYTHON_SOLVER_OUT_VENV_DIR="/opt/venv"
 PYTHON_SOLVER_OUT_SCRIPT_DIR="/opt/solver"
 
-# Solver selection: cp_sat (default), cbc, gurobi
+# Solver selection: cp_sat (default), gurobi
 SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
 
 # Runner selection: test_runner (default) or trace_replayer
@@ -192,9 +192,6 @@ stage_solver_and_venv() {
   # Determine solver script based on SOLVER_TYPE
   local solver_script
   case "${SOLVER_TYPE}" in
-    cbc)
-      solver_script="solver_cbc.py"
-      ;;
     gurobi)
       solver_script="solver_gurobi.py"
       ;;

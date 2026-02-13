@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # test_python_solver_main.py
 """
-Tests for the Python solvers (CP-SAT and CBC).
+Tests for the CP-SAT Python solver.
 """
 
 import pytest
@@ -17,36 +17,9 @@ from scripts.python_solver.solver_cp_sat import (
     SolverOptions as CPSATSolverOptions,
     main as cpsat_solver_main,
 )
-from scripts.python_solver.solver_cbc import (
-    CBCSolver,
-    NO_NODES as CBC_NO_NODES,
-    NO_PODS as CBC_NO_PODS,
-    SolverOptions as CBCSolverOptions,
-    main as cbc_solver_main,
-)
 
 # ---------------------------------------------------------------------------
-# Solver fixtures for parametrized tests
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(params=["cpsat", "cbc"])
-def solver_instance(request):
-    """Fixture that provides both solver types for parametrized testing."""
-    if request.param == "cpsat":
-        return CPSATSolver()
-    else:
-        return CBCSolver()
-
-@pytest.fixture(params=["cpsat", "cbc"])
-def solver_main_fn(request):
-    """Fixture that provides both solver main functions."""
-    if request.param == "cpsat":
-        return cpsat_solver_main
-    else:
-        return cbc_solver_main
-
-# ---------------------------------------------------------------------------
-# Shared Test Data Builders
+# Test Data Builders
 # ---------------------------------------------------------------------------
 
 def go_payload(*, solver_input: dict, solver_options: dict | None = None) -> dict:
@@ -508,26 +481,22 @@ def test_compute_overall_status_priority(phases, st, expected):
     assert s._compute_overall_status(phases, st) == expected
 
 # ---------------------------------------------------------------------------
-# Shared Integration tests (parametrized for both CP-SAT and CBC solvers)
+# Integration tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("solver_cls", [CPSATSolver, CBCSolver])
-def test_solve_quick_exits_no_nodes_or_no_pods(solver_cls):
-    s = solver_cls()
-    no_nodes = NO_NODES if solver_cls == CPSATSolver else CBC_NO_NODES
-    no_pods = NO_PODS if solver_cls == CPSATSolver else CBC_NO_PODS
+def test_solve_quick_exits_no_nodes_or_no_pods():
+    s = CPSATSolver()
 
     out = s.solve(go_payload(solver_input={"nodes": [], "pods": [pod("p1")], "timeout_ms": DEFAULT_TIMEOUT_MS}))
     assert_solver_output_schema(out, expect_full=False)
-    assert out["status"] == no_nodes
+    assert out["status"] == NO_NODES
 
     out = s.solve(go_payload(solver_input={"nodes": [node("n1")], "pods": [], "timeout_ms": DEFAULT_TIMEOUT_MS}))
     assert_solver_output_schema(out, expect_full=False)
-    assert out["status"] == no_pods
+    assert out["status"] == NO_PODS
 
-@pytest.mark.parametrize("solver_cls", [CPSATSolver, CBCSolver])
-def test_solve_single_pending_pod_is_placed_on_single_node(solver_cls):
-    s = solver_cls()
+def test_solve_single_pending_pod_is_placed_on_single_node():
+    s = CPSATSolver()
     out = s.solve(
         go_payload(
             solver_input={
@@ -547,9 +516,8 @@ def test_solve_single_pending_pod_is_placed_on_single_node(solver_cls):
     assert pl["node"] == "n1"
     assert out["evictions"] == []
 
-@pytest.mark.parametrize("solver_cls", [CPSATSolver, CBCSolver])
-def test_solve_pending_pod_too_big_is_infeasible_in_background_mode(solver_cls):
-    s = solver_cls()
+def test_solve_pending_pod_too_big_is_infeasible_in_background_mode():
+    s = CPSATSolver()
     out = s.solve(
         go_payload(
             solver_input={
@@ -564,9 +532,8 @@ def test_solve_pending_pod_too_big_is_infeasible_in_background_mode(solver_cls):
     assert out["placements"] == []
     assert out["evictions"] == []
 
-@pytest.mark.parametrize("solver_cls", [CPSATSolver, CBCSolver])
-def test_solve_duplicate_uid_prefers_running_copy_and_avoids_infeasible_capacity(solver_cls):
-    s = solver_cls()
+def test_solve_duplicate_uid_prefers_running_copy_and_avoids_infeasible_capacity():
+    s = CPSATSolver()
     out = s.solve(
         go_payload(
             solver_input={
@@ -584,9 +551,8 @@ def test_solve_duplicate_uid_prefers_running_copy_and_avoids_infeasible_capacity
     assert out["placements"] == []
     assert out["evictions"] == []
 
-@pytest.mark.parametrize("solver_cls", [CPSATSolver, CBCSolver])
-def test_solve_single_preemptor_mode_places_preemptor_when_feasible(solver_cls):
-    s = solver_cls()
+def test_solve_single_preemptor_mode_places_preemptor_when_feasible():
+    s = CPSATSolver()
     preemptor = {
         "uid": "pre",
         "namespace": "default",
@@ -616,9 +582,8 @@ def test_solve_single_preemptor_mode_places_preemptor_when_feasible(solver_cls):
     assert pl["node"] == "n1"
     assert out["evictions"] == []
 
-@pytest.mark.parametrize("solver_cls", [CPSATSolver, CBCSolver])
-def test_solve_running_pods_over_capacity_leads_to_one_eviction_or_move(solver_cls):
-    s = solver_cls()
+def test_solve_running_pods_over_capacity_leads_to_one_eviction_or_move():
+    s = CPSATSolver()
     out = s.solve(
         go_payload(
             solver_input={
@@ -638,7 +603,7 @@ def test_solve_running_pods_over_capacity_leads_to_one_eviction_or_move(solver_c
     assert_eviction_entry_schema(out["evictions"][0])
 
 # ---------------------------------------------------------------------------
-# main(): Go<=>Python contract tests (parametrized for both solvers)
+# main(): Go<=>Python contract tests
 # ---------------------------------------------------------------------------
 
 def run_main_with_stdin(monkeypatch, capsys, payload_dict, main_fn):
@@ -650,8 +615,7 @@ def run_main_with_stdin(monkeypatch, capsys, payload_dict, main_fn):
     assert out_str, "Expected main() to print something on stdout"
     return json.loads(out_str)
 
-@pytest.mark.parametrize("main_fn", [cpsat_solver_main, cbc_solver_main])
-def test_main_valid_instance_roundtrip(monkeypatch, capsys, main_fn):
+def test_main_valid_instance_roundtrip(monkeypatch, capsys):
     payload = go_payload(
         solver_input={
             "nodes": [node("n1")],
@@ -660,34 +624,26 @@ def test_main_valid_instance_roundtrip(monkeypatch, capsys, main_fn):
         },
         solver_options={},
     )
-    out = run_main_with_stdin(monkeypatch, capsys, payload, main_fn)
+    out = run_main_with_stdin(monkeypatch, capsys, payload, cpsat_solver_main)
     assert_solver_output_schema(out, expect_full=True)
     assert out["status"] in ("FEASIBLE", "OPTIMAL")
 
-@pytest.mark.parametrize(
-    "main_fn,no_nodes,no_pods",
-    [
-        (cpsat_solver_main, NO_NODES, NO_PODS),
-        (cbc_solver_main, CBC_NO_NODES, CBC_NO_PODS),
-    ],
-)
-def test_main_quick_exits_only_require_status(monkeypatch, capsys, main_fn, no_nodes, no_pods):
+def test_main_quick_exits_only_require_status(monkeypatch, capsys):
     # Test NO_NODES
     payload = go_payload(solver_input={"nodes": [], "pods": [pod("p1")], "timeout_ms": DEFAULT_TIMEOUT_MS})
-    out = run_main_with_stdin(monkeypatch, capsys, payload, main_fn)
+    out = run_main_with_stdin(monkeypatch, capsys, payload, cpsat_solver_main)
     assert_solver_output_schema(out, expect_full=False)
-    assert out["status"] == no_nodes
+    assert out["status"] == NO_NODES
 
     # Test NO_PODS
     payload = go_payload(solver_input={"nodes": [node("n1")], "pods": [], "timeout_ms": DEFAULT_TIMEOUT_MS})
-    out = run_main_with_stdin(monkeypatch, capsys, payload, main_fn)
+    out = run_main_with_stdin(monkeypatch, capsys, payload, cpsat_solver_main)
     assert_solver_output_schema(out, expect_full=False)
-    assert out["status"] == no_pods
+    assert out["status"] == NO_PODS
 
-@pytest.mark.parametrize("main_fn", [cpsat_solver_main, cbc_solver_main])
-def test_main_invalid_json_returns_python_exception(monkeypatch, capsys, main_fn):
+def test_main_invalid_json_returns_python_exception(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO("{not-json}"))
-    main_fn()
+    cpsat_solver_main()
     captured = capsys.readouterr()
     data = json.loads(captured.out.strip())
     assert_solver_output_schema(data, expect_full=False)
@@ -707,16 +663,3 @@ def test_main_last_resort_json_print_when_json_dumps_fails_cpsat(monkeypatch, ca
     captured = capsys.readouterr()
     assert captured.out.strip() == '{"status":"PYTHON_EXCEPTION","error":"unserializable error"}'
 
-def test_main_last_resort_json_print_when_json_dumps_fails_cbc(monkeypatch, capsys):
-    """Test that CBC main() falls back to hardcoded JSON when json.dumps fails."""
-    monkeypatch.setattr("sys.stdin", io.StringIO("{not-json}"))
-
-    import scripts.python_solver.solver_cbc as solver_mod
-
-    def dumps_boom(*_args, **_kwargs):
-        raise RuntimeError("json is broken")
-
-    monkeypatch.setattr(solver_mod.json, "dumps", dumps_boom)
-    solver_mod.main()
-    captured = capsys.readouterr()
-    assert captured.out.strip() == '{"status":"PYTHON_EXCEPTION","error":"unserializable error"}'

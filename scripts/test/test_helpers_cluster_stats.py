@@ -12,7 +12,7 @@ from scripts.test.test_utils import time_sequence
 
 def test_stat_snapshot_computes_utilization_and_counts(monkeypatch):
 	monkeypatch.setattr(cs, "get_running_and_unscheduled",
-		lambda ctx, ns, expected: ("all_running", [("p1", "n1"), ("p2", "n2")], ["p3"]),
+		lambda ctx, ns, expected, timeout=None: ("all_running", [("p1", "n1"), ("p2", "n2")], ["p3"]),
 	)
 	def fake_get_json_ctx(ctx, cmd):
 		nodes = {
