@@ -1,9 +1,9 @@
-\begin{table*}[t]
+\begin{table}[H]
 \tiny
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Solver duration and resource-usage improvement for runs with 4 priorities and 1\,s solver timeout.}
+\caption{Solver performance metrics with 4 and 8 avg.\ pods per node at different target usage levels. The results are based on 4 priorities, 1\,s solver timeout. The reason that the solver duration exceeds a little the timeout is that we limit the solver itself, and the time here is the total duration including extraction of the solution and I/O, which may slightly be above the solver timeout.}
 \label{tab:metrics-prio4-timeout1}
 \begin{tabular}{c l c c c c c c c c}
 \toprule
@@ -24,4 +24,4 @@
  & Diff.\,eff.\,usage\,(\%) & +2.0 & +2.2 & +2.4 & +1.7 & +2.2 & +2.6 & +1.5 & -0.3 \\
 \bottomrule
 \end{tabular}
-\end{table*}
+\end{table}

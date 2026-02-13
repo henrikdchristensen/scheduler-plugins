@@ -142,7 +142,7 @@ def write_latex_table(
 ) -> None:
     """Wrap *tabular_lines* in a ``table*`` float and write to *out_path*."""
     wrapped: List[str] = [
-        r"\begin{table*}[t]",
+        r"\begin{table}[H]",
         font_size,
         rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}",
         rf"\renewcommand{{\arraystretch}}{{{arraystretch}}}",
@@ -150,7 +150,7 @@ def write_latex_table(
         rf"\caption{{{caption}}}",
         rf"\label{{{label}}}",
         *tabular_lines,
-        r"\end{table*}",
+        r"\end{table}",
         "",
     ]
     out_path.parent.mkdir(parents=True, exist_ok=True)

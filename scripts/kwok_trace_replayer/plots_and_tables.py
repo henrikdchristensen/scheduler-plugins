@@ -1110,8 +1110,8 @@ def latex_table_metric(
 
     # First header row: node counts (each spans n_arrivals columns)
     node_headers = [
-        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\llap{{\#nodes =\,}}{n}}}" if i == 0
-        else rf"\multicolumn{{{n_arrivals}}}{{c}}{{{n}}}"
+        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\llap{{\#nodes =\,}}{n}}}}}" if i == 0
+        else rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{{n}}}}}"
         for i, n in enumerate(nodes_order)
     ]
     lines.append(" & " + " & ".join(node_headers) + r" \\")
@@ -1124,11 +1124,10 @@ def latex_table_metric(
     for _ in nodes_order:
         for i, a in enumerate(arrivals_order):
             if i == 0 and is_first_overall:
-                # Only the first column gets the label
-                arrival_headers.append(rf"\llap{{inter-arrival =\,}}{fmt_arrival_value(a)}s")
+                arrival_headers.append(rf"\textbf{{\llap{{inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
                 is_first_overall = False
             else:
-                arrival_headers.append(f"{fmt_arrival_value(a)}s")
+                arrival_headers.append(rf"\textbf{{{fmt_arrival_value(a)}s}}")
     lines.append(" & " + " & ".join(arrival_headers) + r" \\")
     lines.append(r"\midrule")
 

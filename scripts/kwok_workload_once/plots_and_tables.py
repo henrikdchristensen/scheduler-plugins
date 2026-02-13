@@ -142,8 +142,13 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     - If keys exclude 'util' -> results are aggregated over util (used for plots).
     - If keys include 'util'  -> results preserve util (used for tables with util breaker).
     """
+    df = per_combo_df.copy()
+    # Compute effective usage (max of cpu/mem) per row *before* aggregation,
+    # so the per-row max is preserved rather than taking max of aggregated means.
+    df["eff_delta_sum"] = np.maximum(df["cpu_delta_sum"], df["mem_delta_sum"])
+
     g = (
-        per_combo_df.groupby(keys, as_index=False).agg(
+        df.groupby(keys, as_index=False).agg(
             {
                 "n_seeds": "sum",
                 "n_seeds_not_all_running": "sum",
@@ -158,6 +163,7 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
                 "solver_duration_ms_sum": "sum",
                 "cpu_delta_sum": "sum",
                 "mem_delta_sum": "sum",
+                "eff_delta_sum": "sum",
             }
         )
     )
@@ -174,8 +180,7 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     g["solver_duration_ms_mean"] = safe_div(g["solver_duration_ms_sum"], g["n_solver_called"])
     g["cpu_delta_mean"] = safe_div(g["cpu_delta_sum"], g["n_seeds"])
     g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
-    # effective usage: max of cpu and mem deltas per parameter combination
-    g["eff_delta_mean"] = np.maximum(g["cpu_delta_mean"], g["mem_delta_mean"])
+    g["eff_delta_mean"] = safe_div(g["eff_delta_sum"], g["n_seeds"])
     return g.copy()
 
 def aggregate_over_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
@@ -307,26 +312,30 @@ def write_metric_table_tex(
     lines.append(r"\begin{tabular}{" + colspec + "}")
     lines.append(r"\toprule")
 
-    # ppn header row (empty leading cells)
-    lead_prefix = " & " * lead_cols
-    ppn_hdr = lead_prefix + " & ".join(
-        rf"\multicolumn{{{n_nodes}}}{{c}}{{\llap{{{PODS_PER_NODE_LABEL} =\,}}{ppn}}}" if i == 0
-        else rf"\multicolumn{{{n_nodes}}}{{c}}{{{ppn}}}"
+    # ppn header row with multirow labels for leading columns
+    if has_breaker:
+        lead_hdr = r"\multirow{2}{*}{\textbf{Usage}} & \multirow{2}{*}{\textbf{Metric}} & "
+    else:
+        lead_hdr = r"\multirow{2}{*}{\textbf{Metric}} & "
+    ppn_hdr = lead_hdr + " & ".join(
+        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{\llap{{{PODS_PER_NODE_LABEL} =\,}}{ppn}}}}}" if i == 0
+        else rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{ppn}}}}}"
         for i, ppn in enumerate(ppn_order)
     ) + r" \\"
     lines.append(ppn_hdr)
     lines.append(latex_cmidrules(n_ppn, n_nodes, start_col=lead_cols + 1))
 
-    # nodes sub-header row
+    # nodes sub-header row (empty leading cells for multirow)
+    lead_prefix = " & " * lead_cols
     node_cells: List[str] = []
     is_first = True
     for _ in ppn_order:
         for n in nodes_order:
             if is_first:
-                node_cells.append(rf"\llap{{\#nodes =\,}}{n}")
+                node_cells.append(rf"\textbf{{\llap{{\#nodes =\,}}{n}}}")
                 is_first = False
             else:
-                node_cells.append(str(n))
+                node_cells.append(rf"\textbf{{{n}}}")
     lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
     lines.append(r"\midrule")
 
@@ -483,8 +492,8 @@ def write_outcome_table_tex(
 
     # ppn header row (top-level grouping)
     ppn_hdr = " & " + " & ".join(
-        rf"\multicolumn{{{n_nodes}}}{{c}}{{\llap{{{PODS_PER_NODE_LABEL} =\,}}{ppn}}}" if i == 0
-        else rf"\multicolumn{{{n_nodes}}}{{c}}{{{ppn}}}"
+        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{\llap{{{PODS_PER_NODE_LABEL} =\,}}{ppn}}}}}" if i == 0
+        else rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{ppn}}}}}"
         for i, ppn in enumerate(ppn_order)
     ) + r" \\"
     lines.append(ppn_hdr)
@@ -496,10 +505,10 @@ def write_outcome_table_tex(
     for _ in ppn_order:
         for n in nodes_order:
             if is_first:
-                node_cells.append(rf"\llap{{\#nodes =\,}}{n}")
+                node_cells.append(rf"\textbf{{\llap{{\#nodes =\,}}{n}}}")
                 is_first = False
             else:
-                node_cells.append(str(n))
+                node_cells.append(rf"\textbf{{{n}}}")
     lines.append(" & " + " & ".join(node_cells) + r" \\")
     lines.append(r"\midrule")
 
@@ -985,9 +994,11 @@ def main(argv: Optional[List[str]] = None) -> None:
             produced_tables.append(out_tex)
 
     # --- METRIC TABLES (per priority, per util, one per timeout)
+    ppn_str = " and ".join(str(p) for p in PLOT_PPNS)
     df_metric_keep_util = aggregate_keep_util(df_per_combo)
     for prio in [p for p in PLOT_PRIORITIES if p in present_prios]:
         for t in PLOT_TIMEOUTS:
+            prio_word = "priority" if prio == 1 else "priorities"
             out_tex_metric_util = out_tables_dir / f"table_metrics_priorities={int(prio)}_timeout={int(t)}.tex"
             write_metric_table_tex(
                 df_table=df_metric_keep_util,
@@ -997,7 +1008,13 @@ def main(argv: Optional[List[str]] = None) -> None:
                 timeout=int(t),
                 priorities=int(prio),
                 breaker_col="util",
-                caption=f"Solver duration and resource-usage improvement for runs with {prio} priorities and {t}\\,s solver timeout.",
+                caption=(
+                    f"Solver performance metrics with {ppn_str} avg.\\ pods per node at different target usage levels. "
+                    f"The results are based on {prio} {prio_word}, {t}\\,s solver timeout. "
+                    f"The reason that the solver duration exceeds a little the timeout is that we limit the solver itself, "
+                    f"and the time here is the total duration including extraction of the solution and I/O, "
+                    f"which may slightly be above the solver timeout."
+                ),
                 label=f"tab:metrics-prio{prio}-timeout{t}",
             )
             produced_tables.append(out_tex_metric_util)
