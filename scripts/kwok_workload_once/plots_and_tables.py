@@ -854,7 +854,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     produced_figs.extend([out_path_2d.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     # --- Grid chart: diff. usage (plugin − baseline)
-    out_dot_usage = out_figures_dir / "dot_diff_usage"
+    out_dot_usage = out_figures_dir / "diff_usage"
     plot_grid(
         df_util_agg,
         metric_col="eff_delta_mean",
@@ -871,7 +871,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     produced_figs.extend([out_dot_usage.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     # --- Grid chart: solver duration
-    out_dot_solver = out_figures_dir / "dot_solver_duration"
+    out_dot_solver = out_figures_dir / "solver_duration"
     plot_grid(
         df_util_agg,
         metric_col="solver_duration_ms_mean",
