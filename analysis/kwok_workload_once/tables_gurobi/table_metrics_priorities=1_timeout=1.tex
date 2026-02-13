@@ -1,0 +1,27 @@
+\begin{table*}[t]
+\tiny
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Solver duration and resource-usage improvement for runs with 1 priorities and 1\,s solver timeout.}
+\label{tab:metrics-prio1-timeout1}
+\begin{tabular}{c l c c c c c c c c}
+\toprule
+ &  & \multicolumn{4}{c}{\llap{pods/node =\,}4} & \multicolumn{4}{c}{8} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+ &  & \llap{\#nodes =\,}4 & 8 & 16 & 32 & 4 & 8 & 16 & 32 \\
+\midrule
+\multirow{2}{*}{90\%} & Solver\,duration\,(s) & 0.2 & 0.2 & 0.4 & 0.5 & 0.2 & 0.2 & 0.3 & \text{--} \\
+ & Diff.\,eff.\,usage\,(\%) & +7.1 & +7.4 & +6.9 & +7.0 & +0.8 & +0.9 & +0.6 & \text{--} \\
+\midrule
+\multirow{2}{*}{95\%} & Solver\,duration\,(s) & 0.2 & 0.7 & 0.9 & 1.0 & 0.2 & 0.3 & 0.5 & 0.7 \\
+ & Diff.\,eff.\,usage\,(\%) & +8.4 & +9.0 & +4.4 & +4.0 & +4.0 & +4.0 & +3.9 & +3.3 \\
+\midrule
+\multirow{2}{*}{100\%} & Solver\,duration\,(s) & 0.2 & 0.9 & 1.0 & 1.0 & 0.8 & 1.0 & 1.0 & 1.1 \\
+ & Diff.\,eff.\,usage\,(\%) & +8.0 & +9.2 & +4.3 & +3.6 & +4.3 & +2.6 & +2.0 & +0.9 \\
+\midrule
+\multirow{2}{*}{105\%} & Solver\,duration\,(s) & 0.3 & 0.9 & 1.0 & 1.0 & 0.5 & 1.0 & 1.0 & 1.1 \\
+ & Diff.\,eff.\,usage\,(\%) & +8.3 & +8.3 & +4.3 & +3.6 & +5.0 & +1.9 & +1.8 & +1.0 \\
+\bottomrule
+\end{tabular}
+\end{table*}

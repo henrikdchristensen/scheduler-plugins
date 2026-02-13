@@ -29,8 +29,6 @@ from scripts.helpers.plot_config import (
 from scripts.helpers.data_helpers import is_finite
 from scripts.helpers.table_helpers import (
     fmt_mean_std,
-    fmt_signed,
-    fmt_unsigned_int,
     latex_cmidrules,
     write_latex_table,
 )
@@ -386,20 +384,6 @@ def aggregate_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
     group_cols = ["job_name", "plugin_config"] + KEY_COLS_MAIN
     return _aggregate_mean_std(df_seeds, group_cols)
 
-def aggregate_mean_std_over_arrival(df_seeds: pd.DataFrame) -> pd.DataFrame:
-    """
-    Aggregate per-seed DataFrame to mean+std, aggregated over inter-arrival.
-    """
-    group_cols = ["nodes", "priorities", "mode", "blocking", "defpreempt"]
-    return _aggregate_mean_std(df_seeds, group_cols)
-
-def aggregate_mean_std_over_arrival_and_priorities(df_seeds: pd.DataFrame) -> pd.DataFrame:
-    """
-    Aggregate per-seed DataFrame to mean+std, aggregated over inter-arrival and priorities.
-    """
-    group_cols = ["nodes", "mode", "blocking", "defpreempt"]
-    return _aggregate_mean_std(df_seeds, group_cols)
-
 def _build_lookup_from_df(df: pd.DataFrame, key_cols: List[str]) -> pd.DataFrame:
     """
     Build a lookup DataFrame indexed by key columns for fast access.
@@ -411,14 +395,6 @@ def build_lookup(df: pd.DataFrame) -> pd.DataFrame:
     Build a lookup DataFrame from the main aggregated DataFrame.
     """
     return _build_lookup_from_df(df, KEY_COLS_MAIN)
-
-def build_lookup_agg_arrival(df: pd.DataFrame) -> pd.DataFrame:
-    key_cols = ["nodes", "priorities", "mode", "blocking", "defpreempt"]
-    return _build_lookup_from_df(df, key_cols)
-
-def build_lookup_agg_arrival_prio(df: pd.DataFrame) -> pd.DataFrame:
-    key_cols = ["nodes", "mode", "blocking", "defpreempt"]
-    return _build_lookup_from_df(df, key_cols)
 
 def _safe_lookup(lookup: pd.DataFrame, key: Tuple, col: str) -> float:
     """
@@ -1092,13 +1068,9 @@ class MetricSpec:
     mean_dec: int
     std_dec: int
 
-    def format_val(self, mean_val: object, std_val: object, include_std: bool) -> str:
-        """Format a single value."""
-        if include_std:
-            return fmt_mean_std(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
-        if self.mean_signed:
-            return fmt_signed(mean_val, self.mean_dec)
-        return fmt_unsigned_int(mean_val)
+    def format_val(self, mean_val: object, std_val: object) -> str:
+        """Format a single value (mean ± std)."""
+        return fmt_mean_std(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
 
 METRIC_SPECS_ALL: List[MetricSpec] = [
     MetricSpec("usage",            "delta_U_pct_eff_mean",  None,                     True,  2, 2),
@@ -1115,7 +1087,6 @@ def latex_table_metric(
     spec: MetricSpec,
     defpreempt: int,
     priorities: int,
-    std: int,
     nodes_order: List[int],
     arrivals_order: List[float],
 ) -> None:
@@ -1170,8 +1141,8 @@ def latex_table_metric(
                 col_total = spec.col_total
                 col_total_std = f"{col_total}_std"
                 mean_total = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=col_total)
-                std_total = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=col_total_std) if std else None
-                total_str = spec.format_val(mean_total, std_total, bool(std))
+                std_total = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=col_total_std)
+                total_str = spec.format_val(mean_total, std_total)
 
                 # Check if we need per-priority values
                 if spec.col_prio_pattern is not None and priorities > 1:
@@ -1181,18 +1152,14 @@ def latex_table_metric(
                         col = spec.col_prio_pattern.format(p=p)
                         col_std = f"{col}_std"
                         mean_v = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=col)
-                        std_v = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=col_std) if std else None
-                        cell_parts.append(rf"p{p} & {spec.format_val(mean_v, std_v, bool(std))}")
+                        std_v = lookup_val(lookup_main, nodes=nodes, priorities=priorities, arrival_s=arrival, row_key=row_key, col=col_std)
+                        cell_parts.append(rf"p{p} & {spec.format_val(mean_v, std_v)}")
                     inner_rows = r"\\".join(cell_parts)
                     cell = rf"\begin{{tabular}}[t]{{@{{}}r@{{:\ }}l@{{}}}}{inner_rows}\end{{tabular}}"
-                elif std:
+                else:
                     # Single value with std - align by ± sign across rows
-                    # Use fixed-width columns for both mean and std parts to align ± across rows
                     val_parts = total_str.strip('$').replace(r'\,\pm\,', ' & ')
                     cell = rf"\begin{{tabular}}[t]{{@{{}}r@{{$\,\pm\,$}}l@{{}}}}{val_parts}\end{{tabular}}"
-                else:
-                    # Just the total value without std
-                    cell = total_str
                 cells.append(cell)
         mode_label = row_key_label(row_key)
         lines.append(f"{mode_label} & " + " & ".join(cells) + r" \\")
@@ -1203,8 +1170,6 @@ def latex_table_metric(
     # Generate caption based on parameters
     prio_desc = "one priority" if priorities == 1 else f"{priorities} priorities"
     preempt_desc = "with DefaultPreemption enabled" if defpreempt else "with DefaultPreemption disabled"
-    std_desc = " (mean ± std)" if std else ""
-    # Metric-specific caption descriptions
     metric_captions = {
         "latency": "scheduling latency (ms)",
         "deletions": "number of pod deletions",
@@ -1213,88 +1178,9 @@ def latex_table_metric(
     }
     metric_desc = metric_captions.get(spec.name, spec.name)
     caption = (
-        f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler for runs with {prio_desc}{std_desc}."
+        f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler for runs with {prio_desc} (mean ± std)."
     )
-    # Unique label for referencing the table
-    label = f"tab:{spec.name}-defpreempt{defpreempt}-prio{priorities}-std{std}"
-
-    write_latex_table(out_path, lines, caption=caption, label=label)
-
-
-def latex_table_metric_agg(
-    *,
-    out_path: Path,
-    lookup_agg: pd.DataFrame,
-    spec: MetricSpec,
-    defpreempt: int,
-    priorities: Optional[int] = None,
-    std: int,
-    nodes_order: List[int],
-) -> None:
-    """
-    Generate a LaTeX table for one metric, aggregated over inter-arrival
-    (and optionally over priorities when *priorities* is ``None``).
-    Rows = modes, columns = nodes.
-    """
-    modes = sort_row_keys([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(defpreempt)) for s in MODE_SPECS])
-    n_nodes = len(nodes_order)
-
-    lines: List[str] = []
-    colspec = "l " + " ".join(["c"] * n_nodes)
-    lines.append(rf"\begin{{tabular}}{{{colspec}}}")
-    lines.append(r"\toprule")
-
-    node_headers = [rf"\#nodes={n}" for n in nodes_order]
-    lines.append(" & " + " & ".join(node_headers) + r" \\")
-    lines.append(r"\midrule")
-
-    for row_key in modes:
-        cells: List[str] = []
-        for nodes in nodes_order:
-            col_total = spec.col_total
-            col_total_std = f"{col_total}_std"
-            if priorities is not None:
-                key = (int(nodes), int(priorities), str(row_key.mode), int(row_key.blocking), int(row_key.defpreempt))
-            else:
-                key = (int(nodes), str(row_key.mode), int(row_key.blocking), int(row_key.defpreempt))
-            try:
-                mean_total = float(lookup_agg.at[key, col_total])
-            except (KeyError, TypeError):
-                mean_total = float("nan")
-            try:
-                std_total = float(lookup_agg.at[key, col_total_std]) if std else None
-            except (KeyError, TypeError):
-                std_total = None
-            total_str = spec.format_val(mean_total, std_total, bool(std))
-            cells.append(total_str)
-        mode_label = row_key_label(row_key)
-        lines.append(f"{mode_label} & " + " & ".join(cells) + r" \\")
-
-    lines.append(r"\bottomrule")
-    lines.append(r"\end{tabular}")
-
-    preempt_desc = "with DefaultPreemption enabled" if defpreempt else "with DefaultPreemption disabled"
-    std_desc = " (mean \\pm std)" if std else ""
-    metric_captions = {
-        "latency": "scheduling latency (ms)",
-        "deletions": "number of pod deletions",
-        "solver_runs": "number of solver runs",
-        "plan_activations": "number of plan activations",
-    }
-    metric_desc = metric_captions.get(spec.name, spec.name)
-    if priorities is not None:
-        prio_desc = "one priority" if priorities == 1 else f"{priorities} priorities"
-        caption = (
-            f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler "
-            f"for runs with {prio_desc}, aggregated over inter-arrival times{std_desc}."
-        )
-        label = f"tab:{spec.name}-defpreempt{defpreempt}-prio{priorities}-std{std}-agg-arrival"
-    else:
-        caption = (
-            f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler, "
-            f"aggregated over inter-arrival times and priorities{std_desc}."
-        )
-        label = f"tab:{spec.name}-defpreempt{defpreempt}-std{std}-agg-arrival-prio"
+    label = f"tab:{spec.name}-defpreempt{defpreempt}-prio{priorities}"
 
     write_latex_table(out_path, lines, caption=caption, label=label)
 
@@ -1316,12 +1202,6 @@ def main() -> None:
 
     df_mean_std = aggregate_mean_std(df_seeds)
     lookup_main = build_lookup(df_mean_std)
-
-    df_mean_std_agg_arr = aggregate_mean_std_over_arrival(df_seeds)
-    lookup_agg_arrival = build_lookup_agg_arrival(df_mean_std_agg_arr)
-
-    df_mean_std_agg_arr_prio = aggregate_mean_std_over_arrival_and_priorities(df_seeds)
-    lookup_agg_arrival_prio = build_lookup_agg_arrival_prio(df_mean_std_agg_arr_prio)
 
     nodes_order = sorted(df_mean_std["nodes"].unique().tolist())
     arrivals_order_all = df_mean_std["arrival_s"].unique().tolist()
@@ -1356,24 +1236,9 @@ def main() -> None:
 
     for spec in METRIC_SPECS_ALL:
         for defpreempt in (0, 1):
-            for std in (0, 1):
-                std_subdir = OUT_TABLES_DIR / f"std{std}"
-                std_subdir.mkdir(parents=True, exist_ok=True)
-
-                for k in PRIORITIES_TO_SHOW:
-                    # Full table
-                    out = std_subdir / f"table_{spec.name}_defpreempt={defpreempt}_priorities={k}.tex"
-                    latex_table_metric(out_path=out, lookup_main=lookup_main, spec=spec, defpreempt=defpreempt, priorities=k, std=std, nodes_order=nodes_order, arrivals_order=arrivals_order)
-                    produced_tables.append(out)
-
-                    # Aggregated over inter-arrival
-                    out = std_subdir / f"table_{spec.name}_defpreempt={defpreempt}_priorities={k}_agg_arrival.tex"
-                    latex_table_metric_agg(out_path=out, lookup_agg=lookup_agg_arrival, spec=spec, defpreempt=defpreempt, priorities=k, std=std, nodes_order=nodes_order)
-                    produced_tables.append(out)
-
-                # Aggregated over inter-arrival AND priorities
-                out = std_subdir / f"table_{spec.name}_defpreempt={defpreempt}_agg_arrival_prio.tex"
-                latex_table_metric_agg(out_path=out, lookup_agg=lookup_agg_arrival_prio, spec=spec, defpreempt=defpreempt, std=std, nodes_order=nodes_order)
+            for k in PRIORITIES_TO_SHOW:
+                out = OUT_TABLES_DIR / f"table_defpreempt={defpreempt}_priorities={k}_{spec.name}.tex"
+                latex_table_metric(out_path=out, lookup_main=lookup_main, spec=spec, defpreempt=defpreempt, priorities=k, nodes_order=nodes_order, arrivals_order=arrivals_order)
                 produced_tables.append(out)
 
     # ---------- Figures ----------
@@ -1381,12 +1246,12 @@ def main() -> None:
         plot_modes = [(m, blocking) for m in MAIN_PLOT_MODE_NAMES]
         for defpreempt in (1, 0):
             # Main grid
-            stem = f"grid_main_defaultpreemption={defpreempt}_blocking={blocking}"
+            stem = f"main_defaultpreempt={defpreempt}_blocking={blocking}"
             make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=True, defpreempt=defpreempt, plot_modes=plot_modes, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=stem, legend_x_offset=GRID_LEGEND_X_OFFSET_MAIN.get(blocking, 0.0))
             produced_figs.extend([OUT_FIGURES_DIR / f"{stem}.{fmt}" for fmt in PLOT_FORMATS])
 
             # Delta grid (periodic vs stable)
-            stem = f"grid_periodic_vs_stable_defaultpreemption={defpreempt}_blocking={blocking}"
+            stem = f"periodic_vs_stable_defaultpreempt={defpreempt}_blocking={blocking}"
             make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=True, defpreempt=defpreempt, blocking=blocking, delta_series_names=delta_names, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=stem, legend_x_offset=GRID_LEGEND_X_OFFSET_DELTAS.get(blocking, 0.0))
             produced_figs.extend([OUT_FIGURES_DIR / f"{stem}.{fmt}" for fmt in PLOT_FORMATS])
 
