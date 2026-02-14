@@ -228,6 +228,8 @@ class ModeSpec:
     mode: str
     blocking: int
     label: str
+    base_label: str
+    detail: str
     rank: int
     color_idx: int  # Index into PLOT_COLORS
 
@@ -240,7 +242,7 @@ def _expand_mode_specs() -> List[ModeSpec]:
             if detail:
                 label += f", {detail}"
             rank = rank_base + (0 if blocking else 1)
-            specs.append(ModeSpec(mode=mode, blocking=blocking, label=label, rank=rank, color_idx=color_idx))
+            specs.append(ModeSpec(mode=mode, blocking=blocking, label=label, base_label=base_label, detail=detail, rank=rank, color_idx=color_idx))
     return specs
 
 MODE_SPECS: List[ModeSpec] = _expand_mode_specs()
@@ -254,6 +256,20 @@ def row_key_rank(row_key: RowKey) -> int:
 def row_key_label(row_key: RowKey) -> str:
     mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
     return mode_spec.label if mode_spec else f"{row_key.mode}:{row_key.blocking}"
+
+def row_key_table_label(row_key: RowKey, *, multiline: bool = True) -> str:
+    """LaTeX label for tables. Multi-line when multiline=True, single-line otherwise."""
+    mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
+    if not mode_spec:
+        return f"{row_key.mode}:{row_key.blocking}"
+    if not multiline:
+        return mode_spec.label
+    b_str = "blocking" if mode_spec.blocking else "non-blocking"
+    parts = [mode_spec.base_label, f"({b_str})"]
+    if mode_spec.detail:
+        parts.append(mode_spec.detail)
+    inner = r"\\".join(parts)
+    return rf"\makebox[6.5em][c]{{\begin{{tabular}}[t]{{@{{}}c@{{}}}}{inner}\end{{tabular}}}}"
 
 def row_key_color(row_key: RowKey):
     mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
@@ -1096,7 +1112,6 @@ def latex_table_metric(
     modes = sort_row_keys([RowKey(mode=s.mode, blocking=int(s.blocking), defpreempt=int(defpreempt)) for s in MODE_SPECS])
     n_arrivals = len(arrivals_order)
     n_nodes = len(nodes_order)
-    total_data_cols = n_nodes * n_arrivals
 
     lines: List[str] = []
 
@@ -1104,17 +1119,19 @@ def latex_table_metric(
     col_groups = []
     for i, _ in enumerate(nodes_order):
         col_groups.append(" ".join(["c"] * n_arrivals))
-    colspec = "l " + " @{\\hspace{1.5em}} ".join(col_groups)
+    if priorities > 1:
+        colspec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(col_groups)
+    else:
+        colspec = "l " + " @{\\hspace{1.5em}} ".join(col_groups)
     lines.append(rf"\begin{{tabular}}{{{colspec}}}")
     lines.append(r"\toprule")
 
     # First header row: node counts (each spans n_arrivals columns)
     node_headers = [
-        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\llap{{\#nodes =\,}}{n}}}}}" if i == 0
-        else rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{{n}}}}}"
-        for i, n in enumerate(nodes_order)
+        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\# Nodes =\,{n}}}}}"
+        for n in nodes_order
     ]
-    lines.append(" & " + " & ".join(node_headers) + r" \\")
+    lines.append(r"\multirow{2}{*}{\textbf{Trigger Mode}} & " + " & ".join(node_headers) + r" \\")
 
     # Add cmidrule under each node group for distinction
     lines.append(latex_cmidrules(n_nodes, n_arrivals))
@@ -1124,7 +1141,7 @@ def latex_table_metric(
     for _ in nodes_order:
         for i, a in enumerate(arrivals_order):
             if i == 0 and is_first_overall:
-                arrival_headers.append(rf"\textbf{{\llap{{inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
+                arrival_headers.append(rf"\textbf{{\llap{{Inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
                 is_first_overall = False
             else:
                 arrival_headers.append(rf"\textbf{{{fmt_arrival_value(a)}s}}")
@@ -1156,15 +1173,17 @@ def latex_table_metric(
                     inner_rows = r"\\".join(cell_parts)
                     cell = rf"\begin{{tabular}}[t]{{@{{}}r@{{:\ }}l@{{}}}}{inner_rows}\end{{tabular}}"
                 else:
-                    # Single value with std - align by ± sign across rows
-                    val_parts = total_str.strip('$').replace(r'\,\pm\,', ' & ')
-                    cell = rf"\begin{{tabular}}[t]{{@{{}}r@{{$\,\pm\,$}}l@{{}}}}{val_parts}\end{{tabular}}"
+                    cell = total_str
                 cells.append(cell)
-        mode_label = row_key_label(row_key)
+        mode_label = row_key_table_label(row_key, multiline=(priorities > 1))
         lines.append(f"{mode_label} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
+
+    # Wrap in resizebox to fit text width
+    lines.insert(0, r"\resizebox{\textwidth}{!}{%")
+    lines.append("}")
 
     # Generate caption based on parameters
     prio_desc = "one priority" if priorities == 1 else f"{priorities} priorities"

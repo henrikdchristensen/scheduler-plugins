@@ -66,12 +66,15 @@ EPS = 1e-9
 ANNOT_FS = 3.5
 
 # labels
-TARGET_UTIL_LABEL = "target util (%)"
-NODES_LABEL = "#nodes"
+TARGET_UTIL_LABEL = "target usage (%)"
+NODES_PLOT_LABEL = "#nodes"
+NODES_TABLE_LABEL = rf"\# Nodes"
 INSTANCES_LABEL = "% of instances"
-PODS_PER_NODE_LABEL = "pods/node"
-PRIORITIES_LABEL = "#priorities"
-TIMEOUT_LABEL = "solver timeout"
+PODS_PER_NODE_PLOT_LABEL = "pods/node"
+PODS_PER_NODE_TABLE_LABEL = "Pods/Node"
+PRIORITIES_PLOT_LABEL = "#priorities"
+PRIORITIES_TABLE_LABEL = rf"\# Priorities"
+SOLVER_TIMEOUT_LABEL = "solver timeout"
 
 # figure saving
 
@@ -318,9 +321,8 @@ def write_metric_table_tex(
     else:
         lead_hdr = r"\multirow{2}{*}{\textbf{Metric}} & "
     ppn_hdr = lead_hdr + " & ".join(
-        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{\llap{{{PODS_PER_NODE_LABEL} =\,}}{ppn}}}}}" if i == 0
-        else rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{ppn}}}}}"
-        for i, ppn in enumerate(ppn_order)
+        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}"
+        for ppn in ppn_order
     ) + r" \\"
     lines.append(ppn_hdr)
     lines.append(latex_cmidrules(n_ppn, n_nodes, start_col=lead_cols + 1))
@@ -332,7 +334,7 @@ def write_metric_table_tex(
     for _ in ppn_order:
         for n in nodes_order:
             if is_first:
-                node_cells.append(rf"\textbf{{\llap{{\#nodes =\,}}{n}}}")
+                node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
                 is_first = False
             else:
                 node_cells.append(rf"\textbf{{{n}}}")
@@ -402,11 +404,10 @@ def write_outcome_table_tex(
     """
     Generic outcome breakdown table (% of instances).
 
-    Handles three variants controlled by *priorities* and *breaker_col*:
-
-    - ``priorities`` set, ``breaker_col="util"``: per-util table sectioned by util.
-    - ``priorities`` set, no breaker: flat table aggregated over util.
-    - ``priorities=None``, no breaker: flat table aggregated over util **and** priorities.
+    Layout: columns grouped by pods/node, then nodes within each group.
+    When breaker_col is set, a leading column shows the breaker value
+    (e.g. Usage) using \\multirow, and the second column shows the outcome name.
+    When breaker_col is None, a single leading column shows the outcome name.
     """
     # ---- filter by timeout (and optionally priorities) ------------------
     dff = df_table[df_table["timeout_s"].astype(int) == int(timeout)].copy()
@@ -422,13 +423,6 @@ def write_outcome_table_tex(
         out_path.write_text("% empty: no data after filters\n", encoding="utf-8")
         print(f"[warn] table empty -> {out_path}")
         return
-
-    # ---- build title text ----------------------------------------------
-    title_parts: List[str] = []
-    if priorities is not None:
-        title_parts.append(rf"\#priorities={int(priorities)}")
-    title_parts.append(rf"timeout={int(timeout)}\,s")
-    title_text = ", ".join(title_parts)
 
     # ---- prepare indexed DataFrame for fast lookup ---------------------
     idx_cols: List[str] = []
@@ -473,55 +467,67 @@ def write_outcome_table_tex(
         breaker_vals = sorted(dff.index.get_level_values(breaker_col).unique())
         for bv in breaker_vals:
             sections.append((
-                f"{breaker_col} = {int(bv)}\\%",
+                f"{int(bv)}\\%",
                 _make_rate_fn(tuple(prefix_parts) + (int(bv),)),
             ))
     else:
         sections.append((None, _make_rate_fn(tuple(prefix_parts))))
 
-    # ---- build tabular lines -------------------------------------------
+    # ---- determine layout ----------------------------------------------
+    has_breaker = breaker_col is not None and len(sections) > 1 or (len(sections) == 1 and sections[0][0] is not None)
     n_nodes = len(nodes_order)
     n_ppn = len(ppn_order)
     data_cols = n_ppn * n_nodes
-    total_cols = 1 + data_cols
+    n_outcomes = len(OUTCOME_ROWS)
 
-    colspec = "l" + (" " + "c" * data_cols if data_cols > 0 else "")
+    if has_breaker:
+        # two leading columns: Usage + Outcome
+        lead_cols = 2
+        colspec = "c l" + " c" * data_cols
+    else:
+        # single leading column: Outcome
+        lead_cols = 1
+        colspec = "l" + " c" * data_cols
+    total_cols = lead_cols + data_cols
+
     lines: List[str] = []
     lines.append(r"\begin{tabular}{" + colspec + "}")
     lines.append(r"\toprule")
 
-    # ppn header row (top-level grouping)
-    ppn_hdr = " & " + " & ".join(
-        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{\llap{{{PODS_PER_NODE_LABEL} =\,}}{ppn}}}}}" if i == 0
-        else rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{ppn}}}}}"
-        for i, ppn in enumerate(ppn_order)
+    # ppn header row with multirow labels for leading columns
+    if has_breaker:
+        lead_hdr = r"\multirow{2}{*}{\textbf{Usage}} & \multirow{2}{*}{\textbf{Outcome}} & "
+    else:
+        lead_hdr = r"\multirow{2}{*}{\textbf{Outcome}} & "
+    ppn_hdr = lead_hdr + " & ".join(
+        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}"
+        for ppn in ppn_order
     ) + r" \\"
     lines.append(ppn_hdr)
-    lines.append(latex_cmidrules(n_ppn, n_nodes))
+    lines.append(latex_cmidrules(n_ppn, n_nodes, start_col=lead_cols + 1))
 
-    # nodes sub-header row
+    # nodes sub-header row (empty leading cells for multirow)
+    lead_prefix = " & " * lead_cols
     node_cells: List[str] = []
     is_first = True
     for _ in ppn_order:
         for n in nodes_order:
             if is_first:
-                node_cells.append(rf"\textbf{{\llap{{\#nodes =\,}}{n}}}")
+                node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
                 is_first = False
             else:
                 node_cells.append(rf"\textbf{{{n}}}")
-    lines.append(" & " + " & ".join(node_cells) + r" \\")
+    lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
     lines.append(r"\midrule")
 
+    # data rows
     first_section = True
     for section_title, get_rate in sections:
-        if section_title is not None:
-            if not first_section:
-                lines.append(r"\midrule")
-            lines.append(rf"\multicolumn{{{total_cols}}}{{l}}{{\textbf{{{section_title}}}}} \\")
+        if not first_section:
             lines.append(r"\midrule")
         first_section = False
 
-        for row_label, col in OUTCOME_ROWS:
+        for m_idx, (row_label, col) in enumerate(OUTCOME_ROWS):
             cells: List[str] = []
             for ppn in ppn_order:
                 for n in nodes_order:
@@ -533,7 +539,16 @@ def write_outcome_table_tex(
                     else:
                         pct = 0.0
                     cells.append(fmt_pct(pct, decimals=decimals))
-            lines.append(f"{row_label} & " + " & ".join(cells) + r" \\")
+
+            if has_breaker:
+                if m_idx == 0:
+                    lead = rf"\multirow{{{n_outcomes}}}{{*}}{{{section_title}}}" + " & " + row_label
+                else:
+                    lead = " & " + row_label
+            else:
+                lead = row_label
+
+            lines.append(f"{lead} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -638,20 +653,20 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
             ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
 
             if r == 0:
-                ax.set_title(rf"{PRIORITIES_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
+                ax.set_title(rf"{PRIORITIES_PLOT_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
 
             if c == 0:
                 if nrows % 2 == 1 and r == nrows // 2:
-                    axis_text = f"{INSTANCES_LABEL}\n{PODS_PER_NODE_LABEL}={ppn}"
+                    axis_text = f"{INSTANCES_LABEL}\n{PODS_PER_NODE_PLOT_LABEL}={ppn}"
                 else:
-                    axis_text = f"\n{PODS_PER_NODE_LABEL}={ppn}"
+                    axis_text = f"\n{PODS_PER_NODE_PLOT_LABEL}={ppn}"
                 lbl = ax.set_ylabel(axis_text, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=10)
                 lbl.set_va("center")
                 lbl.set_ha("center")
                 lbl.set_linespacing(1.8)
 
             if r == nrows - 1:
-                ax.set_xlabel(NODES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+                ax.set_xlabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
     legends = [s for s in CATEGORIES if s["key"] in seen_keys][::-1]
     legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"], ec="black", linewidth=0.4) for s in legends]
@@ -721,7 +736,7 @@ def plot_3d_ppn_prio_timeout(
     ax.tick_params(axis="z", labelsize=PLOT_TICK_FONTSIZE, pad=-1)
 
     ax.set_xlabel(TARGET_UTIL_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=-4.0)
-    ax.set_ylabel(NODES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=-5.5)
+    ax.set_ylabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=-5.5)
     ax.set_zlabel(INSTANCES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=-5.0)
 
     ax.set_title(title, fontsize=PLOT_TITLE_FONTSIZE, y=1.01, pad=0)
@@ -876,9 +891,9 @@ def plot_grid(
             ax.set_xlim(-0.5, len(fixed_nodes) - 0.5)
 
             if r == 0:
-                ax.set_title(rf"{PRIORITIES_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
+                ax.set_title(rf"{PRIORITIES_PLOT_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
             if c == 0:
-                ppn_text = f"{PODS_PER_NODE_LABEL}={ppn}"
+                ppn_text = f"{PODS_PER_NODE_PLOT_LABEL}={ppn}"
                 if nrows % 2 == 1 and r == nrows // 2:
                     axis_text = f"{y_label}\n{ppn_text}"
                 else:
@@ -888,7 +903,7 @@ def plot_grid(
                 lbl.set_ha("center")
                 lbl.set_linespacing(1.8)
             if r == nrows - 1:
-                ax.set_xlabel(NODES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+                ax.set_xlabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
     # shared y-label for cases where the per-axis label is only the ppn tag
     fig.supylabel(y_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=y_label_x)
@@ -1077,8 +1092,8 @@ def main(argv: Optional[List[str]] = None) -> None:
                 if sub.empty:
                     print(f"[skip] no per-combo rows for ppn={ppn}, prio={prio}, t={t}")
                     continue
-                title = rf"{PODS_PER_NODE_LABEL}={ppn}, {PRIORITIES_LABEL}={prio}, {TIMEOUT_LABEL}={t}s"
-                out_file = out_figures_dir / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
+                title = rf"{PODS_PER_NODE_PLOT_LABEL}={ppn}, {PRIORITIES_PLOT_LABEL}={prio}, {SOLVER_TIMEOUT_LABEL}={t}s"
+                out_file = out_figures_dir / f"3d_ppn={ppn}_priorities={prio}_timeout={t:02d}"
                 plot_3d_ppn_prio_timeout(sub, title, out_file)
                 produced_figs.extend([out_file.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
     for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
