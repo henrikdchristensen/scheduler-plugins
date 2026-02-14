@@ -10,7 +10,7 @@ from scripts.helpers.data_helpers import is_finite
 # LaTeX table formatting defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_TABLE_FONT_SIZE = r"\tiny"
+DEFAULT_TABLE_FONT_SIZE = r"\small"
 DEFAULT_TABLE_TABCOLSEP = "1.2pt"
 DEFAULT_TABLE_ARRAYSTRETCH = "1.12"
 
@@ -64,7 +64,7 @@ def fmt_mean_std(
     m = f"{float(mean_v):+.{mean_dec}f}" if mean_signed else f"{float(mean_v):.{mean_dec}f}"
     if not is_finite(std_v):
         return m
-    return rf"${m}\,\pm\,{abs(float(std_v)):.{std_dec}f}$"
+    return rf"${m}\pm{abs(float(std_v)):.{std_dec}f}$"
 
 def fmt_mean_std_split(
     mean_v: object,
@@ -149,7 +149,9 @@ def write_latex_table(
         r"\centering",
         rf"\caption{{{caption}}}",
         rf"\label{{{label}}}",
+        r"\resizebox{\textwidth}{!}{%",
         *tabular_lines,
+        r"}",
         r"\end{table}",
         "",
     ]

@@ -1089,7 +1089,7 @@ class MetricSpec:
         return fmt_mean_std(mean_val, std_val, mean_signed=self.mean_signed, mean_dec=self.mean_dec, std_dec=self.std_dec)
 
 METRIC_SPECS_ALL: List[MetricSpec] = [
-    MetricSpec("usage",            "delta_U_pct_eff_mean",  None,                     True,  2, 2),
+    MetricSpec("usage",            "delta_U_pct_eff_mean",  None,                     True,  1, 1),
     MetricSpec("latency",          "delta_L_ms_total_mean", "delta_L_ms_p{p}_mean",   True,  0, 0),
     MetricSpec("deletions",        "delta_D_num_total_mean","delta_D_num_p{p}_mean",   True,  1, 1),
     MetricSpec("solver_runs",      "solver_attempts_mean",  None,                     False, 0, 1),
@@ -1118,7 +1118,7 @@ def latex_table_metric(
     # Column specification: label column + data columns with vertical separator between node groups
     col_groups = []
     for i, _ in enumerate(nodes_order):
-        col_groups.append(" ".join(["c"] * n_arrivals))
+        col_groups.append(" @{\\hspace{0.5em}} ".join(["c"] * n_arrivals))
     if priorities > 1:
         colspec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(col_groups)
     else:
@@ -1189,6 +1189,7 @@ def latex_table_metric(
     prio_desc = "one priority" if priorities == 1 else f"{priorities} priorities"
     preempt_desc = "with DefaultPreemption enabled" if defpreempt else "with DefaultPreemption disabled"
     metric_captions = {
+        "usage": "effective resource usage (\\%)",
         "latency": "scheduling latency (ms)",
         "deletions": "number of pod deletions",
         "solver_runs": "number of solver runs",

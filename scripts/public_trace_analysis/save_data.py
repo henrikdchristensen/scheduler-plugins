@@ -13,9 +13,9 @@ from google.cloud import bigquery
 # ----------------------------------------------------------------------
 
 ALIBABA_IN = "alibaba-clusterdata/cluster-trace-gpu-v2025/disaggregated_DLRM_trace.csv"
-ALIBABA_OUT = "alibaba-clusterdata/cluster-trace-gpu-v2025/data.csv"
+ALIBABA_OUT = "data/public_trace_data/alibaba-clusterdata/cluster-trace-gpu-v2025/data.csv"
 
-GOOGLE_OUT = "google-cluster-data/ClusterData2019/data.csv"
+GOOGLE_OUT = "data/public_trace_data/google-cluster-data/ClusterData2019/data.csv"
 GOOGLE_PROJECT_ID = "master-thesis-479005"
 GOOGLE_CELL_DATASETS = [
     "clusterdata_2019_a",

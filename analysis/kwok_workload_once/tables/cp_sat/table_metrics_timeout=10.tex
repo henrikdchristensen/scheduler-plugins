@@ -1,0 +1,31 @@
+\begin{table}[H]
+\small
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Solver performance metrics with different cluster sizes and different target usage levels with 10\,s solver timeout. Values show the mean paired differences between the solver and default scheduler over 100 instances. Solver duration can slightly exceed the timeout because the timeout applies to solving only; the reported time also includes solution extraction and I/O.}
+\label{tab:metrics-timeout10}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{c l c c c c c c c c c c c c c c c c c c c c c c c c}
+\toprule
+\multirow{3}{*}{\textbf{Usage}} & \multirow{3}{*}{\textbf{Metric}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,1}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,2}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,4}} \\
+\cmidrule(lr){3-10}\cmidrule(lr){11-18}\cmidrule(lr){19-26}
+ &  & \multicolumn{4}{c}{\textbf{Pods/Node =\,4}} & \multicolumn{4}{c}{\textbf{Pods/Node =\,8}} & \multicolumn{4}{c}{\textbf{Pods/Node =\,4}} & \multicolumn{4}{c}{\textbf{Pods/Node =\,8}} & \multicolumn{4}{c}{\textbf{Pods/Node =\,4}} & \multicolumn{4}{c}{\textbf{Pods/Node =\,8}} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}\cmidrule(lr){11-14}\cmidrule(lr){15-18}\cmidrule(lr){19-22}\cmidrule(lr){23-26}
+ &  & \textbf{\llap{\# Nodes =\,}4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} \\
+\midrule
+\multirow{2}{*}{90\%} & Solver\,duration\,(s) & 0.9 & 1.6 & 6.6 & 10.8 & 0.7 & 0.8 & 1.7 & \text{--} & 1.0 & 1.5 & 4.0 & 9.1 & 0.7 & 0.9 & 1.6 & \text{--} & 0.9 & 1.1 & 2.3 & 5.8 & 0.9 & 1.0 & 1.7 & \text{--} \\
+ & Diff.\,eff.\,usage\,(\%) & +7.0 & +7.4 & +6.9 & +4.4 & +0.8 & +0.9 & +0.6 & \text{--} & +4.0 & +5.4 & +5.3 & +3.4 & +0.5 & +0.3 & +0.4 & \text{--} & +2.1 & +3.1 & +3.3 & +3.9 & +0.3 & +0.3 & +0.3 & \text{--} \\
+\midrule
+\multirow{2}{*}{95\%} & Solver\,duration\,(s) & 2.6 & 8.9 & 10.7 & 10.9 & 0.9 & 2.0 & 7.6 & 10.7 & 1.0 & 4.5 & 10.2 & 10.9 & 0.9 & 1.5 & 5.7 & 11.0 & 0.9 & 1.7 & 5.0 & 9.8 & 1.0 & 1.5 & 3.9 & 10.1 \\
+ & Diff.\,eff.\,usage\,(\%) & +8.6 & +11.8 & +10.5 & +8.4 & +4.0 & +4.0 & +4.0 & +1.8 & +4.2 & +6.7 & +7.9 & +6.2 & +3.2 & +3.4 & +2.7 & -0.2 & +2.3 & +3.3 & +3.7 & +4.3 & +2.1 & +2.7 & +2.5 & +0.2 \\
+\midrule
+\multirow{2}{*}{100\%} & Solver\,duration\,(s) & 1.6 & 10.2 & 10.7 & 10.9 & 6.2 & 10.6 & 10.8 & 10.8 & 1.0 & 4.9 & 10.3 & 10.8 & 1.9 & 10.1 & 10.7 & 11.0 & 0.9 & 1.7 & 5.2 & 10.1 & 1.0 & 5.0 & 10.3 & 10.9 \\
+ & Diff.\,eff.\,usage\,(\%) & +7.8 & +12.2 & +10.6 & +8.5 & +4.5 & +5.9 & +5.1 & +1.8 & +4.3 & +6.4 & +7.2 & +6.6 & +4.0 & +5.1 & +4.3 & +1.4 & +2.4 & +2.9 & +3.2 & +3.3 & +2.1 & +3.3 & +3.4 & +2.5 \\
+\midrule
+\multirow{2}{*}{105\%} & Solver\,duration\,(s) & 3.4 & 10.4 & 10.7 & 10.8 & 3.6 & 10.6 & 10.7 & 11.0 & 1.2 & 4.9 & 10.3 & 10.8 & 2.1 & 10.3 & 10.7 & 11.0 & 0.9 & 1.6 & 6.0 & 10.2 & 1.2 & 6.2 & 10.3 & 11.0 \\
+ & Diff.\,eff.\,usage\,(\%) & +8.6 & +11.4 & +10.1 & +7.9 & +5.1 & +5.2 & +4.8 & +0.5 & +4.5 & +5.4 & +7.2 & +5.6 & +3.6 & +4.4 & +4.0 & +1.6 & +2.1 & +2.6 & +3.2 & +2.1 & +2.5 & +2.8 & +2.6 & +0.6 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

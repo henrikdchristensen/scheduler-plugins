@@ -42,14 +42,14 @@ from scripts.helpers.plot_helpers import configure_matplotlib, save_figure
 # Default paths (can be overridden by --solver argument)
 DEFAULT_RESULTS_ROOT = Path("analysis/kwok_workload_once")
 DEFAULT_SOLVER = "cp_sat"  # Default solver name
+ALL_SOLVERS = ["cp_sat", "gurobi"]  # All available solvers
 
 
 def get_paths_for_solver(solver: str, results_root: Path = DEFAULT_RESULTS_ROOT):
     """Get input/output paths for a specific solver."""
-    # All solvers use consistent naming: results_per_combo_{solver}.csv, figures_{solver}/, tables_{solver}/
     df_path = results_root / f"results_per_combo_{solver}.csv"
-    figures_dir = results_root / f"figures_{solver}"
-    tables_dir = results_root / f"tables_{solver}"
+    figures_dir = results_root / "figures" / solver
+    tables_dir = results_root / "tables" / solver
     return df_path, figures_dir, tables_dir
 
 # filters - FIXED configurations (always show these even if data is missing)
@@ -215,7 +215,7 @@ def write_metric_table_tex(
     ppns: List[int],
     nodes: List[int],
     timeout: int,
-    priorities: Optional[int] = None,
+    priorities_list: List[int],
     breaker_col: Optional[str] = None,
     caption: str = "",
     label: str = "",
@@ -223,43 +223,37 @@ def write_metric_table_tex(
     """
     Metric breakdown table (solver duration, diff eff. usage).
 
-    Layout: columns grouped by pods/node, then nodes within each group.
-    When breaker_col is set, a leading column shows the breaker value
-    (e.g. util) using \\multirow, and the second column shows the metric name.
-    When breaker_col is None, a single leading column shows the metric name.
+    Priorities are placed side-by-side as top-level column groups.
+    Under each priority: pods/node groups, then individual node columns.
+    The ``Pods/Node`` and ``# Nodes`` labels only appear in the first
+    priority group.
     """
     from scripts.helpers.table_helpers import nan_str
 
     # ---- filter --------------------------------------------------------
     dff = df_table[df_table["timeout_s"].astype(int) == int(timeout)].copy()
-    if priorities is not None:
-        dff = dff[dff["priorities"].astype(int) == int(priorities)]
+    dff = dff[dff["priorities"].astype(int).isin(priorities_list)]
 
     nodes_order = sorted(int(x) for x in dff["nodes"].dropna().unique())
     nodes_order = [n for n in nodes if n in set(nodes_order)]
     ppn_present = set(int(x) for x in dff["pods_per_node"].dropna().unique())
     ppn_order = [p for p in ppns if p in ppn_present]
+    prio_order = [p for p in priorities_list if p in set(dff["priorities"].astype(int).unique())]
 
-    if not nodes_order or not ppn_order:
+    if not nodes_order or not ppn_order or not prio_order:
         out_path.write_text("% empty: no data after filters\n", encoding="utf-8")
         print(f"[warn] metric table empty -> {out_path}")
         return
 
     # ---- index ---------------------------------------------------------
-    idx_cols: List[str] = []
-    if priorities is not None and "priorities" in dff.columns:
-        idx_cols.append("priorities")
-    if "timeout_s" in dff.columns:
-        idx_cols.append("timeout_s")
+    idx_cols: List[str] = ["priorities", "timeout_s"]
     if breaker_col and breaker_col in dff.columns:
         idx_cols.append(breaker_col)
     idx_cols.extend(["pods_per_node", "nodes"])
 
-    for c in ["timeout_s", "nodes", "pods_per_node"]:
+    for c in ["timeout_s", "nodes", "pods_per_node", "priorities"]:
         if c in dff.columns:
             dff[c] = dff[c].astype(int)
-    if "priorities" in dff.columns:
-        dff["priorities"] = dff["priorities"].astype(int)
     if breaker_col and breaker_col in dff.columns:
         dff[breaker_col] = pd.to_numeric(dff[breaker_col], errors="coerce").round().astype(int)
 
@@ -269,79 +263,84 @@ def write_metric_table_tex(
     dff = dff.set_index(idx_cols).sort_index()
 
     # ---- lookup closure ------------------------------------------------
-    def _make_lookup(prefix: tuple):
-        def get_val(ppn: int, node: int, col: str) -> float:
+    def _make_lookup(breaker_val=None):
+        def get_val(prio: int, ppn: int, node: int, col: str) -> float:
             try:
-                return float(dff.at[prefix + (int(ppn), int(node)), col])
+                if breaker_val is not None:
+                    key = (int(prio), int(timeout), int(breaker_val), int(ppn), int(node))
+                else:
+                    key = (int(prio), int(timeout), int(ppn), int(node))
+                return float(dff.at[key, col])
             except Exception:
                 return float("nan")
         return get_val
-
-    prefix_parts: List[int] = []
-    if priorities is not None:
-        prefix_parts.append(int(priorities))
-    prefix_parts.append(int(timeout))
 
     # ---- sections ------------------------------------------------------
     sections: List[Tuple[Optional[str], object]] = []
     if breaker_col:
         breaker_vals = sorted(dff.index.get_level_values(breaker_col).unique())
         for bv in breaker_vals:
-            sections.append((
-                f"{int(bv)}\\%",
-                _make_lookup(tuple(prefix_parts) + (int(bv),)),
-            ))
+            sections.append((f"{int(bv)}\\%", _make_lookup(int(bv))))
     else:
-        sections.append((None, _make_lookup(tuple(prefix_parts))))
+        sections.append((None, _make_lookup()))
 
     # ---- determine layout ----------------------------------------------
     has_breaker = breaker_col is not None and len(sections) > 1 or (len(sections) == 1 and sections[0][0] is not None)
     n_nodes = len(nodes_order)
     n_ppn = len(ppn_order)
-    data_cols = n_ppn * n_nodes
+    n_prio = len(prio_order)
+    cols_per_prio = n_ppn * n_nodes
+    data_cols = n_prio * cols_per_prio
     n_metrics = len(METRIC_ROWS)
 
     if has_breaker:
-        # two leading columns: breaker + metric
         lead_cols = 2
         colspec = "c l" + " c" * data_cols
     else:
-        # single leading column: metric
         lead_cols = 1
         colspec = "l" + " c" * data_cols
-    total_cols = lead_cols + data_cols
 
     lines: List[str] = []
     lines.append(r"\begin{tabular}{" + colspec + "}")
     lines.append(r"\toprule")
 
-    # ppn header row with multirow labels for leading columns
+    n_header_rows = 3
+    # ---- header row 1: priorities --------------------------------------
     if has_breaker:
-        lead_hdr = r"\multirow{2}{*}{\textbf{Usage}} & \multirow{2}{*}{\textbf{Metric}} & "
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Usage}}}} & \multirow{{{n_header_rows}}}{{*}}{{\textbf{{Metric}}}} & "
     else:
-        lead_hdr = r"\multirow{2}{*}{\textbf{Metric}} & "
-    ppn_hdr = lead_hdr + " & ".join(
-        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}"
-        for ppn in ppn_order
-    ) + r" \\"
-    lines.append(ppn_hdr)
-    lines.append(latex_cmidrules(n_ppn, n_nodes, start_col=lead_cols + 1))
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Metric}}}} & "
+    prio_cells = [
+        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{\textbf{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}}}"
+        for prio in prio_order
+    ]
+    lines.append(lead_hdr + " & ".join(prio_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio, cols_per_prio, start_col=lead_cols + 1))
 
-    # nodes sub-header row (empty leading cells for multirow)
+    # ---- header row 2: pods/node --------------------------------------
     lead_prefix = " & " * lead_cols
+    ppn_cells: List[str] = []
+    for _ in prio_order:
+        for ppn in ppn_order:
+            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}")
+    lines.append(lead_prefix + " & ".join(ppn_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio * n_ppn, n_nodes, start_col=lead_cols + 1))
+
+    # ---- header row 3: nodes (label only on very first cell) -----------
     node_cells: List[str] = []
     is_first = True
-    for _ in ppn_order:
-        for n in nodes_order:
-            if is_first:
-                node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
-                is_first = False
-            else:
-                node_cells.append(rf"\textbf{{{n}}}")
+    for _ in prio_order:
+        for _ in ppn_order:
+            for n in nodes_order:
+                if is_first:
+                    node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
+                    is_first = False
+                else:
+                    node_cells.append(rf"\textbf{{{n}}}")
     lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
     lines.append(r"\midrule")
 
-    # data rows
+    # ---- data rows -----------------------------------------------------
     first_section = True
     for section_title, get_val in sections:
         if not first_section:
@@ -350,20 +349,20 @@ def write_metric_table_tex(
 
         for m_idx, (row_label, col, scale, decimals, signed) in enumerate(METRIC_ROWS):
             cells: List[str] = []
-            for ppn in ppn_order:
-                for n in nodes_order:
-                    raw = get_val(ppn, n, col)
-                    if is_finite(raw):
-                        v = raw * scale
-                        if signed:
-                            # explicit +/- prefix
-                            if abs(v) < 5e-13:
-                                v = 0.0
-                            cells.append(f"{v:+.{decimals}f}")
+            for prio in prio_order:
+                for ppn in ppn_order:
+                    for n in nodes_order:
+                        raw = get_val(prio, ppn, n, col)
+                        if is_finite(raw):
+                            v = raw * scale
+                            if signed:
+                                if abs(v) < 5e-13:
+                                    v = 0.0
+                                cells.append(f"{v:+.{decimals}f}")
+                            else:
+                                cells.append(f"{v:.{decimals}f}")
                         else:
-                            cells.append(f"{v:.{decimals}f}")
-                    else:
-                        cells.append(nan_str())
+                            cells.append(nan_str())
 
             if has_breaker:
                 if m_idx == 0:
@@ -395,50 +394,44 @@ def write_outcome_table_tex(
     out_path: Path,
     ppns: List[int],
     timeout: int,
-    priorities: Optional[int] = None,
+    priorities_list: List[int],
     breaker_col: Optional[str] = None,
     decimals: int = 1,
     caption: str = "",
     label: str = "",
 ) -> None:
     """
-    Generic outcome breakdown table (% of instances).
+    Outcome breakdown table (% of instances).
 
-    Layout: columns grouped by pods/node, then nodes within each group.
-    When breaker_col is set, a leading column shows the breaker value
-    (e.g. Usage) using \\multirow, and the second column shows the outcome name.
-    When breaker_col is None, a single leading column shows the outcome name.
+    Priorities are placed side-by-side as top-level column groups.
+    Under each priority: pods/node groups, then individual node columns.
+    The ``Pods/Node`` and ``# Nodes`` labels only appear in the first
+    priority group.
     """
-    # ---- filter by timeout (and optionally priorities) ------------------
+    # ---- filter --------------------------------------------------------
     dff = df_table[df_table["timeout_s"].astype(int) == int(timeout)].copy()
-    if priorities is not None:
-        dff = dff[dff["priorities"].astype(int) == int(priorities)]
+    dff = dff[dff["priorities"].astype(int).isin(priorities_list)]
 
     # ---- infer column orders -------------------------------------------
     nodes_order = sorted(int(x) for x in dff["nodes"].dropna().unique())
     ppn_present = set(int(x) for x in dff["pods_per_node"].dropna().unique())
     ppn_order = [p for p in ppns if p in ppn_present]
+    prio_order = [p for p in priorities_list if p in set(dff["priorities"].astype(int).unique())]
 
-    if not nodes_order or not ppn_order:
+    if not nodes_order or not ppn_order or not prio_order:
         out_path.write_text("% empty: no data after filters\n", encoding="utf-8")
         print(f"[warn] table empty -> {out_path}")
         return
 
     # ---- prepare indexed DataFrame for fast lookup ---------------------
-    idx_cols: List[str] = []
-    if priorities is not None and "priorities" in dff.columns:
-        idx_cols.append("priorities")
-    if "timeout_s" in dff.columns:
-        idx_cols.append("timeout_s")
+    idx_cols: List[str] = ["priorities", "timeout_s"]
     if breaker_col and breaker_col in dff.columns:
         idx_cols.append(breaker_col)
     idx_cols.extend(["pods_per_node", "nodes"])
 
-    for c in ["timeout_s", "nodes", "pods_per_node"]:
+    for c in ["timeout_s", "nodes", "pods_per_node", "priorities"]:
         if c in dff.columns:
             dff[c] = dff[c].astype(int)
-    if "priorities" in dff.columns:
-        dff["priorities"] = dff["priorities"].astype(int)
     if breaker_col and breaker_col in dff.columns:
         dff[breaker_col] = pd.to_numeric(dff[breaker_col], errors="coerce").round().astype(int)
 
@@ -447,80 +440,84 @@ def write_outcome_table_tex(
     dff = dff.set_index(idx_cols).sort_index()
 
     # ---- rate lookup closures ------------------------------------------
-    def _make_rate_fn(prefix: tuple):
-        def get_rate(ppn: int, nodes: int, col: str) -> float:
+    def _make_rate_fn(breaker_val=None):
+        def get_rate(prio: int, ppn: int, nodes: int, col: str) -> float:
             try:
-                return float(dff.at[prefix + (int(ppn), int(nodes)), col])
+                if breaker_val is not None:
+                    key = (int(prio), int(timeout), int(breaker_val), int(ppn), int(nodes))
+                else:
+                    key = (int(prio), int(timeout), int(ppn), int(nodes))
+                return float(dff.at[key, col])
             except Exception:
                 return float("nan")
         return get_rate
 
-    prefix_parts: List[int] = []
-    if priorities is not None:
-        prefix_parts.append(int(priorities))
-    prefix_parts.append(int(timeout))
-
     # ---- build sections ------------------------------------------------
-    Sections = List[Tuple[Optional[str], object]]
-    sections: Sections = []
+    sections: List[Tuple[Optional[str], object]] = []
     if breaker_col:
         breaker_vals = sorted(dff.index.get_level_values(breaker_col).unique())
         for bv in breaker_vals:
-            sections.append((
-                f"{int(bv)}\\%",
-                _make_rate_fn(tuple(prefix_parts) + (int(bv),)),
-            ))
+            sections.append((f"{int(bv)}\\%", _make_rate_fn(int(bv))))
     else:
-        sections.append((None, _make_rate_fn(tuple(prefix_parts))))
+        sections.append((None, _make_rate_fn()))
 
     # ---- determine layout ----------------------------------------------
     has_breaker = breaker_col is not None and len(sections) > 1 or (len(sections) == 1 and sections[0][0] is not None)
     n_nodes = len(nodes_order)
     n_ppn = len(ppn_order)
-    data_cols = n_ppn * n_nodes
+    n_prio = len(prio_order)
+    cols_per_prio = n_ppn * n_nodes
+    data_cols = n_prio * cols_per_prio
     n_outcomes = len(OUTCOME_ROWS)
 
     if has_breaker:
-        # two leading columns: Usage + Outcome
         lead_cols = 2
         colspec = "c l" + " c" * data_cols
     else:
-        # single leading column: Outcome
         lead_cols = 1
         colspec = "l" + " c" * data_cols
-    total_cols = lead_cols + data_cols
 
     lines: List[str] = []
     lines.append(r"\begin{tabular}{" + colspec + "}")
     lines.append(r"\toprule")
 
-    # ppn header row with multirow labels for leading columns
+    n_header_rows = 3
+    # ---- header row 1: priorities --------------------------------------
     if has_breaker:
-        lead_hdr = r"\multirow{2}{*}{\textbf{Usage}} & \multirow{2}{*}{\textbf{Outcome}} & "
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Usage}}}} & \multirow{{{n_header_rows}}}{{*}}{{\textbf{{Outcome}}}} & "
     else:
-        lead_hdr = r"\multirow{2}{*}{\textbf{Outcome}} & "
-    ppn_hdr = lead_hdr + " & ".join(
-        rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}"
-        for ppn in ppn_order
-    ) + r" \\"
-    lines.append(ppn_hdr)
-    lines.append(latex_cmidrules(n_ppn, n_nodes, start_col=lead_cols + 1))
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Outcome}}}} & "
+    prio_cells = [
+        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{\textbf{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}}}"
+        for prio in prio_order
+    ]
+    lines.append(lead_hdr + " & ".join(prio_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio, cols_per_prio, start_col=lead_cols + 1))
 
-    # nodes sub-header row (empty leading cells for multirow)
+    # ---- header row 2: pods/node --------------------------------------
     lead_prefix = " & " * lead_cols
+    ppn_cells: List[str] = []
+    for _ in prio_order:
+        for ppn in ppn_order:
+            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}")
+    lines.append(lead_prefix + " & ".join(ppn_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio * n_ppn, n_nodes, start_col=lead_cols + 1))
+
+    # ---- header row 3: nodes (label only on very first cell) -----------
     node_cells: List[str] = []
     is_first = True
-    for _ in ppn_order:
-        for n in nodes_order:
-            if is_first:
-                node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
-                is_first = False
-            else:
-                node_cells.append(rf"\textbf{{{n}}}")
+    for _ in prio_order:
+        for _ in ppn_order:
+            for n in nodes_order:
+                if is_first:
+                    node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
+                    is_first = False
+                else:
+                    node_cells.append(rf"\textbf{{{n}}}")
     lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
     lines.append(r"\midrule")
 
-    # data rows
+    # ---- data rows -----------------------------------------------------
     first_section = True
     for section_title, get_rate in sections:
         if not first_section:
@@ -529,16 +526,17 @@ def write_outcome_table_tex(
 
         for m_idx, (row_label, col) in enumerate(OUTCOME_ROWS):
             cells: List[str] = []
-            for ppn in ppn_order:
-                for n in nodes_order:
-                    r_ = get_rate(ppn, n, col)
-                    if is_finite(r_):
-                        pct = 100.0 * r_
-                    elif col == "default_all_running_rate":
-                        pct = 100.0  # no data → assume all pods running
-                    else:
-                        pct = 0.0
-                    cells.append(fmt_pct(pct, decimals=decimals))
+            for prio in prio_order:
+                for ppn in ppn_order:
+                    for n in nodes_order:
+                        r_ = get_rate(prio, ppn, n, col)
+                        if is_finite(r_):
+                            pct = 100.0 * r_
+                        elif col == "default_all_running_rate":
+                            pct = 100.0  # no data → assume all pods running
+                        else:
+                            pct = 0.0
+                        cells.append(fmt_pct(pct, decimals=decimals))
 
             if has_breaker:
                 if m_idx == 0:
@@ -955,9 +953,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument(
         "--solver", 
         type=str, 
-        default=DEFAULT_SOLVER,
-        choices=["cp_sat", "gurobi"],
-        help="Solver name (determines input/output paths)"
+        default=None,
+        choices=ALL_SOLVERS,
+        help="Solver name (determines input/output paths). If omitted, runs all solvers."
     )
     parser.add_argument(
         "--results-root",
@@ -967,8 +965,15 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     args = parser.parse_args(argv)
     
-    solver = args.solver
-    df_path, out_figures_dir, out_tables_dir = get_paths_for_solver(solver, args.results_root)
+    solvers = [args.solver] if args.solver else ALL_SOLVERS
+    configure_matplotlib()
+
+    for solver in solvers:
+        _run_solver(solver, args.results_root)
+
+
+def _run_solver(solver: str, results_root: Path) -> None:
+    df_path, out_figures_dir, out_tables_dir = get_paths_for_solver(solver, results_root)
     
     print(f"Generating tables and figures for solver={solver}...")
     print(f"  Input: {df_path}")
@@ -979,8 +984,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         print(f"[error] Input file not found: {df_path}")
         print(f"  Run: python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-{solver}")
         return
-    
-    configure_matplotlib()
 
     out_figures_dir.mkdir(parents=True, exist_ok=True)
     out_tables_dir.mkdir(parents=True, exist_ok=True)
@@ -990,49 +993,48 @@ def main(argv: Optional[List[str]] = None) -> None:
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
 
-    # --- TABLES (per util, split by timeout)
+    # --- TABLES (per timeout, all priorities side-by-side)
     df_table = aggregate_keep_util(df_per_combo)
     present_prios = set(df_table["priorities"].astype(int).unique().tolist())
-    for prio in [p for p in PLOT_PRIORITIES if p in present_prios]:
-        for t in PLOT_TIMEOUTS:
-            out_tex = out_tables_dir / f"table_outcomes_priorities={int(prio)}_timeout={int(t)}.tex"
-            write_outcome_table_tex(
-                df_table=df_table,
-                out_path=out_tex,
-                ppns=PLOT_PPNS,
-                timeout=int(t),
-                priorities=int(prio),
-                breaker_col="util",
-                caption=f"Outcome breakdown for runs with {prio} priorities and {t}\\,s solver timeout (\\% of instances).",
-                label=f"tab:outcomes-prio{prio}-timeout{t}",
-            )
-            produced_tables.append(out_tex)
+    prio_list = [p for p in PLOT_PRIORITIES if p in present_prios]
+    for t in PLOT_TIMEOUTS:
+        out_tex = out_tables_dir / f"table_outcomes_timeout={int(t)}.tex"
+        write_outcome_table_tex(
+            df_table=df_table,
+            out_path=out_tex,
+            ppns=PLOT_PPNS,
+            timeout=int(t),
+            priorities_list=prio_list,
+            breaker_col="util",
+            decimals=1,
+            caption=f"Outcome breakdown for {t}\\,s solver timeout. Values show the mean paired differences between the solver and default scheduler over 100 instances (\\% of instances).",
+            label=f"tab:outcomes-timeout{t}",
+        )
+        produced_tables.append(out_tex)
 
-    # --- METRIC TABLES (per priority, per util, one per timeout)
+    # --- METRIC TABLES (per timeout, all priorities side-by-side)
     ppn_str = " and ".join(str(p) for p in PLOT_PPNS)
     df_metric_keep_util = aggregate_keep_util(df_per_combo)
-    for prio in [p for p in PLOT_PRIORITIES if p in present_prios]:
-        for t in PLOT_TIMEOUTS:
-            prio_word = "priority" if prio == 1 else "priorities"
-            out_tex_metric_util = out_tables_dir / f"table_metrics_priorities={int(prio)}_timeout={int(t)}.tex"
-            write_metric_table_tex(
-                df_table=df_metric_keep_util,
-                out_path=out_tex_metric_util,
-                ppns=PLOT_PPNS,
-                nodes=PLOT_NODES,
-                timeout=int(t),
-                priorities=int(prio),
-                breaker_col="util",
-                caption=(
-                    f"Solver performance metrics with {ppn_str} avg.\\ pods per node at different target usage levels. "
-                    f"The results are based on {prio} {prio_word}, {t}\\,s solver timeout. "
-                    f"The reason that the solver duration exceeds a little the timeout is that we limit the solver itself, "
-                    f"and the time here is the total duration including extraction of the solution and I/O, "
-                    f"which may slightly be above the solver timeout."
-                ),
-                label=f"tab:metrics-prio{prio}-timeout{t}",
-            )
-            produced_tables.append(out_tex_metric_util)
+    for t in PLOT_TIMEOUTS:
+        out_tex_metric_util = out_tables_dir / f"table_metrics_timeout={int(t)}.tex"
+        write_metric_table_tex(
+            df_table=df_metric_keep_util,
+            out_path=out_tex_metric_util,
+            ppns=PLOT_PPNS,
+            nodes=PLOT_NODES,
+            timeout=int(t),
+            priorities_list=prio_list,
+            breaker_col="util",
+            caption=(
+                f"Solver performance metrics with different cluster sizes and different target usage levels "
+                f"with {t}\\,s solver timeout. "
+                f"Values show the mean paired differences between the solver and default scheduler over 100 instances. "
+                f"Solver duration can slightly exceed the timeout because the timeout applies to solving only; "
+                f"the reported time also includes solution extraction and I/O."
+            ),
+            label=f"tab:metrics-timeout{t}",
+        )
+        produced_tables.append(out_tex_metric_util)
 
     # --- PLOTS
     df_util_agg = aggregate_over_util(df_per_combo)

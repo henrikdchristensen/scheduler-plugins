@@ -285,8 +285,7 @@ def make_combined_grid(layout: str, out_dir: str) -> None:
         h_pad=0.4,
     )
     out_dir = out_dir.rstrip("/") + "/"
-    fig.savefig(out_dir + "public_trace_histograms.png", dpi=300, bbox_inches="tight")
-    fig.savefig(out_dir + "public_trace_histograms.pdf", bbox_inches="tight")
+    fig.savefig(out_dir + "public_traces_histograms.pdf", bbox_inches="tight")
     plt.close(fig)
     print(f"[OK] Saved combined grid to {out_dir} (layout={layout})")
 
@@ -306,7 +305,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--out-dir",
         type=str,
-        default="analysis/kwok_trace_replayer/public_trace_histograms/",
+        default="analysis/public_traces/public_trace_histograms/",
         help="Output directory for the combined plots.",
     )
     return p

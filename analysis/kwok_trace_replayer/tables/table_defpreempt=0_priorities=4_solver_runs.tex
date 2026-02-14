@@ -1,32 +1,34 @@
 \begin{table}[H]
-\tiny
+\small
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
 \caption{Mean paired differences in number of solver runs between the plugin with DefaultPreemption disabled and the default scheduler for runs with 4 priorities (mean ± std).}
 \label{tab:solver_runs-defpreempt0-prio4}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{l @{\hspace{1em}} c c c c @{\hspace{1.5em}} c c c c}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l @{\hspace{1em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
 \cmidrule(lr){2-5}\cmidrule(lr){6-9}
  & \textbf{\llap{Inter-arrival =\,}2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} & \textbf{2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} \\
 \midrule
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Scheduling-failure\\(blocking)\end{tabular}} & $365\,\pm\,37.3$ & $268\,\pm\,63.3$ & $189\,\pm\,28.3$ & $117\,\pm\,18.6$ & $284\,\pm\,16.0$ & $191\,\pm\,12.5$ & $129\,\pm\,7.5$ & $84\,\pm\,20.5$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Scheduling-failure\\(non-blocking)\end{tabular}} & $357\,\pm\,31.1$ & $273\,\pm\,64.2$ & $180\,\pm\,32.7$ & $117\,\pm\,21.4$ & $280\,\pm\,12.9$ & $186\,\pm\,12.2$ & $127\,\pm\,6.3$ & $86\,\pm\,20.7$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(blocking)\\4s interval\end{tabular}} & $85\,\pm\,4.7$ & $107\,\pm\,31.9$ & $90\,\pm\,15.4$ & $73\,\pm\,25.3$ & $94\,\pm\,6.2$ & $81\,\pm\,15.5$ & $76\,\pm\,4.0$ & $53\,\pm\,17.2$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(non-blocking)\\4s interval\end{tabular}} & $87\,\pm\,9.6$ & $98\,\pm\,16.0$ & $87\,\pm\,14.2$ & $85\,\pm\,39.7$ & $93\,\pm\,11.5$ & $85\,\pm\,9.8$ & $73\,\pm\,11.7$ & $60\,\pm\,18.6$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(blocking)\\8s interval\end{tabular}} & $39\,\pm\,4.6$ & $51\,\pm\,6.1$ & $53\,\pm\,12.2$ & $46\,\pm\,8.8$ & $47\,\pm\,5.0$ & $53\,\pm\,9.8$ & $56\,\pm\,4.4$ & $46\,\pm\,18.4$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(non-blocking)\\8s interval\end{tabular}} & $36\,\pm\,4.0$ & $48\,\pm\,10.2$ & $57\,\pm\,20.8$ & $47\,\pm\,11.5$ & $47\,\pm\,6.7$ & $55\,\pm\,7.9$ & $51\,\pm\,4.1$ & $45\,\pm\,14.8$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(blocking)\\16s interval\end{tabular}} & $16\,\pm\,2.9$ & $22\,\pm\,5.4$ & $26\,\pm\,4.6$ & $26\,\pm\,4.2$ & $22\,\pm\,3.9$ & $31\,\pm\,6.5$ & $30\,\pm\,6.0$ & $29\,\pm\,8.9$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(non-blocking)\\16s interval\end{tabular}} & $15\,\pm\,6.1$ & $22\,\pm\,3.4$ & $27\,\pm\,5.2$ & $29\,\pm\,1.8$ & $20\,\pm\,2.4$ & $28\,\pm\,3.9$ & $32\,\pm\,5.1$ & $32\,\pm\,16.3$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(blocking)\\4s delay\end{tabular}} & $141\,\pm\,17.2$ & $130\,\pm\,12.2$ & $211\,\pm\,187.6$ & $105\,\pm\,52.6$ & $164\,\pm\,14.3$ & $133\,\pm\,9.5$ & $114\,\pm\,1.8$ & $86\,\pm\,20.4$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(non-blocking)\\4s delay\end{tabular}} & $133\,\pm\,11.9$ & $149\,\pm\,34.5$ & $128\,\pm\,26.0$ & $106\,\pm\,54.9$ & $154\,\pm\,15.8$ & $136\,\pm\,16.9$ & $118\,\pm\,8.1$ & $88\,\pm\,25.4$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(blocking)\\8s delay\end{tabular}} & $64\,\pm\,24.5$ & $86\,\pm\,50.4$ & $116\,\pm\,111.6$ & $74\,\pm\,30.0$ & $78\,\pm\,14.5$ & $74\,\pm\,11.3$ & $67\,\pm\,5.8$ & $60\,\pm\,17.3$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(non-blocking)\\8s delay\end{tabular}} & $55\,\pm\,5.9$ & $65\,\pm\,6.7$ & $78\,\pm\,30.0$ & $82\,\pm\,42.4$ & $81\,\pm\,14.4$ & $69\,\pm\,11.8$ & $69\,\pm\,6.6$ & $59\,\pm\,23.8$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(blocking)\\16s delay\end{tabular}} & $16\,\pm\,3.6$ & $27\,\pm\,3.3$ & $33\,\pm\,8.4$ & $37\,\pm\,13.3$ & $32\,\pm\,7.5$ & $39\,\pm\,6.9$ & $42\,\pm\,6.7$ & $47\,\pm\,25.4$ \\
-\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(non-blocking)\\16s delay\end{tabular}} & $22\,\pm\,12.9$ & $28\,\pm\,6.3$ & $39\,\pm\,13.0$ & $46\,\pm\,13.7$ & $30\,\pm\,5.5$ & $39\,\pm\,7.5$ & $38\,\pm\,6.1$ & $34\,\pm\,10.2$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Scheduling-failure\\(blocking)\end{tabular}} & $365\pm37.3$ & $268\pm63.3$ & $189\pm28.3$ & $117\pm18.6$ & $284\pm16.0$ & $191\pm12.5$ & $129\pm7.5$ & $84\pm20.5$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Scheduling-failure\\(non-blocking)\end{tabular}} & $357\pm31.1$ & $273\pm64.2$ & $180\pm32.7$ & $117\pm21.4$ & $280\pm12.9$ & $186\pm12.2$ & $127\pm6.3$ & $86\pm20.7$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(blocking)\\4s interval\end{tabular}} & $85\pm4.7$ & $107\pm31.9$ & $90\pm15.4$ & $73\pm25.3$ & $94\pm6.2$ & $81\pm15.5$ & $76\pm4.0$ & $53\pm17.2$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(non-blocking)\\4s interval\end{tabular}} & $87\pm9.6$ & $98\pm16.0$ & $87\pm14.2$ & $85\pm39.7$ & $93\pm11.5$ & $85\pm9.8$ & $73\pm11.7$ & $60\pm18.6$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(blocking)\\8s interval\end{tabular}} & $39\pm4.6$ & $51\pm6.1$ & $53\pm12.2$ & $46\pm8.8$ & $47\pm5.0$ & $53\pm9.8$ & $56\pm4.4$ & $46\pm18.4$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(non-blocking)\\8s interval\end{tabular}} & $36\pm4.0$ & $48\pm10.2$ & $57\pm20.8$ & $47\pm11.5$ & $47\pm6.7$ & $55\pm7.9$ & $51\pm4.1$ & $45\pm14.8$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(blocking)\\16s interval\end{tabular}} & $16\pm2.9$ & $22\pm5.4$ & $26\pm4.6$ & $26\pm4.2$ & $22\pm3.9$ & $31\pm6.5$ & $30\pm6.0$ & $29\pm8.9$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Periodic\\(non-blocking)\\16s interval\end{tabular}} & $15\pm6.1$ & $22\pm3.4$ & $27\pm5.2$ & $29\pm1.8$ & $20\pm2.4$ & $28\pm3.9$ & $32\pm5.1$ & $32\pm16.3$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(blocking)\\4s delay\end{tabular}} & $141\pm17.2$ & $130\pm12.2$ & $211\pm187.6$ & $105\pm52.6$ & $164\pm14.3$ & $133\pm9.5$ & $114\pm1.8$ & $86\pm20.4$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(non-blocking)\\4s delay\end{tabular}} & $133\pm11.9$ & $149\pm34.5$ & $128\pm26.0$ & $106\pm54.9$ & $154\pm15.8$ & $136\pm16.9$ & $118\pm8.1$ & $88\pm25.4$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(blocking)\\8s delay\end{tabular}} & $64\pm24.5$ & $86\pm50.4$ & $116\pm111.6$ & $74\pm30.0$ & $78\pm14.5$ & $74\pm11.3$ & $67\pm5.8$ & $60\pm17.3$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(non-blocking)\\8s delay\end{tabular}} & $55\pm5.9$ & $65\pm6.7$ & $78\pm30.0$ & $82\pm42.4$ & $81\pm14.4$ & $69\pm11.8$ & $69\pm6.6$ & $59\pm23.8$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(blocking)\\16s delay\end{tabular}} & $16\pm3.6$ & $27\pm3.3$ & $33\pm8.4$ & $37\pm13.3$ & $32\pm7.5$ & $39\pm6.9$ & $42\pm6.7$ & $47\pm25.4$ \\
+\makebox[6.5em][c]{\begin{tabular}[t]{@{}c@{}}Stable-queue\\(non-blocking)\\16s delay\end{tabular}} & $22\pm12.9$ & $28\pm6.3$ & $39\pm13.0$ & $46\pm13.7$ & $30\pm5.5$ & $39\pm7.5$ & $38\pm6.1$ & $34\pm10.2$ \\
 \bottomrule
 \end{tabular}
+}
 }
 \end{table}
