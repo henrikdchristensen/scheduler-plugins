@@ -9,7 +9,7 @@ var OptimizeMode = parseOptimizeMode(getEnv("OPTIMIZE_MODE", "periodic"))
 
 // OptimizeBlockingSolving controls whether solver runs blocks normal scheduling
 // during execution. Determines when to take the Active lock.
-var OptimizeBlockingSolving = parseBool(getEnv("OPTIMIZE_BLOCKING_SOLVING", "true"))
+var OptimizeBlockingSolving = parseBool(getEnv("OPTIMIZE_BLOCKING_SOLVING", "false"))
 
 // OptimizePeriodicInterval is the duration between consecutive optimization
 // runs in periodic mode. If a plan is currently active, the loop is skipped.
