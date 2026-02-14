@@ -269,7 +269,7 @@ def row_key_table_label(row_key: RowKey, *, multiline: bool = True) -> str:
     if mode_spec.detail:
         parts.append(mode_spec.detail)
     inner = r"\\".join(parts)
-    return rf"\makebox[6.5em][c]{{\begin{{tabular}}[t]{{@{{}}c@{{}}}}{inner}\end{{tabular}}}}"
+    return rf"\begin{{tabular}}[t]{{@{{}}l@{{}}}}{inner}\end{{tabular}}"
 
 def row_key_color(row_key: RowKey):
     mode_spec = _SPEC_BY_MODE_BLOCK.get((row_key.mode, int(row_key.blocking)))
@@ -1175,7 +1175,8 @@ def latex_table_metric(
                 else:
                     cell = total_str
                 cells.append(cell)
-        mode_label = row_key_table_label(row_key, multiline=(priorities > 1))
+        has_prio_breakdown = spec.col_prio_pattern is not None and priorities > 1
+        mode_label = row_key_table_label(row_key, multiline=has_prio_breakdown)
         lines.append(f"{mode_label} & " + " & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
