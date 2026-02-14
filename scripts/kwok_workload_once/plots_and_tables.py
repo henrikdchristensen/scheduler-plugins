@@ -203,7 +203,7 @@ def aggregate_keep_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
 # Metric rows for the "dot-plot style" metric tables
 METRIC_ROWS: List[Tuple[str, str, float, int, bool]] = [
     # (label, column, scale, decimals, signed)
-    (r"Solver\,duration\,(s)",       "solver_duration_ms_mean", 1.0 / 1000.0, 1, False),
+    (r"Optimizer\,duration\,(s)",       "solver_duration_ms_mean", 1.0 / 1000.0, 1, False),
     (r"Diff.\,eff.\,usage\,(\%)",    "eff_delta_mean",          100.0,         1, True),
 ]
 
@@ -919,7 +919,7 @@ def plot_grid(
         )
         for t in fixed_timeouts
     ]
-    legend_labels = [f"solver timeout = {t}s" for t in fixed_timeouts]
+    legend_labels = [f"{SOLVER_TIMEOUT_LABEL}={t}s" for t in fixed_timeouts]
     fig.legend(
         legend_handles,
         legend_labels,
@@ -1007,7 +1007,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
             priorities_list=prio_list,
             breaker_col="util",
             decimals=1,
-            caption=f"Outcome breakdown for {t}\\,s solver timeout. Values show the mean paired differences between the solver and default scheduler over 100 instances (\\% of instances).",
+            caption=f"Outcome breakdown for {t}\\,s optimizer timeout. Values show the mean paired differences between the optimizer and default scheduler over 100 instances (\\% of instances).",
             label=f"tab:outcomes-timeout{t}",
         )
         produced_tables.append(out_tex)
@@ -1026,10 +1026,10 @@ def _run_solver(solver: str, results_root: Path) -> None:
             priorities_list=prio_list,
             breaker_col="util",
             caption=(
-                f"Solver performance metrics with different cluster sizes and different target usage levels "
-                f"with {t}\\,s solver timeout. "
-                f"Values show the mean paired differences between the solver and default scheduler over 100 instances. "
-                f"Solver duration can slightly exceed the timeout because the timeout applies to solving only; "
+                f"Optimizer performance metrics with different cluster sizes and different target usage levels "
+                f"with {t}\\,s optimizer timeout. "
+                f"Values show the mean paired differences between the optimizer and default scheduler over 100 instances. "
+                f"Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; "
                 f"the reported time also includes solution extraction and I/O."
             ),
             label=f"tab:metrics-timeout{t}",
@@ -1067,11 +1067,11 @@ def _run_solver(solver: str, results_root: Path) -> None:
     produced_figs.extend([out_dot_usage.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     # --- Grid chart: solver duration
-    out_dot_solver = out_figures_dir / "solver_duration"
+    out_dot_solver = out_figures_dir / "optimizer_duration"
     plot_grid(
         df_util_agg,
         metric_col="solver_duration_ms_mean",
-        y_label=r"solver duration (s)",
+        y_label=r"optimizer duration (s)",
         ppns=PLOT_PPNS,
         priorities=PLOT_PRIORITIES,
         out_path=out_dot_solver,

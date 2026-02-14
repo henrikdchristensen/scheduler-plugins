@@ -338,7 +338,7 @@ GRID_ROW_SPECS = [
     GridRowSpec("delta_U_pct_eff_mean", "util", y_label="diff. usage (%)"),
     GridRowSpec("delta_L_ms_total_mean", "latency", y_label="diff. latency (ms)"),
     GridRowSpec("delta_D_num_total_mean", "deletions", y_label="diff. deletions"),
-    GridRowSpec("solver_attempts_mean", "solver", y_tick_strategy="count_sparse", y_label="solver runs"),
+    GridRowSpec("solver_attempts_mean", "solver", y_tick_strategy="count_sparse", y_label="optimizer runs"),
     GridRowSpec("plan_activated_mean", "plans", y_tick_strategy="count_sparse", y_label="plan activations", is_bottom=True),
 ]
 
@@ -1092,7 +1092,7 @@ METRIC_SPECS_ALL: List[MetricSpec] = [
     MetricSpec("usage",            "delta_U_pct_eff_mean",  None,                     True,  1, 1),
     MetricSpec("latency",          "delta_L_ms_total_mean", "delta_L_ms_p{p}_mean",   True,  0, 0),
     MetricSpec("deletions",        "delta_D_num_total_mean","delta_D_num_p{p}_mean",   True,  1, 1),
-    MetricSpec("solver_runs",      "solver_attempts_mean",  None,                     False, 0, 1),
+    MetricSpec("optimizer_runs",   "solver_attempts_mean",  None,                     False, 0, 1),
     MetricSpec("plan_activations", "plan_activated_mean",   None,                     False, 0, 1),
 ]
 
@@ -1192,7 +1192,7 @@ def latex_table_metric(
         "usage": "effective resource usage (\\%)",
         "latency": "scheduling latency (ms)",
         "deletions": "number of pod deletions",
-        "solver_runs": "number of solver runs",
+        "optimizer_runs": "number of optimizer runs",
         "plan_activations": "number of plan activations",
     }
     metric_desc = metric_captions.get(spec.name, spec.name)

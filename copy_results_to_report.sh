@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# copy_analysis.sh — Copy analysis folders to a destination directory.
-# Usage: ./copy_analysis.sh <dest_dir>
+# ./copy_results_to_report.sh /mnt/d/projects/master/SDU-Master-Thesis-Report/figures/generated/
 
 set -euo pipefail
 
@@ -14,10 +13,10 @@ COPY_MAP=(
     "kwok_trace_replayer/figures            trace_replayer_figures"
     "kwok_trace_replayer/tables             trace_replayer_tables"
     "public_traces                          public_traces_figures"
-    "kwok_workload_once/figures/cp_sat      solver_cp_sat_figures"
-    "kwok_workload_once/tables/cp_sat       solver_cp_sat_tables"
-    "kwok_workload_once/figures/gurobi      solver_gurobi_figures"
-    "kwok_workload_once/tables/gurobi       solver_gurobi_tables"
+    "kwok_workload_once/figures/cp_sat      optimizer_cp_sat_figures"
+    "kwok_workload_once/tables/cp_sat       optimizer_cp_sat_tables"
+    "kwok_workload_once/figures/gurobi      optimizer_gurobi_figures"
+    "kwok_workload_once/tables/gurobi       optimizer_gurobi_tables"
 )
 
 for entry in "${COPY_MAP[@]}"; do
