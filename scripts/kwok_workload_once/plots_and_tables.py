@@ -196,6 +196,11 @@ def aggregate_keep_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
     keys = ["util", "pods_per_node", "priorities", "timeout_s", "nodes"]
     return _aggregate_counts_to_rates(per_combo_df, keys)
 
+def aggregate_over_all_except_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
+    # Used by the single-panel plot: aggregate over priorities, timeout, nodes, pods_per_node
+    keys = ["util"]
+    return _aggregate_counts_to_rates(per_combo_df, keys)
+
 #################################################################
 # Tables
 #################################################################
@@ -800,6 +805,93 @@ def plot_3d_ppn_prio_timeout(
     save_figure(fig, out_path)
 
 
+# 2d single-panel sizes (aggregated over everything except util)
+GRID_2D_SINGLE_FIGSIZE = (2.8, 2.0)
+GRID_2D_SINGLE_BAR_WIDTH = 0.55
+
+
+def plot_2d_single_aggregated_by_util(
+    df_agg: pd.DataFrame,
+    out_path: Path,
+    *,
+    fixed_utils: List[int] = PLOT_UTILS,
+    figsize: Tuple[float, float] = GRID_2D_SINGLE_FIGSIZE,
+) -> None:
+    """Single stacked-bar plot: usage levels on x-axis, % of instances on y.
+
+    All other dimensions (priorities, timeout, nodes, pods/node) are
+    aggregated away so each bar represents the average over every
+    configuration at that target usage level.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+
+    x = np.arange(len(fixed_utils))
+    width = GRID_2D_SINGLE_BAR_WIDTH
+    bar_height = np.zeros(len(fixed_utils), dtype=float)
+    seen_keys: set = set()
+
+    df_idx = df_agg.set_index("util") if not df_agg.empty else pd.DataFrame()
+
+    for category in CATEGORIES:
+        if not df_idx.empty and category["col"] in df_idx.columns:
+            vals = (
+                df_idx[category["col"]]
+                .reindex(fixed_utils)
+                .fillna(0.0)
+                .values
+            )
+        else:
+            vals = np.zeros(len(fixed_utils))
+        h = vals * 100.0
+        if np.any(h > EPS):
+            ax.bar(
+                x,
+                h,
+                width=width,
+                bottom=bar_height,
+                color=category["color"],
+                edgecolor="black",
+                linewidth=0.35,
+                label=category["label"],
+            )
+            bar_height += h
+            seen_keys.add(category["key"])
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{u}%" for u in fixed_utils], fontsize=PLOT_TICK_FONTSIZE)
+    ax.set_xlabel(TARGET_UTIL_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+    ax.set_ylim(0, 110)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.yaxis.set_major_formatter(mtick.PercentFormatter(100.0))
+    ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
+    ax.set_ylabel(INSTANCES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    # legend
+    legends = [s for s in CATEGORIES if s["key"] in seen_keys][::-1]
+    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"], ec="black", linewidth=0.4) for s in legends]
+    legend_labels = [s["label"] for s in legends]
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="upper center",
+        bbox_to_anchor=(0.48, 0.96),
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        ncol=min(len(legend_labels), 5),
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+
+    fig.subplots_adjust(
+        left=0.14,
+        right=0.98,
+        bottom=0.15,
+        top=0.82,
+    )
+
+    save_figure(fig, out_path)
+
+
 def plot_grid(
     df_util_agg: pd.DataFrame,
     *,
@@ -1038,6 +1130,15 @@ def _run_solver(solver: str, results_root: Path) -> None:
 
     # --- PLOTS
     df_util_agg = aggregate_over_util(df_per_combo)
+
+    # --- Single-panel plot: outcomes by usage level (all other dims aggregated)
+    df_util_only = aggregate_over_all_except_util(df_per_combo)
+    out_path_2d_util = out_figures_dir / "2d_by_usage"
+    plot_2d_single_aggregated_by_util(
+        df_agg=df_util_only,
+        out_path=out_path_2d_util,
+    )
+    produced_figs.extend([out_path_2d_util.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     out_path_2d = out_figures_dir / "2d_main"
     plot_2d_grid_ppn_prio_with_aggregated_util(
