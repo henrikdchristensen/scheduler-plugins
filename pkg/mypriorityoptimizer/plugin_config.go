@@ -51,7 +51,7 @@ func buildPluginConfigSnapshot() PluginConfigSnapshot {
 		PlanCompletionCheckInterval: PlanCompletionCheckInterval.String(),
 		PlanActivationTimeout:       PlanActivationTimeout.String(),
 		WaitPodsGoneInterval:        WaitPodsGoneInterval.String(),
-		EvictRecreateParallelism:    EvictRecreateParallelism,
+		EvictParallelism:    		 EvictParallelism,
 	}
 }
 

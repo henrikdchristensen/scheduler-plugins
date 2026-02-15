@@ -369,7 +369,7 @@ func (pl *SharedState) evictTargets(ctx context.Context, targets []*v1.Pod) erro
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(EvictRecreateParallelism)
+	g.SetLimit(EvictParallelism)
 
 	for _, pod := range targets {
 		p := pod // explicit capture (even though Go 1.22+ fixes range capture)

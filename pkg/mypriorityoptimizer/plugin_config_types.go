@@ -53,5 +53,5 @@ type PluginConfigSnapshot struct {
 	PlanCompletionCheckInterval string `json:"planCompletionCheckInterval"`
 	PlanActivationTimeout       string `json:"planActivationTimeout"`
 	WaitPodsGoneInterval        string `json:"waitPodsGoneInterval"`
-	EvictRecreateParallelism    int    `json:"evictRecreateParallelism"`
+	EvictParallelism    		int    `json:"evictParallelism"`
 }

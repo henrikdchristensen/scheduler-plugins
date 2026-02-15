@@ -74,7 +74,7 @@ PODS_PER_NODE_PLOT_LABEL = "pods/node"
 PODS_PER_NODE_TABLE_LABEL = "Pods/Node"
 PRIORITIES_PLOT_LABEL = "#priorities"
 PRIORITIES_TABLE_LABEL = rf"\# Priorities"
-SOLVER_TIMEOUT_LABEL = "solver timeout"
+SOLVER_TIMEOUT_LABEL = "Optimizer timeout"
 
 # figure saving
 
@@ -1016,7 +1016,7 @@ def plot_grid(
         legend_handles,
         legend_labels,
         loc="upper center",
-        bbox_to_anchor=(0.51, 1.02),
+        bbox_to_anchor=(0.56, 1.02),
         fontsize=PLOT_LEGEND_FONTSIZE,
         ncol=len(legend_labels),
         handlelength=PLOT_LEGEND_HANDLE_LENGTH,

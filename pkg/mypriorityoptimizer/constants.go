@@ -32,8 +32,8 @@ const (
 	PlanActivationTimeout = 8 * time.Second
 	// Interval for waiting for pods to be gone after eviction.
 	WaitPodsGoneInterval = 250 * time.Millisecond
-	// Degree of parallelism for eviction and recreate operations.
-	EvictRecreateParallelism = 8
+	// Degree of parallelism for eviction operations.
+	EvictParallelism = 8
 	// Prefix for plan ConfigMaps.
 	PlanConfigMapNamePrefix = "plan-"
 	// PlanConfigMapLabelKey is the name of the ConfigMap used for plan configuration.
