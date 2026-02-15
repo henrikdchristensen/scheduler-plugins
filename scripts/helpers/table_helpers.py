@@ -139,6 +139,7 @@ def write_latex_table(
     font_size: str = DEFAULT_TABLE_FONT_SIZE,
     tabcolsep: str = DEFAULT_TABLE_TABCOLSEP,
     arraystretch: str = DEFAULT_TABLE_ARRAYSTRETCH,
+    resizebox: bool = True,
 ) -> None:
     """Wrap *tabular_lines* in a ``table*`` float and write to *out_path*."""
     wrapped: List[str] = [
@@ -149,11 +150,15 @@ def write_latex_table(
         r"\centering",
         rf"\caption{{{caption}}}",
         rf"\label{{{label}}}",
-        r"\resizebox{\textwidth}{!}{%",
-        *tabular_lines,
-        r"}",
+    ]
+    if resizebox:
+        wrapped.append(r"\resizebox{\textwidth}{!}{%")
+    wrapped.extend(tabular_lines)
+    if resizebox:
+        wrapped.append(r"}")
+    wrapped.extend([
         r"\end{table}",
         "",
-    ]
+    ])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(wrapped), encoding="utf-8")

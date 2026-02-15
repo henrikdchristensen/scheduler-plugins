@@ -4,7 +4,7 @@
 python -m scripts.kwok_trace_replayer.plots_and_tables
 """
 
-import math, re
+import math, re, yaml
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -39,6 +39,7 @@ from scripts.helpers.plot_helpers import PLOT_COLORS, configure_matplotlib, save
 # =============================================================================
 
 IN_RESULTS_SEEDS = Path("analysis/kwok_trace_replayer/results_seeds.csv")
+TRACES_DIR = Path("data/traces")
 
 OUT_DIR = Path("analysis/kwok_trace_replayer")
 OUT_TABLES_DIR = OUT_DIR / "tables"
@@ -1206,6 +1207,126 @@ def latex_table_metric(
 
 
 # =============================================================================
+# Mean-lifetime table (from trace generation info)
+# =============================================================================
+
+def load_mean_lifetime_data(traces_dir: Path) -> pd.DataFrame:
+    """Scan all info_generate.yaml files and extract calibrated mean lifetime."""
+    records: List[Dict] = []
+    for yaml_path in sorted(traces_dir.rglob("info_generate.yaml")):
+        with open(yaml_path, "r", encoding="utf-8") as fh:
+            info = yaml.safe_load(fh)
+        gen = info.get("inputs", {}).get("generated", {})
+        args = info.get("inputs", {}).get("args", {})
+        nodes = int(args.get("num_nodes", 0))
+        priorities = int(args.get("priority_max", 1))
+        arrival_s = float(args.get("mean_arrival", 0))
+        seed = str(args.get("seed", yaml_path.parent.name))
+        mean_life = float(gen.get("derived_mean_lifetime_s", float("nan")))
+        records.append({
+            "nodes": nodes,
+            "priorities": priorities,
+            "arrival_s": arrival_s,
+            "seed": seed,
+            "mean_lifetime_s": mean_life,
+        })
+    return pd.DataFrame(records)
+
+
+def latex_table_mean_lifetime(
+    *,
+    out_path: Path,
+    df_life: pd.DataFrame,
+    priorities: int,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    seeds_order: List[str],
+    decimals: int = 1,
+    caption: str = "",
+    label: str = "",
+) -> None:
+    """Generate a LaTeX table of calibrated mean lifetime (s) per seed.
+
+    Layout mirrors the metric tables: nodes as top-level column groups,
+    inter-arrival times as sub-columns, seeds as rows.
+    """
+    dff = df_life[df_life["priorities"] == priorities].copy()
+    dff = dff.set_index(["nodes", "arrival_s", "seed"]).sort_index()
+
+    n_arrivals = len(arrivals_order)
+    n_nodes = len(nodes_order)
+
+    lines: List[str] = []
+
+    col_groups = []
+    for _ in nodes_order:
+        col_groups.append(" @{\\hspace{0.5em}} ".join(["c"] * n_arrivals))
+    colspec = "p{7.2em} " + " @{\\hspace{1.5em}} ".join(col_groups)
+    lines.append(rf"\begin{{tabular}}{{{colspec}}}")
+    lines.append(r"\toprule")
+
+    # Header row 1: node counts
+    node_headers = [
+        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\# Nodes =\,{n}}}}}"
+        for n in nodes_order
+    ]
+    lines.append(r"\multirow{2}{*}{\centering\textbf{Trace Seed}} & " + " & ".join(node_headers) + r" \\")
+    lines.append(latex_cmidrules(n_nodes, n_arrivals))
+
+    # Header row 2: inter-arrival times
+    arrival_headers = []
+    is_first = True
+    for _ in nodes_order:
+        for a in arrivals_order:
+            if is_first:
+                arrival_headers.append(rf"\textbf{{\llap{{Inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
+                is_first = False
+            else:
+                arrival_headers.append(rf"\textbf{{{fmt_arrival_value(a)}s}}")
+    lines.append(" & " + " & ".join(arrival_headers) + r" \\")
+    lines.append(r"\midrule")
+
+    # Data rows: one per seed
+    for s_idx, seed in enumerate(seeds_order, start=1):
+        cells: List[str] = []
+        for nodes in nodes_order:
+            for arrival in arrivals_order:
+                try:
+                    val = float(dff.at[(nodes, arrival, seed), "mean_lifetime_s"])
+                except Exception:
+                    val = float("nan")
+                if is_finite(val):
+                    cells.append(f"{val:.{decimals}f}")
+                else:
+                    cells.append(r"\text{--}")
+        lines.append(rf"\centering {s_idx} & " + " & ".join(cells) + r" \\")
+
+    # Mean row
+    lines.append(r"\midrule")
+    mean_cells: List[str] = []
+    for nodes in nodes_order:
+        for arrival in arrivals_order:
+            vals = []
+            for seed in seeds_order:
+                try:
+                    v = float(dff.at[(nodes, arrival, seed), "mean_lifetime_s"])
+                    if is_finite(v):
+                        vals.append(v)
+                except Exception:
+                    pass
+            if vals:
+                mean_cells.append(f"{np.mean(vals):.{decimals}f}")
+            else:
+                mean_cells.append(r"\text{--}")
+    lines.append(r"\centering\textbf{Mean} & " + " & ".join(mean_cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    write_latex_table(out_path, lines, caption=caption, label=label, resizebox=False)
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -1260,6 +1381,25 @@ def main() -> None:
                 out = OUT_TABLES_DIR / f"table_defpreempt={defpreempt}_priorities={k}_{spec.name}.tex"
                 latex_table_metric(out_path=out, lookup_main=lookup_main, spec=spec, defpreempt=defpreempt, priorities=k, nodes_order=nodes_order, arrivals_order=arrivals_order)
                 produced_tables.append(out)
+
+    # Mean-lifetime tables (one per priority level)
+    df_life = load_mean_lifetime_data(TRACES_DIR)
+    if not df_life.empty:
+        seeds_order = sorted(df_life["seed"].unique().tolist())
+        for k in PRIORITIES_TO_SHOW:
+            out = OUT_TABLES_DIR / f"table_mean_lifetime_priorities={k}.tex"
+            prio_desc = "one priority" if k == 1 else f"{k} priorities"
+            latex_table_mean_lifetime(
+                out_path=out,
+                df_life=df_life,
+                priorities=k,
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                seeds_order=seeds_order,
+                caption=f"Calibrated mean workload lifetime (s) per seed for runs with {prio_desc}.",
+                label=f"tab:mean-lifetime-prio{k}",
+            )
+            produced_tables.append(out)
 
     # ---------- Figures ----------
     for blocking in (0, 1):
