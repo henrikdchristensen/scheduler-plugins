@@ -152,9 +152,11 @@ def write_latex_table(
         rf"\label{{{label}}}",
     ]
     if resizebox:
-        wrapped.append(r"\resizebox{\textwidth}{!}{%")
+        wrapped.append(r"\resizebox{\linewidth}{!}{%")
     wrapped.extend(tabular_lines)
     if resizebox:
+        # Append % to last tabular line to avoid spurious whitespace before closing brace
+        wrapped[-1] = wrapped[-1] + "%"
         wrapped.append(r"}")
     wrapped.extend([
         r"\end{table}",

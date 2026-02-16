@@ -3,10 +3,9 @@
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean paired differences in number of optimizer runs between the plugin with DefaultPreemption enabled and the default scheduler for runs with one priority (mean ± std).}
+\caption{Mean paired differences in number of solver runs between the plugin with DefaultPreemption enabled and the default scheduler for runs with one priority (mean ± std).}
 \label{tab:optimizer_runs-defpreempt1-prio1}
-\resizebox{\textwidth}{!}{%
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{l c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
@@ -28,7 +27,6 @@ Stable-queue (non-blocking), 8s delay & $50\pm7.8$ & $65\pm10.6$ & $60\pm14.2$ &
 Stable-queue (blocking), 16s delay & $21\pm2.1$ & $31\pm4.5$ & $33\pm8.0$ & $40\pm15.2$ & $38\pm5.5$ & $49\pm4.7$ & $70\pm19.5$ & $65\pm30.9$ \\
 Stable-queue (non-blocking), 16s delay & $22\pm4.4$ & $28\pm3.4$ & $31\pm6.7$ & $45\pm18.9$ & $39\pm8.1$ & $47\pm9.9$ & $66\pm18.7$ & $39\pm11.0$ \\
 \bottomrule
-\end{tabular}
-}
+\end{tabular}%
 }
 \end{table}

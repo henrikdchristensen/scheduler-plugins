@@ -5,8 +5,7 @@
 \centering
 \caption{Mean paired differences in effective resource usage (\%) between the plugin with DefaultPreemption disabled and the default scheduler for runs with one priority (mean ± std).}
 \label{tab:usage-defpreempt0-prio1}
-\resizebox{\textwidth}{!}{%
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{l c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
@@ -28,7 +27,6 @@ Stable-queue (non-blocking), 8s delay & $+0.9\pm0.3$ & $+1.6\pm0.7$ & $+2.1\pm1.
 Stable-queue (blocking), 16s delay & $+0.9\pm0.8$ & $+1.2\pm0.8$ & $+1.9\pm1.1$ & $+2.8\pm0.7$ & $+0.5\pm0.2$ & $+1.2\pm0.5$ & $+1.5\pm1.3$ & $+2.6\pm1.4$ \\
 Stable-queue (non-blocking), 16s delay & $+0.7\pm0.3$ & $+1.3\pm0.7$ & $+1.9\pm1.0$ & $+2.8\pm0.7$ & $+0.4\pm0.1$ & $+1.2\pm0.4$ & $+1.6\pm1.0$ & $+2.6\pm1.3$ \\
 \bottomrule
-\end{tabular}
-}
+\end{tabular}%
 }
 \end{table}

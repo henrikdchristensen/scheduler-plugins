@@ -1,0 +1,20 @@
+\begin{table}[H]
+\small
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean difference between 8s baseline and other timing variants for blocking runs with DefaultPreemption enabled.}
+\label{tab:timing-diff-defpreempt1-blocking1}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{l c c c c c}
+\toprule
+\textbf{Comparison} & \makecell{diff. usage\\(\%)} & \makecell{diff. latency\\(ms)} & \makecell{diff. pod\\deletions} & \makecell{diff. solver\\runs} & \makecell{diff. plan\\activations} \\
+\midrule
+Periodic, 8s $\to$ 4s & +0.1 & -13 & +35.0 & +36 & +20 \\
+Periodic, 8s $\to$ 16s & -0.1 & +152 & -32.1 & -23 & -12 \\
+Stable-queue, 8s $\to$ 4s & -0.6 & -89 & -69.3 & +54 & +12 \\
+Stable-queue, 8s $\to$ 16s & -0.2 & +212 & -17.7 & -35 & -10 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

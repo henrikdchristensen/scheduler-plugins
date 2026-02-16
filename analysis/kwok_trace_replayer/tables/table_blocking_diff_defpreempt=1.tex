@@ -1,0 +1,19 @@
+\begin{table}[H]
+\small
+\setlength{\tabcolsep}{1.2pt}
+\renewcommand{\arraystretch}{1.12}
+\centering
+\caption{Mean difference (non-blocking $-$ blocking) across all trace settings for runs with all priority settings and DefaultPreemption enabled.}
+\label{tab:blocking-diff-defpreempt1-prioall}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{l c c c c c}
+\toprule
+\textbf{Trigger Mode} & \makecell{diff. usage\\(\%)} & \makecell{diff. latency\\(ms)} & \makecell{diff. pod\\deletions} & \makecell{diff. solver\\runs} & \makecell{diff. plan\\activations} \\
+\midrule
+Scheduling-failure & +0.0 & -35 & -8.9 & +2 & +0 \\
+Periodic, 8s interval & +0.0 & +52 & +0.2 & +1 & +0 \\
+Stable-queue, 8s delay & +0.0 & +11 & +6.5 & +1 & +0 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

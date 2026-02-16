@@ -3,10 +3,9 @@
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean paired differences in scheduling latency (ms) between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities (mean ± std).}
+\caption{Mean paired differences in scheduling latency (ms) between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities (mean ± std). p1 is the lowest priority.}
 \label{tab:latency-defpreempt1-prio4}
-\resizebox{\textwidth}{!}{%
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{l @{\hspace{1em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
@@ -28,7 +27,6 @@
 \begin{tabular}[t]{@{}l@{}}Stable-queue\\(blocking)\\16s delay\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+23\pm36$\\p1 & $+52\pm134$\\p2 & $+5\pm13$\\p3 & $+23\pm19$\\p4 & $+8\pm12$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+31\pm69$\\p1 & $+113\pm261$\\p2 & $+5\pm17$\\p3 & $-13\pm25$\\p4 & $-4\pm19$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-103\pm133$\\p1 & $-371\pm451$\\p2 & $+14\pm35$\\p3 & $+7\pm29$\\p4 & $+1\pm30$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-131\pm381$\\p1 & $-374\pm1340$\\p2 & $-9\pm70$\\p3 & $+3\pm29$\\p4 & $-15\pm24$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+33\pm75$\\p1 & $+77\pm228$\\p2 & $+13\pm10$\\p3 & $+13\pm18$\\p4 & $+16\pm13$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-47\pm81$\\p1 & $-144\pm237$\\p2 & $-1\pm20$\\p3 & $+4\pm23$\\p4 & $-1\pm17$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-86\pm266$\\p1 & $-261\pm864$\\p2 & $+7\pm27$\\p3 & $-11\pm14$\\p4 & $+19\pm26$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-498\pm713$\\p1 & $-1561\pm2317$\\p2 & $-10\pm37$\\p3 & $+6\pm29$\\p4 & $-8\pm44$\end{tabular} \\
 \begin{tabular}[t]{@{}l@{}}Stable-queue\\(non-blocking)\\16s delay\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-4\pm29$\\p1 & $-24\pm105$\\p2 & $+4\pm17$\\p3 & $+8\pm15$\\p4 & $+8\pm13$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-11\pm60$\\p1 & $-71\pm168$\\p2 & $+14\pm21$\\p3 & $-2\pm29$\\p4 & $+12\pm25$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+20\pm116$\\p1 & $+57\pm394$\\p2 & $+23\pm43$\\p3 & $-0\pm43$\\p4 & $-18\pm30$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-46\pm521$\\p1 & $-195\pm1763$\\p2 & $+5\pm38$\\p3 & $+3\pm30$\\p4 & $+11\pm48$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+29\pm20$\\p1 & $+53\pm33$\\p2 & $+21\pm41$\\p3 & $+11\pm36$\\p4 & $+18\pm32$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-66\pm95$\\p1 & $-203\pm291$\\p2 & $-1\pm9$\\p3 & $+5\pm16$\\p4 & $-12\pm17$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-79\pm263$\\p1 & $-289\pm843$\\p2 & $+23\pm25$\\p3 & $+4\pm25$\\p4 & $+37\pm47$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-382\pm741$\\p1 & $-1209\pm2460$\\p2 & $-16\pm41$\\p3 & $-12\pm40$\\p4 & $+8\pm41$\end{tabular} \\
 \bottomrule
-\end{tabular}
-}
+\end{tabular}%
 }
 \end{table}

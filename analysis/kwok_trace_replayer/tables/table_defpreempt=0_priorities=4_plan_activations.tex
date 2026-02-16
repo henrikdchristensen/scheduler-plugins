@@ -3,10 +3,9 @@
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean paired differences in number of plan activations between the plugin with DefaultPreemption disabled and the default scheduler for runs with 4 priorities (mean ± std).}
+\caption{Mean paired differences in number of plan activations between the plugin with DefaultPreemption disabled and the default scheduler for runs with 4 priorities (mean ± std). p1 is the lowest priority.}
 \label{tab:plan_activations-defpreempt0-prio4}
-\resizebox{\textwidth}{!}{%
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{l @{\hspace{1em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
@@ -28,7 +27,6 @@ Stable-queue (non-blocking), 8s delay & $30\pm4.8$ & $34\pm9.0$ & $32\pm6.6$ & $
 Stable-queue (blocking), 16s delay & $12\pm1.9$ & $18\pm4.4$ & $19\pm3.4$ & $19\pm2.1$ & $16\pm4.0$ & $21\pm4.5$ & $22\pm4.8$ & $17\pm2.4$ \\
 Stable-queue (non-blocking), 16s delay & $12\pm4.3$ & $17\pm4.6$ & $21\pm5.8$ & $20\pm3.4$ & $15\pm2.3$ & $23\pm4.0$ & $22\pm3.3$ & $20\pm7.0$ \\
 \bottomrule
-\end{tabular}
-}
+\end{tabular}%
 }
 \end{table}

@@ -29,7 +29,9 @@ from scripts.helpers.plot_config import (
 from scripts.helpers.data_helpers import is_finite
 from scripts.helpers.table_helpers import (
     fmt_mean_std,
+    fmt_signed,
     latex_cmidrules,
+    metric_header_tex,
     write_latex_table,
 )
 from scripts.helpers.plot_helpers import PLOT_COLORS, configure_matplotlib, save_figure
@@ -48,6 +50,10 @@ OUT_FIGURES_DIR = OUT_DIR / "figures"
 MAX_PRIORITIES = 4
 
 SEED_COL = "seed"
+
+# Display name for the solver/optimizer metric. Change this single value
+# to switch between "optimizer" and "solver" everywhere in plots and tables.
+SOLVER_DISPLAY_NAME = "solver"
 
 # Base modes — each is auto-expanded into blocking=1 and blocking=0 variants.
 # (mode, base_label, detail, rank_base, color_idx)
@@ -338,8 +344,8 @@ class GridRowSpec:
 GRID_ROW_SPECS = [
     GridRowSpec("delta_U_pct_eff_mean", "util", y_label="diff. usage (%)"),
     GridRowSpec("delta_L_ms_total_mean", "latency", y_label="diff. latency (ms)"),
-    GridRowSpec("delta_D_num_total_mean", "deletions", y_label="diff. deletions"),
-    GridRowSpec("solver_attempts_mean", "solver", y_tick_strategy="count_sparse", y_label="optimizer runs"),
+    GridRowSpec("delta_D_num_total_mean", "deletions", y_label="diff. pod deletions"),
+    GridRowSpec("solver_attempts_mean", "solver", y_tick_strategy="count_sparse", y_label=f"{SOLVER_DISPLAY_NAME} runs"),
     GridRowSpec("plan_activated_mean", "plans", y_tick_strategy="count_sparse", y_label="plan activations", is_bottom=True),
 ]
 
@@ -1183,10 +1189,6 @@ def latex_table_metric(
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
 
-    # Wrap in resizebox to fit text width
-    lines.insert(0, r"\resizebox{\textwidth}{!}{%")
-    lines.append("}")
-
     # Generate caption based on parameters
     prio_desc = "one priority" if priorities == 1 else f"{priorities} priorities"
     preempt_desc = "with DefaultPreemption enabled" if defpreempt else "with DefaultPreemption disabled"
@@ -1194,16 +1196,288 @@ def latex_table_metric(
         "usage": "effective resource usage (\\%)",
         "latency": "scheduling latency (ms)",
         "deletions": "number of pod deletions",
-        "optimizer_runs": "number of optimizer runs",
+        "optimizer_runs": f"number of {SOLVER_DISPLAY_NAME} runs",
         "plan_activations": "number of plan activations",
     }
     metric_desc = metric_captions.get(spec.name, spec.name)
+    prio_note = " p1 is the lowest priority." if priorities > 1 else ""
     caption = (
-        f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler for runs with {prio_desc} (mean ± std)."
+        f"Mean paired differences in {metric_desc} between the plugin {preempt_desc} and the default scheduler for runs with {prio_desc} (mean ± std).{prio_note}"
     )
     label = f"tab:{spec.name}-defpreempt{defpreempt}-prio{priorities}"
 
     write_latex_table(out_path, lines, caption=caption, label=label)
+
+
+# =============================================================================
+# Blocking vs non-blocking difference table
+# =============================================================================
+
+_BLOCKING_DIFF_METRIC_SPECS: List[MetricSpec] = METRIC_SPECS_ALL
+
+_BLOCKING_DIFF_METRIC_HEADERS: Dict[str, str] = {
+    "usage": r"\makecell{diff. usage\\(\%)}",
+    "latency": r"\makecell{diff. latency\\(ms)}",
+    "deletions": r"\makecell{diff. pod\\deletions}",
+    "optimizer_runs": rf"\makecell{{diff. {SOLVER_DISPLAY_NAME}\\runs}}",
+    "plan_activations": r"\makecell{diff. plan\\activations}",
+}
+
+# Subset of BASE_MODES used in the compact summary tables (8s variants only)
+SUMMARY_MODES: List[Tuple[str, str, str, int, int]] = [
+    m for m in BASE_MODES if m[0] in {"schedulingfailure", "periodic8s", "stable-queue-8s"}
+]
+
+# Timing comparisons: (baseline_mode, compared_mode, row_label)
+TIMING_DELTA_SPECS: List[Tuple[str, str, str]] = [
+    ("periodic8s",      "periodic4s",      "Periodic, 8s $\\to$ 4s"),
+    ("periodic8s",      "periodic16s",     "Periodic, 8s $\\to$ 16s"),
+    ("stable-queue-8s", "stable-queue-4s",  "Stable-queue, 8s $\\to$ 4s"),
+    ("stable-queue-8s", "stable-queue-16s", "Stable-queue, 8s $\\to$ 16s"),
+]
+
+
+def latex_table_blocking_diff(
+    *,
+    out_path: Path,
+    df_seeds: pd.DataFrame,
+    defpreempt: int,
+    priorities: Optional[int] = None,
+) -> None:
+    """
+    Generate a LaTeX table showing the mean difference (blocking − non-blocking)
+    for each base mode, averaged across all trace settings (nodes, arrivals, seeds).
+
+    When *priorities* is None the difference is aggregated across all priority
+    settings; otherwise only runs with the given number of priorities are used.
+
+    Rows: 7 base modes.
+    Columns: 5 metrics (usage, latency, deletions, optimizer runs, plan activations).
+    """
+    # Filter to the requested defpreempt (and optionally priorities)
+    df = df_seeds[df_seeds["defpreempt"] == int(defpreempt)].copy()
+    if priorities is not None:
+        df = df[df["priorities"] == int(priorities)]
+
+    merge_cols = ["nodes", "priorities", "arrival_s", SEED_COL]
+    specs = _BLOCKING_DIFF_METRIC_SPECS
+    metric_cols = [s.col_total for s in specs]
+
+    rows_data: List[Tuple[str, List[str]]] = []  # (mode_label, [formatted_cells...])
+
+    for mode, base_label, detail, _rank, _cidx in SUMMARY_MODES:
+        df_block = df[(df["mode"] == mode) & (df["blocking"] == 1)][merge_cols + metric_cols]
+        df_nonblock = df[(df["mode"] == mode) & (df["blocking"] == 0)][merge_cols + metric_cols]
+
+        merged = df_block.merge(df_nonblock, on=merge_cols, suffixes=("_B", "_NB"), how="inner")
+
+        cells: List[str] = []
+        for spec in specs:
+            col = spec.col_total
+            diff = merged[f"{col}_NB"] - merged[f"{col}_B"]
+            if diff.empty:
+                cells.append(fmt_signed(float("nan"), spec.mean_dec))
+            else:
+                m = float(diff.mean())
+                cells.append(fmt_signed(m, spec.mean_dec))
+
+        # Build row label
+        label = base_label
+        if detail:
+            label += f", {detail}"
+        rows_data.append((label, cells))
+
+    # Build LaTeX tabular
+    n_metrics = len(specs)
+    col_spec = "l " + " ".join(["c"] * n_metrics)
+
+    lines: List[str] = []
+    lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
+    lines.append(r"\toprule")
+
+    # Header row
+    headers = [_BLOCKING_DIFF_METRIC_HEADERS.get(s.name, s.name) for s in specs]
+    lines.append(r"\textbf{Trigger Mode} & " + " & ".join(headers) + r" \\")
+    lines.append(r"\midrule")
+
+    for label, cells in rows_data:
+        lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    preempt_desc = "DefaultPreemption enabled" if defpreempt else "DefaultPreemption disabled"
+    if priorities is None:
+        prio_part = "all priority settings"
+        prio_tag = "all"
+    else:
+        prio_part = "one priority" if priorities == 1 else f"{priorities} priorities"
+        prio_tag = str(priorities)
+    caption = (
+        f"Mean difference (non-blocking $-$ blocking) across all trace settings "
+        f"for runs with {prio_part} and {preempt_desc}."
+    )
+    label = f"tab:blocking-diff-defpreempt{defpreempt}-prio{prio_tag}"
+
+    write_latex_table(out_path, lines, caption=caption, label=label)
+
+
+# =============================================================================
+# DefaultPreemption enabled vs disabled difference table
+# =============================================================================
+
+_DEFPREEMPT_DIFF_METRIC_HEADERS: Dict[str, str] = _BLOCKING_DIFF_METRIC_HEADERS
+
+
+def latex_table_defpreempt_diff(
+    *,
+    out_path: Path,
+    df_seeds: pd.DataFrame,
+    blocking: int,
+    priorities: Optional[int] = None,
+) -> None:
+    """
+    Generate a LaTeX table showing the mean difference
+    (DefaultPreemption enabled − disabled) for each base mode,
+    averaged across all trace settings (nodes, arrivals, seeds).
+
+    When *priorities* is None the difference is aggregated across all priority
+    settings; otherwise only runs with the given number of priorities are used.
+
+    Rows: 7 base modes.
+    Columns: 5 metrics.
+    """
+    df = df_seeds[df_seeds["blocking"] == int(blocking)].copy()
+    if priorities is not None:
+        df = df[df["priorities"] == int(priorities)]
+
+    merge_cols = ["nodes", "priorities", "arrival_s", SEED_COL]
+    specs = _BLOCKING_DIFF_METRIC_SPECS
+    metric_cols = [s.col_total for s in specs]
+
+    rows_data: List[Tuple[str, List[str]]] = []
+
+    for mode, base_label, detail, _rank, _cidx in SUMMARY_MODES:
+        df_enabled  = df[(df["mode"] == mode) & (df["defpreempt"] == 1)][merge_cols + metric_cols]
+        df_disabled = df[(df["mode"] == mode) & (df["defpreempt"] == 0)][merge_cols + metric_cols]
+
+        merged = df_enabled.merge(df_disabled, on=merge_cols, suffixes=("_E", "_D"), how="inner")
+
+        cells: List[str] = []
+        for spec in specs:
+            col = spec.col_total
+            diff = merged[f"{col}_E"] - merged[f"{col}_D"]
+            if diff.empty:
+                cells.append(fmt_signed(float("nan"), spec.mean_dec))
+            else:
+                cells.append(fmt_signed(float(diff.mean()), spec.mean_dec))
+
+        label = base_label
+        if detail:
+            label += f", {detail}"
+        rows_data.append((label, cells))
+
+    # Build LaTeX tabular
+    n_metrics = len(specs)
+    col_spec = "l " + " ".join(["c"] * n_metrics)
+
+    lines: List[str] = []
+    lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
+    lines.append(r"\toprule")
+
+    headers = [_DEFPREEMPT_DIFF_METRIC_HEADERS.get(s.name, s.name) for s in specs]
+    lines.append(r"\textbf{Trigger Mode} & " + " & ".join(headers) + r" \\")
+    lines.append(r"\midrule")
+
+    for label, cells in rows_data:
+        lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    blocking_desc = "blocking" if blocking else "non-blocking"
+    if priorities is None:
+        prio_part = "all priority settings"
+    else:
+        prio_part = "one priority" if priorities == 1 else f"{priorities} priorities"
+    caption = (
+        f"Mean difference (DefaultPreemption enabled $-$ disabled) across all trace settings "
+        f"for {blocking_desc} runs with {prio_part}."
+    )
+    tbl_label = f"tab:defpreempt-diff-blocking{blocking}"
+
+    write_latex_table(out_path, lines, caption=caption, label=tbl_label)
+
+
+# =============================================================================
+# Timing difference table (8s vs 4s / 16s)
+# =============================================================================
+
+def latex_table_timing_diff(
+    *,
+    out_path: Path,
+    df_seeds: pd.DataFrame,
+    defpreempt: int,
+    blocking: int,
+) -> None:
+    """
+    Generate a LaTeX table showing the mean difference between the 8s baseline
+    and the 4s / 16s timing variants, averaged across all trace settings
+    (nodes, arrivals, priorities, seeds) for a specific defpreempt and blocking.
+
+    Rows: 4 comparisons (Periodic 8→4, 8→16, Stable-queue 8→4, 8→16).
+    Columns: 5 metrics.
+    """
+    df = df_seeds[(df_seeds["defpreempt"] == int(defpreempt)) & (df_seeds["blocking"] == int(blocking))].copy()
+    merge_cols = ["nodes", "priorities", "arrival_s", SEED_COL]
+    specs = _BLOCKING_DIFF_METRIC_SPECS
+    metric_cols = [s.col_total for s in specs]
+
+    rows_data: List[Tuple[str, List[str]]] = []
+
+    for baseline_mode, compared_mode, row_label in TIMING_DELTA_SPECS:
+        df_base = df[df["mode"] == baseline_mode][merge_cols + metric_cols]
+        df_comp = df[df["mode"] == compared_mode][merge_cols + metric_cols]
+
+        merged = df_comp.merge(df_base, on=merge_cols, suffixes=("_C", "_B"), how="inner")
+
+        cells: List[str] = []
+        for spec in specs:
+            col = spec.col_total
+            diff = merged[f"{col}_C"] - merged[f"{col}_B"]
+            if diff.empty:
+                cells.append(fmt_signed(float("nan"), spec.mean_dec))
+            else:
+                cells.append(fmt_signed(float(diff.mean()), spec.mean_dec))
+        rows_data.append((row_label, cells))
+
+    # Build LaTeX tabular
+    n_metrics = len(specs)
+    col_spec = "l " + " ".join(["c"] * n_metrics)
+
+    lines: List[str] = []
+    lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
+    lines.append(r"\toprule")
+
+    headers = [_BLOCKING_DIFF_METRIC_HEADERS.get(s.name, s.name) for s in specs]
+    lines.append(r"\textbf{Comparison} & " + " & ".join(headers) + r" \\")
+    lines.append(r"\midrule")
+
+    for label, cells in rows_data:
+        lines.append(f"{label} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    blocking_desc = "blocking" if blocking else "non-blocking"
+    preempt_desc = "DefaultPreemption enabled" if defpreempt else "DefaultPreemption disabled"
+    caption = (
+        f"Mean difference between 8s baseline and other timing variants "
+        f"for {blocking_desc} runs with {preempt_desc}."
+    )
+    tbl_label = f"tab:timing-diff-defpreempt{defpreempt}-blocking{blocking}"
+
+    write_latex_table(out_path, lines, caption=caption, label=tbl_label)
 
 
 # =============================================================================
@@ -1381,6 +1655,25 @@ def main() -> None:
                 out = OUT_TABLES_DIR / f"table_defpreempt={defpreempt}_priorities={k}_{spec.name}.tex"
                 latex_table_metric(out_path=out, lookup_main=lookup_main, spec=spec, defpreempt=defpreempt, priorities=k, nodes_order=nodes_order, arrivals_order=arrivals_order)
                 produced_tables.append(out)
+
+    # Blocking vs non-blocking difference tables (aggregated across all priority settings)
+    for defpreempt in (0, 1):
+        out = OUT_TABLES_DIR / f"table_blocking_diff_defpreempt={defpreempt}.tex"
+        latex_table_blocking_diff(out_path=out, df_seeds=df_seeds, defpreempt=defpreempt)
+        produced_tables.append(out)
+
+    # DefaultPreemption enabled vs disabled difference tables (one per blocking variant)
+    for blocking in (0, 1):
+        out = OUT_TABLES_DIR / f"table_defpreempt_diff_blocking={blocking}.tex"
+        latex_table_defpreempt_diff(out_path=out, df_seeds=df_seeds, blocking=blocking)
+        produced_tables.append(out)
+
+    # Timing difference tables (8s vs 4s/16s) — one per (defpreempt, blocking)
+    for defpreempt in (0, 1):
+        for blocking in (0, 1):
+            out = OUT_TABLES_DIR / f"table_timing_diff_defpreempt={defpreempt}_blocking={blocking}.tex"
+            latex_table_timing_diff(out_path=out, df_seeds=df_seeds, defpreempt=defpreempt, blocking=blocking)
+            produced_tables.append(out)
 
     # Mean-lifetime tables (one per priority level)
     df_life = load_mean_lifetime_data(TRACES_DIR)

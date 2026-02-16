@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ./copy_results_to_report.sh /mnt/d/projects/master/SDU-Master-Thesis-Report/figures/generated/
+# ./copy_results_to_thesis.sh /mnt/d/projects/master/SDU-Master-Thesis-Report/figures/generated/
 
 set -euo pipefail
 

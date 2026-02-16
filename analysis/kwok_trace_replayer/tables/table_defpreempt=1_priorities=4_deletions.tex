@@ -3,10 +3,9 @@
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean paired differences in number of pod deletions between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities (mean ± std).}
+\caption{Mean paired differences in number of pod deletions between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities (mean ± std). p1 is the lowest priority.}
 \label{tab:deletions-defpreempt1-prio4}
-\resizebox{\textwidth}{!}{%
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{l @{\hspace{1em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
@@ -28,7 +27,6 @@
 \begin{tabular}[t]{@{}l@{}}Stable-queue\\(blocking)\\16s delay\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+63.2\pm120.2$\\p1 & $+62.8\pm116.6$\\p2 & $+1.4\pm6.1$\\p3 & $-1.4\pm2.7$\\p4 & $+0.4\pm2.1$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+83.4\pm49.3$\\p1 & $+81.8\pm47.9$\\p2 & $-0.6\pm2.6$\\p3 & $+1.6\pm1.7$\\p4 & $+0.6\pm0.9$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+87.6\pm55.5$\\p1 & $+86.8\pm54.3$\\p2 & $+1.8\pm1.5$\\p3 & $-0.2\pm2.4$\\p4 & $-0.8\pm0.8$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+76.2\pm36.4$\\p1 & $+77.8\pm36.7$\\p2 & $-1.6\pm3.4$\\p3 & $+0.0\pm0.0$\\p4 & $+0.0\pm0.0$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+57.4\pm54.8$\\p1 & $+58.6\pm56.2$\\p2 & $-0.4\pm4.9$\\p3 & $+0.4\pm1.5$\\p4 & $-1.2\pm1.3$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+73.6\pm47.2$\\p1 & $+73.8\pm46.5$\\p2 & $-1.0\pm1.9$\\p3 & $+0.4\pm2.3$\\p4 & $+0.4\pm1.1$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+59.4\pm25.4$\\p1 & $+58.4\pm24.5$\\p2 & $+1.0\pm1.4$\\p3 & $-0.4\pm0.5$\\p4 & $+0.4\pm0.5$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+59.2\pm28.9$\\p1 & $+58.6\pm28.3$\\p2 & $+0.4\pm0.9$\\p3 & $+0.2\pm0.4$\\p4 & $+0.0\pm0.0$\end{tabular} \\
 \begin{tabular}[t]{@{}l@{}}Stable-queue\\(non-blocking)\\16s delay\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-1574.8\pm3698.8$\\p1 & $-621.6\pm1572.3$\\p2 & $-378.0\pm847.5$\\p3 & $-306.6\pm687.8$\\p4 & $-268.6\pm592.2$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+91.0\pm50.0$\\p1 & $+90.0\pm51.8$\\p2 & $+1.4\pm3.9$\\p3 & $+0.2\pm1.1$\\p4 & $-0.6\pm1.1$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+86.2\pm52.1$\\p1 & $+85.2\pm55.0$\\p2 & $+1.8\pm6.4$\\p3 & $+0.4\pm1.1$\\p4 & $-1.2\pm1.6$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+80.4\pm37.0$\\p1 & $+81.8\pm38.9$\\p2 & $-1.2\pm2.8$\\p3 & $-0.2\pm0.4$\\p4 & $+0.0\pm0.0$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+80.4\pm39.8$\\p1 & $+87.6\pm36.6$\\p2 & $-2.6\pm7.0$\\p3 & $-2.0\pm2.2$\\p4 & $-2.6\pm4.5$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+78.8\pm40.1$\\p1 & $+77.6\pm38.4$\\p2 & $-0.2\pm0.8$\\p3 & $+0.8\pm2.0$\\p4 & $+0.6\pm0.5$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $-323.4\pm846.2$\\p1 & $-100.8\pm353.1$\\p2 & $-85.0\pm188.4$\\p3 & $-81.2\pm179.9$\\p4 & $-56.4\pm125.0$\end{tabular} & \begin{tabular}[t]{@{}r@{:\ }l@{}}total & $+56.8\pm27.2$\\p1 & $+56.8\pm27.3$\\p2 & $+0.6\pm0.9$\\p3 & $-0.6\pm0.9$\\p4 & $+0.0\pm0.0$\end{tabular} \\
 \bottomrule
-\end{tabular}
-}
+\end{tabular}%
 }
 \end{table}

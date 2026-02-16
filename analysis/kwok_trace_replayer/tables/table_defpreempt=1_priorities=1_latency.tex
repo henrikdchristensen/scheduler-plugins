@@ -5,8 +5,7 @@
 \centering
 \caption{Mean paired differences in scheduling latency (ms) between the plugin with DefaultPreemption enabled and the default scheduler for runs with one priority (mean ± std).}
 \label{tab:latency-defpreempt1-prio1}
-\resizebox{\textwidth}{!}{%
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{l c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
@@ -28,7 +27,6 @@ Stable-queue (non-blocking), 8s delay & $+20\pm242$ & $-43\pm609$ & $+83\pm1324$
 Stable-queue (blocking), 16s delay & $-95\pm311$ & $-124\pm497$ & $+412\pm1338$ & $-2695\pm2339$ & $-87\pm99$ & $-785\pm931$ & $-215\pm1824$ & $-4485\pm4094$ \\
 Stable-queue (non-blocking), 16s delay & $-17\pm194$ & $+59\pm526$ & $+284\pm1510$ & $-2443\pm1905$ & $+68\pm177$ & $-695\pm1075$ & $-648\pm1554$ & $-5999\pm4070$ \\
 \bottomrule
-\end{tabular}
-}
+\end{tabular}%
 }
 \end{table}

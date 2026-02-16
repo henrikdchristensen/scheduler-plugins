@@ -5,8 +5,7 @@
 \centering
 \caption{Mean paired differences in number of pod deletions between the plugin with DefaultPreemption enabled and the default scheduler for runs with one priority (mean ± std).}
 \label{tab:deletions-defpreempt1-prio1}
-\resizebox{\textwidth}{!}{%
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{l c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
@@ -28,7 +27,6 @@ Stable-queue (non-blocking), 8s delay & $+27.0\pm100.5$ & $-1.4\pm60.3$ & $+26.0
 Stable-queue (blocking), 16s delay & $+16.6\pm80.8$ & $-23.2\pm58.7$ & $-5.8\pm35.8$ & $-15.4\pm21.5$ & $+37.4\pm49.3$ & $+27.0\pm55.8$ & $+25.0\pm40.1$ & $+9.4\pm18.6$ \\
 Stable-queue (non-blocking), 16s delay & $-9.2\pm90.9$ & $-53.4\pm72.5$ & $+10.6\pm39.8$ & $-14.2\pm25.8$ & $-45.4\pm52.7$ & $+16.2\pm61.2$ & $+17.8\pm32.3$ & $+40.2\pm49.2$ \\
 \bottomrule
-\end{tabular}
-}
+\end{tabular}%
 }
 \end{table}
