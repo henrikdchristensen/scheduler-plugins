@@ -1,32 +1,32 @@
-\begin{table}[H]
+\begin{table*}[htbp]
 \small
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
 \caption{Mean paired differences in number of plan activations between the plugin with DefaultPreemption disabled and the default scheduler for runs with one priority (mean ± std).}
 \label{tab:plan_activations-defpreempt0-prio1}
-\resizebox{\linewidth}{!}{%
-\begin{tabular}{l c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
+\adjustbox{max width=\textwidth, max totalheight=0.9\textheight}{%
+\begin{tabular}{l c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
-\multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{4}{c}{\textbf{\# Nodes =\,32}} \\
-\cmidrule(lr){2-5}\cmidrule(lr){6-9}
- & \textbf{\llap{Inter-arrival =\,}2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} & \textbf{2s} & \textbf{4s} & \textbf{8s} & \textbf{16s} \\
+\multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{3}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{3}{c}{\textbf{\# Nodes =\,32}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & \textbf{\llap{Inter-arrival =\,}4s} & \textbf{8s} & \textbf{16s} & \textbf{4s} & \textbf{8s} & \textbf{16s} \\
 \midrule
-Scheduling-failure (blocking) & $203\pm39.8$ & $136\pm22.7$ & $91\pm18.4$ & $62\pm16.9$ & $160\pm25.2$ & $106\pm12.0$ & $55\pm12.2$ & $37\pm4.6$ \\
-Scheduling-failure (non-blocking) & $199\pm31.0$ & $140\pm31.8$ & $89\pm19.9$ & $60\pm16.1$ & $153\pm22.2$ & $95\pm18.6$ & $54\pm11.2$ & $37\pm6.0$ \\
-Periodic (blocking), 4s interval & $63\pm5.1$ & $53\pm2.1$ & $45\pm7.6$ & $37\pm9.9$ & $62\pm9.6$ & $52\pm11.9$ & $35\pm4.6$ & $23\pm6.5$ \\
-Periodic (non-blocking), 4s interval & $59\pm5.3$ & $50\pm6.3$ & $47\pm2.8$ & $35\pm9.5$ & $51\pm15.0$ & $52\pm11.7$ & $34\pm5.4$ & $22\pm6.6$ \\
-Periodic (blocking), 8s interval & $33\pm4.4$ & $30\pm6.2$ & $28\pm2.2$ & $27\pm4.6$ & $35\pm11.6$ & $35\pm5.5$ & $24\pm8.5$ & $19\pm6.0$ \\
-Periodic (non-blocking), 8s interval & $30\pm6.9$ & $33\pm8.2$ & $28\pm2.7$ & $26\pm4.3$ & $32\pm5.6$ & $36\pm11.1$ & $23\pm4.8$ & $20\pm4.4$ \\
-Periodic (blocking), 16s interval & $13\pm2.4$ & $18\pm1.7$ & $18\pm4.9$ & $17\pm4.0$ & $18\pm5.4$ & $22\pm5.6$ & $16\pm4.2$ & $14\pm3.3$ \\
-Periodic (non-blocking), 16s interval & $13\pm3.0$ & $17\pm5.1$ & $18\pm2.9$ & $15\pm1.6$ & $17\pm4.0$ & $21\pm4.9$ & $17\pm5.4$ & $14\pm4.3$ \\
-Stable-queue (blocking), 4s delay & $44\pm4.7$ & $45\pm5.0$ & $38\pm2.4$ & $32\pm4.9$ & $31\pm7.9$ & $32\pm7.2$ & $26\pm4.1$ & $19\pm3.1$ \\
-Stable-queue (non-blocking), 4s delay & $43\pm5.3$ & $41\pm5.2$ & $38\pm2.0$ & $32\pm7.9$ & $32\pm4.3$ & $36\pm8.4$ & $23\pm6.8$ & $20\pm5.8$ \\
-Stable-queue (blocking), 8s delay & $27\pm6.4$ & $29\pm5.5$ & $24\pm5.2$ & $26\pm4.3$ & $23\pm5.1$ & $24\pm5.7$ & $18\pm6.9$ & $16\pm6.4$ \\
-Stable-queue (non-blocking), 8s delay & $26\pm6.0$ & $28\pm4.4$ & $29\pm5.2$ & $25\pm5.5$ & $22\pm5.5$ & $26\pm4.7$ & $20\pm6.1$ & $14\pm4.5$ \\
-Stable-queue (blocking), 16s delay & $13\pm2.5$ & $18\pm4.5$ & $18\pm5.3$ & $16\pm1.9$ & $12\pm1.9$ & $16\pm5.7$ & $15\pm5.1$ & $13\pm2.7$ \\
-Stable-queue (non-blocking), 16s delay & $12\pm4.1$ & $16\pm2.7$ & $17\pm4.2$ & $15\pm4.1$ & $11\pm2.5$ & $17\pm4.4$ & $14\pm3.2$ & $12\pm2.6$ \\
+Scheduling-failure (blocking) & $136\pm22.7$ & $91\pm18.4$ & $62\pm16.9$ & $106\pm12.0$ & $55\pm12.2$ & $37\pm4.6$ \\
+Scheduling-failure (non-blocking) & $140\pm31.8$ & $89\pm19.9$ & $60\pm16.1$ & $95\pm18.6$ & $54\pm11.2$ & $37\pm6.0$ \\
+Periodic (blocking), 4s interval & $53\pm2.1$ & $45\pm7.6$ & $37\pm9.9$ & $52\pm11.9$ & $35\pm4.6$ & $23\pm6.5$ \\
+Periodic (non-blocking), 4s interval & $50\pm6.3$ & $47\pm2.8$ & $35\pm9.5$ & $52\pm11.7$ & $34\pm5.4$ & $22\pm6.6$ \\
+Periodic (blocking), 8s interval & $30\pm6.2$ & $28\pm2.2$ & $27\pm4.6$ & $35\pm5.5$ & $24\pm8.5$ & $19\pm6.0$ \\
+Periodic (non-blocking), 8s interval & $33\pm8.2$ & $28\pm2.7$ & $26\pm4.3$ & $36\pm11.1$ & $23\pm4.8$ & $20\pm4.4$ \\
+Periodic (blocking), 16s interval & $18\pm1.7$ & $18\pm4.9$ & $17\pm4.0$ & $22\pm5.6$ & $16\pm4.2$ & $14\pm3.3$ \\
+Periodic (non-blocking), 16s interval & $17\pm5.1$ & $18\pm2.9$ & $15\pm1.6$ & $21\pm4.9$ & $17\pm5.4$ & $14\pm4.3$ \\
+Stable-queue (blocking), 4s delay & $45\pm5.0$ & $38\pm2.4$ & $32\pm4.9$ & $32\pm7.2$ & $26\pm4.1$ & $19\pm3.1$ \\
+Stable-queue (non-blocking), 4s delay & $41\pm5.2$ & $38\pm2.0$ & $32\pm7.9$ & $36\pm8.4$ & $23\pm6.8$ & $20\pm5.8$ \\
+Stable-queue (blocking), 8s delay & $29\pm5.5$ & $24\pm5.2$ & $26\pm4.3$ & $24\pm5.7$ & $18\pm6.9$ & $16\pm6.4$ \\
+Stable-queue (non-blocking), 8s delay & $28\pm4.4$ & $29\pm5.2$ & $25\pm5.5$ & $26\pm4.7$ & $20\pm6.1$ & $14\pm4.5$ \\
+Stable-queue (blocking), 16s delay & $18\pm4.5$ & $18\pm5.3$ & $16\pm1.9$ & $16\pm5.7$ & $15\pm5.1$ & $13\pm2.7$ \\
+Stable-queue (non-blocking), 16s delay & $16\pm2.7$ & $17\pm4.2$ & $15\pm4.1$ & $17\pm4.4$ & $14\pm3.2$ & $12\pm2.6$ \\
 \bottomrule
 \end{tabular}%
 }
-\end{table}
+\end{table*}

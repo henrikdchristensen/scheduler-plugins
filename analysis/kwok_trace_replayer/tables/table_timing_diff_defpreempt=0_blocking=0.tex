@@ -1,19 +1,22 @@
-\begin{table}[H]
+\begin{table}[htbp]
 \small
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean difference between 8s baseline and other timing variants for non-blocking runs with DefaultPreemption disabled.}
+\caption{Mean difference between 8s baseline and other timing variants per inter-arrival time, aggregated over node counts and priority configurations, for non-blocking runs with DefaultPreemption disabled.}
 \label{tab:timing-diff-defpreempt0-blocking0}
 \resizebox{\linewidth}{!}{%
-\begin{tabular}{l c c c c c}
+\begin{tabular}{l @{\hspace{1em}} c c c @{\hspace{1.5em}} c c c @{\hspace{1.5em}} c c c @{\hspace{1.5em}} c c c}
 \toprule
-\textbf{Comparison} & \makecell{diff. usage\\(\%)} & \makecell{diff. latency\\(ms)} & \makecell{diff. pod\\deletions} & \makecell{diff. solver\\runs} & \makecell{diff. plan\\activations} \\
+\textbf{Metric} & \multicolumn{3}{c}{\textbf{Periodic, 8s $\to$ 4s}} & \multicolumn{3}{c}{\textbf{Periodic, 8s $\to$ 16s}} & \multicolumn{3}{c}{\textbf{Stable-queue, 8s $\to$ 4s}} & \multicolumn{3}{c}{\textbf{Stable-queue, 8s $\to$ 16s}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
+ & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
 \midrule
-Periodic, 8s $\to$ 4s & +0.1 & -212 & +40.6 & +34 & +19 \\
-Periodic, 8s $\to$ 16s & -0.2 & +509 & -29.0 & -20 & -12 \\
-Stable-queue, 8s $\to$ 4s & +0.1 & -142 & +28.2 & +55 & +12 \\
-Stable-queue, 8s $\to$ 16s & -0.1 & +431 & -24.7 & -35 & -9 \\
+Diff. usage (\%) & +0.2 & +0.1 & +0.0 & -0.3 & -0.2 & -0.2 & +0.1 & +0.1 & +0.1 & -0.3 & -0.1 & +0.0 \\
+Diff. latency (ms) & -72 & -296 & +83 & +118 & +359 & +1142 & -67 & -83 & -484 & +148 & +298 & +372 \\
+Diff. pod deletions & +65.2 & +54.6 & +30.6 & -44.1 & -29.2 & -13.7 & +53.8 & +33.6 & +21.4 & -34.1 & -30.6 & -18.8 \\
+Diff. solver runs & +39 & +29 & +27 & -25 & -22 & -17 & +74 & +52 & +23 & -37 & -39 & -36 \\
+Diff. plan activations & +22 & +14 & +8 & -17 & -10 & -8 & +14 & +9 & +6 & -12 & -9 & -5 \\
 \bottomrule
 \end{tabular}%
 }

@@ -13,6 +13,8 @@ from scripts.helpers.data_helpers import is_finite
 DEFAULT_TABLE_FONT_SIZE = r"\small"
 DEFAULT_TABLE_TABCOLSEP = "1.2pt"
 DEFAULT_TABLE_ARRAYSTRETCH = "1.12"
+DEFAULT_TABLE_PLACEMENT = "htbp"  # e.g. "H", "t", "ht", "htbp"
+DEFAULT_TABLE_ENVIRONMENT = "table"  # "table" or "table*"
 
 def nan_str() -> str:
     """
@@ -140,10 +142,19 @@ def write_latex_table(
     tabcolsep: str = DEFAULT_TABLE_TABCOLSEP,
     arraystretch: str = DEFAULT_TABLE_ARRAYSTRETCH,
     resizebox: bool = True,
+    max_height: Optional[str] = None,
+    placement: str = DEFAULT_TABLE_PLACEMENT,
+    environment: str = DEFAULT_TABLE_ENVIRONMENT,
 ) -> None:
-    """Wrap *tabular_lines* in a ``table*`` float and write to *out_path*."""
+    """Wrap *tabular_lines* in a ``table`` / ``table*`` float and write to *out_path*.
+
+    When *resizebox* is True, the tabular is wrapped so it fits the available
+    width.  If *max_height* is also given (e.g. ``"0.9\\textheight"``), an
+    ``\\adjustbox`` with both ``max width`` and ``max totalheight`` is used
+    instead of ``\\resizebox`` so the table never overflows the page.
+    """
     wrapped: List[str] = [
-        r"\begin{table}[H]",
+        rf"\begin{{{environment}}}[{placement}]",
         font_size,
         rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}",
         rf"\renewcommand{{\arraystretch}}{{{arraystretch}}}",
@@ -151,15 +162,18 @@ def write_latex_table(
         rf"\caption{{{caption}}}",
         rf"\label{{{label}}}",
     ]
-    if resizebox:
-        wrapped.append(r"\resizebox{\linewidth}{!}{%")
+    width = r"\textwidth" if environment.endswith("*") else r"\linewidth"
+    if resizebox and max_height:
+        wrapped.append(rf"\adjustbox{{max width={width}, max totalheight={max_height}}}{{%")
+    elif resizebox:
+        wrapped.append(rf"\resizebox{{{width}}}{{!}}{{%")
     wrapped.extend(tabular_lines)
     if resizebox:
         # Append % to last tabular line to avoid spurious whitespace before closing brace
         wrapped[-1] = wrapped[-1] + "%"
         wrapped.append(r"}")
     wrapped.extend([
-        r"\end{table}",
+        rf"\end{{{environment}}}",
         "",
     ])
     out_path.parent.mkdir(parents=True, exist_ok=True)

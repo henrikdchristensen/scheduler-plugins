@@ -1,18 +1,22 @@
-\begin{table}[H]
+\begin{table}[htbp]
 \small
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
-\caption{Mean difference (non-blocking $-$ blocking) across all trace settings for runs with all priority settings and DefaultPreemption enabled.}
+\caption{Mean difference (non-blocking $-$ blocking) per inter-arrival time, aggregated over node counts and all priority configurations, with DefaultPreemption enabled.}
 \label{tab:blocking-diff-defpreempt1-prioall}
 \resizebox{\linewidth}{!}{%
-\begin{tabular}{l c c c c c}
+\begin{tabular}{l @{\hspace{1em}} c c c @{\hspace{1.5em}} c c c @{\hspace{1.5em}} c c c}
 \toprule
-\textbf{Trigger Mode} & \makecell{diff. usage\\(\%)} & \makecell{diff. latency\\(ms)} & \makecell{diff. pod\\deletions} & \makecell{diff. solver\\runs} & \makecell{diff. plan\\activations} \\
+\textbf{Metric} & \multicolumn{3}{c}{\textbf{Scheduling-failure}} & \multicolumn{3}{c}{\textbf{Periodic, 8s interval}} & \multicolumn{3}{c}{\textbf{Stable-queue, 8s delay}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
+ & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
 \midrule
-Scheduling-failure & +0.0 & -35 & -8.9 & +2 & +0 \\
-Periodic, 8s interval & +0.0 & +52 & +0.2 & +1 & +0 \\
-Stable-queue, 8s delay & +0.0 & +11 & +6.5 & +1 & +0 \\
+Diff. usage (\%) & +0.1 & +0.0 & +0.0 & +0.0 & +0.0 & -0.1 & +0.0 & +0.0 & +0.0 \\
+Diff. latency (ms) & +66 & +303 & -209 & -133 & +32 & +245 & +30 & -3 & -266 \\
+Diff. pod deletions & -142.0 & -10.2 & -4.2 & +20.6 & +9.2 & +2.6 & +11.4 & -2.0 & +11.4 \\
+Diff. solver runs & +4 & +1 & +1 & +1 & +0 & +2 & +6 & +5 & +0 \\
+Diff. plan activations & -7 & +2 & +1 & +0 & +2 & +0 & -1 & +0 & +1 \\
 \bottomrule
 \end{tabular}%
 }

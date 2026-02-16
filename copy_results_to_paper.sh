@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # ./copy_results_to_paper.sh /mnt/c/projects/master/k8s-scheduler-opt-modes-paper/figures/generated/
+# ./copy_results_to_paper.sh /mnt/d/projects/master/k8s-scheduler-opt-modes-paper/figures/generated/
 
 set -euo pipefail
 
