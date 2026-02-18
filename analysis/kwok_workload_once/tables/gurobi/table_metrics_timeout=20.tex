@@ -1,11 +1,11 @@
-\begin{table}[H]
+\begin{table}[htbp]
 \small
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
 \caption{Optimizer performance metrics with different cluster sizes and different target usage levels with 20\,s optimizer timeout. Values show the mean paired differences between the optimizer and default scheduler over 100 instances. Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; the reported time also includes solution extraction and I/O.}
 \label{tab:metrics-timeout20}
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{c l c c c c c c c c c c c c c c c c c c c c c c c c}
 \toprule
 \multirow{3}{*}{\textbf{Usage}} & \multirow{3}{*}{\textbf{Metric}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,1}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,2}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,4}} \\
@@ -26,6 +26,6 @@
 \multirow{2}{*}{105\%} & Optimizer\,duration\,(s) & 0.3 & 9.2 & 19.8 & 20.1 & 3.9 & 13.7 & 20.1 & 20.2 & 0.2 & 1.1 & 13.0 & 19.9 & 0.5 & 10.1 & 19.9 & 20.2 & 0.2 & 0.4 & 2.4 & 10.2 & 0.2 & 2.1 & 14.1 & 20.2 \\
  & Diff.\,eff.\,usage\,(\%) & +8.7 & +11.1 & +6.8 & +4.3 & +5.2 & +4.7 & +2.0 & +1.2 & +4.4 & +5.3 & +6.7 & +4.0 & +3.5 & +4.2 & +2.0 & -0.6 & +2.0 & +2.5 & +3.0 & +3.4 & +2.4 & +2.9 & +2.7 & +1.6 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
 }
 \end{table}

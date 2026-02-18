@@ -1,11 +1,11 @@
-\begin{table}[H]
+\begin{table}[htbp]
 \small
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
 \caption{Outcome breakdown for 1\,s optimizer timeout. Values show the mean paired differences between the optimizer and default scheduler over 100 instances (\% of instances).}
 \label{tab:outcomes-timeout1}
-\resizebox{\textwidth}{!}{%
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{c l c c c c c c c c c c c c c c c c c c c c c c c c}
 \toprule
 \multirow{3}{*}{\textbf{Usage}} & \multirow{3}{*}{\textbf{Outcome}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,1}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,2}} & \multicolumn{8}{c}{\textbf{\# Priorities =\,4}} \\
@@ -38,6 +38,6 @@
  & Better (\%) & 62.0 & 98.0 & 98.0 & 0.0 & 46.0 & 100.0 & 17.0 & 0.0 & 11.0 & 56.0 & 88.0 & 0.0 & 33.0 & 95.0 & 71.0 & 0.0 & 1.0 & 18.0 & 52.0 & 0.0 & 6.0 & 66.0 & 24.0 & 0.0 \\
  & Better\&Optimal (\%) & 30.0 & 1.0 & 0.0 & 0.0 & 53.0 & 0.0 & 0.0 & 0.0 & 46.0 & 24.0 & 1.0 & 0.0 & 58.0 & 0.0 & 0.0 & 0.0 & 33.0 & 42.0 & 15.0 & 0.0 & 59.0 & 16.0 & 0.0 & 0.0 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
 }
 \end{table}

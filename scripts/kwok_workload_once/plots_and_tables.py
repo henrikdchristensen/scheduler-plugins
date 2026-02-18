@@ -108,11 +108,11 @@ DOT_YLABEL_XPOS = 0.02
 
 # Fixed y-axis limits for grid dot charts (None = auto-scale)
 DOT_YLIM_DIFF_USAGE: Optional[Tuple[float, float]] = (-5.0, 15.0)   # e.g. (-1.0, 5.0) in %
-DOT_YLIM_SOLVER_DUR: Optional[Tuple[float, float]] = (-5.0, 25.0)   # e.g. (0.0, 25.0) in s
+DOT_YLIM_SOLVER_DUR: Optional[Tuple[float, float]] = (0.0, 25.0)    # duration is non-negative
 
 # Number of horizontal grid lines / y-ticks (None = matplotlib auto)
 DOT_NTICKS_DIFF_USAGE: Optional[int] = 5   # e.g. 6 ticks → 5 intervals
-DOT_NTICKS_SOLVER_DUR: Optional[int] = 7
+DOT_NTICKS_SOLVER_DUR: Optional[int] = 6    # 0, 5, 10, 15, 20, 25
 
 # Y-label positioning per plot (supylabel x-position and per-axis labelpad)
 DOT_YLABEL_X_DIFF: float = 0.03   # figure-fraction x for supylabel
@@ -908,6 +908,7 @@ def plot_grid(
     y_nticks: Optional[int] = None,
     y_label_x: float = DOT_YLABEL_XPOS,
     y_label_pad: float = 10.0,
+    show_zero_line: bool = True,
 ) -> None:
     nrows, ncols = len(ppns), len(priorities)
     fig, axes = plt.subplots(
@@ -960,7 +961,8 @@ def plot_grid(
             ax.grid(axis="y", linewidth=0.4, alpha=0.4)
 
             # horizontal reference line at zero (same style as trace replayer)
-            ax.axhline(0.0, linewidth=0.8, color="black", linestyle="-", alpha=0.7)
+            if show_zero_line:
+                ax.axhline(0.0, linewidth=0.8, color="black", linestyle="-", alpha=0.7)
 
             # fixed y-axis limits (shared across all panels)
             if y_lim is not None:
@@ -1181,6 +1183,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
         y_nticks=DOT_NTICKS_SOLVER_DUR,
         y_label_x=DOT_YLABEL_X_DIFF,
         y_label_pad=DOT_YLABEL_PAD_DIFF,
+        show_zero_line=False,
     )
     produced_figs.extend([out_dot_solver.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
