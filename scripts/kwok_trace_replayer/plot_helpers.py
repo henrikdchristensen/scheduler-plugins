@@ -211,7 +211,7 @@ def plot_generator_histograms(
         axes[0],
         inter_arr,
         x_label="inter-arrival time (seconds)",
-        y_label="probability density",
+        y_label="% of samples",
         bins=80,
         log_y=True,
         x_max=xmax_arrival,
@@ -225,7 +225,7 @@ def plot_generator_histograms(
         axes[1],
         lifetimes,
         x_label="lifetime (seconds)",
-        y_label="probability density",
+        y_label="% of samples",
         bins=80,
         log_y=True,
         x_max=xmax_life,
@@ -239,7 +239,7 @@ def plot_generator_histograms(
         axes[2],
         req_vals,
         x_label="requested CPU (fraction of node capacity)",
-        y_label="probability density",
+        y_label="% of samples",
         bins=80,
         log_y=True,
         x_max=xmax_cpu,
@@ -253,7 +253,7 @@ def plot_generator_histograms(
         axes[3],
         req_vals,
         x_label="requested memory (fraction of node capacity)",
-        y_label="probability density",
+        y_label="% of samples",
         bins=80,
         log_y=True,
         x_max=xmax_mem,
@@ -267,7 +267,7 @@ def plot_generator_histograms(
         axes[4],
         prios,
         x_label="priority",
-        y_label="probability mass",
+        y_label="% of samples",
         geom_fit=True,
         geom_ratio=float(priority_ratio),
         x_min=int(priority_min),
@@ -277,7 +277,7 @@ def plot_generator_histograms(
         axes[5],
         replicas,
         x_label="replicas", 
-        y_label="probability mass",
+        y_label="% of samples",
         geom_fit=True,
         geom_ratio=float(replicas_ratio),
         x_min=int(replicas_min),
@@ -361,7 +361,9 @@ def plot_histogram_with_pareto(
     max_bins_allowed = max(1, min(n_points, n_unique))
     bins_eff = min(int(bins), max_bins_allowed)
 
-    ax.hist(data_for_hist, bins=bins_eff, density=True)
+    weights = np.ones_like(data_for_hist) * (100.0 / data_for_hist.size)
+    _, bin_edges, _ = ax.hist(data_for_hist, bins=bins_eff, weights=weights)
+    bin_width = float(bin_edges[1] - bin_edges[0]) if len(bin_edges) > 1 else 1.0
 
     plot_min = float(np.min(data_for_hist))
     plot_max = float(np.max(data_for_hist))
@@ -391,10 +393,10 @@ def plot_histogram_with_pareto(
         if hi > lo and math.isfinite(lo) and math.isfinite(hi):
             x_fit = np.linspace(lo, hi, 400)
             if xM is not None:
-                y_fit = bounded_pareto_pdf(x_fit, alpha=a, x_min=xm, x_max=xM)
+                y_fit = bounded_pareto_pdf(x_fit, alpha=a, x_min=xm, x_max=xM) * bin_width * 100.0
                 label = rf"bounded Pareto: $\alpha={a:.3f}$, $x_{{\min}}={xm:.3g}$, $x_{{\max}}={xM:.3g}$"
             else:
-                y_fit = pareto_pdf(x_fit, alpha=a, x_min=xm)
+                y_fit = pareto_pdf(x_fit, alpha=a, x_min=xm) * bin_width * 100.0
                 label = rf"Pareto: $\alpha={a:.3f}$, $x_{{\min}}={xm:.3g}$"
 
             line = ax.plot(x_fit, y_fit, linewidth=1.5, linestyle="-")[0]
@@ -461,7 +463,7 @@ def plot_bar_with_geometric(
 
     counts = np.array([np.sum(data_integers == v) for v in unique_vals], dtype=float)
     total = counts.sum()
-    probs_empirical = counts / total if total > 0.0 else np.zeros_like(counts) 
+    probs_empirical = (counts / total * 100.0) if total > 0.0 else np.zeros_like(counts)
 
     ax.bar(positions, probs_empirical, width=0.8, align="center")
 
@@ -478,7 +480,7 @@ def plot_bar_with_geometric(
         else:
             weights = ratio ** exponents
 
-        probs_theoretical = weights / weights.sum()
+        probs_theoretical = weights / weights.sum() * 100.0
 
         line, = ax.plot(positions, probs_theoretical, linestyle="-", linewidth=1.0)
         legend_handles.append(line)

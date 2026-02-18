@@ -31,10 +31,16 @@ from scripts.helpers.table_helpers import (
     fmt_mean_std,
     fmt_signed,
     latex_cmidrules,
-    metric_header_tex,
     write_latex_table,
 )
-from scripts.helpers.plot_helpers import PLOT_COLORS, configure_matplotlib, save_figure
+from scripts.helpers.plot_helpers import PLOT_COLORS, configure_matplotlib
+
+# Table environment for metric tables: "table*" (spans two columns) or "table".
+TABLE_METRIC_ENVIRONMENT: str = "table"
+
+# Display name for the solver/optimizer metric. Change this single value
+# to switch between "optimizer" and "solver" everywhere in plots and tables.
+SOLVER_DISPLAY_NAME = "optimizer"
 
 # =============================================================================
 # CONFIG
@@ -50,10 +56,6 @@ OUT_FIGURES_DIR = OUT_DIR / "figures"
 MAX_PRIORITIES = 4
 
 SEED_COL = "seed"
-
-# Display name for the solver/optimizer metric. Change this single value
-# to switch between "optimizer" and "solver" everywhere in plots and tables.
-SOLVER_DISPLAY_NAME = "solver"
 
 # Base modes — each is auto-expanded into blocking=1 and blocking=0 variants.
 # (mode, base_label, detail, rank_base, color_idx)
@@ -92,8 +94,6 @@ BLOCKING_DIFF_ARRIVALS: Optional[List[float]] = None  # None → use INTER_ARRIV
 # Timing-diff tables use the same modes as the main plots (MAIN_PLOT_MODE_NAMES)
 # so they are always consistent — no separate config needed.
 
-# Table environment for metric tables: "table*" (spans two columns) or "table".
-TABLE_METRIC_ENVIRONMENT: str = "table*"
 # Max height for metric tables (None = no height cap).  Requires adjustbox package.
 TABLE_METRIC_MAX_HEIGHT: Optional[str] = r"0.9\textheight"
 

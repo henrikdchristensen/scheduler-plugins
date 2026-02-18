@@ -1,11 +1,11 @@
-\begin{table*}[htbp]
+\begin{table}[htbp]
 \small
 \setlength{\tabcolsep}{1.2pt}
 \renewcommand{\arraystretch}{1.12}
 \centering
 \caption{Mean paired differences in scheduling latency (ms) between the plugin with DefaultPreemption disabled and the default scheduler for runs with one priority (mean ± std).}
 \label{tab:latency-defpreempt0-prio1}
-\adjustbox{max width=\textwidth, max totalheight=0.9\textheight}{%
+\adjustbox{max width=\linewidth, max totalheight=0.9\textheight}{%
 \begin{tabular}{l c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{3}{c}{\textbf{\# Nodes =\,16}} & \multicolumn{3}{c}{\textbf{\# Nodes =\,32}} \\
@@ -29,4 +29,4 @@ Stable-queue (non-blocking), 16s delay & $+13\pm476$ & $+454\pm1505$ & $-2098\pm
 \bottomrule
 \end{tabular}%
 }
-\end{table*}
+\end{table}

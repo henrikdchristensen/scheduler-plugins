@@ -95,11 +95,11 @@ BASE_PLOT_SPECS = [
     {
         "column": "inter_arrival_us",
         "x_label": "inter-arrival time (seconds)",
-        "y_label": "probability density",
+        "y_label": "% of samples",
         "bins": 100,
         "log_y": True,
-        "y_min": 1e-6,
-        "y_max": 1e-1,
+        "y_min": None,
+        "y_max": None,
         "x_max": 4_000.0,    # after scaling
         "scale": 1e-6,       # µs → seconds
         "fit_pareto": False,
@@ -107,11 +107,11 @@ BASE_PLOT_SPECS = [
     {
         "column": "life_time_us",
         "x_label": "lifetime (hours)",
-        "y_label": "probability density",
+        "y_label": "% of samples",
         "bins": 100,
         "log_y": True,
-        "y_min": 1e-5,
-        "y_max": 1e-1,
+        "y_min": None,
+        "y_max": None,
         "x_max": 550.0,
         "scale": 1.0 / (1_000_000.0 * 3600.0),  # µs → hours
         "fit_pareto": False,
@@ -119,11 +119,11 @@ BASE_PLOT_SPECS = [
     {
         "column": "cpu_request",
         "x_label": "requested CPU",
-        "y_label": "probability density",
+        "y_label": "% of samples",
         "bins": 100,
         "log_y": True,
-        "y_min": 1e-4,
-        "y_max": 1e3,
+        "y_min": None,
+        "y_max": None,
         "x_max": None,
         "scale": 1.0,
         "fit_pareto": False,
@@ -131,11 +131,11 @@ BASE_PLOT_SPECS = [
     {
         "column": "mem_request",
         "x_label": "requested memory",
-        "y_label": "probability density",
+        "y_label": "% of samples",
         "bins": 100,
         "log_y": True,
-        "y_min": 1e-4,
-        "y_max": 1e3,
+        "y_min": None,
+        "y_max": None,
         "x_max": None,
         "scale": 1.0,
         "fit_pareto": False,
@@ -143,7 +143,7 @@ BASE_PLOT_SPECS = [
     {
         "column": "priority",
         "x_label": "priority",
-        "y_label": "probability mass",
+        "y_label": "% of samples",
         "bins": 10,
         "log_y": False,
         "y_min": None,
@@ -305,7 +305,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--out-dir",
         type=str,
-        default="analysis/public_traces/public_trace_histograms/",
+        default="analysis/public_traces/",
         help="Output directory for the combined plots.",
     )
     return p
