@@ -37,11 +37,11 @@ from scripts.helpers.table_helpers import (
 from scripts.helpers.plot_helpers import PLOT_COLORS, configure_matplotlib
 
 # Table environment for metric tables: "table*" (spans two columns) or "table".
-TABLE_METRIC_ENVIRONMENT: str = "table*"
+TABLE_METRIC_ENVIRONMENT: str = "table"
 
 # Display name for the solver/optimizer metric. Change this single value
 # to switch between "optimizer" and "solver" everywhere in plots and tables.
-SOLVER_DISPLAY_NAME = "solver"
+SOLVER_DISPLAY_NAME = "optimizer"
 
 # =============================================================================
 # CONFIG

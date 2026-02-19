@@ -1,8 +1,8 @@
-\begin{table*}[htbp]
+\begin{table}[htbp]
 \centering
 \caption{Overview of mean paired differences and plan acceptance rate per inter-arrival time, aggregated over node counts and all priority configurations, for blocking and non-blocking runs with DefaultPreemption enabled.}
 \label{tab:overview-defpreempt1}
-\adjustbox{max width=\textwidth}{%
+\adjustbox{max width=\linewidth}{%
 \begin{tabular}{l w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em}}
 \toprule
 \multirow{3}{*}{\textbf{Metric}} & \multicolumn{6}{c}{\textbf{Scheduling-failure}} & \multicolumn{6}{c}{\textbf{Periodic, 8s interval}} & \multicolumn{6}{c}{\textbf{Stable-queue, 8s delay}} \\
@@ -14,10 +14,10 @@
 Diff. usage (\%) & $+0.7$ & $+1.2$ & $+1.9$ & $+0.8$ & $+1.2$ & $+1.9$ & $+1.1$ & $+1.4$ & $+2.0$ & $+1.2$ & $+1.4$ & $+1.9$ & $+1.1$ & $+1.5$ & $+2.0$ & $+1.1$ & $+1.5$ & $+2.0$ \\
 Diff. latency (ms) & $+2619$ & $+3219$ & $+1680$ & $+2685$ & $+3522$ & $+1471$ & $-198$ & $-29$ & $-2144$ & $-330$ & $+3$ & $-1899$ & $-313$ & $-180$ & $-2028$ & $-283$ & $-183$ & $-2293$ \\
 Diff. pod deletions & $-422.6$ & $-156.4$ & $-28.8$ & $-564.5$ & $-166.6$ & $-33.0$ & $+66.8$ & $+72.0$ & $+53.4$ & $+87.4$ & $+81.2$ & $+56.0$ & $+66.7$ & $+68.0$ & $+47.2$ & $+78.1$ & $+66.0$ & $+58.6$ \\
-Diff. solver runs & $212$ & $154$ & $105$ & $216$ & $155$ & $107$ & $55$ & $57$ & $52$ & $56$ & $57$ & $55$ & $80$ & $91$ & $73$ & $86$ & $97$ & $74$ \\
+Diff. optimizer runs & $212$ & $154$ & $105$ & $216$ & $155$ & $107$ & $55$ & $57$ & $52$ & $56$ & $57$ & $55$ & $80$ & $91$ & $73$ & $86$ & $97$ & $74$ \\
 Diff. plan activations & $143$ & $85$ & $52$ & $136$ & $87$ & $53$ & $38$ & $30$ & $25$ & $38$ & $32$ & $25$ & $32$ & $28$ & $22$ & $31$ & $28$ & $23$ \\
 Acceptance rate (\%) & $68.7$ & $56.1$ & $52.8$ & $63.3$ & $56.7$ & $53.1$ & $71.3$ & $57.6$ & $54.6$ & $70.4$ & $60.3$ & $54.6$ & $41.7$ & $37.7$ & $37.3$ & $40.4$ & $37.6$ & $38.2$ \\
 \bottomrule
 \end{tabular}%
 }
-\end{table*}
+\end{table}

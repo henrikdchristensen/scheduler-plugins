@@ -1,8 +1,8 @@
-\begin{table*}[htbp]
+\begin{table}[htbp]
 \centering
 \caption{Mean difference (non-blocking $-$ blocking) per inter-arrival time, aggregated over node counts and all priority configurations, with DefaultPreemption enabled.}
 \label{tab:blocking-diff-defpreempt1-prioall}
-\adjustbox{max width=\textwidth}{%
+\adjustbox{max width=\linewidth}{%
 \begin{tabular}{l w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em}}
 \toprule
 \multirow{2}{*}{\textbf{Metric}} & \multicolumn{3}{c}{\makecell{\textbf{Scheduling-failure}\\(non-blocking\,$-$\,blocking)}} & \multicolumn{3}{c}{\makecell{\textbf{Periodic, 8s interval}\\(non-blocking\,$-$\,blocking)}} & \multicolumn{3}{c}{\makecell{\textbf{Stable-queue, 8s delay}\\(non-blocking\,$-$\,blocking)}} \\
@@ -12,9 +12,9 @@
 Diff. usage (\%) & +0.1 & +0.0 & +0.0 & +0.0 & +0.0 & -0.1 & +0.0 & +0.0 & +0.0 \\
 Diff. latency (ms) & +66 & +303 & -209 & -133 & +32 & +245 & +30 & -3 & -266 \\
 Diff. pod deletions & -142.0 & -10.2 & -4.2 & +20.6 & +9.2 & +2.6 & +11.4 & -2.0 & +11.4 \\
-Diff. solver runs & +4 & +1 & +1 & +1 & +0 & +2 & +6 & +5 & +0 \\
+Diff. optimizer runs & +4 & +1 & +1 & +1 & +0 & +2 & +6 & +5 & +0 \\
 Diff. plan activations & -7 & +2 & +1 & +0 & +2 & +0 & -1 & +0 & +1 \\
 \bottomrule
 \end{tabular}%
 }
-\end{table*}
+\end{table}

@@ -11,7 +11,7 @@ from scripts.helpers.data_helpers import is_finite
 # ---------------------------------------------------------------------------
 
 DEFAULT_TABLE_PLACEMENT = "htbp"  # e.g. "H", "t", "ht", "htbp"
-DEFAULT_TABLE_ENVIRONMENT = "table*"  # "table" or "table*"
+DEFAULT_TABLE_ENVIRONMENT = "table"  # "table" or "table*"
 
 def nan_str() -> str:
     """
