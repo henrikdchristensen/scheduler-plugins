@@ -8,9 +8,9 @@
 \resizebox{\linewidth}{!}{%
 \begin{tabular}{l @{\hspace{1em}} c c c @{\hspace{1.5em}} c c c @{\hspace{1.5em}} c c c}
 \toprule
-\textbf{Metric} & \multicolumn{3}{c}{\textbf{Scheduling-failure}} & \multicolumn{3}{c}{\textbf{Periodic, 8s interval}} & \multicolumn{3}{c}{\textbf{Stable-queue, 8s delay}} \\
+\multirow{2}{*}{\textbf{Metric}} & \multicolumn{3}{c}{\makecell{\textbf{Scheduling-failure}\\(blocking)}} & \multicolumn{3}{c}{\makecell{\textbf{Periodic, 8s interval}\\(blocking)}} & \multicolumn{3}{c}{\makecell{\textbf{Stable-queue, 8s delay}\\(blocking)}} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
- & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
+ & \llap{Inter-arrival =\,}4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
 \midrule
 Diff. usage (\%) & -0.3 & -0.1 & -0.1 & +0.0 & +0.0 & +0.1 & +0.0 & +0.1 & +0.0 \\
 Diff. latency (ms) & -523 & -1658 & -1173 & -687 & -1192 & -2217 & -773 & -1524 & -1685 \\

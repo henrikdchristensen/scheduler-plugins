@@ -1164,7 +1164,7 @@ def latex_table_metric(
 
     # First header row: node counts (each spans n_arrivals columns)
     node_headers = [
-        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\# Nodes =\,{n}}}}}"
+        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\# Nodes =\,{n}}}"
         for n in nodes_order
     ]
     lines.append(r"\multirow{2}{*}{\textbf{Trigger Mode}} & " + " & ".join(node_headers) + r" \\")
@@ -1177,10 +1177,10 @@ def latex_table_metric(
     for _ in nodes_order:
         for i, a in enumerate(arrivals_order):
             if i == 0 and is_first_overall:
-                arrival_headers.append(rf"\textbf{{\llap{{Inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
+                arrival_headers.append(rf"\llap{{Inter-arrival =\,}}{fmt_arrival_value(a)}s")
                 is_first_overall = False
             else:
-                arrival_headers.append(rf"\textbf{{{fmt_arrival_value(a)}s}}")
+                arrival_headers.append(rf"{fmt_arrival_value(a)}s")
     lines.append(" & " + " & ".join(arrival_headers) + r" \\")
     lines.append(r"\midrule")
 
@@ -1259,13 +1259,14 @@ SUMMARY_MODES: List[Tuple[str, str, str, int, int]] = [
 
 # Timing comparisons derived from MAIN_PLOT_MODE_NAMES.
 # Only include timing deltas whose baseline mode is in the main plot list.
-_ALL_TIMING_DELTA_SPECS: List[Tuple[str, str, str]] = [
-    ("periodic8s",      "periodic4s",      "Periodic, 8s $\\to$ 4s"),
-    ("periodic8s",      "periodic16s",     "Periodic, 8s $\\to$ 16s"),
-    ("stable-queue-8s", "stable-queue-4s",  "Stable-queue, 8s $\\to$ 4s"),
-    ("stable-queue-8s", "stable-queue-16s", "Stable-queue, 8s $\\to$ 16s"),
+# (baseline_mode, compared_mode, mode_family_label, direction_label)
+_ALL_TIMING_DELTA_SPECS: List[Tuple[str, str, str, str]] = [
+    ("periodic8s",      "periodic4s",      "Periodic",     "8s $\\to$ 4s"),
+    ("periodic8s",      "periodic16s",     "Periodic",     "8s $\\to$ 16s"),
+    ("stable-queue-8s", "stable-queue-4s",  "Stable-queue", "8s $\\to$ 4s"),
+    ("stable-queue-8s", "stable-queue-16s", "Stable-queue", "8s $\\to$ 16s"),
 ]
-TIMING_DELTA_SPECS: List[Tuple[str, str, str]] = [
+TIMING_DELTA_SPECS: List[Tuple[str, str, str, str]] = [
     t for t in _ALL_TIMING_DELTA_SPECS if t[0] in set(MAIN_PLOT_MODE_NAMES)
 ]
 
@@ -1339,18 +1340,24 @@ def latex_table_blocking_diff(
     lines.append(r"\toprule")
 
     # First header row: mode names spanning their inter-arrival columns
-    header1_parts = [r"\textbf{Metric}"]
+    header1_parts = [r"\multirow{2}{*}{\textbf{Metric}}"]
     for label in mode_labels:
-        header1_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{{label}}}}}")
+        cell = rf"\makecell{{\textbf{{{label}}}\\(non-blocking\,$-$\,blocking)}}"
+        header1_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{cell}}}")
     lines.append(" & ".join(header1_parts) + r" \\")
     lines.append(latex_cmidrules(n_modes, n_arrivals, start_col=2))
 
     # Second header row: inter-arrival times
     header2_parts = [""]
+    is_first = True
     for _ in mode_labels:
         for arr in arrivals_order:
-            arr_str = f"{int(arr)}s" if arr == int(arr) else f"{arr}s"
-            header2_parts.append(arr_str)
+            arr_val = fmt_arrival_value(arr)
+            if is_first:
+                header2_parts.append(rf"\llap{{Inter-arrival =\,}}{arr_val}s")
+                is_first = False
+            else:
+                header2_parts.append(f"{arr_val}s")
     lines.append(" & ".join(header2_parts) + r" \\")
     lines.append(r"\midrule")
 
@@ -1470,18 +1477,25 @@ def latex_table_defpreempt_diff(
     lines.append(r"\toprule")
 
     # First header row: mode names spanning their inter-arrival columns
-    header1_parts = [r"\textbf{Metric}"]
+    blocking_label = "blocking" if blocking else "non-blocking"
+    header1_parts = [r"\multirow{2}{*}{\textbf{Metric}}"]
     for label in mode_labels:
-        header1_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{{label}}}}}")
+        cell = rf"\makecell{{\textbf{{{label}}}\\({blocking_label})}}"
+        header1_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{cell}}}")
     lines.append(" & ".join(header1_parts) + r" \\")
     lines.append(latex_cmidrules(n_modes, n_arrivals, start_col=2))
 
     # Second header row: inter-arrival times
     header2_parts = [""]
+    is_first = True
     for _ in mode_labels:
         for arr in arrivals_order:
-            arr_str = f"{int(arr)}s" if arr == int(arr) else f"{arr}s"
-            header2_parts.append(arr_str)
+            arr_val = fmt_arrival_value(arr)
+            if is_first:
+                header2_parts.append(rf"\llap{{Inter-arrival =\,}}{arr_val}s")
+                is_first = False
+            else:
+                header2_parts.append(f"{arr_val}s")
     lines.append(" & ".join(header2_parts) + r" \\")
     lines.append(r"\midrule")
 
@@ -1541,8 +1555,10 @@ def latex_table_timing_diff(
     Generate a LaTeX table showing the mean difference between the 8s baseline
     and the 4s / 16s timing variants, broken down by inter-arrival time.
 
-    Columns: comparison groups (e.g. 8s→4s, 8s→16s), each with inter-arrival
-             sub-columns.
+    Three-level header:
+      Row 1: mode family (e.g. Periodic, Stable-queue) spanning its directions
+      Row 2: direction  (e.g. 8s→4s, 8s→16s)         spanning its arrivals
+      Row 3: inter-arrival times
     Rows: 5 metrics.
     """
     df = df_seeds[(df_seeds["defpreempt"] == int(defpreempt)) & (df_seeds["blocking"] == int(blocking))].copy()
@@ -1551,17 +1567,18 @@ def latex_table_timing_diff(
     metric_cols = [s.col_total for s in specs]
 
     # Build per-comparison, per-arrival diffs -----------------------------------------
-    comp_labels: List[str] = []
-    # comp_data[label][arrival] = {spec.name: formatted_string}
-    comp_data: Dict[str, Dict[float, Dict[str, str]]] = {}
+    # comp_key = (family_label, direction_label)
+    comp_keys: List[Tuple[str, str]] = []
+    comp_data: Dict[Tuple[str, str], Dict[float, Dict[str, str]]] = {}
 
-    for baseline_mode, compared_mode, row_label in TIMING_DELTA_SPECS:
+    for baseline_mode, compared_mode, family_label, direction_label in TIMING_DELTA_SPECS:
         df_base = df[df["mode"] == baseline_mode][merge_cols + metric_cols]
         df_comp = df[df["mode"] == compared_mode][merge_cols + metric_cols]
 
         merged = df_comp.merge(df_base, on=merge_cols, suffixes=("_C", "_B"), how="inner")
 
-        comp_labels.append(row_label)
+        key = (family_label, direction_label)
+        comp_keys.append(key)
         arrival_data: Dict[float, Dict[str, str]] = {}
         for arr in arrivals_order:
             arr_merged = merged[merged["arrival_s"] == arr]
@@ -1574,33 +1591,62 @@ def latex_table_timing_diff(
                 else:
                     spec_vals[spec.name] = fmt_signed(float(diff.mean()), spec.mean_dec)
             arrival_data[arr] = spec_vals
-        comp_data[row_label] = arrival_data
+        comp_data[key] = arrival_data
 
-    n_comps = len(comp_labels)
     n_arrivals = len(arrivals_order)
 
+    # Group comparisons by mode family (preserving order) ----------------------------
+    # families = [(family_label, [direction_labels...])]  in original order
+    families: List[Tuple[str, List[str]]] = []
+    seen_families: Dict[str, int] = {}
+    for fam, dirn in comp_keys:
+        if fam not in seen_families:
+            seen_families[fam] = len(families)
+            families.append((fam, []))
+        families[seen_families[fam]][1].append(dirn)
+
     # Build LaTeX tabular ------------------------------------------------------------
+    # One arrival sub-column per (family, direction) pair
+    n_comps = len(comp_keys)
     col_groups = [" ".join(["c"] * n_arrivals) for _ in range(n_comps)]
-    col_spec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(col_groups)
+    col_spec = "l @{\\hspace{1em}} " + " @{\\hspace{1.2em}} ".join(col_groups)
 
     lines: List[str] = []
     lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
     lines.append(r"\toprule")
 
-    # First header row: comparison names spanning their inter-arrival columns
-    header1_parts = [r"\textbf{Metric}"]
-    for label in comp_labels:
-        header1_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{{label}}}}}")
+    # --- Header row 1: mode family names spanning all their directions ---------------
+    header1_parts = [r"\multirow{3}{*}{\textbf{Metric}}"]
+    family_cmidrules: List[str] = []
+    col_cursor = 2  # first data column (1-based, col 1 is the metric label)
+    for fam_label, directions in families:
+        span = len(directions) * n_arrivals
+        header1_parts.append(rf"\multicolumn{{{span}}}{{c}}{{\textbf{{{fam_label}}}}}")
+        family_cmidrules.append(rf"\cmidrule(lr){{{col_cursor}-{col_cursor + span - 1}}}")
+        col_cursor += span
     lines.append(" & ".join(header1_parts) + r" \\")
+    lines.append("".join(family_cmidrules))
+
+    # --- Header row 2: direction labels spanning their inter-arrival columns ---------
+    header2_parts = [""]
+    for fam_label, directions in families:
+        for dirn in directions:
+            header2_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{dirn}}}")
+    lines.append(" & ".join(header2_parts) + r" \\")
     lines.append(latex_cmidrules(n_comps, n_arrivals, start_col=2))
 
-    # Second header row: inter-arrival times
-    header2_parts = [""]
-    for _ in comp_labels:
+    # --- Header row 3: inter-arrival times -------------------------------------------
+    header3_parts = [""]
+    is_first = True
+    for _ in comp_keys:
         for arr in arrivals_order:
-            arr_str = f"{int(arr)}s" if arr == int(arr) else f"{arr}s"
-            header2_parts.append(arr_str)
-    lines.append(" & ".join(header2_parts) + r" \\")
+            arr_val = fmt_arrival_value(arr)
+            if is_first:
+                header3_parts.append(rf"\llap{{Inter-arrival =\,}}{arr_val}s")
+                is_first = False
+            else:
+                header3_parts.append(f"{arr_val}s")
+    lines.append(" & ".join(header3_parts) + r" \\")
     lines.append(r"\midrule")
 
     # Metric rows
@@ -1615,9 +1661,9 @@ def latex_table_timing_diff(
     for spec in specs:
         row_label = _TIMING_ROW_LABELS.get(spec.name, spec.name)
         cells = [row_label]
-        for label in comp_labels:
+        for key in comp_keys:
             for arr in arrivals_order:
-                cells.append(comp_data[label][arr][spec.name])
+                cells.append(comp_data[key][arr][spec.name])
         lines.append(" & ".join(cells) + r" \\")
 
     lines.append(r"\bottomrule")
@@ -1696,7 +1742,7 @@ def latex_table_mean_lifetime(
 
     # Header row 1: node counts
     node_headers = [
-        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\textbf{{\# Nodes =\,{n}}}}}"
+        rf"\multicolumn{{{n_arrivals}}}{{c}}{{\# Nodes =\,{n}}}"
         for n in nodes_order
     ]
     lines.append(r"\multirow{2}{*}{\centering\textbf{Trace Seed}} & " + " & ".join(node_headers) + r" \\")
@@ -1708,10 +1754,10 @@ def latex_table_mean_lifetime(
     for _ in nodes_order:
         for a in arrivals_order:
             if is_first:
-                arrival_headers.append(rf"\textbf{{\llap{{Inter-arrival =\,}}{fmt_arrival_value(a)}s}}")
+                arrival_headers.append(rf"\llap{{Inter-arrival =\,}}{fmt_arrival_value(a)}s")
                 is_first = False
             else:
-                arrival_headers.append(rf"\textbf{{{fmt_arrival_value(a)}s}}")
+                arrival_headers.append(rf"{fmt_arrival_value(a)}s")
     lines.append(" & " + " & ".join(arrival_headers) + r" \\")
     lines.append(r"\midrule")
 

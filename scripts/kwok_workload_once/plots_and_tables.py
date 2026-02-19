@@ -27,7 +27,6 @@ from scripts.helpers.plot_config import (
     PLOT_LEGEND_HANDLE_LENGTH,
     PLOT_LEGEND_COLUMN_SPACING,
     PLOT_LEGEND_HANDLE_TEXT_PAD,
-    PLOT_FIGURE_DPI,
     PLOT_FORMATS,
 )
 
@@ -63,7 +62,7 @@ PLOT_UTILS = [90, 95, 100, 105]  # Fixed target utilizations for 3D plots
 EPS = 1e-9
 
 # fonts
-ANNOT_FS = 3.5
+ANNOT_FS = 5.0
 
 # labels
 TARGET_UTIL_LABEL = "target usage (%)"
@@ -81,13 +80,13 @@ SOLVER_TIMEOUT_LABEL = "Optimizer timeout"
 # 2d sizes
 GRID_2D_CELL_FIGSIZE = (2.6, 1.6)
 GRID_2D_BAR_WIDTH = 0.88
-GRID_2D_WSPACE = 0.08
-GRID_2D_HSPACE = 0.12
+GRID_2D_WSPACE = 0.06
+GRID_2D_HSPACE = 0.10
 GRID_2D_LEFT = 0.1
 GRID_2D_RIGHT = 0.995
 GRID_2D_BOTTOM = 0.0
 GRID_2D_TOP = 0.88
-GRID_2D_YLABEL_XPOS = 0.015
+GRID_2D_YLABEL_XPOS = 0.017
 
 # 3d sizes
 FIGSIZE_3D = (8, 4)
@@ -316,7 +315,7 @@ def write_metric_table_tex(
     else:
         lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Metric}}}} & "
     prio_cells = [
-        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{\textbf{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}}}"
+        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}"
         for prio in prio_order
     ]
     lines.append(lead_hdr + " & ".join(prio_cells) + r" \\")
@@ -327,7 +326,7 @@ def write_metric_table_tex(
     ppn_cells: List[str] = []
     for _ in prio_order:
         for ppn in ppn_order:
-            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}")
+            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}")
     lines.append(lead_prefix + " & ".join(ppn_cells) + r" \\")
     lines.append(latex_cmidrules(n_prio * n_ppn, n_nodes, start_col=lead_cols + 1))
 
@@ -338,10 +337,10 @@ def write_metric_table_tex(
         for _ in ppn_order:
             for n in nodes_order:
                 if is_first:
-                    node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
+                    node_cells.append(rf"\llap{{{NODES_TABLE_LABEL} =\,}}{n}")
                     is_first = False
                 else:
-                    node_cells.append(rf"\textbf{{{n}}}")
+                    node_cells.append(rf"{n}")
     lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
     lines.append(r"\midrule")
 
@@ -493,7 +492,7 @@ def write_outcome_table_tex(
     else:
         lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Outcome}}}} & "
     prio_cells = [
-        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{\textbf{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}}}"
+        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}"
         for prio in prio_order
     ]
     lines.append(lead_hdr + " & ".join(prio_cells) + r" \\")
@@ -504,7 +503,7 @@ def write_outcome_table_tex(
     ppn_cells: List[str] = []
     for _ in prio_order:
         for ppn in ppn_order:
-            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{\textbf{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}}}")
+            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}")
     lines.append(lead_prefix + " & ".join(ppn_cells) + r" \\")
     lines.append(latex_cmidrules(n_prio * n_ppn, n_nodes, start_col=lead_cols + 1))
 
@@ -515,10 +514,10 @@ def write_outcome_table_tex(
         for _ in ppn_order:
             for n in nodes_order:
                 if is_first:
-                    node_cells.append(rf"\textbf{{\llap{{{NODES_TABLE_LABEL} =\,}}{n}}}")
+                    node_cells.append(rf"\llap{{{NODES_TABLE_LABEL} =\,}}{n}")
                     is_first = False
                 else:
-                    node_cells.append(rf"\textbf{{{n}}}")
+                    node_cells.append(rf"{n}")
     lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
     lines.append(r"\midrule")
 
@@ -583,7 +582,7 @@ def plot_2d_grid_ppn_prio_with_aggregated_util(
         squeeze=False,
     )
 
-    fig.supylabel("% of instances", fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=GRID_2D_YLABEL_XPOS)
+    fig.supylabel("% of instances", fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=GRID_2D_YLABEL_XPOS, y=(GRID_2D_BOTTOM + GRID_2D_TOP) / 2)
 
     seen_keys = set()
 

@@ -6,11 +6,13 @@
 \caption{Mean difference between 8s baseline and other timing variants per inter-arrival time, aggregated over node counts and priority configurations, for non-blocking runs with DefaultPreemption enabled.}
 \label{tab:timing-diff-defpreempt1-blocking0}
 \resizebox{\linewidth}{!}{%
-\begin{tabular}{l @{\hspace{1em}} c c c @{\hspace{1.5em}} c c c @{\hspace{1.5em}} c c c @{\hspace{1.5em}} c c c}
+\begin{tabular}{l @{\hspace{1em}} c c c @{\hspace{1.2em}} c c c @{\hspace{1.2em}} c c c @{\hspace{1.2em}} c c c}
 \toprule
-\textbf{Metric} & \multicolumn{3}{c}{\textbf{Periodic, 8s $\to$ 4s}} & \multicolumn{3}{c}{\textbf{Periodic, 8s $\to$ 16s}} & \multicolumn{3}{c}{\textbf{Stable-queue, 8s $\to$ 4s}} & \multicolumn{3}{c}{\textbf{Stable-queue, 8s $\to$ 16s}} \\
+\multirow{3}{*}{\textbf{Metric}} & \multicolumn{6}{c}{\textbf{Periodic}} & \multicolumn{6}{c}{\textbf{Stable-queue}} \\
+\cmidrule(lr){2-7}\cmidrule(lr){8-13}
+ & \multicolumn{3}{c}{8s $\to$ 4s} & \multicolumn{3}{c}{8s $\to$ 16s} & \multicolumn{3}{c}{8s $\to$ 4s} & \multicolumn{3}{c}{8s $\to$ 16s} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
- & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
+ & \llap{Inter-arrival =\,}4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
 \midrule
 Diff. usage (\%) & +0.1 & +0.2 & +0.1 & -0.2 & -0.1 & +0.0 & +0.1 & +0.1 & +0.3 & -0.2 & -4.6 & +0.0 \\
 Diff. latency (ms) & +21 & -217 & -703 & +187 & +22 & -88 & -57 & -22 & +29 & +105 & +78 & +76 \\
