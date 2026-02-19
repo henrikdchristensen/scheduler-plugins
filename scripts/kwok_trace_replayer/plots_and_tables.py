@@ -30,6 +30,7 @@ from scripts.helpers.data_helpers import is_finite
 from scripts.helpers.table_helpers import (
     fmt_mean_std,
     fmt_signed,
+    nan_str,
     latex_cmidrules,
     write_latex_table,
 )
@@ -98,7 +99,7 @@ BLOCKING_DIFF_ARRIVALS: Optional[List[float]] = None  # None → use INTER_ARRIV
 TABLE_METRIC_MAX_HEIGHT: Optional[str] = r"0.9\textheight"
 
 # Fixed y-axis limits for solver runs and plan activations (None = auto-compute)
-YLIM_SOLVER_MAIN: Optional[Tuple[float, float]] = (0.0, 400.0)
+YLIM_SOLVER_MAIN: Optional[Tuple[float, float]] = (0.0, 300.0)
 YLIM_PLANS_MAIN: Optional[Tuple[float, float]] = (0.0, 300.0)
 YLIM_SOLVER_DELTAS: Optional[Tuple[float, float]] = (-150.0, 150.0)
 YLIM_PLANS_DELTAS: Optional[Tuple[float, float]] = (-60.0, 60.0)
@@ -162,8 +163,8 @@ PLOT_MARKER_LINEWIDTH = 0.4
 #   label_template may contain "{nodes}" which will be replaced with the actual node count.
 #   Set facecolor to "none" for outline-only markers, or any color string to fill.
 SHAPE_LEGEND_SPECS: List[Tuple[str, str, float, str]] = [
-    ("o", "run with {nodes} nodes", 3.5, "none"),  # nodes_order[0]
-    ("s", "run with {nodes} nodes", 3.4, "none"),  # nodes_order[1]
+    ("o", "run with {nodes} nodes", 3.6, "none"),  # nodes_order[0]
+    ("s", "run with {nodes} nodes", 3.5, "none"),  # nodes_order[1]
     ("D", "avg. for all runs", 3.6, "none"),       # mean
 ]
 SHAPE_LEGEND_EDGE_WIDTH = 0.6
@@ -179,7 +180,7 @@ GRID_FIGSIZE_DELTAS = (3.6, PLOT_HEIGHT)
 GRID_LEGEND_NCOL_COLORS = 1
 GRID_LEGEND_NCOL_SHAPES = 1
 
-GRID_LEGEND_GAP = 0.01       # horizontal gap between the two legend boxes (figure fraction)
+GRID_LEGEND_GAP = 0.01      # horizontal gap between the two legend boxes (figure fraction)
 GRID_LEGEND_X_OFFSET_MAIN: Dict[int, float] = {
     0: -0.03,  # non-blocking
     1: -0.02,  # blocking
@@ -193,12 +194,12 @@ GRID_LEGEND_PAD_DELTAS = 0.13
 GRID_LEFT_MAIN = 0.14
 GRID_LEFT_DELTAS = 0.125
 GRID_RIGHT = 0.99
-GRID_BOTTOM = 0.03
+GRID_BOTTOM = 0.04
 GRID_TOP_MAIN = 0.89
 GRID_TOP_DELTAS = 0.873
 GRID_WSPACE = 0.10
 GRID_HSPACE = 0.10
-GRID_YLABEL_PAD_PT = 23.0
+GRID_YLABEL_PAD_PT = 25.0
 
 PLOT_ARRIVAL_X_SPACING = 0.35
 PLOT_MODE_X_SPACING_MAIN = 0.09
@@ -747,7 +748,7 @@ def draw_points_on_ax(
             transform=ax.get_xaxis_transform(),
             ha="center",
             va="top",
-            fontsize=PLOT_TICK_FONTSIZE,
+            fontsize=PLOT_AXIS_LABEL_FONTSIZE,
             clip_on=False,
         )
     else:
@@ -831,6 +832,8 @@ def make_grid(
     mode_x_spacing: float,
     legend_x_offset: float = 0.0,
     y_tick_symmetric: bool = False,
+    legend_ncol_colors: int = GRID_LEGEND_NCOL_COLORS,
+    legend_gap: float = GRID_LEGEND_GAP,
 ) -> None:
     """
     Grid plotting used by both main and delta grids.
@@ -923,7 +926,7 @@ def make_grid(
         title_fontproperties={"size": PLOT_LEGEND_FONTSIZE, "weight": "bold"},
         loc="upper left",
         bbox_to_anchor=(0, legend_y),
-        ncol=GRID_LEGEND_NCOL_COLORS,
+        ncol=legend_ncol_colors,
         **legend_kwargs,
     )
 
@@ -944,12 +947,12 @@ def make_grid(
     renderer = fig.canvas.get_renderer()
     w_colors = leg_colors.get_window_extent(renderer).transformed(fig.transFigure.inverted()).width
     w_shapes = leg_shapes.get_window_extent(renderer).transformed(fig.transFigure.inverted()).width
-    total_w = w_colors + GRID_LEGEND_GAP + w_shapes
+    total_w = w_colors + legend_gap + w_shapes
     x_start = x_center_grid - total_w / 2 + legend_x_offset
 
     leg_colors.set_bbox_to_anchor((x_start, legend_y), transform=fig.transFigure)
     leg_colors._loc = leg_colors.codes["upper left"]
-    leg_shapes.set_bbox_to_anchor((x_start + w_colors + GRID_LEGEND_GAP, legend_y), transform=fig.transFigure)
+    leg_shapes.set_bbox_to_anchor((x_start + w_colors + legend_gap, legend_y), transform=fig.transFigure)
     leg_shapes._loc = leg_shapes.codes["upper left"]
     
     x_text = x_from_left_with_pad_points(fig, grid_left, GRID_YLABEL_PAD_PT)
@@ -1009,6 +1012,95 @@ def make_grid_main(
         mode_x_spacing=PLOT_MODE_X_SPACING_MAIN,
         legend_x_offset=legend_x_offset,
         y_tick_symmetric=False,
+    )
+
+# ---------------------------------------------------------------------------
+# Lighter-colour helper for non-blocking variants
+# ---------------------------------------------------------------------------
+
+def _lighter_color(color: Any, factor: float = 0.45) -> Tuple[float, ...]:
+    """Blend *color* towards white by *factor* (0=unchanged, 1=white)."""
+    import matplotlib.colors as mcolors
+    r, g, b = mcolors.to_rgb(color)
+    return (r + (1.0 - r) * factor, g + (1.0 - g) * factor, b + (1.0 - b) * factor)
+
+
+# Config for the combined (blocking + non-blocking) main grid
+GRID_FIGSIZE_MAIN_COMBINED = (6.5, PLOT_HEIGHT)
+GRID_LEGEND_NCOL_COLORS_COMBINED = 3
+GRID_LEGEND_X_OFFSET_MAIN_COMBINED = -0.04
+GRID_TOP_MAIN_COMBINED = 0.89
+GRID_LEFT_MAIN_COMBINED = GRID_LEFT_MAIN
+GRID_LEGEND_PAD_MAIN_COMBINED = GRID_LEGEND_PAD_MAIN
+GRID_LEGEND_GAP_COMBINED = 0.001
+PLOT_MODE_X_SPACING_MAIN_COMBINED = 0.05
+
+
+def make_grid_main_combined(
+    *,
+    df_seeds: pd.DataFrame,
+    lookup_main: pd.DataFrame,
+    plot_seeds: bool,
+    defpreempt: int,
+    mode_names: List[str],
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    priorities_cols: List[int],
+    ylim_solver: Tuple[float, float],
+    ylim_plans: Tuple[float, float],
+    out_stem: str,
+    legend_x_offset: float = 0.0,
+) -> None:
+    """
+    Make combined main grid plot with blocking variants first, then
+    non-blocking variants (in a lighter shade of the same colour).
+    """
+    # Build series: group blocking + non-blocking variants per mode family
+    series: List[RowKey] = []
+    for m in mode_names:
+        series.append(RowKey(mode=m, blocking=1, defpreempt=defpreempt))
+        series.append(RowKey(mode=m, blocking=0, defpreempt=defpreempt))
+
+    # Build colour mapping: blocking=normal colour, non-blocking=lighter
+    _color_map: Dict[RowKey, Any] = {}
+    for rk in series:
+        base_color = row_key_color(RowKey(mode=rk.mode, blocking=1, defpreempt=rk.defpreempt))
+        if rk.blocking:
+            _color_map[rk] = base_color
+        else:
+            _color_map[rk] = _lighter_color(base_color)
+
+    def color_of(rk: RowKey) -> Any:
+        return _color_map.get(rk, row_key_color(rk))
+
+    def y_function_factory(col: str) -> YOfFn:
+        if plot_seeds:
+            return lambda row_key, n, a, k: values_from_df_seeds(df_seeds, nodes=n, priorities=k, arrival_s=a, row_key=row_key, col=col)
+        return lambda row_key, n, a, k: lookup_val(lookup_main, nodes=n, priorities=k, arrival_s=a, row_key=row_key, col=col)
+
+    legend_labels = [row_key_label(rk) for rk in series]
+
+    make_grid(
+        y_function_factory=y_function_factory,
+        series=series,
+        color_override=color_of,
+        legend_labels=legend_labels,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        priorities_cols=priorities_cols,
+        ylim_solver=ylim_solver,
+        ylim_plans=ylim_plans,
+        out_stem=out_stem,
+        y_config=Y_MAIN,
+        figsize=GRID_FIGSIZE_MAIN_COMBINED,
+        grid_left=GRID_LEFT_MAIN_COMBINED,
+        grid_top=GRID_TOP_MAIN_COMBINED,
+        legend_pad=GRID_LEGEND_PAD_MAIN_COMBINED,
+        mode_x_spacing=PLOT_MODE_X_SPACING_MAIN_COMBINED,
+        legend_x_offset=legend_x_offset,
+        y_tick_symmetric=False,
+        legend_ncol_colors=GRID_LEGEND_NCOL_COLORS_COMBINED,
+        legend_gap=GRID_LEGEND_GAP_COMBINED,
     )
 
 def make_grid_periodic_vs_stable(
@@ -1239,6 +1331,170 @@ def latex_table_metric(
 
 
 # =============================================================================
+# Overview table (all metrics + acceptance rate)
+# =============================================================================
+
+
+def _fmt_acceptance_rate(mean_v: object, std_v: object, decimals: int = 1) -> str:
+    """Format an acceptance-rate value (0–100 %) as mean ± std."""
+    if not is_finite(mean_v):
+        return nan_str()
+    m = f"{float(mean_v):.{decimals}f}"
+    if not is_finite(std_v):
+        return m
+    return rf"${m}\pm{abs(float(std_v)):.{decimals}f}$"
+
+
+def _fmt_mean_only(mean_v: object, *, signed: bool = False, decimals: int = 1) -> str:
+    """Format a mean value (no std) for LaTeX."""
+    if not is_finite(mean_v):
+        return nan_str()
+    if signed:
+        return f"${float(mean_v):+.{decimals}f}$"
+    return f"${float(mean_v):.{decimals}f}$"
+
+
+def latex_table_overview(
+    *,
+    out_path: Path,
+    df_seeds: pd.DataFrame,
+    defpreempt: int,
+    arrivals_order: List[float],
+) -> None:
+    """
+    Generate a LaTeX overview table with all metrics (usage, latency,
+    deletions, optimizer runs, plan activations) plus the plan acceptance
+    rate, aggregated over node counts and priority configurations.
+
+    Both blocking and non-blocking variants are shown side-by-side under
+    each mode name.  Only mean values are shown (no std).
+
+    Layout per mode: 2 sub-groups (blocking, non-blocking) each with
+    inter-arrival sub-columns.
+    """
+    df = df_seeds[df_seeds["defpreempt"] == int(defpreempt)].copy()
+
+    specs = _BLOCKING_DIFF_METRIC_SPECS
+
+    # Compute acceptance rate per seed row
+    df["acceptance_rate_pct"] = np.where(
+        df["solver_attempts_mean"] > 0,
+        100.0 * df["plan_activated_mean"] / df["solver_attempts_mean"],
+        np.nan,
+    )
+
+    # Build per-mode, per-blocking, per-arrival mean values
+    mode_labels: List[str] = []
+    # mode_data[label][(blocking, arrival)] = {metric_name: formatted_string}
+    mode_data: Dict[str, Dict[Tuple[int, float], Dict[str, str]]] = {}
+
+    for mode, base_label, detail, _rank, _cidx in OVERVIEW_MODES:
+        label = base_label
+        if detail:
+            label += f", {detail}"
+        mode_labels.append(label)
+
+        cell_data: Dict[Tuple[int, float], Dict[str, str]] = {}
+        for blocking in (1, 0):
+            df_mb = df[(df["mode"] == mode) & (df["blocking"] == blocking)]
+            for arr in arrivals_order:
+                df_arr = df_mb[df_mb["arrival_s"] == arr]
+                vals: Dict[str, str] = {}
+                for spec in specs:
+                    col = spec.col_total
+                    series = df_arr[col]
+                    if series.empty:
+                        vals[spec.name] = _fmt_mean_only(float("nan"), signed=spec.mean_signed, decimals=spec.mean_dec)
+                    else:
+                        vals[spec.name] = _fmt_mean_only(float(series.mean()), signed=spec.mean_signed, decimals=spec.mean_dec)
+                # Acceptance rate
+                ar = df_arr["acceptance_rate_pct"]
+                if ar.empty or ar.isna().all():
+                    vals["acceptance_rate"] = _fmt_mean_only(float("nan"), decimals=1)
+                else:
+                    vals["acceptance_rate"] = _fmt_mean_only(float(ar.mean()), decimals=1)
+                cell_data[(blocking, arr)] = vals
+        mode_data[label] = cell_data
+
+    n_modes = len(mode_labels)
+    n_arrivals = len(arrivals_order)
+    cols_per_blocking = n_arrivals           # columns under "Blocking" or "Non-blocking"
+    cols_per_mode = 2 * cols_per_blocking    # blocking + non-blocking
+
+    # Build LaTeX tabular
+    # Each mode gets 2 × n_arrivals columns
+    mode_col_specs = [" ".join(["c"] * cols_per_mode) for _ in range(n_modes)]
+    col_spec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(mode_col_specs)
+
+    lines: List[str] = []
+    lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
+    lines.append(r"\toprule")
+
+    # Header row 1: mode names spanning 2×n_arrivals columns each
+    header1_parts = [r"\multirow{3}{*}{\textbf{Metric}}"]
+    for label in mode_labels:
+        cell = rf"\textbf{{{label}}}"
+        header1_parts.append(rf"\multicolumn{{{cols_per_mode}}}{{c}}{{{cell}}}")
+    lines.append(" & ".join(header1_parts) + r" \\")
+    lines.append(latex_cmidrules(n_modes, cols_per_mode, start_col=2))
+
+    # Header row 2: "Blocking" / "Non-blocking" under each mode
+    header2_parts = [""]
+    for _ in mode_labels:
+        header2_parts.append(rf"\multicolumn{{{cols_per_blocking}}}{{c}}{{Blocking}}")
+        header2_parts.append(rf"\multicolumn{{{cols_per_blocking}}}{{c}}{{Non-blocking}}")
+    lines.append(" & ".join(header2_parts) + r" \\")
+    # cmidrules for each blocking sub-group
+    lines.append(latex_cmidrules(n_modes * 2, cols_per_blocking, start_col=2))
+
+    # Header row 3: inter-arrival times
+    header3_parts = [""]
+    is_first = True
+    for _ in mode_labels:
+        for _ in (1, 0):  # blocking, non-blocking
+            for arr in arrivals_order:
+                arr_val = fmt_arrival_value(arr)
+                if is_first:
+                    header3_parts.append(rf"\llap{{Inter-arrival =\,}}{arr_val}s")
+                    is_first = False
+                else:
+                    header3_parts.append(f"{arr_val}s")
+    lines.append(" & ".join(header3_parts) + r" \\")
+    lines.append(r"\midrule")
+
+    # Metric rows
+    _OVERVIEW_ROW_LABELS: List[Tuple[str, str]] = [
+        ("usage",            rf"Diff. usage (\%)"),
+        ("latency",          rf"Diff. latency (ms)"),
+        ("deletions",        rf"Diff. pod deletions"),
+        ("optimizer_runs",   rf"Diff. {SOLVER_DISPLAY_NAME} runs"),
+        ("plan_activations", rf"Diff. plan activations"),
+        ("acceptance_rate",  rf"Acceptance rate (\%)"),
+    ]
+
+    for metric_key, row_label in _OVERVIEW_ROW_LABELS:
+        cells = [row_label]
+        for label in mode_labels:
+            for blocking in (1, 0):
+                for arr in arrivals_order:
+                    cells.append(mode_data[label][(blocking, arr)][metric_key])
+        lines.append(" & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    preempt_desc = "DefaultPreemption enabled" if defpreempt else "DefaultPreemption disabled"
+    caption = (
+        f"Overview of mean paired differences and plan acceptance rate "
+        f"per inter-arrival time, aggregated over node counts and all priority "
+        f"configurations, for blocking and non-blocking runs with {preempt_desc}."
+    )
+    tbl_label = f"tab:overview-defpreempt{defpreempt}"
+
+    write_latex_table(out_path, lines, caption=caption, label=tbl_label)
+
+
+# =============================================================================
 # Blocking vs non-blocking difference table
 # =============================================================================
 
@@ -1256,6 +1512,9 @@ _BLOCKING_DIFF_METRIC_HEADERS: Dict[str, str] = {
 SUMMARY_MODES: List[Tuple[str, str, str, int, int]] = [
     m for m in BASE_MODES if m[0] in set(BLOCKING_DIFF_MODE_NAMES)
 ]
+
+# Modes used in overview tables (same set as SUMMARY_MODES)
+OVERVIEW_MODES: List[Tuple[str, str, str, int, int]] = SUMMARY_MODES
 
 # Timing comparisons derived from MAIN_PLOT_MODE_NAMES.
 # Only include timing deltas whose baseline mode is in the main plot list.
@@ -1480,7 +1739,7 @@ def latex_table_defpreempt_diff(
     blocking_label = "blocking" if blocking else "non-blocking"
     header1_parts = [r"\multirow{2}{*}{\textbf{Metric}}"]
     for label in mode_labels:
-        cell = rf"\makecell{{\textbf{{{label}}}\\({blocking_label})}}"
+        cell = rf"\makecell{{\textbf{{{label} ({blocking_label})}}\\(enabled\,$-$\,disabled)}}"
         header1_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{cell}}}")
     lines.append(" & ".join(header1_parts) + r" \\")
     lines.append(latex_cmidrules(n_modes, n_arrivals, start_col=2))
@@ -1616,12 +1875,13 @@ def latex_table_timing_diff(
     lines.append(r"\toprule")
 
     # --- Header row 1: mode family names spanning all their directions ---------------
+    blocking_label = "blocking" if blocking else "non-blocking"
     header1_parts = [r"\multirow{3}{*}{\textbf{Metric}}"]
     family_cmidrules: List[str] = []
     col_cursor = 2  # first data column (1-based, col 1 is the metric label)
     for fam_label, directions in families:
         span = len(directions) * n_arrivals
-        header1_parts.append(rf"\multicolumn{{{span}}}{{c}}{{\textbf{{{fam_label}}}}}")
+        header1_parts.append(rf"\multicolumn{{{span}}}{{c}}{{\textbf{{{fam_label} ({blocking_label})}}}}")
         family_cmidrules.append(rf"\cmidrule(lr){{{col_cursor}-{col_cursor + span - 1}}}")
         col_cursor += span
     lines.append(" & ".join(header1_parts) + r" \\")
@@ -1885,6 +2145,15 @@ def main() -> None:
             latex_table_timing_diff(out_path=out, df_seeds=df_seeds, defpreempt=defpreempt, blocking=blocking, arrivals_order=arrivals_order)
             produced_tables.append(out)
 
+    # Overview tables (all metrics + acceptance rate, one per defpreempt)
+    for defpreempt in (0, 1):
+        out = OUT_TABLES_DIR / f"table_overview_defaultpreempt={defpreempt}.tex"
+        latex_table_overview(
+            out_path=out, df_seeds=df_seeds, defpreempt=defpreempt,
+            arrivals_order=arrivals_order,
+        )
+        produced_tables.append(out)
+
     # Mean-lifetime tables (one per priority level)
     df_life = load_mean_lifetime_data(TRACES_DIR)
     if not df_life.empty:
@@ -1908,7 +2177,7 @@ def main() -> None:
     for blocking in (0, 1):
         plot_modes = [(m, blocking) for m in MAIN_PLOT_MODE_NAMES]
         for defpreempt in (1, 0):
-            # Main grid
+            # Main grid (per-blocking)
             stem = f"main_defaultpreempt={defpreempt}_blocking={blocking}"
             make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=True, defpreempt=defpreempt, plot_modes=plot_modes, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=stem, legend_x_offset=GRID_LEGEND_X_OFFSET_MAIN.get(blocking, 0.0))
             produced_figs.extend([OUT_FIGURES_DIR / f"{stem}.{fmt}" for fmt in PLOT_FORMATS])
@@ -1917,6 +2186,12 @@ def main() -> None:
             stem = f"periodic_vs_stable_defaultpreempt={defpreempt}_blocking={blocking}"
             make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=True, defpreempt=defpreempt, blocking=blocking, delta_series_names=delta_names, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=stem, legend_x_offset=GRID_LEGEND_X_OFFSET_DELTAS.get(blocking, 0.0))
             produced_figs.extend([OUT_FIGURES_DIR / f"{stem}.{fmt}" for fmt in PLOT_FORMATS])
+
+    # Combined main grid (blocking + non-blocking together)
+    for defpreempt in (1, 0):
+        stem = f"main_defaultpreempt={defpreempt}"
+        make_grid_main_combined(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=True, defpreempt=defpreempt, mode_names=MAIN_PLOT_MODE_NAMES, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=stem, legend_x_offset=GRID_LEGEND_X_OFFSET_MAIN_COMBINED)
+        produced_figs.extend([OUT_FIGURES_DIR / f"{stem}.{fmt}" for fmt in PLOT_FORMATS])
 
     # Summary
     for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
