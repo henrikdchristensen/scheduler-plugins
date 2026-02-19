@@ -1628,10 +1628,18 @@ def latex_table_timing_diff(
     lines.append("".join(family_cmidrules))
 
     # --- Header row 2: direction labels spanning their inter-arrival columns ---------
+    _FAMILY_DIR_PREFIX: Dict[str, str] = {
+        "Periodic": "Interval",
+        "Stable-queue": "Delay",
+    }
     header2_parts = [""]
     for fam_label, directions in families:
+        prefix = _FAMILY_DIR_PREFIX.get(fam_label, "")
         for dirn in directions:
-            header2_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{dirn}}}")
+            if prefix:
+                header2_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{prefix}: {dirn}}}")
+            else:
+                header2_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{dirn}}}")
     lines.append(" & ".join(header2_parts) + r" \\")
     lines.append(latex_cmidrules(n_comps, n_arrivals, start_col=2))
 
