@@ -10,11 +10,8 @@ from scripts.helpers.data_helpers import is_finite
 # LaTeX table formatting defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_TABLE_FONT_SIZE = r"\small"
-DEFAULT_TABLE_TABCOLSEP = "1.2pt"
-DEFAULT_TABLE_ARRAYSTRETCH = "1.12"
 DEFAULT_TABLE_PLACEMENT = "htbp"  # e.g. "H", "t", "ht", "htbp"
-DEFAULT_TABLE_ENVIRONMENT = "table"  # "table" or "table*"
+DEFAULT_TABLE_ENVIRONMENT = "table*"  # "table" or "table*"
 
 def nan_str() -> str:
     """
@@ -138,9 +135,6 @@ def write_latex_table(
     *,
     caption: str = "",
     label: str = "",
-    font_size: str = DEFAULT_TABLE_FONT_SIZE,
-    tabcolsep: str = DEFAULT_TABLE_TABCOLSEP,
-    arraystretch: str = DEFAULT_TABLE_ARRAYSTRETCH,
     resizebox: bool = True,
     max_height: Optional[str] = None,
     placement: str = DEFAULT_TABLE_PLACEMENT,
@@ -155,9 +149,6 @@ def write_latex_table(
     """
     wrapped: List[str] = [
         rf"\begin{{{environment}}}[{placement}]",
-        font_size,
-        rf"\setlength{{\tabcolsep}}{{{tabcolsep}}}",
-        rf"\renewcommand{{\arraystretch}}{{{arraystretch}}}",
         r"\centering",
         rf"\caption{{{caption}}}",
         rf"\label{{{label}}}",
@@ -166,7 +157,7 @@ def write_latex_table(
     if resizebox and max_height:
         wrapped.append(rf"\adjustbox{{max width={width}, max totalheight={max_height}}}{{%")
     elif resizebox:
-        wrapped.append(rf"\resizebox{{{width}}}{{!}}{{%")
+        wrapped.append(rf"\adjustbox{{max width={width}}}{{%")
     wrapped.extend(tabular_lines)
     if resizebox:
         # Append % to last tabular line to avoid spurious whitespace before closing brace

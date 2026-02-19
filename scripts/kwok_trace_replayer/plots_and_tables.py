@@ -37,11 +37,11 @@ from scripts.helpers.table_helpers import (
 from scripts.helpers.plot_helpers import PLOT_COLORS, configure_matplotlib
 
 # Table environment for metric tables: "table*" (spans two columns) or "table".
-TABLE_METRIC_ENVIRONMENT: str = "table"
+TABLE_METRIC_ENVIRONMENT: str = "table*"
 
 # Display name for the solver/optimizer metric. Change this single value
 # to switch between "optimizer" and "solver" everywhere in plots and tables.
-SOLVER_DISPLAY_NAME = "optimizer"
+SOLVER_DISPLAY_NAME = "solver"
 
 # =============================================================================
 # CONFIG
@@ -94,6 +94,11 @@ BLOCKING_DIFF_ARRIVALS: Optional[List[float]] = None  # None → use INTER_ARRIV
 
 # Timing-diff tables use the same modes as the main plots (MAIN_PLOT_MODE_NAMES)
 # so they are always consistent — no separate config needed.
+
+# Fixed column width for data columns in tables.
+TABLE_COL_WIDTH = "2.5em"              # default for most tables
+TABLE_COL_WIDTH_METRIC = "5.0em"       # wider for metric tables (priorities=1)
+TABLE_COL_WIDTH_METRIC_P4 = "9.0em"    # metric tables with priorities=4
 
 # Max height for metric tables (None = no height cap).  Requires adjustbox package.
 TABLE_METRIC_MAX_HEIGHT: Optional[str] = r"0.9\textheight"
@@ -1244,13 +1249,14 @@ def latex_table_metric(
     lines: List[str] = []
 
     # Column specification: label column + data columns with vertical separator between node groups
+    if priorities == 4 and spec.name in ("latency", "deletions"):
+        col_w = TABLE_COL_WIDTH_METRIC_P4
+    else:
+        col_w = TABLE_COL_WIDTH_METRIC
     col_groups = []
     for i, _ in enumerate(nodes_order):
-        col_groups.append(" @{\\hspace{0.5em}} ".join(["c"] * n_arrivals))
-    if priorities > 1:
-        colspec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(col_groups)
-    else:
-        colspec = "l " + " @{\\hspace{1.5em}} ".join(col_groups)
+        col_groups.append(" ".join([f"w{{c}}{{{col_w}}}"] * n_arrivals))
+    colspec = "l " + " ".join(col_groups)
     lines.append(rf"\begin{{tabular}}{{{colspec}}}")
     lines.append(r"\toprule")
 
@@ -1423,8 +1429,8 @@ def latex_table_overview(
 
     # Build LaTeX tabular
     # Each mode gets 2 × n_arrivals columns
-    mode_col_specs = [" ".join(["c"] * cols_per_mode) for _ in range(n_modes)]
-    col_spec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(mode_col_specs)
+    mode_col_specs = [" ".join([f"w{{c}}{{{TABLE_COL_WIDTH_METRIC}}}"] * cols_per_mode) for _ in range(n_modes)]
+    col_spec = "l " + " ".join(mode_col_specs)
 
     lines: List[str] = []
     lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
@@ -1591,8 +1597,8 @@ def latex_table_blocking_diff(
     n_arrivals = len(arrivals_order)
 
     # Build LaTeX tabular ---------------------------------------------------------------
-    col_groups = [" ".join(["c"] * n_arrivals) for _ in range(n_modes)]
-    col_spec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(col_groups)
+    col_groups = [" ".join([f"w{{c}}{{{TABLE_COL_WIDTH}}}"] * n_arrivals) for _ in range(n_modes)]
+    col_spec = "l " + " ".join(col_groups)
 
     lines: List[str] = []
     lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
@@ -1728,18 +1734,18 @@ def latex_table_defpreempt_diff(
     n_arrivals = len(arrivals_order)
 
     # Build LaTeX tabular
-    col_groups = [" ".join(["c"] * n_arrivals) for _ in range(n_modes)]
-    col_spec = "l @{\\hspace{1em}} " + " @{\\hspace{1.5em}} ".join(col_groups)
+    col_groups = [" ".join([f"w{{c}}{{{TABLE_COL_WIDTH}}}"] * n_arrivals) for _ in range(n_modes)]
+    col_spec = "l " + " ".join(col_groups)
 
     lines: List[str] = []
     lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
     lines.append(r"\toprule")
 
-    # First header row: mode names spanning their inter-arrival columns
-    blocking_label = "blocking" if blocking else "non-blocking"
+
+    # First header row: mode names spanning their inter-arrival columns (no blocking label)
     header1_parts = [r"\multirow{2}{*}{\textbf{Metric}}"]
     for label in mode_labels:
-        cell = rf"\makecell{{\textbf{{{label} ({blocking_label})}}\\(enabled\,$-$\,disabled)}}"
+        cell = rf"\makecell{{\textbf{{{label}}}\\(enabled\,$-$\,disabled)}}"
         header1_parts.append(rf"\multicolumn{{{n_arrivals}}}{{c}}{{{cell}}}")
     lines.append(" & ".join(header1_parts) + r" \\")
     lines.append(latex_cmidrules(n_modes, n_arrivals, start_col=2))
@@ -1867,21 +1873,20 @@ def latex_table_timing_diff(
     # Build LaTeX tabular ------------------------------------------------------------
     # One arrival sub-column per (family, direction) pair
     n_comps = len(comp_keys)
-    col_groups = [" ".join(["c"] * n_arrivals) for _ in range(n_comps)]
-    col_spec = "l @{\\hspace{1em}} " + " @{\\hspace{1.2em}} ".join(col_groups)
+    col_groups = [" ".join([f"w{{c}}{{{TABLE_COL_WIDTH}}}"] * n_arrivals) for _ in range(n_comps)]
+    col_spec = "l " + " ".join(col_groups)
 
     lines: List[str] = []
     lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
     lines.append(r"\toprule")
 
-    # --- Header row 1: mode family names spanning all their directions ---------------
-    blocking_label = "blocking" if blocking else "non-blocking"
+    # --- Header row 1: mode family names spanning all their directions (no blocking label) ---------------
     header1_parts = [r"\multirow{3}{*}{\textbf{Metric}}"]
     family_cmidrules: List[str] = []
     col_cursor = 2  # first data column (1-based, col 1 is the metric label)
     for fam_label, directions in families:
         span = len(directions) * n_arrivals
-        header1_parts.append(rf"\multicolumn{{{span}}}{{c}}{{\textbf{{{fam_label} ({blocking_label})}}}}")
+        header1_parts.append(rf"\multicolumn{{{span}}}{{c}}{{\textbf{{{fam_label}}}}}")
         family_cmidrules.append(rf"\cmidrule(lr){{{col_cursor}-{col_cursor + span - 1}}}")
         col_cursor += span
     lines.append(" & ".join(header1_parts) + r" \\")
@@ -2003,8 +2008,8 @@ def latex_table_mean_lifetime(
 
     col_groups = []
     for _ in nodes_order:
-        col_groups.append(" @{\\hspace{0.5em}} ".join(["c"] * n_arrivals))
-    colspec = "p{7.2em} " + " @{\\hspace{1.5em}} ".join(col_groups)
+        col_groups.append(" ".join([f"w{{c}}{{{TABLE_COL_WIDTH}}}"] * n_arrivals))
+    colspec = "p{7.2em} " + " ".join(col_groups)
     lines.append(rf"\begin{{tabular}}{{{colspec}}}")
     lines.append(r"\toprule")
 

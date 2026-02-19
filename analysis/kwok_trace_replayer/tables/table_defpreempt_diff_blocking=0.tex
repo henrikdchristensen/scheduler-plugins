@@ -1,23 +1,20 @@
-\begin{table}[htbp]
-\small
-\setlength{\tabcolsep}{1.2pt}
-\renewcommand{\arraystretch}{1.12}
+\begin{table*}[htbp]
 \centering
 \caption{Mean difference (DefaultPreemption enabled $-$ disabled) per inter-arrival time, aggregated over node counts and all priority configurations, for non-blocking runs.}
 \label{tab:defpreempt-diff-blocking0}
-\resizebox{\linewidth}{!}{%
-\begin{tabular}{l @{\hspace{1em}} c c c @{\hspace{1.5em}} c c c @{\hspace{1.5em}} c c c}
+\adjustbox{max width=\textwidth}{%
+\begin{tabular}{l w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em}}
 \toprule
-\multirow{2}{*}{\textbf{Metric}} & \multicolumn{3}{c}{\makecell{\textbf{Scheduling-failure (non-blocking)}\\(enabled\,$-$\,disabled)}} & \multicolumn{3}{c}{\makecell{\textbf{Periodic, 8s interval (non-blocking)}\\(enabled\,$-$\,disabled)}} & \multicolumn{3}{c}{\makecell{\textbf{Stable-queue, 8s delay (non-blocking)}\\(enabled\,$-$\,disabled)}} \\
+\multirow{2}{*}{\textbf{Metric}} & \multicolumn{3}{c}{\makecell{\textbf{Scheduling-failure}\\(enabled\,$-$\,disabled)}} & \multicolumn{3}{c}{\makecell{\textbf{Periodic, 8s interval}\\(enabled\,$-$\,disabled)}} & \multicolumn{3}{c}{\makecell{\textbf{Stable-queue, 8s delay}\\(enabled\,$-$\,disabled)}} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
  & \llap{Inter-arrival =\,}4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
 \midrule
 Diff. usage (\%) & -0.1 & +0.0 & +0.0 & +0.0 & -0.1 & -0.1 & -0.1 & +0.0 & +0.1 \\
 Diff. latency (ms) & -459 & -1501 & -2194 & -728 & -1033 & -1558 & -684 & -1291 & -2185 \\
 Diff. pod deletions & +260.4 & +158.8 & +84.8 & +525.7 & +297.9 & +144.5 & +533.9 & +289.9 & +149.4 \\
-Diff. optimizer runs & +0 & +3 & +0 & +3 & +2 & +4 & +12 & +17 & -8 \\
+Diff. solver runs & +0 & +3 & +0 & +3 & +2 & +4 & +12 & +17 & -8 \\
 Diff. plan activations & +0 & +5 & +0 & +1 & +2 & +1 & +0 & +1 & +1 \\
 \bottomrule
 \end{tabular}%
 }
-\end{table}
+\end{table*}

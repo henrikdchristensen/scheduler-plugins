@@ -1,12 +1,9 @@
-\begin{table}[htbp]
-\small
-\setlength{\tabcolsep}{1.2pt}
-\renewcommand{\arraystretch}{1.12}
+\begin{table*}[htbp]
 \centering
 \caption{Mean paired differences in number of pod deletions between the plugin with DefaultPreemption disabled and the default scheduler for runs with 4 priorities (mean ± std). p1 is the lowest priority.}
 \label{tab:deletions-defpreempt0-prio4}
-\adjustbox{max width=\linewidth, max totalheight=0.9\textheight}{%
-\begin{tabular}{l @{\hspace{1em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c @{\hspace{1.5em}} c @{\hspace{0.5em}} c @{\hspace{0.5em}} c}
+\adjustbox{max width=\textwidth, max totalheight=0.9\textheight}{%
+\begin{tabular}{l w{c}{9.0em} w{c}{9.0em} w{c}{9.0em} w{c}{9.0em} w{c}{9.0em} w{c}{9.0em}}
 \toprule
 \multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{3}{c}{\# Nodes =\,16} & \multicolumn{3}{c}{\# Nodes =\,32} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
@@ -29,4 +26,4 @@
 \bottomrule
 \end{tabular}%
 }
-\end{table}
+\end{table*}
