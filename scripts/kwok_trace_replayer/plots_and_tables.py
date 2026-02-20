@@ -1884,9 +1884,10 @@ def latex_table_timing_diff(
     header1_parts = [r"\multirow{3}{*}{\textbf{Metric}}"]
     family_cmidrules: List[str] = []
     col_cursor = 2  # first data column (1-based, col 1 is the metric label)
+    blocking_desc = "blocking" if blocking else "non-blocking"
     for fam_label, directions in families:
         span = len(directions) * n_arrivals
-        header1_parts.append(rf"\multicolumn{{{span}}}{{c}}{{\textbf{{{fam_label}}}}}")
+        header1_parts.append(rf"\multicolumn{{{span}}}{{c}}{{\textbf{{{fam_label} ({blocking_desc})}}}}")
         family_cmidrules.append(rf"\cmidrule(lr){{{col_cursor}-{col_cursor + span - 1}}}")
         col_cursor += span
     lines.append(" & ".join(header1_parts) + r" \\")
@@ -2178,19 +2179,6 @@ def main() -> None:
             )
             produced_tables.append(out)
 
-    # ---------- Figures ----------
-    for blocking in (0, 1):
-        plot_modes = [(m, blocking) for m in MAIN_PLOT_MODE_NAMES]
-        for defpreempt in (1, 0):
-            # Main grid (per-blocking)
-            stem = f"main_defaultpreempt={defpreempt}_blocking={blocking}"
-            make_grid_main(df_seeds=df_seeds, lookup_main=lookup_main, plot_seeds=True, defpreempt=defpreempt, plot_modes=plot_modes, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_main, ylim_plans=ylim_plans_main, out_stem=stem, legend_x_offset=GRID_LEGEND_X_OFFSET_MAIN.get(blocking, 0.0))
-            produced_figs.extend([OUT_FIGURES_DIR / f"{stem}.{fmt}" for fmt in PLOT_FORMATS])
-
-            # Delta grid (periodic vs stable)
-            stem = f"periodic_vs_stable_defaultpreempt={defpreempt}_blocking={blocking}"
-            make_grid_periodic_vs_stable(df_delta_seeds=df_delta_seeds, lookup_deltas=lookup_deltas, plot_seeds=True, defpreempt=defpreempt, blocking=blocking, delta_series_names=delta_names, nodes_order=nodes_order, arrivals_order=arrivals_order, priorities_cols=PRIORITIES_TO_SHOW, ylim_solver=ylim_solver_deltas, ylim_plans=ylim_plans_deltas, out_stem=stem, legend_x_offset=GRID_LEGEND_X_OFFSET_DELTAS.get(blocking, 0.0))
-            produced_figs.extend([OUT_FIGURES_DIR / f"{stem}.{fmt}" for fmt in PLOT_FORMATS])
 
     # Combined main grid (blocking + non-blocking together)
     for defpreempt in (1, 0):
