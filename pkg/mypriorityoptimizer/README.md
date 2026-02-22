@@ -1,7 +1,7 @@
 
-# Priority Optimizer Plugin
+# Kubernetes Plugin for Optimized Scheduling
 
-- [Priority Optimizer Plugin](#priority-optimizer-plugin)
+- [Kubernetes Plugin for Optimized Scheduling](#kubernetes-plugin-for-optimized-scheduling)
   - [Overview](#overview)
   - [Code Structure](#code-structure)
   - [Integrating with the scheduler](#integrating-with-the-scheduler)
