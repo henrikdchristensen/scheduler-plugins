@@ -9,9 +9,9 @@
   - [Requirements for Execution on a KWOK Cluster](#requirements-for-execution-on-a-kwok-cluster)
   - [Evaluation of the Plugin on a KWOK Cluster](#evaluation-of-the-plugin-on-a-kwok-cluster)
     - [Workload Once Generator](#workload-once-generator)
-      - [Expected folder structure after running all tests for Workload Once Generator](#expected-folder-structure-after-running-all-tests-for-workload-once-generator)
+      - [Structuring Workload Once Generator Results](#structuring-workload-once-generator-results)
     - [Trace Replayer](#trace-replayer)
-      - [Expected folder structure after running all tests for Trace Replayer](#expected-folder-structure-after-running-all-tests-for-trace-replayer)
+      - [Structuring Trace Replayer Results](#structuring-trace-replayer-results)
     - [Bootstrapping for parallel evaluation](#bootstrapping-for-parallel-evaluation)
       - [Using Vagrant for bootstrap script development](#using-vagrant-for-bootstrap-script-development)
     - [Result replication and running test jobs](#result-replication-and-running-test-jobs)
@@ -177,23 +177,12 @@ python -m scripts.kwok_workload_once.test_runner \
 
 TODO: SKAL VÆRE klart at vi specificerer seeds fra deterministic plugin here, og at job files specify which seeds to use.
 
-#### Expected folder structure after running all tests for Workload Once Generator
+#### Structuring Workload Once Generator Results
 
 Having downloaded the results folder containing results from all jobs - the job files ensures that the results is organized by job type, as follows:
 
-```results/
-results/
-├── default-deterministic/
-│   ├── nodes4_pods16_prio1_util090/
-│   │   ├── results.csv
-│   │   ├── info.yaml
-│   │   ├── seeds-all-running.txt        (if applicable)
-│   │   └── seeds-not-all-running.txt    (if applicable)
-│   ├── nodes4_pods16_prio1_util095/
-│   ├── nodes4_pods16_prio1_util100/
-│   ├── nodes4_pods16_prio1_util105/
-│   ├── ...
-│   └── nodes32_pods256_prio4_util105/
+```text
+analysis/kwok_workload_once/
 ├── default/
 │   ├── nodes4_pods16_prio1_util090/
 │   │   ├── results.csv
@@ -202,7 +191,7 @@ results/
 │   │   └── seeds-not-all-running.txt    (if applicable)
 │   ├── ...
 │   └── nodes32_pods256_prio4_util105/
-└── plugin-scheduler/
+└── plugin-cp_sat/
     ├── nodes4_pods16_prio1_util090_timeout01/
     │   ├── results.csv
     │   ├── info.yaml
@@ -223,7 +212,6 @@ results/
     ├── nodes4_pods16_prio1_util105_timeout20/
     ├── ...
     └── nodes32_pods256_prio4_util105_timeout20/
-
 ```
 
 The `results.csv` file contains the scheduling results for the job, while the `info.yaml` file contains the job configuration used. If applicable, the `seeds-all-running.txt` and `seeds-not-all-running.txt` files contain the seeds where all pods were running and where not all pods were running, respectively. For the plugin jobs, the `scheduler-logs/` folder contains the saved kube-scheduler logs for each seed, while the `solver-stats/` folder contains the saved solver statistics for each seed.
@@ -246,7 +234,33 @@ python -m scripts.kwok_trace_replayer.trace_replayer \
 --job-file data/jobs/kwok_trace_replayer/<job_file>.yaml \
 ```
 
-#### Expected folder structure after running all tests for Trace Replayer
+#### Structuring Trace Replayer Results
+
+Having downloaded the results folder containing results from all jobs - the job files ensures that the results is organized by job type, as follows:
+
+```text
+analysis/kwok_trace_replayer/
+├── default/
+│   ├── nodes=16_prio=1_arrival=1s/
+│   │   ├── 1420052706459400740/
+│   │   │   ├── general_stats.csv
+│   │   │   ├── pod_stats.csv
+│   │   │   └── info_replayer.yaml
+│   │   └── ...
+│   ├── nodes=16_prio=1_arrival=2s/
+│   │   ├── ...
+│   └── ...
+└── plugin/
+    ├── mode=periodic2s_blocking=0_defpreempt=0_nodes=16_prio=1_arrival=1s/
+    │   ├── 1420052706459400740/
+    │   │   ├── general_stats.csv
+    │   │   ├── pod_stats.csv
+    │   │   └── info_replayer.yaml
+    │   └── ...
+    ├── mode=stablequeue16s_blocking=1_defpreempt=1_nodes=32_prio=4_arrival=16s/
+    │   ├── ...
+    └── ...
+```
 
 ### Bootstrapping for parallel evaluation
 
