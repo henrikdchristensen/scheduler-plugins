@@ -672,7 +672,6 @@ class CPSATSolver:
         #########################
         # Solve per priority
         #########################
-        # TODO: add total_solver_time to output, as total_time also includes model building time and I/O time
         st = cp_model.UNKNOWN
         phases: list[dict] = []
         for p in tiers:

@@ -79,6 +79,8 @@ The source code for the **MyPriorityOptimizer** plugin is located in `pkg/myprio
 
 The two solver implementations are located in `scripts/python_solver/` and can also serve as templates for adding other solvers.
 
+Note: Since Gurobi is a commercial solver, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID`—which can be obtained from the Gurobi license file. In our experience, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
+
 ## Scheduler Integration
 
 Plugins in the Kubernetes scheduler are enabled through a **scheduler configuration manifest** that selects the plugin and its settings. The manifests for the plugin are located in `manifests/mypriorityoptimizer/` (see also [Scheduler Configuration](https://kubernetes.io/docs/reference/scheduling/config/) for background).
