@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # scripts/kwok_workload_once/seal_results.py
 """
-python -m scripts.kwok_workload_once.seal_results
+CP-SAT:
+- python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-cp_sat
 
-or
-
-python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-gurobi
+Gurobi:
+- python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-guro
 """
 
 import argparse, json, re
@@ -92,18 +92,53 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
 
     df = df.rename(columns={cols[k]: v for k, v in rename_map.items() if k in cols and cols[k] != v})
 
+    # Ensure optional solver columns exist
+    for c in ["solver_status", "solver_name", "solver_duration_ms", "solver_score"]:
+        if c not in df.columns:
+            df[c] = ""
+
     # minimal conversions
     df["seed"] = df["seed"].astype(str).str.strip()
     df["util_run_cpu"] = pd.to_numeric(df["util_run_cpu"].astype(str), errors="coerce")
     df["util_run_mem"] = pd.to_numeric(df["util_run_mem"].astype(str), errors="coerce")
-    df["solver_duration_ms"] = pd.to_numeric(df.get("solver_duration_ms", "").astype(str), errors="coerce")
-    df["solver_status"] = df.get("solver_status", "").astype(str).str.strip().str.upper()
+    df["solver_duration_ms"] = pd.to_numeric(df["solver_duration_ms"].astype(str), errors="coerce")
+    df["solver_status"] = df["solver_status"].astype(str).str.strip().str.upper()
 
     # placed_by_prio: use what is actually running (as you had)
     df["placed_by_prio"] = df.apply(
         lambda r: json.dumps(parse_json_cell(r.get("placed_by_prio_running", "")), separators=(",", ":")),
         axis=1,
     )
+    
+    # rows where solver actually produced a solution
+    df["solver_has_solution"] = df["solver_status"].isin(["OPTIMAL", "FEASIBLE"]).astype(int)
+
+    # Extract moves + evictions directly from best_solver_score
+    disrupt_df = df["solver_score"].apply(
+        lambda x: pd.Series(
+            _extract_solver_disruption_parts(x),
+            index=["moves_raw", "evictions_raw"],
+        )
+    )
+    df = pd.concat([df, disrupt_df], axis=1)
+
+    # Final normalized disruption columns (only meaningful for rows with a solution)
+    def _finalize_disruption(row: pd.Series) -> Tuple[int, int]:
+        if int(row.get("solver_has_solution", 0)) != 1:
+            return 0, 0
+
+        moves = _safe_int_from_any(row.get("moves_raw"))
+        evictions = _safe_int_from_any(row.get("evictions_raw"))
+
+        # If field is missing, default to 0 (common in single-priority cases: no evictions)
+        return max(moves or 0, 0), max(evictions or 0, 0)
+
+    moves_ev_df = df.apply(
+        lambda r: pd.Series(_finalize_disruption(r), index=["moves", "evictions"]),
+        axis=1,
+    )
+    df = pd.concat([df, moves_ev_df], axis=1)
+    
     return df
 
 def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: str) -> pd.DataFrame:
@@ -124,6 +159,9 @@ def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: st
             "solver_status",
             "solver_name",
             "solver_duration_ms",
+            "solver_has_solution",
+            "moves",
+            "evictions",
         ]
     ].rename(
         columns={
@@ -166,6 +204,40 @@ def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: st
     joined["mem_delta"] = joined["util_mem_solver"] - joined["util_mem_default"]
 
     return joined
+
+def _safe_int_from_any(x: Any) -> Optional[int]:
+    try:
+        if x is None or x == "":
+            return None
+        return int(float(x))
+    except Exception:
+        return None
+
+
+def _extract_solver_disruption_parts(score_cell: Any) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Extract disruption counts from best_solver_score JSON.
+
+    Supports common key variants:
+      moved / moves
+      evicted / evictions
+    """
+    score = parse_json_cell(score_cell)
+    if not isinstance(score, dict):
+        return None, None
+
+    def pick_first_int(d: dict, keys: List[str]) -> Optional[int]:
+        for k in keys:
+            if k in d:
+                v = _safe_int_from_any(d.get(k))
+                if v is not None:
+                    return v
+        return None
+
+    moves = pick_first_int(score, ["moved", "moves"])
+    evictions = pick_first_int(score, ["evicted", "evictions"])
+
+    return moves, evictions
 
 @dataclass(frozen=True)
 class CombineResultsArgs:
@@ -351,6 +423,36 @@ class CombineResultsAnalyzer:
         if count_sum != len(per_seed_df):
             print(f"[warn] {solver_dir.name}: category counts sum={count_sum} != joined={len(per_seed_df)}")
 
+        # Disruption statistics (only rows where solver produced a solution)
+        solver_sol_mask = (
+            pd.to_numeric(not_all_running["solver_has_solution"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+            .eq(1)
+        )
+        n_solver_solution = int(solver_sol_mask.sum())
+
+        def _sum_num(mask: pd.Series, col: str) -> float:
+            return float(pd.to_numeric(not_all_running.loc[mask, col], errors="coerce").fillna(0).sum())
+
+        # Split by improvement outcome category
+        is_optimal_better = not_all_running["solver_status"].eq("OPTIMAL") & not_all_running["placed_cmp"].gt(0)
+        is_feasible_better = not_all_running["solver_status"].eq("FEASIBLE") & not_all_running["placed_cmp"].gt(0)
+
+        moves_sum_solver_optimal = _sum_num(is_optimal_better, "moves")
+        evictions_sum_solver_optimal = _sum_num(is_optimal_better, "evictions")
+
+        moves_sum_solver_feasible = _sum_num(is_feasible_better, "moves")
+        evictions_sum_solver_feasible = _sum_num(is_feasible_better, "evictions")
+
+        # Normalize disruptions to % of total pods (constant per configuration)
+        total_pods = int(meta["nodes"] * meta["pods_per_node"])  # same as meta["pods"]
+
+        def _pct_sum_of_total_pods(x: float) -> float:
+            if total_pods <= 0:
+                return float("nan")
+            return 100.0 * float(x) / float(total_pods)
+
         decimals = self.args.decimals
         return {
             "util": meta["util"],
@@ -388,6 +490,14 @@ class CombineResultsAnalyzer:
             "mem_delta_mean": format_num(
                 float(mem_delta_mean) if mem_delta_mean == mem_delta_mean else float("nan"), decimals
             ),
+            "total_pods": total_pods,
+            "n_solver_solution": n_solver_solution,
+
+            # Normalized disruption sums (sum over seeds of % of total pods)
+            "moves_pct_sum_solver_optimal": format_num(_pct_sum_of_total_pods(moves_sum_solver_optimal), decimals),
+            "evictions_pct_sum_solver_optimal": format_num(_pct_sum_of_total_pods(evictions_sum_solver_optimal), decimals),
+            "moves_pct_sum_solver_feasible": format_num(_pct_sum_of_total_pods(moves_sum_solver_feasible), decimals),
+            "evictions_pct_sum_solver_feasible": format_num(_pct_sum_of_total_pods(evictions_sum_solver_feasible), decimals),
         }
 
     def run(self) -> None:
@@ -418,18 +528,24 @@ class CombineResultsAnalyzer:
             "n_seeds",
             "n_default_all_running",
             "n_solver_called",
+            "n_solver_solution",
             "n_solver_failed",
             "n_default_optimal",
             "n_solver_optimal",
             "n_solver_feasible",
             "n_solver_improve",
             "n_other",
+            "total_pods",
             "cpu_delta_mean",
             "mem_delta_mean",
             "cpu_delta_sum",
             "mem_delta_sum",
             "solver_duration_ms_sum",
             "solver_duration_ms_mean",
+            "moves_pct_sum_solver_optimal",
+            "evictions_pct_sum_solver_optimal",
+            "moves_pct_sum_solver_feasible",
+            "evictions_pct_sum_solver_feasible",
         ]
         for c in numeric_cols:
             if c in per_combo_df.columns:

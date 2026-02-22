@@ -51,6 +51,17 @@ def get_paths_for_solver(solver: str, results_root: Path = DEFAULT_RESULTS_ROOT)
     tables_dir = results_root / "tables" / solver
     return df_path, figures_dir, tables_dir
 
+
+# Required columns produced by seal_results.py
+REQUIRED_DISRUPTION_COLUMNS = {
+    "n_solver_optimal",
+    "n_solver_feasible",
+    "moves_pct_sum_solver_optimal",
+    "evictions_pct_sum_solver_optimal",
+    "moves_pct_sum_solver_feasible",
+    "evictions_pct_sum_solver_feasible",
+}
+
 # filters - FIXED configurations (always show these even if data is missing)
 PLOT_PPNS = [4, 8]
 PLOT_PRIORITIES = [1, 2, 4]
@@ -76,6 +87,20 @@ PRIORITIES_TABLE_LABEL = rf"\# Priorities"
 SOLVER_TIMEOUT_LABEL = "Optimizer timeout"
 
 # figure saving
+
+GRID_2D_CELL_FIGSIZE_DISRUPT = (1.5, 1.0)
+GRID_2D_LEFT_DISRUPT = 0.13          # increase from 0.10 -> pushes plots right
+GRID_2D_YLABEL_XPOS_DISRUPT = 0.01   # shared y-label position (figure coords)
+GRID_2D_TOP_DISRUPT = 0.80          # lower top -> more room for legends above plots
+GRID_2D_LEGEND_PAD_DISRUPT = 0.11  # vertical gap above top row of axes
+GRID_2D_LEGEND_GAP_DISRUPT = 0.012  # horizontal gap between legend boxes
+GRID_2D_ROWLABEL_PAD_DISRUPT = 13.0  # smaller -> moves "pods/node=..." to the right (closer to axis)
+HATCH_MOVES = "xxxxxxxxxx"                  # lighter density than xxxxxx
+HATCH_MOVES_LEGEND = "xxxxxx"       # lighter/less dense in legend only
+HATCH_LINEWIDTH = 0.25              # thinner hatch strokes
+DISRUPT_NTICKS = 6
+DISRUPT_YLIM = (0.0, 40.0)
+DISRUPT_YTICKS = [0, 10, 20, 30, 40]
 
 # 2d sizes
 GRID_2D_CELL_FIGSIZE = (2.6, 1.6)
@@ -145,6 +170,16 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     - If keys include 'util'  -> results preserve util (used for tables with util breaker).
     """
     df = per_combo_df.copy()
+
+    # Require disruption columns (no backward compatibility)
+    missing = REQUIRED_DISRUPTION_COLUMNS - set(df.columns)
+    if missing:
+        raise KeyError(
+            "Missing required disruption columns in sealed CSV: "
+            + ", ".join(sorted(missing))
+            + ". Re-run seal_results.py with the updated version."
+        )
+
     # Compute effective usage (max of cpu/mem) per row *before* aggregation,
     # so the per-row max is preserved rather than taking max of aggregated means.
     df["eff_delta_sum"] = np.maximum(df["cpu_delta_sum"], df["mem_delta_sum"])
@@ -156,6 +191,7 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
                 "n_seeds_not_all_running": "sum",
                 "n_default_all_running": "sum",
                 "n_solver_called": "sum",
+                "n_solver_solution": "sum",
                 "n_solver_failed": "sum",
                 "n_default_optimal": "sum",
                 "n_solver_optimal": "sum",
@@ -166,6 +202,10 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
                 "cpu_delta_sum": "sum",
                 "mem_delta_sum": "sum",
                 "eff_delta_sum": "sum",
+                "moves_pct_sum_solver_optimal": "sum",
+                "evictions_pct_sum_solver_optimal": "sum",
+                "moves_pct_sum_solver_feasible": "sum",
+                "evictions_pct_sum_solver_feasible": "sum",
             }
         )
     )
@@ -183,7 +223,27 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     g["cpu_delta_mean"] = safe_div(g["cpu_delta_sum"], g["n_seeds"])
     g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
     g["eff_delta_mean"] = safe_div(g["eff_delta_sum"], g["n_seeds"])
+
+    # Disruptions as % of total pods (averaged per improved instance category)
+    g["moves_pct_mean_per_better"] = safe_div(g["moves_pct_sum_solver_feasible"], g["n_solver_feasible"])
+    g["evictions_pct_mean_per_better"] = safe_div(g["evictions_pct_sum_solver_feasible"], g["n_solver_feasible"])
+
+    g["moves_pct_mean_per_optimal"] = safe_div(g["moves_pct_sum_solver_optimal"], g["n_solver_optimal"])
+    g["evictions_pct_mean_per_optimal"] = safe_div(g["evictions_pct_sum_solver_optimal"], g["n_solver_optimal"])
+
     return g.copy()
+
+def aggregate_over_util_and_timeout(per_combo_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate over util and timeout, keeping only:
+      - pods_per_node
+      - priorities
+      - nodes
+
+    Used for the moves+evictions stacked plot.
+    """
+    keys = ["pods_per_node", "priorities", "nodes"]
+    return _aggregate_counts_to_rates(per_combo_df, keys)
 
 def aggregate_over_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
     # Used by plots: util is aggregated away (unchanged behavior)
@@ -561,6 +621,266 @@ def write_outcome_table_tex(
 #################################################################
 # Plots
 #################################################################
+
+def plot_2d_grid_moves_evictions_better_vs_optimal(
+    df_agg: pd.DataFrame,
+    ppns: list[int],
+    priorities: list[int],
+    out_path: Path,
+    cell_figsize: tuple[float, float],
+    *,
+    fixed_nodes: list[int] = PLOT_NODES,
+) -> None:
+    nrows, ncols = len(ppns), len(priorities)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * cell_figsize[0], nrows * cell_figsize[1]),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+
+    fig.supylabel(
+        "avg. disruptions (% of total pods)",
+        fontsize=PLOT_AXIS_LABEL_FONTSIZE,
+        x=GRID_2D_YLABEL_XPOS_DISRUPT,
+        y=(GRID_2D_BOTTOM + GRID_2D_TOP_DISRUPT) / 2,
+    )
+
+    # Use the same colors as the main plot categories
+    cat_color = {c["key"]: c["color"] for c in CATEGORIES}
+
+    series = [
+        {
+            "label": "Better",
+            "key": "solver_feasible",
+            "color": cat_color["solver_feasible"],
+            "moves_col": "moves_pct_mean_per_better",
+            "evictions_col": "evictions_pct_mean_per_better",
+        },
+        {
+            "label": "Better&Optimal",
+            "key": "solver_optimal",
+            "color": cat_color["solver_optimal"],
+            "moves_col": "moves_pct_mean_per_optimal",
+            "evictions_col": "evictions_pct_mean_per_optimal",
+        },
+    ]
+
+    # Make hatch lines thinner only for this plot
+    with mpl.rc_context({"hatch.linewidth": HATCH_LINEWIDTH}):
+        for r, ppn in enumerate(ppns):
+            for c, prio in enumerate(priorities):
+                ax = axes[r][c]
+                panel = df_agg[
+                    (df_agg["pods_per_node"] == ppn) &
+                    (df_agg["priorities"] == prio)
+                ].copy()
+
+                x = np.arange(len(fixed_nodes))
+                bars_per_group = 2
+                group_width = 0.60
+                width = group_width / bars_per_group
+                offsets = [(j - (bars_per_group - 1) / 2.0) * width for j in range(bars_per_group)]
+
+                if not panel.empty:
+                    panel = panel.set_index("nodes")
+
+                for j, s in enumerate(series):
+                    xj = x + offsets[j]
+
+                    if not panel.empty:
+                        moves = pd.to_numeric(
+                            panel.get(s["moves_col"], pd.Series(dtype=float)),
+                            errors="coerce",
+                        ).reindex(fixed_nodes).fillna(0.0).values
+                        evictions = pd.to_numeric(
+                            panel.get(s["evictions_col"], pd.Series(dtype=float)),
+                            errors="coerce",
+                        ).reindex(fixed_nodes).fillna(0.0).values
+                    else:
+                        moves = np.zeros(len(fixed_nodes))
+                        evictions = np.zeros(len(fixed_nodes))
+
+                    total = evictions + moves
+
+                    # Base bar = total disruptions in series color
+                    ax.bar(
+                        xj,
+                        total,
+                        width=width,
+                        color=s["color"],
+                        edgecolor="black",
+                        linewidth=0.35,
+                        zorder=2,
+                    )
+
+                    # Overlay ONLY the moves area with white hatch (at the bottom),
+                    # so evictions remain the solid top segment.
+                    ax.bar(
+                        xj,
+                        moves,
+                        width=width,
+                        bottom=0.0,
+                        color=s["color"],
+                        edgecolor="white",   # hatch color follows edgecolor
+                        linewidth=0.0,
+                        hatch=HATCH_MOVES,
+                        zorder=3,
+                    )
+
+                    # White separator line at the split (between moves and evictions),
+                    # only when both parts are present.
+                    for xi, m, e in zip(xj, moves, evictions):
+                        if (m > EPS) and (e > EPS):
+                            ax.plot(
+                                [xi - width / 2.0, xi + width / 2.0],
+                                [m, m],
+                                color="white",
+                                linewidth=HATCH_LINEWIDTH,
+                                solid_capstyle="butt",
+                                zorder=3.5,
+                            )
+
+                    # Clean black outline on top
+                    ax.bar(
+                        xj,
+                        total,
+                        width=width,
+                        bottom=0.0,
+                        facecolor="none",
+                        edgecolor="black",
+                        linewidth=0.35,
+                        zorder=4,
+                    )
+                    
+
+                ax.set_xticks(x)
+                ax.set_xticklabels([str(n) for n in fixed_nodes], fontsize=PLOT_TICK_FONTSIZE)
+                ax.set_ylim(*DISRUPT_YLIM)
+                ax.set_yticks(DISRUPT_YTICKS)
+                ax.yaxis.set_major_formatter(mtick.FormatStrFormatter("%d"))
+
+                ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
+                ax.grid(axis="y", linewidth=0.4, alpha=0.4)
+                if r == 0:
+                    ax.set_title(rf"{PRIORITIES_PLOT_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
+
+                if c == 0:
+                    if nrows % 2 == 1 and r == nrows // 2:
+                        axis_text = f"avg. disruptions / instance\n{PODS_PER_NODE_PLOT_LABEL}={ppn}"
+                    else:
+                        axis_text = f"\n{PODS_PER_NODE_PLOT_LABEL}={ppn}"
+                    # smaller labelpad moves the row label RIGHT (closer to axis)
+                    lbl = ax.set_ylabel(
+                        axis_text,
+                        fontsize=PLOT_AXIS_LABEL_FONTSIZE,
+                        labelpad=GRID_2D_ROWLABEL_PAD_DISRUPT,
+                    )
+                    lbl.set_va("center")
+                    lbl.set_ha("center")
+                    lbl.set_linespacing(1.8)
+
+                if r == nrows - 1:
+                    ax.set_xlabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    # --- Two separate legend boxes: Colors + Fill pattern (centered, non-overlapping) ---
+    color_handles = [
+        mpatches.Rectangle((0, 0), 1, 1, fc=cat_color["solver_feasible"], ec="black", linewidth=0.4),
+        mpatches.Rectangle((0, 0), 1, 1, fc=cat_color["solver_optimal"], ec="black", linewidth=0.4),
+    ]
+    color_labels = ["Better", "Better&Optimal"]
+
+    # Use neutral gray here so the legend explains the pattern semantics only.
+    # For the hatched entry, overlay two patches:
+    #   1) base patch gives the black border
+    #   2) transparent patch gives the white hatch
+    hatched_base = mpatches.Rectangle((0, 0), 1, 1, fc="0.75", ec="black", linewidth=0.4)
+    hatched_overlay = mpatches.Rectangle((0, 0), 1, 1, fc="none", ec="white", linewidth=0.0, hatch=HATCH_MOVES_LEGEND)
+
+    fill_handles = [
+        (hatched_base, hatched_overlay),  # composite handle
+        mpatches.Rectangle((0, 0), 1, 1, fc="0.75", ec="black", linewidth=0.4),
+    ]
+    fill_labels = ["Hatched = moves", "Solid = evictions"]
+
+    legend_kwargs = dict(
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+
+    # First reserve space (important: prevents overlap)
+    fig.subplots_adjust(
+        left=GRID_2D_LEFT_DISRUPT,
+        right=GRID_2D_RIGHT,
+        bottom=GRID_2D_BOTTOM,
+        top=GRID_2D_TOP_DISRUPT,
+        wspace=GRID_2D_WSPACE,
+        hspace=GRID_2D_HSPACE,
+    )
+
+    # Compute centered placement like the trace-replayer script
+    bbox_l = axes[0, 0].get_position()
+    bbox_r = axes[0, -1].get_position()
+    x_center_grid = 0.5 * (bbox_l.x0 + bbox_r.x1)
+    y_top_grid = max(axes[0, j].get_position().y1 for j in range(ncols))
+
+    # --- Two separate legend boxes: Colors + Fill (centered, above the grid) ---
+    # Create off-screen first to measure size, like in the trace-replayer script
+    leg_colors = fig.legend(
+        color_handles,
+        color_labels,
+        title="Colors",
+        title_fontproperties={"size": PLOT_LEGEND_FONTSIZE, "weight": "bold"},
+        loc="upper left",
+        bbox_to_anchor=(0, 0),
+        ncol=1,
+        **legend_kwargs,
+    )
+
+    leg_fill = fig.legend(
+        fill_handles,
+        fill_labels,
+        title="Fill",
+        title_fontproperties={"size": PLOT_LEGEND_FONTSIZE, "weight": "bold"},
+        loc="upper left",
+        bbox_to_anchor=(0, 0),
+        ncol=1,
+        **legend_kwargs,
+    )
+
+    # Measure and center the two legend boxes together
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    bb_colors = leg_colors.get_window_extent(renderer).transformed(fig.transFigure.inverted())
+    bb_fill = leg_fill.get_window_extent(renderer).transformed(fig.transFigure.inverted())
+
+    w_colors = bb_colors.width
+    w_fill = bb_fill.width
+    h_colors = bb_colors.height
+    h_fill = bb_fill.height
+
+    total_w = w_colors + GRID_2D_LEGEND_GAP_DISRUPT + w_fill
+    x_start = x_center_grid - total_w / 2
+
+    # For loc="upper left", bbox y is the TOP of the legend.
+    # Place the legends so their bottoms are above the top row of axes.
+    legend_top_y = y_top_grid + GRID_2D_LEGEND_PAD_DISRUPT + max(h_colors, h_fill)
+
+    leg_colors.set_bbox_to_anchor((x_start, legend_top_y), transform=fig.transFigure)
+    leg_colors._loc = leg_colors.codes["upper left"]
+
+    leg_fill.set_bbox_to_anchor(
+        (x_start + w_colors + GRID_2D_LEGEND_GAP_DISRUPT, legend_top_y),
+        transform=fig.transFigure,
+    )
+    leg_fill._loc = leg_fill.codes["upper left"]
+
+    save_figure(fig, out_path)
 
 def plot_2d_grid_ppn_prio_with_aggregated_util(
     df_util_agg: pd.DataFrame,
@@ -1082,6 +1402,14 @@ def _run_solver(solver: str, results_root: Path) -> None:
     out_tables_dir.mkdir(parents=True, exist_ok=True)
 
     df_per_combo = pd.read_csv(df_path)
+    
+    missing = REQUIRED_DISRUPTION_COLUMNS - set(df_per_combo.columns)
+    if missing:
+        raise KeyError(
+            "Input file is missing required disruption columns: "
+            + ", ".join(sorted(missing))
+            + ". Re-run seal_results.py first."
+        )
 
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
@@ -1167,6 +1495,18 @@ def _run_solver(solver: str, results_root: Path) -> None:
         y_label_pad=DOT_YLABEL_PAD_DIFF,
     )
     produced_figs.extend([out_dot_usage.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    # --- Grid chart: disruption composition (moves + evictions), aggregated over util and timeout
+    df_disrupt_agg = aggregate_over_util_and_timeout(df_per_combo)
+    out_disrupt = out_figures_dir / "moves_evictions_better_vs_optimal"
+    plot_2d_grid_moves_evictions_better_vs_optimal(
+        df_agg=df_disrupt_agg,
+        ppns=PLOT_PPNS,
+        priorities=PLOT_PRIORITIES,
+        out_path=out_disrupt,
+        cell_figsize=GRID_2D_CELL_FIGSIZE_DISRUPT,
+    )
+    produced_figs.extend([out_disrupt.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     # --- Grid chart: solver duration
     out_dot_solver = out_figures_dir / "optimizer_duration"
