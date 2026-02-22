@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	apiv1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -16,17 +16,133 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
-// Create or update config map, storing data as JSON at DataKey.
-func (d ConfigMapDoc) ensureJson(ctx context.Context, cli corev1client.CoreV1Interface, data any) error {
-	b, err := json.MarshalIndent(data, "", "  ")
+// -------------------------
+// listConfigMaps
+// -------------------------
+
+// listConfigMaps lists config maps in the namespace with the given label key,
+// sorted by creation timestamp descending.
+func listConfigMaps(nsLister corev1listers.ConfigMapNamespaceLister, labelKey string) ([]v1.ConfigMap, error) {
+	// List with label selector
+	sel := labels.SelectorFromSet(labels.Set{labelKey: "true"})
+	items, err := nsLister.List(sel)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make a copy and sort by creation timestamp descending
+	cms := make([]v1.ConfigMap, len(items))
+	for i := range items {
+		cms[i] = *items[i].DeepCopy()
+	}
+
+	// Sort by creation timestamp descending
+	sort.Slice(cms, func(i, j int) bool {
+		return cms[i].CreationTimestamp.Time.After(cms[j].CreationTimestamp.Time)
+	})
+	return cms, nil
+}
+
+// -------------------------
+// pruneConfigMaps
+// -------------------------
+
+// pruneConfigMaps keeps first K newest config maps with label, deletes the rest.
+func pruneConfigMaps(
+	ctx context.Context,
+	cms corev1client.ConfigMapInterface,
+	nsLister corev1listers.ConfigMapNamespaceLister,
+	labelKey string,
+	keep int,
+) error {
+	// Nothing to do
+	if keep <= 0 {
+		return nil
+	}
+
+	// List config maps with label
+	items, err := listConfigMaps(nsLister, labelKey)
+	if err != nil || len(items) <= keep {
+		return err
+	}
+
+	// Delete older ones
+	for i := keep; i < len(items); i++ {
+		if err := cms.Delete(ctx, items[i].Name, metav1.DeleteOptions{}); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// -------------------------
+// marshalJsonIndented
+// -------------------------
+
+// marshalJsonIndented marshals an object to JSON with indentation.
+func marshalJsonIndented(v any) ([]byte, error) {
+	return json.MarshalIndent(v, "", "  ")
+}
+
+// -------------------------
+// jsonString
+// -------------------------
+
+// marshalToJsonString pretty-prints v to JSON and returns it as a string.
+func marshalToJsonString(v any) (string, error) {
+	b, err := marshalJsonIndented(v)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// -------------------------
+// patchDataString
+// -------------------------
+
+// patchDataString patches a single DataKey with the given raw JSON string.
+func (d ConfigMapDoc) patchDataString(
+	ctx context.Context,
+	cms corev1client.ConfigMapInterface,
+	raw string,
+) error {
+	// Create merge patch
+	patch := []byte(fmt.Sprintf(`{"data":{"%s":%q}}`, d.DataKey, raw))
+	_, err := cms.Patch(
+		ctx,
+		d.Name,
+		types.MergePatchType,
+		patch,
+		metav1.PatchOptions{},
+	)
+	return err
+}
+
+// -------------------------
+// ensureJson
+// -------------------------
+
+// ensureJson creates or updates config map, storing data as JSON at DataKey.
+func (d ConfigMapDoc) ensureJson(
+	ctx context.Context,
+	cms corev1client.ConfigMapInterface,
+	data any,
+) error {
+	// Marshal to JSON bytes
+	b, err := marshalJsonIndented(data)
 	if err != nil {
 		return err
 	}
-	cms := cli.ConfigMaps(d.Namespace)
+
+	// Get existing
 	cm, err := cms.Get(ctx, d.Name, metav1.GetOptions{})
 	switch {
-	case apierrors.IsNotFound(err):
-		cm = &apiv1.ConfigMap{
+	case apierrors.IsNotFound(err): // create new
+		cm = &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      d.Name,
 				Namespace: d.Namespace,
@@ -36,9 +152,11 @@ func (d ConfigMapDoc) ensureJson(ctx context.Context, cli corev1client.CoreV1Int
 		}
 		_, err = cms.Create(ctx, cm, metav1.CreateOptions{})
 		return err
+
 	case err != nil:
 		return err
-	default:
+
+	default: // update existing
 		if cm.Data == nil {
 			cm.Data = map[string]string{}
 		}
@@ -48,114 +166,100 @@ func (d ConfigMapDoc) ensureJson(ctx context.Context, cli corev1client.CoreV1Int
 	}
 }
 
-// Patch only DataKey via merge patch.
-func (d ConfigMapDoc) patchJson(ctx context.Context, cli corev1client.CoreV1Interface, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
+// -------------------------
+// patchJson
+// -------------------------
+
+// patchJson patches only DataKey via merge patch.
+func (d ConfigMapDoc) patchJson(
+	ctx context.Context,
+	cms corev1client.ConfigMapInterface,
+	v any,
+) error {
+	// Marshal to JSON string
+	jsonStr, err := marshalToJsonString(v)
 	if err != nil {
 		return err
 	}
-	patch := []byte(fmt.Sprintf(`{"data":{"%s":%q}}`, d.DataKey, string(b)))
-	_, err = cli.ConfigMaps(d.Namespace).Patch(ctx, d.Name, types.MergePatchType, patch, metav1.PatchOptions{})
-	return err
+	// Patch data key
+	return d.patchDataString(ctx, cms, jsonStr)
 }
 
-// Read DataKey; nil if config map or key missing.
+// -------------------------
+// readJson
+// -------------------------
+
+// readJson reads DataKey as JSON bytes.
 func (d ConfigMapDoc) readJson(
-	lister func(ns string) corev1listers.ConfigMapNamespaceLister,
-) ([]byte, error) {
-	cm, err := lister(d.Namespace).Get(d.Name)
-	if apierrors.IsNotFound(err) || cm == nil {
-		return nil, nil
+	nsLister corev1listers.ConfigMapNamespaceLister,
+) (raw []byte, found bool, err error) {
+	// get config map
+	cm, err := nsLister.Get(d.Name)
+	// NotFound => treat as missing (no error)
+	if apierrors.IsNotFound(err) {
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return []byte(cm.Data[d.DataKey]), nil
+	if cm == nil {
+		return nil, false, nil
+	}
+	// get data key
+	return []byte(cm.Data[d.DataKey]), true, nil
 }
 
-// Load -> mutate -> patch an array JSON.
+// -------------------------
+// mutateJson
+// -------------------------
+
+// mutateJson loads -> mutates -> patches an array JSON.
 func mutateJson[T any](
 	ctx context.Context,
-	cli corev1client.CoreV1Interface,
-	lister func(ns string) corev1listers.ConfigMapNamespaceLister,
+	cms corev1client.ConfigMapInterface,
+	nsLister corev1listers.ConfigMapNamespaceLister,
 	doc ConfigMapDoc,
 	f func(existing []T) ([]T, error),
 ) error {
-	raw, err := doc.readJson(lister)
-	if err != nil {
-		return err
+	// read existing
+	raw, found, err := doc.readJson(nsLister)
+	if err != nil || !found {
+		return err // no-op on missing, propagate error
 	}
+	// unmarshal existing array
 	var arr []T
 	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &arr) // best effort
+		_ = json.Unmarshal(raw, &arr)
 	}
+	// mutate
 	out, err := f(arr)
-	if err != nil {
+	if err != nil || out == nil { // allow nil => “no change”
 		return err
 	}
-	return doc.patchJson(ctx, cli, out)
+	return doc.patchJson(ctx, cms, out)
 }
 
-// MutateRaw loads the JSON string at DataKey, 'mutate' it, and writes the result back.
+// -------------------------
+// mutateRaw
+// -------------------------
+
+// mutateRaw loads JSON string at DataKey, mutates it, and writes result back.
 func (d ConfigMapDoc) mutateRaw(
 	ctx context.Context,
-	cli corev1client.CoreV1Interface,
-	lister func(ns string) corev1listers.ConfigMapNamespaceLister,
+	cms corev1client.ConfigMapInterface,
+	nsLister corev1listers.ConfigMapNamespaceLister,
 	mutate func(raw []byte) ([]byte, error),
 ) error {
-	raw, err := d.readJson(lister)
-	if err != nil || len(raw) == 0 {
-		return err // nil if missing -> no-op
+	// Read existing
+	raw, found, err := d.readJson(nsLister)
+	if err != nil || !found {
+		return err // missing => no-op
 	}
+	// Mutate
 	newRaw, err := mutate(raw)
 	if err != nil || newRaw == nil {
-		return err // nil -> no-op
+		return err // nil => no-op
 	}
-	// Store as string (ConfigMap data values are strings).
-	patch := []byte(fmt.Sprintf(`{"data":{"%s":%q}}`, d.DataKey, string(newRaw)))
-	_, err = cli.ConfigMaps(d.Namespace).Patch(ctx, d.Name, types.MergePatchType, patch, metav1.PatchOptions{})
-	return err
-}
-
-// List config maps by label newest-first.
-func listConfigMaps(
-	_ context.Context,
-	lister func(ns string) corev1listers.ConfigMapNamespaceLister,
-	namespace, labelKey string,
-) ([]apiv1.ConfigMap, error) {
-	sel := labels.SelectorFromSet(labels.Set{labelKey: "true"})
-	items, err := lister(namespace).List(sel)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]apiv1.ConfigMap, len(items))
-	for i := range items {
-		out[i] = *items[i].DeepCopy()
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].CreationTimestamp.Time.After(out[j].CreationTimestamp.Time)
-	})
-	return out, nil
-}
-
-// Keep first K newest config maps for label, delete the rest.
-func pruneConfigMaps(
-	ctx context.Context,
-	cli corev1client.CoreV1Interface,
-	lister func(ns string) corev1listers.ConfigMapNamespaceLister,
-	namespace, labelKey string,
-	keep int,
-) error {
-	if keep <= 0 {
-		return nil
-	}
-	items, err := listConfigMaps(ctx, lister, namespace, labelKey)
-	if err != nil || len(items) <= keep {
-		return err
-	}
-	cms := cli.ConfigMaps(namespace)
-	for i := keep; i < len(items); i++ {
-		_ = cms.Delete(ctx, items[i].Name, metav1.DeleteOptions{})
-	}
-	return nil
+	// Patch back
+	return d.patchDataString(ctx, cms, string(newRaw))
 }

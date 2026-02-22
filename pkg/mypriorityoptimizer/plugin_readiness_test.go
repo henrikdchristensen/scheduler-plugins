@@ -3,273 +3,400 @@ package mypriorityoptimizer
 
 import (
 	"context"
-	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 )
 
-// -----------------------------------------------------------------------------
-// pluginReadiness
-// -----------------------------------------------------------------------------
-
-func TestPluginReadiness(t *testing.T) {
-	t.Run("cache-sync-canceled", func(t *testing.T) {
-		pl := &SharedState{
-			BlockedWhileActive: newPodSet("test"),
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		inf := &fakeSharedIndexInformer{synced: false}
-
-		done := make(chan struct{})
-		go func() {
-			pl.pluginReadiness(ctx, inf)
-			close(done)
-		}()
-
-		// Give pluginReadiness a moment to enter WaitForCacheSync, then cancel.
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-
-		select {
-		case <-done:
-		case <-time.After(1 * time.Second):
-			t.Fatalf("pluginReadiness did not return in time when cache sync is canceled")
-		}
-
-		if got := pl.PluginReady.Load(); got {
-			t.Fatalf("expected PluginReady=false when cache sync is canceled, got true")
-		}
-	})
-
-	t.Run("ctx-canceled-before-usable-node", func(t *testing.T) {
-		pl := &SharedState{
-			BlockedWhileActive: newPodSet("test"),
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		done := make(chan struct{})
-		go func() {
-			// No informers; should short-circuit on ctx cancellation or waitForUsableNode.
-			pl.pluginReadiness(ctx)
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(1 * time.Second):
-			t.Fatalf("pluginReadiness did not return in time when ctx is already canceled")
-		}
-
-		if got := pl.PluginReady.Load(); got {
-			t.Fatalf("expected PluginReady=false when ctx is canceled before usable node, got true")
-		}
-	})
-
-	t.Run("warmup-canceled", func(t *testing.T) {
-		pl := &SharedState{
-			BlockedWhileActive: newPodSet("test"),
-		}
-
-		withCacheWarmupDelay(50*time.Millisecond, func() {
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-
-			done := make(chan struct{})
-			go func() {
-				// No informers; cacheReady will trivially succeed, but warmup should
-				// observe ctx cancellation and return.
-				pl.pluginReadiness(ctx)
-				close(done)
-			}()
-
-			select {
-			case <-done:
-			case <-time.After(1 * time.Second):
-				t.Fatalf("pluginReadiness did not return in time when warmup is canceled")
-			}
-
-			if got := pl.PluginReady.Load(); got {
-				t.Fatalf("expected PluginReady=false when warmup is canceled, got true")
-			}
-		})
-	})
-
-	t.Run("success-path", func(t *testing.T) {
-		pl := &SharedState{
-			BlockedWhileActive: newPodSet("test"),
-		}
-
-		withReadinessInterval(1*time.Millisecond, func() {
-			withCacheWarmupDelay(0, func() {
-				// Use PerPod@PreEnqueue so we are in the most restrictive mode;
-				// readiness itself should still complete once a usable node is seen.
-				withMode(ModePerPod, true, func() {
-					ctx, cancel := context.WithCancel(context.Background())
-					defer cancel()
-
-					withReadinessHooks(
-						func(_ *SharedState) ([]*v1.Node, error) {
-							// Immediately report one node, so readiness does not spin.
-							return []*v1.Node{new(v1.Node)}, nil
-						},
-						func(*v1.Node) bool { return true },
-						func() {
-							done := make(chan struct{})
-							go func() {
-								pl.pluginReadiness(ctx)
-								close(done)
-							}()
-
-							select {
-							case <-done:
-							case <-time.After(3 * time.Second):
-								t.Fatalf("pluginReadiness did not complete in time on success path")
-							}
-
-							if !pl.PluginReady.Load() {
-								t.Fatalf("expected PluginReady=true on success path")
-							}
-						},
-					)
-				})
-			})
-		})
-	})
-}
-
-// -----------------------------------------------------------------------------
+// -------------------------
 // isCacheReady
-// -----------------------------------------------------------------------------
+// -------------------------
 
-func TestIsCacheReady(t *testing.T) {
-	t.Run("no-informers-returns-true", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+func TestIsCacheReadyn(t *testing.T) {
+	tests := []struct {
+		name      string
+		ctxFn     func() (context.Context, context.CancelFunc)
+		informers []cache.SharedIndexInformer
+		startInf  bool
+		want      bool
+	}{
+		{
+			name:  "no informers",
+			ctxFn: func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+			want:  true,
+		},
+		{
+			name:      "all nil informers",
+			ctxFn:     func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+			informers: []cache.SharedIndexInformer{nil, nil},
+			want:      true,
+		},
+		{
+			name: "context canceled returns false",
+			ctxFn: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			informers: []cache.SharedIndexInformer{newTestPodInformer()},
+			want:      false,
+		},
+		{
+			name: "running informer returns true",
+			ctxFn: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 500*time.Millisecond)
+			},
+			informers: []cache.SharedIndexInformer{newTestPodInformer()},
+			startInf:  true,
+			want:      true,
+		},
+	}
 
-		if !isCacheReady(ctx) {
-			t.Fatalf("expected isCacheReady to return true when no informers are provided")
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.ctxFn()
+			defer cancel()
+			infs := tt.informers
 
-	t.Run("synced-informer-returns-true", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+			if tt.startInf && len(infs) > 0 && infs[0] != nil {
+				startInformer(t, infs[0])
+			}
 
-		inf := &fakeSharedIndexInformer{synced: true}
-		if !isCacheReady(ctx, inf) {
-			t.Fatalf("expected isCacheReady to return true when informer is synced")
-		}
-	})
-
-	t.Run("ctx-canceled-returns-false", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		inf := &fakeSharedIndexInformer{synced: false}
-		cancel()
-
-		if isCacheReady(ctx, inf) {
-			t.Fatalf("expected isCacheReady to return false when context is canceled")
-		}
-	})
-
-	t.Run("nil-informer-ignored", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		if !isCacheReady(ctx, nil) {
-			t.Fatalf("expected isCacheReady to return true when only nil informers are passed")
-		}
-	})
+			got := isCacheReady(ctx, infs...)
+			if got != tt.want {
+				t.Fatalf("isCacheReady() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
-// -----------------------------------------------------------------------------
+// -------------------------
 // waitForUsableNode
-// -----------------------------------------------------------------------------
+// -------------------------
 
-func TestWaitForUsableNode(t *testing.T) {
-	t.Run("ctx-canceled-before-first-tick", func(t *testing.T) {
-		pl := &SharedState{}
-
+func TestWaitForUsableNode_ContextCanceled(t *testing.T) {
+	pl := &SharedState{}
+	withReadinessEnv(t, ReadinessEnvs{
+		GetNodes: func(*SharedState) ([]*v1.Node, error) { return []*v1.Node{node("nodeA")}, nil },
+		IsUsable: func(*v1.Node) bool { return true },
+	}, func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
 		if got := pl.waitForUsableNode(ctx); got {
-			t.Fatalf("expected waitForUsableNode to return false when ctx is canceled before first tick")
+			t.Fatalf("waitForUsableNode(canceled ctx) = %v, want false", got)
 		}
 	})
+}
 
-	t.Run("error-and-no-usable", func(t *testing.T) {
-		pl := &SharedState{}
+func TestWaitForUsableNode_EventuallyFindsUsableNode(t *testing.T) {
+	pl := &SharedState{}
+	var calls atomic.Int32
 
-		withReadinessInterval(1*time.Millisecond, func() {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+	withReadinessEnv(t, ReadinessEnvs{
+		GetNodes: func(*SharedState) ([]*v1.Node, error) {
+			switch calls.Add(1) {
+			case 1:
+				return []*v1.Node{node("nodeA")}, nil
+			default:
+				return []*v1.Node{node("nodeB")}, nil
+			}
+		},
+		IsUsable: func(n *v1.Node) bool { return n != nil && n.Name == "nodeB" },
+	}, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
 
-			calls := 0
-			errs := 0
-			withReadinessHooks(
-				func(_ *SharedState) ([]*v1.Node, error) {
-					calls++
-					if calls == 1 {
-						errs++
-						return nil, fmt.Errorf("boom") // first call: error
-					}
-					// After the first error, simulate nodes present but none usable,
-					// and cancel the context. There might be 1 or more of these calls
-					// before ctx.Done() wins the next select.
-					cancel()
-					return []*v1.Node{new(v1.Node)}, nil
-				},
-				func(*v1.Node) bool {
-					return false // treat all nodes as unusable
-				},
-				func() {
-					got := pl.waitForUsableNode(ctx)
-					if got {
-						t.Fatalf("expected waitForUsableNode to return false when only unusable nodes and errors")
-					}
-					if calls != 2 {
-						t.Fatalf("expected exactly 2 getNodes calls (error + unusable), got %d", calls)
-					}
-					if errs != 1 {
-						t.Fatalf("expected exactly 1 getNodes error, got %d", errs)
-					}
-				},
-			)
-		})
+		if got := pl.waitForUsableNode(ctx); !got {
+			t.Fatalf("waitForUsableNode() = %v, want true", got)
+		}
+		if calls.Load() < 2 {
+			t.Fatalf("expected getNodesForReadiness to be called at least twice, got %d", calls.Load())
+		}
 	})
+}
 
-	t.Run("usable-node-found", func(t *testing.T) {
-		pl := &SharedState{}
+func TestWaitForUsableNode_GetNodesErrorThenSucceeds(t *testing.T) {
+	pl := &SharedState{}
+	var calls atomic.Int32
 
-		withReadinessInterval(1*time.Millisecond, func() {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+	withReadinessEnv(t, ReadinessEnvs{
+		GetNodes: func(*SharedState) ([]*v1.Node, error) {
+			switch calls.Add(1) {
+			case 1:
+				return nil, context.DeadlineExceeded
+			default:
+				return []*v1.Node{node("nodeB")}, nil
+			}
+		},
+		IsUsable: func(n *v1.Node) bool { return n != nil && n.Name == "nodeB" },
+	}, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
 
-			calls := 0
-
-			withReadinessHooks(
-				func(_ *SharedState) ([]*v1.Node, error) {
-					calls++
-					return []*v1.Node{new(v1.Node)}, nil
-				},
-				func(*v1.Node) bool { return true }, // always usable
-				func() {
-					got := pl.waitForUsableNode(ctx)
-					if !got {
-						t.Fatalf("expected waitForUsableNode to return true when a usable node is present")
-					}
-					if calls == 0 {
-						t.Fatalf("expected at least one getNodes call, got %d", calls)
-					}
-				},
-			)
-		})
+		if got := pl.waitForUsableNode(ctx); !got {
+			t.Fatalf("waitForUsableNode() = %v, want true", got)
+		}
+		if calls.Load() < 2 {
+			t.Fatalf("expected getNodesForReadiness >=2, got %d", calls.Load())
+		}
 	})
+}
+
+// -------------------------
+// pluginReadiness
+// -------------------------
+
+func TestPluginReadiness_InformerSyncCanceled(t *testing.T) {
+	pl := &SharedState{}
+	pl.BlockedWhileActive = newPodSet("blocked")
+	pl.PluginReady.Store(false)
+
+	var persistCalls, activateCalls, startCalls atomic.Int32
+
+	inf := newTestPodInformer()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	withReadinessEnv(t, ReadinessEnvs{
+		Persist:    func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
+		Activate:   func(*SharedState) { activateCalls.Add(1) },
+		StartLoops: func(*SharedState, context.Context) { startCalls.Add(1) },
+	}, func() {
+		pl.pluginReadiness(ctx, inf)
+
+		if pl.PluginReady.Load() {
+			t.Fatalf("PluginReady = true, want false when informers never synced")
+		}
+		if persistCalls.Load() != 0 || activateCalls.Load() != 0 || startCalls.Load() != 0 {
+			t.Fatalf("side effects should not run (persist=%d activate=%d start=%d)",
+				persistCalls.Load(), activateCalls.Load(), startCalls.Load(),
+			)
+		}
+	})
+}
+
+func TestPluginReadiness_WarmupCanceled(t *testing.T) {
+	pl := &SharedState{}
+	pl.BlockedWhileActive = newPodSet("blocked")
+	pl.PluginReady.Store(false)
+
+	var persistCalls, activateCalls, startCalls atomic.Int32
+
+	withReadinessEnv(t, ReadinessEnvs{
+		Warmup:   250 * time.Millisecond, // should not actually sleep because ctx is already canceled
+		GetNodes: func(*SharedState) ([]*v1.Node, error) { return []*v1.Node{node("n1")}, nil },
+		IsUsable: func(*v1.Node) bool { return true },
+		Persist:  func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
+		Activate: func(*SharedState) { activateCalls.Add(1) },
+		StartLoops: func(*SharedState, context.Context) {
+			startCalls.Add(1)
+		},
+	}, func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		pl.pluginReadiness(ctx)
+
+		if pl.PluginReady.Load() {
+			t.Fatalf("PluginReady = true, want false when warmup is canceled")
+		}
+		if persistCalls.Load() != 0 || activateCalls.Load() != 0 || startCalls.Load() != 0 {
+			t.Fatalf("side effects should not run (persist=%d activate=%d start=%d)",
+				persistCalls.Load(), activateCalls.Load(), startCalls.Load(),
+			)
+		}
+	})
+}
+
+func TestPluginReadiness_WithWarmup(t *testing.T) {
+	pl := &SharedState{}
+	pl.BlockedWhileActive = newPodSet("blocked")
+	pl.PluginReady.Store(false)
+
+	var persistCalls, activateCalls, startCalls atomic.Int32
+
+	withReadinessEnv(t, ReadinessEnvs{
+		Warmup:   0,
+		GetNodes: func(*SharedState) ([]*v1.Node, error) { return []*v1.Node{node("n1")}, nil },
+		IsUsable: func(*v1.Node) bool { return false },
+		Persist:  func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
+		Activate: func(*SharedState) { activateCalls.Add(1) },
+		StartLoops: func(*SharedState, context.Context) {
+			startCalls.Add(1)
+		},
+	}, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+		defer cancel()
+
+		pl.pluginReadiness(ctx)
+
+		if pl.PluginReady.Load() {
+			t.Fatalf("PluginReady = true, want false when no usable node is found")
+		}
+		if persistCalls.Load() != 0 || activateCalls.Load() != 0 || startCalls.Load() != 0 {
+			t.Fatalf("side effects should not run (persist=%d activate=%d start=%d)",
+				persistCalls.Load(), activateCalls.Load(), startCalls.Load(),
+			)
+		}
+	})
+}
+
+func TestPluginReadiness_CompletesWithInformer(t *testing.T) {
+	pl := &SharedState{}
+	pl.BlockedWhileActive = newPodSet("blocked")
+	pl.PluginReady.Store(false)
+
+	var persistCalls, activateCalls, startCalls atomic.Int32
+	var getNodesCalls atomic.Int32
+
+	inf := newTestPodInformer()
+	startInformer(t, inf)
+
+	withReadinessEnv(t, ReadinessEnvs{
+		Warmup: 0,
+		GetNodes: func(*SharedState) ([]*v1.Node, error) {
+			getNodesCalls.Add(1)
+			return []*v1.Node{node("n1")}, nil
+		},
+		IsUsable: func(*v1.Node) bool { return true },
+		Persist:  func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
+		Activate: func(*SharedState) { activateCalls.Add(1) },
+		StartLoops: func(*SharedState, context.Context) {
+			startCalls.Add(1)
+		},
+	}, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		pl.pluginReadiness(ctx, inf)
+
+		if !pl.PluginReady.Load() {
+			t.Fatalf("PluginReady = false, want true on success")
+		}
+		if persistCalls.Load() != 1 || activateCalls.Load() != 1 || startCalls.Load() != 1 {
+			t.Fatalf("expected side effects once (persist=%d activate=%d start=%d)",
+				persistCalls.Load(), activateCalls.Load(), startCalls.Load(),
+			)
+		}
+		if getNodesCalls.Load() == 0 {
+			t.Fatalf("expected getNodesForReadiness to be called at least once")
+		}
+	})
+}
+
+func TestPluginReadiness_CompletesWithWarmup(t *testing.T) {
+	pl := &SharedState{}
+	pl.BlockedWhileActive = newPodSet("blocked")
+	pl.PluginReady.Store(false)
+
+	var persistCalls, activateCalls, startCalls atomic.Int32
+
+	// Use a warmup long enough to make the timing assertion robust.
+	warmup := 40 * time.Millisecond
+
+	withReadinessEnv(t, ReadinessEnvs{
+		Warmup:   warmup,
+		GetNodes: func(*SharedState) ([]*v1.Node, error) { return []*v1.Node{node("n1")}, nil },
+		IsUsable: func(*v1.Node) bool { return true },
+		Persist:  func(*SharedState, context.Context) error { persistCalls.Add(1); return nil },
+		Activate: func(*SharedState) { activateCalls.Add(1) },
+		StartLoops: func(*SharedState, context.Context) {
+			startCalls.Add(1)
+		},
+	}, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		start := time.Now()
+		pl.pluginReadiness(ctx)
+		elapsed := time.Since(start)
+
+		if !pl.PluginReady.Load() {
+			t.Fatalf("PluginReady = false, want true on success")
+		}
+		if persistCalls.Load() != 1 || activateCalls.Load() != 1 || startCalls.Load() != 1 {
+			t.Fatalf("expected side effects once (persist=%d activate=%d start=%d)",
+				persistCalls.Load(), activateCalls.Load(), startCalls.Load(),
+			)
+		}
+
+		// Timers should not fire early; allow a tiny scheduling margin.
+		if elapsed < warmup-5*time.Millisecond {
+			t.Fatalf("expected warmup delay to be honored, warmup=%v elapsed=%v", warmup, elapsed)
+		}
+	})
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+type ReadinessEnvs struct {
+	Interval   time.Duration
+	Warmup     time.Duration
+	GetNodes   func(*SharedState) ([]*v1.Node, error)
+	IsUsable   func(*v1.Node) bool
+	Persist    func(*SharedState, context.Context) error
+	Activate   func(*SharedState)
+	StartLoops func(*SharedState, context.Context)
+}
+
+func withReadinessEnv(t *testing.T, env ReadinessEnvs, fn func()) {
+	t.Helper()
+
+	if env.Interval <= 0 {
+		env.Interval = 2 * time.Millisecond
+	}
+	if env.GetNodes == nil {
+		env.GetNodes = func(*SharedState) ([]*v1.Node, error) { return nil, nil }
+	}
+	if env.IsUsable == nil {
+		env.IsUsable = func(*v1.Node) bool { return false }
+	}
+	if env.Persist == nil {
+		env.Persist = func(*SharedState, context.Context) error { return nil }
+	}
+	if env.Activate == nil {
+		env.Activate = func(*SharedState) {}
+	}
+	if env.StartLoops == nil {
+		env.StartLoops = func(*SharedState, context.Context) {}
+	}
+
+	withVar(t, &readinessUsableNodeInterval, env.Interval)
+	withVar(t, &cacheWarmupDelay, env.Warmup)
+	withVar(t, &getNodesForReadiness, env.GetNodes)
+	withVar(t, &isNodeUsableForReadiness, env.IsUsable)
+	withVar(t, &persistPluginConfigForReadiness, env.Persist)
+	withVar(t, &activateBlockedPodsForReadiness, env.Activate)
+	withVar(t, &startLoopsForReadiness, env.StartLoops)
+
+	fn()
+}
+
+func newTestPodInformer() cache.SharedIndexInformer {
+	lw := &cache.ListWatch{
+		ListFunc: func(_ metav1.ListOptions) (runtime.Object, error) {
+			return &v1.PodList{}, nil
+		},
+		WatchFunc: func(_ metav1.ListOptions) (watch.Interface, error) {
+			return watch.NewFake(), nil
+		},
+	}
+	return cache.NewSharedIndexInformer(lw, &v1.Pod{}, 0, cache.Indexers{})
+}
+
+func startInformer(t *testing.T, inf cache.SharedIndexInformer) chan struct{} {
+	t.Helper()
+	stopCh := make(chan struct{})
+	go inf.Run(stopCh)
+	t.Cleanup(func() { close(stopCh) })
+	return stopCh
 }

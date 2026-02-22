@@ -6,39 +6,57 @@ import (
 	"time"
 )
 
-// -----------------------------------------------------------------------------
-// parseGetEnv
-// -----------------------------------------------------------------------------
+// -------------------------
+// getEnv
+// -------------------------
 
 func TestGetEnv(t *testing.T) {
-	t.Run("returns existing value", func(t *testing.T) {
-		t.Setenv("TEST_KEY", "value")
-		got := getenv("TEST_KEY", "default")
-		if got != "value" {
-			t.Fatalf("getenv() = %q, want %q", got, "value")
-		}
-	})
+	tests := []struct {
+		name string
+		key  string
+		set  *string
+		def  string
+		want string
+	}{
+		{
+			name: "returns existing value",
+			key:  "TEST_KEY",
+			set:  ptr("value"),
+			def:  "default",
+			want: "value",
+		},
+		{
+			name: "returns default when unset",
+			key:  "UNSET_KEY",
+			set:  nil,
+			def:  "default",
+			want: "default",
+		},
+		{
+			name: "returns default when set to empty string",
+			key:  "EMPTY_KEY",
+			set:  ptr(""),
+			def:  "default",
+			want: "default",
+		},
+	}
 
-	t.Run("returns default when unset", func(t *testing.T) {
-		// no Setenv -> env var is unset
-		got := getenv("UNSET_KEY", "default")
-		if got != "default" {
-			t.Fatalf("getenv() = %q, want %q", got, "default")
-		}
-	})
-
-	t.Run("returns default when set to empty string", func(t *testing.T) {
-		t.Setenv("EMPTY_KEY", "")
-		got := getenv("EMPTY_KEY", "default")
-		if got != "default" {
-			t.Fatalf("getenv() with empty value = %q, want %q", got, "default")
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.set != nil {
+				t.Setenv(tt.key, *tt.set)
+			}
+			got := getEnv(tt.key, tt.def)
+			if got != tt.want {
+				t.Fatalf("getEnv(%q, %q) = %q, want %q", tt.key, tt.def, got, tt.want)
+			}
+		})
+	}
 }
 
-// -----------------------------------------------------------------------------
+// -------------------------
 // parseBool
-// -----------------------------------------------------------------------------
+// -------------------------
 
 func TestParseBool(t *testing.T) {
 	tests := []struct {
@@ -56,19 +74,19 @@ func TestParseBool(t *testing.T) {
 		{"empty -> false", "", false},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := parseBool(test.in)
-			if got != test.want {
-				t.Fatalf("parseBool(%q) = %v, want %v", test.in, got, test.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseBool(tt.in)
+			if got != tt.want {
+				t.Fatalf("parseBool(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
 	}
 }
 
-// -----------------------------------------------------------------------------
+// -------------------------
 // parseInt
-// -----------------------------------------------------------------------------
+// -------------------------
 
 func TestParseInt(t *testing.T) {
 	tests := []struct {
@@ -83,21 +101,23 @@ func TestParseInt(t *testing.T) {
 		{"empty -> 0", "", 0},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := parseInt(test.in)
-			if got != test.want {
-				t.Fatalf("parseInt(%q) = %d, want %d", test.in, got, test.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseInt(tt.in)
+			if got != tt.want {
+				t.Fatalf("parseInt(%q) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}
 }
 
-// -----------------------------------------------------------------------------
+// -------------------------
 // parseFloat
-// -----------------------------------------------------------------------------
+// -------------------------
 
 func TestParseFloat(t *testing.T) {
+	const floatTolerance = 1e-9
+
 	tests := []struct {
 		name   string
 		in     string
@@ -152,30 +172,28 @@ func TestParseFloat(t *testing.T) {
 			in:     "notafloat",
 			lLimit: -1.0,
 			uLimit: 10.0,
-			want:   0.0, // 0.0 is within [-1, 10], so returned as-is
+			want:   0.0,
 		},
 	}
 
-	const floatTolerance = 1e-9
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := parseFloat(test.in, test.lLimit, test.uLimit)
-			diff := got - test.want
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseFloat(tt.in, tt.lLimit, tt.uLimit)
+			diff := got - tt.want
 			if diff < 0 {
 				diff = -diff
 			}
 			if diff > floatTolerance {
 				t.Fatalf("parseFloat(%q, %f, %f) = %f, want %f",
-					test.in, test.lLimit, test.uLimit, got, test.want)
+					tt.in, tt.lLimit, tt.uLimit, got, tt.want)
 			}
 		})
 	}
 }
 
-// -----------------------------------------------------------------------------
+// -------------------------
 // parseTime
-// -----------------------------------------------------------------------------
+// -------------------------
 
 func TestParseTime(t *testing.T) {
 	tests := []struct {
@@ -201,23 +219,28 @@ func TestParseTime(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
+// -------------------------
 // parseOptimizeMode
-// -----------------------------------------------------------------------------
+// -------------------------
 
 func TestParseOptimizeMode(t *testing.T) {
 	tests := []struct {
 		in   string
 		want ModeType
 	}{
-		{"per_pod", ModePerPod},
-		{"PER_POD", ModePerPod},
-		{"periodic ", ModePeriodic},
-		{"interlude", ModeInterlude},
+		{"schedulingfailure", ModeSchedulingFailure},
+		{"scheduling_failure", ModeSchedulingFailure},
+		{"SCHEDULING_FAILURE ", ModeSchedulingFailure}, // test for 'with spaces' and 'uppercase'
+		{"periodic", ModePeriodic},
+		{"stablequeue", ModeStableQueue},
+		{"stable_queue", ModeStableQueue},
 		{"manual", ModeManual},
+		{"manualblocking", ModeManualBlocking},
 		{"manual_blocking", ModeManualBlocking},
-		{"unknown", ModePeriodic}, // default
+		{"unknown", ModePeriodic}, // default case
+		{"", ModePeriodic},        // default case
 	}
+
 	for _, test := range tests {
 		got := parseOptimizeMode(test.in)
 		if got != test.want {

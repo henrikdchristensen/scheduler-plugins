@@ -1,0 +1,22 @@
+\begin{table}[htbp]
+\centering
+\caption{Mean difference between 8s baseline and other timing variants per inter-arrival time, aggregated over node counts and priority configurations, for non-blocking runs with DefaultPreemption disabled.}
+\label{tab:timing-diff-defpreempt0-blocking0}
+\adjustbox{max width=\linewidth}{%
+\begin{tabular}{l w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em} w{c}{2.5em}}
+\toprule
+\multirow{3}{*}{\textbf{Metric}} & \multicolumn{6}{c}{\textbf{Periodic (non-blocking)}} & \multicolumn{6}{c}{\textbf{Stable-queue (non-blocking)}} \\
+\cmidrule(lr){2-7}\cmidrule(lr){8-13}
+ & \multicolumn{3}{c}{Interval: 8s $\to$ 4s} & \multicolumn{3}{c}{Interval: 8s $\to$ 16s} & \multicolumn{3}{c}{Delay: 8s $\to$ 4s} & \multicolumn{3}{c}{Delay: 8s $\to$ 16s} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
+ & \llap{Inter-arrival =\,}4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s & 4s & 8s & 16s \\
+\midrule
+Diff. usage (\%) & +0.2 & +0.1 & +0.0 & -0.3 & -0.2 & -0.2 & +0.1 & +0.1 & +0.1 & -0.3 & -0.1 & +0.0 \\
+Diff. latency (ms) & -72 & -296 & +83 & +118 & +359 & +1142 & -67 & -83 & -484 & +148 & +298 & +372 \\
+Diff. pod deletions & +65.2 & +54.6 & +30.6 & -44.1 & -29.2 & -13.7 & +53.8 & +33.6 & +21.4 & -34.1 & -30.6 & -18.8 \\
+Diff. optimizer runs & +39 & +29 & +27 & -25 & -22 & -17 & +74 & +52 & +23 & -37 & -39 & -36 \\
+Diff. plan activations & +22 & +14 & +8 & -17 & -10 & -8 & +14 & +9 & +6 & -12 & -9 & -5 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

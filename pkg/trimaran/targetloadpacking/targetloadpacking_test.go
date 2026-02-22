@@ -28,6 +28,7 @@ import (
 
 	"github.com/paypal/load-watcher/pkg/watcher"
 	"github.com/stretchr/testify/assert"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/metrics"
 	testutil "sigs.k8s.io/scheduler-plugins/test/util"
 
@@ -53,8 +54,8 @@ var _ framework.SharedLister = &testSharedLister{}
 
 type testSharedLister struct {
 	nodes       []*v1.Node
-	nodeInfos   []*framework.NodeInfo
-	nodeInfoMap map[string]*framework.NodeInfo
+	nodeInfos   []fwk.NodeInfo
+	nodeInfoMap map[string]fwk.NodeInfo
 }
 
 func (f *testSharedLister) StorageInfos() framework.StorageInfoLister {
@@ -65,19 +66,19 @@ func (f *testSharedLister) NodeInfos() framework.NodeInfoLister {
 	return f
 }
 
-func (f *testSharedLister) List() ([]*framework.NodeInfo, error) {
+func (f *testSharedLister) List() ([]fwk.NodeInfo, error) {
 	return f.nodeInfos, nil
 }
 
-func (f *testSharedLister) HavePodsWithAffinityList() ([]*framework.NodeInfo, error) {
+func (f *testSharedLister) HavePodsWithAffinityList() ([]fwk.NodeInfo, error) {
 	return nil, nil
 }
 
-func (f *testSharedLister) HavePodsWithRequiredAntiAffinityList() ([]*framework.NodeInfo, error) {
+func (f *testSharedLister) HavePodsWithRequiredAntiAffinityList() ([]fwk.NodeInfo, error) {
 	return nil, nil
 }
 
-func (f *testSharedLister) Get(nodeName string) (*framework.NodeInfo, error) {
+func (f *testSharedLister) Get(nodeName string) (fwk.NodeInfo, error) {
 	return f.nodeInfoMap[nodeName], nil
 }
 
@@ -268,7 +269,9 @@ func TestTargetLoadPackingScoring(t *testing.T) {
 			var actualList framework.NodeScoreList
 			for _, n := range tt.nodes {
 				nodeName := n.Name
-				score, status := scorePlugin.Score(context.Background(), state, tt.pod, nodeName)
+				nodeInfo := framework.NewNodeInfo()
+				nodeInfo.SetNode(n)
+				score, status := scorePlugin.Score(context.Background(), state, tt.pod, nodeInfo)
 				assert.True(t, status.IsSuccess())
 				actualList = append(actualList, framework.NodeScore{Name: nodeName, Score: score})
 			}
@@ -367,7 +370,9 @@ func BenchmarkTargetLoadPackingPlugin(b *testing.B) {
 				gotList := make(framework.NodeScoreList, len(nodes))
 				scoreNode := func(i int) {
 					n := nodes[i]
-					score, _ := scorePlugin.Score(ctx, state, pod, n.Name)
+					nodeInfo := framework.NewNodeInfo()
+					nodeInfo.SetNode(n)
+					score, _ := scorePlugin.Score(ctx, state, pod, nodeInfo)
 					gotList[i] = framework.NodeScore{Name: n.Name, Score: score}
 				}
 				Until(ctx, len(nodes), scoreNode)
@@ -400,14 +405,14 @@ func Until(ctx context.Context, pieces int, doWorkPiece workqueue.DoWorkPieceFun
 }
 
 func newTestSharedLister(pods []*v1.Pod, nodes []*v1.Node) *testSharedLister {
-	nodeInfoMap := make(map[string]*framework.NodeInfo)
-	nodeInfos := make([]*framework.NodeInfo, 0)
+	nodeInfoMap := make(map[string]fwk.NodeInfo)
+	nodeInfos := make([]fwk.NodeInfo, 0)
 	for _, pod := range pods {
 		nodeName := pod.Spec.NodeName
 		if _, ok := nodeInfoMap[nodeName]; !ok {
 			nodeInfoMap[nodeName] = framework.NewNodeInfo()
 		}
-		nodeInfoMap[nodeName].AddPod(pod)
+		nodeInfoMap[nodeName].(*framework.NodeInfo).AddPod(pod)
 	}
 	for _, node := range nodes {
 		if _, ok := nodeInfoMap[node.Name]; !ok {

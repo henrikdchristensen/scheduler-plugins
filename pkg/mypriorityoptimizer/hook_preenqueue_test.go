@@ -6,86 +6,116 @@ import (
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
+	fwk "k8s.io/kube-scheduler/framework"
 )
 
-// helper: temporarily override OptimizeMode using the real parsers.
-func withOptimizeModeStage(modeStr string, fn func()) {
-	origMode := OptimizeMode
-	OptimizeMode = parseOptimizeMode(modeStr)
-	defer func() {
-		OptimizeMode = origMode
-	}()
-	fn()
-}
+// -------------------------
+// PreEnqueue
+// -------------------------
 
-// kube-system pods should always be allowed regardless of mode/plan.
-func TestPreEnqueue_KubeSystemAlwaysAllowed(t *testing.T) {
-	pl := &SharedState{}
-	// Make sure we don't accidentally trip the "caches not warmed" branch.
-	pl.PluginReady.Store(true)
+func TestPreEnqueue(t *testing.T) {
+	type tc struct {
+		name string
+		// inputs
+		pod          *v1.Pod
+		pluginReady  bool
+		mode         ModeType
+		synch        bool
+		activePlan   *ActivePlan
+		placementMap map[string]string
+		// expected
+		wantCode    fwk.Code
+		wantBlocked int
+	}
 
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sys-pod",
-			Namespace: SystemNamespace,
+	tests := []tc{
+		{
+			name:        "kube-system always allowed",
+			pod:         pod(SystemNamespace, "sys-pod"),
+			pluginReady: false, // doesn't matter
+			mode:        ModeManualBlocking,
+			synch:       true,
+			wantCode:    fwk.Success,
+			wantBlocked: 0,
+		},
+		{
+			name:        "caches not ready blocks pod",
+			pod:         pod("default", "p1"),
+			pluginReady: false,
+			mode:        ModePeriodic,
+			synch:       true,
+			wantCode:    fwk.Pending,
+			wantBlocked: 1,
+		},
+		{
+			name:        "manual blocking mode blocks when no active plan",
+			pod:         pod("default", "work-pod"),
+			pluginReady: true,
+			mode:        ModeManualBlocking,
+			synch:       true,
+			wantCode:    fwk.Pending,
+			wantBlocked: 0,
+		},
+		{
+			name:        "default mode pass-through when no active plan",
+			pod:         pod("default", "work-pod"),
+			pluginReady: true,
+			mode:        ModePeriodic,
+			synch:       true,
+			wantCode:    fwk.Success,
+			wantBlocked: 0,
+		},
+		{
+			name:        "active plan blocks pod not allowed by plan",
+			pod:         pod("default", "p1"),
+			pluginReady: true,
+			mode:        ModePeriodic,
+			synch:       true,
+			activePlan:  &ActivePlan{ID: "ap1"},
+			// PlacementByName empty => p1 not allowed
+			wantCode:    fwk.Pending,
+			wantBlocked: 1,
+		},
+		{
+			name:        "active plan allows pinned pod",
+			pod:         pod("default", "p1"),
+			pluginReady: true,
+			mode:        ModePeriodic,
+			synch:       true,
+			activePlan:  &ActivePlan{ID: "ap1"},
+			placementMap: map[string]string{
+				"default/p1": "node1",
+			},
+			wantCode:    fwk.Success,
+			wantBlocked: 0,
 		},
 	}
 
-	st := pl.PreEnqueue(context.Background(), pod)
-	if st == nil {
-		t.Fatalf("PreEnqueue() returned nil status")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pl := &SharedState{BlockedWhileActive: newPodSet("blocked")}
+			pl.PluginReady.Store(tt.pluginReady)
+
+			if tt.activePlan != nil {
+				ap := *tt.activePlan
+				if tt.placementMap != nil {
+					ap.PlacementByName = tt.placementMap
+				} else if ap.PlacementByName == nil {
+					ap.PlacementByName = map[string]string{}
+				}
+				pl.ActivePlan.Store(&ap)
+			}
+
+			withMode(tt.mode, tt.synch, func() {
+				st := pl.PreEnqueue(context.Background(), tt.pod)
+				mustHookStatus(t, "PreEnqueue", st, tt.wantCode, "")
+
+				if pl.BlockedWhileActive != nil {
+					if got := pl.BlockedWhileActive.Size(); got != tt.wantBlocked {
+						t.Fatalf("BlockedWhileActive.Size() = %d, want %d", got, tt.wantBlocked)
+					}
+				}
+			})
+		})
 	}
-	if st.Code() != framework.Success {
-		t.Fatalf("PreEnqueue() code = %v, want %v", st.Code(), framework.Success)
-	}
-}
-
-// In Manual Blocking mode, PreEnqueue should block non-system pods when
-// there is no active plan.
-func TestPreEnqueue_ManualBlockingModeBlocks(t *testing.T) {
-	pl := &SharedState{}
-	pl.PluginReady.Store(true) // skip cache-not-ready branch
-
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
-
-	withOptimizeModeStage("manual_blocking", func() {
-		st := pl.PreEnqueue(context.Background(), pod)
-		if st == nil {
-			t.Fatalf("PreEnqueue() returned nil status")
-		}
-		if st.Code() != framework.Pending {
-			t.Fatalf("PreEnqueue() code = %v, want %v (Pending)", st.Code(), framework.Pending)
-		}
-	})
-}
-
-// In a default-like configuration with no active plan,
-// PreEnqueue should just pass through and allow the pod.
-func TestPreEnqueue_DefaultModePassThrough(t *testing.T) {
-	pl := &SharedState{}
-	pl.PluginReady.Store(true)
-
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "work-pod",
-			Namespace: "default",
-		},
-	}
-
-	withOptimizeModeStage("periodic", func() {
-		st := pl.PreEnqueue(context.Background(), pod)
-		if st == nil {
-			t.Fatalf("PreEnqueue() returned nil status")
-		}
-		if st.Code() != framework.Success {
-			t.Fatalf("PreEnqueue() code = %v, want %v", st.Code(), framework.Success)
-		}
-	})
 }

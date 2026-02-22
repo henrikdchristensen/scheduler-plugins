@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# save_public_trace_data.py
+# save_data.py
+"""
+python -m scripts.public_trace_analysis.save_data
+"""
 
 import csv, os
 from typing import List, Tuple
@@ -10,9 +13,9 @@ from google.cloud import bigquery
 # ----------------------------------------------------------------------
 
 ALIBABA_IN = "alibaba-clusterdata/cluster-trace-gpu-v2025/disaggregated_DLRM_trace.csv"
-ALIBABA_OUT = "alibaba-clusterdata/cluster-trace-gpu-v2025/data.csv"
+ALIBABA_OUT = "data/public_trace_data/alibaba-clusterdata/cluster-trace-gpu-v2025/data.csv"
 
-GOOGLE_OUT = "google-cluster-data/ClusterData2019/data.csv"
+GOOGLE_OUT = "data/public_trace_data/google-cluster-data/ClusterData2019/data.csv"
 GOOGLE_PROJECT_ID = "master-thesis-479005"
 GOOGLE_CELL_DATASETS = [
     "clusterdata_2019_a",

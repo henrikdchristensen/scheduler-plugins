@@ -8,48 +8,30 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// SolveMode indicates the mode of solving.
-type SolveMode int
-
-const (
-	SolveAll SolveMode = iota
-	SolveSingle
-)
-
 // SolverInput is the input to a solver.
 type SolverInput struct {
 	// Preemptor pod (if any; single pod mode)
 	Preemptor *SolverPod `json:"preemptor,omitempty"`
 	// Nodes to consider
 	Nodes []SolverNode `json:"nodes"`
-	// Pods to schedule / re-schedule
+	// Pods to consider
 	Pods []SolverPod `json:"pods"`
+	// Baseline score for comparison
+	BaselineScore SolverScore `json:"baseline_score"`
 	// Timeout for the solver (ms)
 	TimeoutMs int64 `json:"timeout_ms"`
 	// If true, ignore affinity rules
 	IgnoreAffinity bool `json:"ignore_affinity"`
-	// Log solver progress
-	LogProgress bool `json:"log_progress,omitempty"`
-	// Maximum number of trials (0 = unlimited)
-	MaxTrials int `json:"max_trials,omitempty"` // for local search
-	// Gap to optimality (0.0 = ignore)
-	GapLimit float64 `json:"gap_limit,omitempty"`
-	// Guaranteed fraction of time for all tiers (0.0-1.0)
-	GuaranteedTierFraction float64 `json:"guaranteed_tier_fraction,omitempty"`
-	// Fraction of a tier's budget for moves (0.0-1.0)
-	MoveFractionOfTier float64 `json:"move_fraction_of_tier,omitempty"`
 }
 
 // SolverOutput is the output from a solver.
 type SolverOutput struct {
-	// Status of the solver (failed/infeasible/feasible/optimal)
+	// Status of the solver
 	Status string `json:"status"`
 	// Pod placements (new or moved)
-	Placements []NewPlacement `json:"placements"`
+	Placements []SolverPod `json:"placements"`
 	// Evicted pods
-	Evictions []Placement `json:"evictions"`
-	// Stages of the solver
-	Stages []SolverStage `json:"stages,omitempty"`
+	Evictions []SolverPod `json:"evictions"`
 	// Duration in milliseconds of the solver
 	DurationMs int64 `json:"duration_ms,omitempty"`
 }
@@ -72,38 +54,38 @@ type SolverNode struct {
 	Pods map[types.UID]*SolverPod `json:"-"`
 }
 
-// SolverPod represents a pod for the solver.
+// SolverPod represents a pod in the cluster.
 type SolverPod struct {
 	// Unique identifier for the pod
-	UID types.UID `json:"uid"`
+	UID types.UID `json:"uid,omitempty"`
 	// Namespace of the pod
-	Namespace string `json:"namespace"`
+	Namespace string `json:"namespace,omitempty"`
 	// Name of the pod
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 	// Requested CPU in millicores
-	ReqCPUm int64 `json:"req_cpu_m"`
+	ReqCPUm int64 `json:"req_cpu_m,omitempty"`
 	// Requested memory in bytes
-	ReqMemBytes int64 `json:"req_mem_bytes"`
+	ReqMemBytes int64 `json:"req_mem_bytes,omitempty"`
 	// Priority of the pod
-	Priority int32 `json:"priority"`
+	Priority int32 `json:"priority,omitempty"`
 	// Whether the pod is protected from preemption
 	Protected bool `json:"protected,omitempty"`
 	// Current node of the pod (empty if new pod)
-	Node string `json:"node"`
+	Node string `json:"node,omitempty"`
+	// Old node of the pod (empty if new pod)
+	OldNode string `json:"old_node,omitempty"`
 }
 
 // SolverAttempt defines a solver attempt configuration and function.
-// solver_types.go
-
 type SolverAttempt struct {
 	// Name of the solver attempt
 	Name string
 	// Whether the solver attempt is enabled
 	Enabled bool
-	// Timeout for the solver attempt
+	// SolverTimeout is the time given to the solver for computation.
+	SolverTimeout time.Duration
+	// Timeout is the overall timeout including grace period for I/O overhead.
 	Timeout time.Duration
-	// Number of trials the solver attempt should perform
-	Trials int
 	// Function to run the solver attempt
 	Run func(ctx context.Context, in SolverInput) (*SolverOutput, error)
 }
@@ -112,7 +94,7 @@ type SolverAttempt struct {
 type SolverResult struct {
 	// Name of the solver attempt
 	Name string `json:"name,omitempty"`
-	// Status of the solver
+	// Status of the solver attempt
 	// filled from Output.Status when present
 	Status string `json:"status,omitempty"`
 	// DurationMs of the solver
@@ -120,54 +102,17 @@ type SolverResult struct {
 	// Score of the solution
 	Score SolverScore `json:"score,omitempty"`
 	// Stages of the solver
-	Stages []SolverStage `json:"stages,omitempty"`
-
-	// In-memory only (not exported)
-	// Comparison vs previous leader (-1 worse, 0 tie, 1 better)
-	CmpBase int `json:"-"`
-	// Full detailed solver output (not exported)
-	Output *SolverOutput `json:"-"`
+	Stages []SolverPhase `json:"stages,omitempty"`
 }
 
 // SolverScore of a solver solution
 type SolverScore struct {
 	// Number of pods placed by priority (higher is better)
-	PlacedByPriority map[string]int `json:"placed_by_priority,omitempty"`
+	PlacedByPriority map[string]int `json:"placed_by_priority"`
 	// Number of evicted pods (lower is better)
-	Evicted int `json:"evicted,omitempty"`
+	Evicted int `json:"evicted"`
 	// Number of moved pods (lower is better)
-	Moved int `json:"moved,omitempty"`
-}
-
-type SolverStage struct {
-	// Tier of the solver stage (0 = placement, 1..n = moves)
-	Tier int `json:"tier"`
-	// Name of the solver stage (e.g. "place" vs "moves")
-	Stage string `json:"stage"`
-	// Status of the solver stage
-	Status string `json:"status"`
-	// Duration of the solver stage
-	DurationMs int64 `json:"duration_ms"`
-	// The ratio gap to optimality (if known)
-	RelativeGap string `json:"relative_gap,omitempty"`
-}
-
-// PreparedState is the prepared state for solving.
-type PreparedState struct {
-	// Whether we are in single-preemptor mode
-	Single bool
-	// Nodes to consider
-	Nodes map[string]*SolverNode
-	// Pods to schedule / re-schedule
-	Pods map[types.UID]*SolverPod
-	// Ordered list of nodes (by available resources descending)
-	Order []*SolverNode
-	// Current resource deltas per node (CPU, MEM)
-	Preemptor *SolverPod
-	// The list of pods to work on (sorted by priority desc, req desc)
-	Worklist []*SolverPod
-	// Move gate for local search
-	MoveGate *int32
+	Moved int `json:"moved"`
 }
 
 // ExportedSolverStats is the structure used to export solver run statistics.
@@ -179,7 +124,21 @@ type ExportedSolverStats struct {
 	// Best solver name
 	BestName string `json:"best_name,omitempty"`
 	// Baseline score
-	Baseline *SolverScore `json:"baseline,omitempty"`
-	// Best score
+	Baseline SolverScore `json:"baseline,omitempty"`
+	// Solver attempts made
 	Attempts []SolverResult `json:"attempts,omitempty"`
+}
+
+// SolverPhase represents a phase/stage of the solver process.
+type SolverPhase struct {
+	// Tier of the solver stage (0 = placement, 1..n = moves)
+	Tier int `json:"tier"`
+	// Name of the solver stage (e.g. "place" vs "moves")
+	Stage string `json:"stage"`
+	// Status of the solver stage
+	Status string `json:"status"`
+	// Duration of the solver stage
+	DurationMs int64 `json:"duration_ms"`
+	// The ratio gap to optimality (if known)
+	RelativeGap string `json:"relative_gap,omitempty"`
 }

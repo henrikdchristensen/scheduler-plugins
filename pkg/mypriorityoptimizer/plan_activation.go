@@ -10,6 +10,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// -------------------------
+// planActivation
+// -------------------------
+
 // planActivation activates all live pending pods that the plan intends to place
 // (i.e., NewPlacement with FromNode == "" and ToNode != "").
 func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
@@ -27,10 +31,10 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 	} else {
 		baseCtx = context.Background()
 	}
-	overallCtx, cancel := context.WithTimeout(baseCtx, PlanOverallTimeout)
+	overallCtx, cancel := context.WithTimeout(baseCtx, PlanActivationTimeout)
 	defer cancel()
 
-	// 1) Resolve unique targets (pods that are moved or evicted)
+	// Resolve unique targets (pods that are moved or evicted)
 	seen := map[types.UID]bool{}
 	var targets []*v1.Pod
 	add := func(uid types.UID, ns, name string) {
@@ -38,30 +42,30 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 			return
 		}
 		seen[uid] = true
-		if pod := pl.getPod(uid, ns, name); pod != nil {
+		if pod := getPodForPlanActivation(pl, uid, ns, name); pod != nil {
 			targets = append(targets, pod)
 		}
 	}
 	for _, mv := range plan.Moves {
-		add(mv.Pod.UID, mv.Pod.Namespace, mv.Pod.Name)
+		add(mv.UID, mv.Namespace, mv.Name)
 	}
 	for _, e := range plan.Evicts {
-		add(e.Pod.UID, e.Pod.Namespace, e.Pod.Name)
+		add(e.UID, e.Namespace, e.Name)
 	}
 
-	// 2) Log plan details and evict (if any)
+	// Log plan details and evict (if any)
 	if len(plan.Moves) == 0 && len(plan.Evicts) == 0 {
 		klog.V(MyV).Info("plan has no moves or evictions")
 	} else {
 		for _, mv := range plan.Moves {
 			klog.V(MyV).InfoS("pod movement planned",
-				"pod", mergeNsName(mv.Pod.Namespace, mv.Pod.Name),
-				"from", mv.FromNode, "to", mv.ToNode,
+				"pod", mergeNsName(mv.Namespace, mv.Name),
+				"from", mv.OldNode, "to", mv.Node,
 			)
 		}
 		for _, e := range plan.Evicts {
 			klog.V(MyV).InfoS("eviction planned",
-				"pod", mergeNsName(e.Pod.Namespace, e.Pod.Name),
+				"pod", mergeNsName(e.Namespace, e.Name),
 				"from", e.Node,
 			)
 		}
@@ -71,17 +75,27 @@ func (pl *SharedState) planActivation(plan *Plan, pods []*v1.Pod) error {
 			if err := pl.evictTargets(overallCtx, targets); err != nil {
 				return err
 			}
-			waitCtx, cancel := context.WithTimeout(overallCtx, WaitPodsGoneTimeout)
-			defer cancel()
-			if err := pl.waitPodsGone(waitCtx, targets); err != nil {
+			if err := pl.waitPodsGone(overallCtx, targets); err != nil {
 				return fmt.Errorf("wait for targeted pods gone: %w", err)
 			}
 		}
 	}
 
-	// 3) Activate planned pending
-	pl.activatePlannedPending(plan, pods)
+	// Activate planned pending
+	activatePlannedPodsFn(pl, plan, pods)
 
 	return nil
-
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	activatePlannedPodsFn = func(pl *SharedState, plan *Plan, pods []*v1.Pod) {
+		pl.activatePlannedPods(plan, pods)
+	}
+	getPodForPlanActivation = func(pl *SharedState, uid types.UID, ns, name string) *v1.Pod {
+		return pl.getPod(uid, ns, name)
+	}
+)

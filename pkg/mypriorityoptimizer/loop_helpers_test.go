@@ -4,7 +4,9 @@ package mypriorityoptimizer
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -12,62 +14,319 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// ----------------------------------------------------------------------
+// -------------------------
 // startLoops
-// ----------------------------------------------------------------------
+// -------------------------
 
-// TODO: test missing
+func TestStartLoops_NotReady(t *testing.T) {
+	withVar(t, &OptimizeMode, ModePeriodic)
 
-// ----------------------------------------------------------------------
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pl := &SharedState{} // PluginReady default is false
+	calledCh := make(chan OptimizeLoopConfig, 1)
+
+	withOptimizeLoopFunc(t,
+		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) { calledCh <- cfg },
+		func() {
+			pl.startLoops(ctx)
+			select {
+			case cfg := <-calledCh:
+				t.Fatalf("unexpected loop start: cfg=%+v (PluginReady=false)", cfg)
+			case <-time.After(50 * time.Millisecond):
+				// ok
+			}
+		},
+	)
+}
+
+func TestStartLoops_StartsPeriodicLoopWhenModePeriodic(t *testing.T) {
+	withVar(t, &OptimizeMode, ModePeriodic)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pl := &SharedState{}
+	pl.PluginReady.Store(true)
+
+	cfgCh := make(chan OptimizeLoopConfig, 1)
+
+	withOptimizeLoopFunc(t,
+		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) { cfgCh <- cfg },
+		func() {
+			pl.startLoops(ctx)
+			select {
+			case cfg := <-cfgCh:
+				if cfg.Label != "PeriodicLoop" {
+					t.Fatalf("expected Label=PeriodicLoop, got %q", cfg.Label)
+				}
+			case <-time.After(500 * time.Millisecond):
+				t.Fatalf("optimizeBackgroundLoopFunc was not called for ModePeriodic")
+			}
+		},
+	)
+}
+
+func TestStartLoops_StartsStableQueueLoopWhenModeStableQueue(t *testing.T) {
+	withVar(t, &OptimizeMode, ModeStableQueue)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pl := &SharedState{}
+	pl.PluginReady.Store(true)
+
+	cfgCh := make(chan OptimizeLoopConfig, 1)
+
+	withOptimizeLoopFunc(t,
+		func(_ *SharedState, _ context.Context, cfg OptimizeLoopConfig) { cfgCh <- cfg },
+		func() {
+			pl.startLoops(ctx)
+			select {
+			case cfg := <-cfgCh:
+				if cfg.Label != "StableQueueLoop" {
+					t.Fatalf("expected Label=StableQueueLoop, got %q", cfg.Label)
+				}
+			case <-time.After(500 * time.Millisecond):
+				t.Fatalf("optimizeBackgroundLoopFunc was not called for ModeStableQueue")
+			}
+		},
+	)
+}
+
+// -------------------------
 // optimizeBackgroundLoop
-// ----------------------------------------------------------------------
+// -------------------------
 
-// TODO: test missing
+func TestOptimizeBackgroundLoop_ImmediateCancel(t *testing.T) {
+	pl := &SharedState{}
+	pl.PluginReady.Store(true)
 
-// ----------------------------------------------------------------------
-// sameUIDSet
-// ----------------------------------------------------------------------
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before entering => hit ctx.Done path immediately
 
-func TestSameUIDSet_NilVsNil(t *testing.T) {
-	if !sameUIDSet(nil, nil) {
-		t.Fatalf("sameUIDSet(nil, nil) = false, want true")
+	cfg := OptimizeLoopConfig{
+		Label:            "TestLoop",
+		Interval:         0, // covers interval<=0 => default 1s path
+		StableQueueDelay: 0,
+		CancelOnChange:   false,
+	}
+
+	// No hooks needed; it should exit immediately on ctx.Done.
+	pl.optimizeBackgroundLoop(ctx, cfg)
+}
+
+func TestOptimizeBackgroundLoop_Scenarios(t *testing.T) {
+	pl := &SharedState{}
+
+	cfg := OptimizeLoopConfig{
+		Label:            "TestLoop",
+		Interval:         5 * time.Millisecond,
+		StableQueueDelay: 15 * time.Millisecond,
+		CancelOnChange:   true,
+	}
+
+	// Snapshots we will “serve” via the hook.
+	snapErr := errors.New("snap boom")
+	snapEmpty := &PendingSnapshot{PendingUIDs: uidSet(), PendingCount: 0, Fingerprint: "fp0"}
+	snapU1 := &PendingSnapshot{PendingUIDs: uidSet("u1"), PendingCount: 1, Fingerprint: "fp1"}
+	snapU2 := &PendingSnapshot{PendingUIDs: uidSet("u2"), PendingCount: 1, Fingerprint: "fp2"}
+	snapU3 := &PendingSnapshot{PendingUIDs: uidSet("u3"), PendingCount: 1, Fingerprint: "fp3"}
+
+	var servedErrOnce atomic.Bool
+	var serveEmpty atomic.Bool
+	var serveU3 atomic.Bool
+
+	var runCount atomic.Int32
+	run1CtxCh := make(chan context.Context, 1)
+	run3CtxCh := make(chan context.Context, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Cover PluginReady=false warm-up branch + active plan skip branch.
+	pl.PluginReady.Store(false)
+	time.AfterFunc(10*time.Millisecond, func() {
+		pl.PluginReady.Store(true)
+		pl.ActivePlanInProgress.Store(true)
+		pl.ActivePlan.Store(&ActivePlan{ID: "ap-1"})
+		time.AfterFunc(10*time.Millisecond, func() {
+			pl.ActivePlanInProgress.Store(false)
+			pl.ActivePlan.Store((*ActivePlan)(nil))
+		})
+	})
+
+	withBackgroundHooks(t,
+		// buildPendingSnapshotHook
+		func(_ *SharedState) (*PendingSnapshot, error) {
+			if !servedErrOnce.Load() {
+				servedErrOnce.Store(true)
+				return nil, snapErr
+			}
+			if serveU3.Load() {
+				return snapU3, nil
+			}
+			if serveEmpty.Load() {
+				return snapEmpty, nil
+			}
+			// Before first run starts -> u1. While run1 is in-flight -> u2 (forces cancel-on-change).
+			if runCount.Load() >= 1 {
+				return snapU2, nil
+			}
+			return snapU1, nil
+		},
+
+		// startBackgroundOptimization hook
+		func(_ *SharedState, _ OptimizeLoopConfig, ctxRun context.Context, runDone chan<- bool) {
+			n := runCount.Add(1)
+			switch n {
+			case 1:
+				run1CtxCh <- ctxRun
+				go func() {
+					<-ctxRun.Done()
+					runDone <- false
+				}()
+			case 2:
+				// solved=true should record lastSolvedSet+fingerprint => skip further runs for same set+fp.
+				runDone <- true
+			case 3:
+				run3CtxCh <- ctxRun
+				go func() {
+					<-ctxRun.Done()
+					runDone <- true
+				}()
+			default:
+				runDone <- false
+			}
+		},
+
+		func() {
+			done := make(chan struct{})
+			go func() {
+				pl.optimizeBackgroundLoop(ctx, cfg)
+				close(done)
+			}()
+
+			// Run 1: must start, then be cancelled due to pending set change.
+			var run1 context.Context
+			select {
+			case run1 = <-run1CtxCh:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("run #1 did not start")
+			}
+			select {
+			case <-run1.Done():
+			case <-time.After(2 * time.Second):
+				t.Fatalf("run #1 was not cancelled (expected cancel-on-change)")
+			}
+
+			// Run 2: must start.
+			eventually(t, 2*time.Second, func() bool {
+				return runCount.Load() >= 2
+			}, "run #2 did not start")
+
+			// Let loop observe completion and establish skip state.
+			time.Sleep(30 * time.Millisecond)
+
+			// If skip works (same set+fingerprint), it should not start extra runs yet.
+			if got := runCount.Load(); got != 2 {
+				t.Fatalf("expected skip to prevent extra runs; runCount=%d, want 2", got)
+			}
+
+			// pendingCount==0 path resets internal state.
+			serveEmpty.Store(true)
+			time.Sleep(20 * time.Millisecond)
+			serveEmpty.Store(false)
+
+			// Run 3: serve u3, let it start, then cancel outer ctx to hit ctx.Done cleanup.
+			serveU3.Store(true)
+
+			var run3 context.Context
+			select {
+			case run3 = <-run3CtxCh:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("run #3 did not start")
+			}
+
+			cancel()
+
+			select {
+			case <-run3.Done():
+			case <-time.After(2 * time.Second):
+				t.Fatalf("run #3 was not cancelled by outer ctx.Done")
+			}
+
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("optimizeBackgroundLoop did not exit after ctx cancel")
+			}
+		},
+	)
+}
+
+// -------------------------
+// isSameUIDSet
+// -------------------------
+
+func TestIsSameUIDSet(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b map[types.UID]struct{}
+		want bool
+	}{
+		{
+			name: "nil vs nil",
+			a:    nil,
+			b:    nil,
+			want: true,
+		},
+		{
+			name: "nil vs non-nil",
+			a:    nil,
+			b:    uidSet("u1"),
+			want: false,
+		},
+		{
+			name: "non-nil vs nil",
+			a:    uidSet("u1"),
+			b:    nil,
+			want: false,
+		},
+		{
+			name: "different lengths",
+			a:    uidSet("u1"),
+			b:    uidSet("u1", "u2"),
+			want: false,
+		},
+		{
+			name: "same elements",
+			a:    uidSet("u1", "u2"),
+			b:    uidSet("u2", "u1"),
+			want: true,
+		},
+		{
+			name: "different elements",
+			a:    uidSet("u1", "u2"),
+			b:    uidSet("u1", "u3"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSameUIDSet(tt.a, tt.b)
+			if got != tt.want {
+				t.Fatalf("isSameUIDSet(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestSameUIDSet_NilVsNonNil(t *testing.T) {
-	a := uidSet("u1")
-	if sameUIDSet(nil, a) || sameUIDSet(a, nil) {
-		t.Fatalf("sameUIDSet(nil, non-nil) or reverse = true, want false")
-	}
-}
-
-func TestSameUIDSet_DifferentLengths(t *testing.T) {
-	a := uidSet("u1")
-	b := uidSet("u1", "u2")
-	if sameUIDSet(a, b) {
-		t.Fatalf("sameUIDSet() with different lengths = true, want false")
-	}
-}
-
-func TestSameUIDSet_SameElements(t *testing.T) {
-	a := uidSet("u1", "u2")
-	b := uidSet("u2", "u1")
-	if !sameUIDSet(a, b) {
-		t.Fatalf("sameUIDSet() with same elements = false, want true")
-	}
-}
-
-func TestSameUIDSet_DifferentElements(t *testing.T) {
-	a := uidSet("u1", "u2")
-	b := uidSet("u1", "u3")
-	if sameUIDSet(a, b) {
-		t.Fatalf("sameUIDSet() with different elements = true, want false")
-	}
-}
-
-// ----------------------------------------------------------------------
+// -------------------------
 // cloneUIDSet
-// ----------------------------------------------------------------------
+// -------------------------
 
 func TestCloneUIDSet_Nil(t *testing.T) {
 	if got := cloneUIDSet(nil); got != nil {
@@ -78,67 +337,79 @@ func TestCloneUIDSet_Nil(t *testing.T) {
 func TestCloneUIDSet_Independence(t *testing.T) {
 	src := uidSet("u1", "u2")
 	cloned := cloneUIDSet(src)
-	if !sameUIDSet(src, cloned) {
+	if !isSameUIDSet(src, cloned) {
 		t.Fatalf("cloneUIDSet() produced different contents: src=%v cloned=%v", src, cloned)
 	}
-	// Mutate clone and ensure src is unaffected
 	delete(cloned, types.UID("u1"))
 	if _, ok := src[types.UID("u1")]; !ok {
 		t.Fatalf("mutating clone mutated source: src=%v cloned=%v", src, cloned)
 	}
-	// Mutate src and ensure clone is unaffected
 	src[types.UID("u3")] = struct{}{}
 	if _, ok := cloned[types.UID("u3")]; ok {
 		t.Fatalf("mutating source mutated clone: src=%v cloned=%v", src, cloned)
 	}
 }
 
-// ----------------------------------------------------------------------
-// isAlreadySolvedForPendingSet
-// ----------------------------------------------------------------------
+// -------------------------
+// isAlreadyComputedForPendingSet
+// -------------------------
 
-func TestIsAlreadySolvedForPendingSet_BestAttemptNil(t *testing.T) {
-	if got := isAlreadySolvedForPendingSet(nil, nil); got {
-		t.Fatalf("isAlreadySolvedForPendingSet(nil, nil) = true, want false")
+func TestIsAlreadyComputedForPendingSet(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		best *SolverResult
+		want bool
+	}{
+		{
+			name: "BestAttemptNil",
+			err:  nil,
+			best: nil,
+			want: false,
+		},
+		{
+			name: "NonOptimalStatus",
+			err:  ErrNoImprovingSolutionFromAnySolver,
+			best: &SolverResult{Status: "FEASIBLE"},
+			want: false,
+		},
+		{
+			name: "OptimalWithNoImprovementError",
+			err:  ErrNoImprovingSolutionFromAnySolver,
+			best: &SolverResult{Status: "OPTIMAL"},
+			want: true,
+		},
+		{
+			name: "OptimalWithNoPendingPodsError",
+			err:  ErrNoPendingPodsScheduled,
+			best: &SolverResult{Status: "OPTIMAL"},
+			want: true,
+		},
+		{
+			name: "OptimalWithOtherError",
+			err:  context.DeadlineExceeded,
+			best: &SolverResult{Status: "OPTIMAL"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isAlreadyComputedForPendingSet(tt.err, tt.best)
+			if got != tt.want {
+				t.Fatalf("isAlreadyComputedForPendingSet(%v, %v) = %v, want %v", tt.err, tt.best, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestIsAlreadySolvedForPendingSet_NonOptimalStatus(t *testing.T) {
-	best := &SolverResult{Status: "FEASIBLE"}
-	if got := isAlreadySolvedForPendingSet(ErrNoImprovingSolutionFromAnySolver, best); got {
-		t.Fatalf("isAlreadySolvedForPendingSet(non-OPTIMAL) = true, want false")
-	}
-}
-
-func TestIsAlreadySolvedForPendingSet_OptimalWithNoImprovementErr(t *testing.T) {
-	best := &SolverResult{Status: "OPTIMAL"}
-	if got := isAlreadySolvedForPendingSet(ErrNoImprovingSolutionFromAnySolver, best); !got {
-		t.Fatalf("isAlreadySolvedForPendingSet(OPTIMAL, ErrNoImprovingSolutionFromAnySolver) = false, want true")
-	}
-}
-
-func TestIsAlreadySolvedForPendingSet_OptimalWithNoPendingPodsErr(t *testing.T) {
-	best := &SolverResult{Status: "OPTIMAL"}
-	if got := isAlreadySolvedForPendingSet(ErrNoPendingPodsToSchedule, best); !got {
-		t.Fatalf("isAlreadySolvedForPendingSet(OPTIMAL, ErrNoPendingPodsToSchedule) = false, want true")
-	}
-}
-
-func TestIsAlreadySolvedForPendingSet_OptimalWithOtherError(t *testing.T) {
-	best := &SolverResult{Status: "OPTIMAL"}
-	if got := isAlreadySolvedForPendingSet(context.DeadlineExceeded, best); got {
-		t.Fatalf("isAlreadySolvedForPendingSet(OPTIMAL, other error) = true, want false")
-	}
-}
-
-// -----------------------------------------------------------------------------
+// -------------------------
 // buildPendingSnapshot
-// -----------------------------------------------------------------------------
+// -------------------------
 
 func TestBuildPendingSnapshot(t *testing.T) {
 	pl := &SharedState{}
 
-	// One usable node
 	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "n1"},
 		Status: v1.NodeStatus{
@@ -149,11 +420,12 @@ func TestBuildPendingSnapshot(t *testing.T) {
 			},
 		},
 	}
-	// One pending pod and one running pod
+
 	pPending := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "p-pending", Namespace: "ns", UID: types.UID("pu1")},
 		Status:     v1.PodStatus{Phase: v1.PodPending},
 	}
+
 	pRunning := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "p-running", Namespace: "ns", UID: types.UID("pu2")},
 		Status:     v1.PodStatus{Phase: v1.PodRunning},
@@ -170,44 +442,59 @@ func TestBuildPendingSnapshot(t *testing.T) {
 		},
 	}
 
-	// Build store to feed fakePodLister.
+	now := metav1.Now()
+	pDeletingPending := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "p-deleting",
+			Namespace:         "ns",
+			UID:               types.UID("pu3"),
+			DeletionTimestamp: &now,
+		},
+		Status: v1.PodStatus{Phase: v1.PodPending},
+	}
+
 	store := map[string]map[string]*v1.Pod{
 		"ns": {
-			"p-pending": pPending,
-			"p-running": pRunning,
+			"p-pending":  pPending,
+			"p-running":  pRunning,
+			"p-deleting": pDeletingPending,
+			"p-nil":      nil,
 		},
 	}
 
-	withNodeLister(&fakeNodeLister{nodes: []*v1.Node{n}}, func() {
-		withPodLister(&fakePodLister{store: store}, func() {
+	withNodeLister(&FakeNodeLister{Nodes: []*v1.Node{n}}, func() {
+		withPodLister(&FakePodLister{Store: store}, func() {
 			snap, err := pl.buildPendingSnapshot()
 			if err != nil {
 				t.Fatalf("buildPendingSnapshot() unexpected error: %v", err)
 			}
+
 			if snap.PendingCount != 1 {
 				t.Fatalf("PendingCount = %d, want 1", snap.PendingCount)
 			}
 			if _, ok := snap.PendingUIDs[pPending.UID]; !ok {
-				t.Fatalf("pending UID set does not contain pending pod")
+				t.Fatalf("pending UID set missing %q", pPending.UID)
 			}
+			if _, ok := snap.PendingUIDs[pDeletingPending.UID]; ok {
+				t.Fatalf("deleting pending pod must be excluded from pending set")
+			}
+
 			if snap.Fingerprint == "" {
 				t.Fatalf("Fingerprint should not be empty")
 			}
-			if len(snap.Pods) != 2 || len(snap.Nodes) != 1 {
-				t.Fatalf("snap pods/nodes sizes wrong: pods=%d nodes=%d", len(snap.Pods), len(snap.Nodes))
+			if len(snap.Pods) != 4 || len(snap.Nodes) != 1 {
+				t.Fatalf("snap sizes wrong: pods=%d nodes=%d", len(snap.Pods), len(snap.Nodes))
 			}
 		})
 	})
 }
 
-func TestBuildPendingSnapshot_NodesErrorPropagated(t *testing.T) {
+func TestBuildPendingSnapshot_NodesError(t *testing.T) {
 	pl := &SharedState{}
 	sentinel := errors.New("nodes boom")
 
-	withNodeLister(&fakeNodeLister{err: sentinel}, func() {
-		// Pod lister should not matter if node listing already fails,
-		// but we provide a no-op lister for completeness.
-		withPodLister(&fakePodLister{}, func() {
+	withNodeLister(&FakeNodeLister{Error: sentinel}, func() {
+		withPodLister(&FakePodLister{}, func() {
 			snap, err := pl.buildPendingSnapshot()
 			if snap != nil {
 				t.Fatalf("expected nil snapshot on error, got %#v", snap)
@@ -219,11 +506,10 @@ func TestBuildPendingSnapshot_NodesErrorPropagated(t *testing.T) {
 	})
 }
 
-func TestBuildPendingSnapshot_PodsErrorPropagated(t *testing.T) {
+func TestBuildPendingSnapshot_PodsError(t *testing.T) {
 	pl := &SharedState{}
 	sentinel := errors.New("pods boom")
 
-	// One usable node so we get past node listing.
 	n := &v1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "n1"},
 		Status: v1.NodeStatus{
@@ -235,8 +521,8 @@ func TestBuildPendingSnapshot_PodsErrorPropagated(t *testing.T) {
 		},
 	}
 
-	withNodeLister(&fakeNodeLister{nodes: []*v1.Node{n}}, func() {
-		withPodLister(&fakePodLister{err: sentinel}, func() {
+	withNodeLister(&FakeNodeLister{Nodes: []*v1.Node{n}}, func() {
+		withPodLister(&FakePodLister{Error: sentinel}, func() {
 			snap, err := pl.buildPendingSnapshot()
 			if snap != nil {
 				t.Fatalf("expected nil snapshot on error, got %#v", snap)
@@ -246,4 +532,60 @@ func TestBuildPendingSnapshot_PodsErrorPropagated(t *testing.T) {
 			}
 		})
 	})
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+func uidSet(uids ...string) map[types.UID]struct{} {
+	m := make(map[types.UID]struct{}, len(uids))
+	for _, u := range uids {
+		m[types.UID(u)] = struct{}{}
+	}
+	return m
+}
+
+func withBackgroundHooks(
+	t *testing.T,
+	snapFn func(pl *SharedState) (*PendingSnapshot, error),
+	startFn func(pl *SharedState, cfg OptimizeLoopConfig, ctxRun context.Context, runDone chan<- bool),
+	body func(),
+) {
+	t.Helper()
+
+	origSnap := buildPendingSnapshotHook
+	origStart := startBackgroundOptimization
+	buildPendingSnapshotHook = snapFn
+	startBackgroundOptimization = startFn
+	t.Cleanup(func() {
+		buildPendingSnapshotHook = origSnap
+		startBackgroundOptimization = origStart
+	})
+
+	body()
+}
+
+// helper that retries until timeout for a condition to become true
+func eventually(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timeout after %v: %s", timeout, msg)
+}
+
+func withOptimizeLoopFunc(t *testing.T,
+	fn func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig),
+	body func(),
+) {
+	t.Helper()
+	orig := optimizeBackgroundLoopFunc
+	optimizeBackgroundLoopFunc = fn
+	t.Cleanup(func() { optimizeBackgroundLoopFunc = orig })
+	body()
 }

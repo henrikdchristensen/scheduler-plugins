@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # general_helpers.py
 
-import sys, time, random, subprocess, csv, re, logging, hashlib, shlex, yaml
-from typing import List, Dict, Tuple, Optional, Any
+import sys, time, random, subprocess, csv, re, logging, hashlib, shlex, yaml, json
+from typing import Callable, List, Dict, Tuple, Optional, Any, Protocol
 from pathlib import Path
 from decimal import Decimal
 from urllib import request as _urlreq, error as _urlerr  # for solver HTTP trigger
+import subprocess
 
 MEM_UNIT_TABLE = {
     # bytes
@@ -21,17 +22,21 @@ MEM_UNIT_TABLE = {
 }
 
 ##############################################
-# ------------ Time helpers----------------
+# ------------ Time helpers ------------------
 ##############################################
+
 def get_timestamp() -> str:
     """
     Get the current timestamp as a string.
     """
     return time.strftime("%Y/%m/%d/%H:%M:%S", time.localtime())
 
-def format_hms(seconds: int) -> str:
+def format_seconds_to_hms(seconds: int) -> str:
     """
     Format seconds into a human-readable string.
+    Examples:
+    3661 -> "1h1m1s"
+    45   -> "45s"
     """
     seconds = max(0, int(seconds))
     h, r = divmod(seconds, 3600)
@@ -43,8 +48,9 @@ def format_hms(seconds: int) -> str:
     return "".join(parts)
 
 ##############################################
-# ------------ Logging helpers----------------
+# ------------ Logging/Info helpers ----------
 ##############################################
+
 class PrefixFilter(logging.Filter):
     """
     Injects a static 'prefix' field into each LogRecord.
@@ -52,6 +58,7 @@ class PrefixFilter(logging.Filter):
     def __init__(self, prefix: str):
         super().__init__()
         self.prefix = prefix
+    
     def filter(self, record: logging.LogRecord) -> bool:
         record.prefix = self.prefix
         return True
@@ -77,29 +84,33 @@ def setup_logging(name: str, prefix: str, level: str = "INFO") -> logging.Logger
 
 def make_header_footer(msg: str, width: int = 100, border: str = "=") -> Tuple[str, str]:
     """
-    Build a centered header line with `msg` between border chars and a matching-width footer line.
+    Build a centered header line with `msg` between borders.
     If `msg` is longer than `width`, the width expands to fit it.
-    Example:
-    >>> h, f = get_header_footer("Running tests")
-    >>> print(h, " ... stuff ... ", f, sep="")
     """
     msg = str(msg).strip().replace("\n", " ")
-    inner = f" {msg} "                       # space padding around the message
-    w = max(width, len(inner))               # ensure width fits the message
+    inner = f" {msg} "
+    w = max(width, len(inner))
     left = (w - len(inner)) // 2
     right = w - len(inner) - left
     header = f"{border * left}{inner}{border * right}"
     footer = f"{border * w}"
     return header, footer
 
-def get_git_info(cwd: Optional[Path] = None) -> Dict[str, Any]:
+def get_git_info(cwd: Optional[Path] = None, *, timeout_s: float = 0.5) -> Dict[str, Any]:
     """
-    Collect basic git info for reproducibility. Best effort; returns empty on failure.
+    Collect basic git info.
     """
     info: Dict[str, Any] = {}
     def _run(cmd: List[str]) -> Optional[str]:
         try:
-            r = subprocess.run(cmd, cwd=str(cwd) if cwd else None, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+            r = subprocess.run(
+                cmd,
+                cwd=str(cwd) if cwd else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=float(timeout_s) if timeout_s is not None else None,
+            )
             if r.returncode == 0:
                 return (r.stdout or b"").decode("utf-8", errors="replace").strip()
         except Exception:
@@ -107,18 +118,15 @@ def get_git_info(cwd: Optional[Path] = None) -> Dict[str, Any]:
         return None
     commit = _run(["git", "rev-parse", "HEAD"])
     branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-    r = subprocess.run(["git", "status", "--porcelain"], cwd=str(cwd) if cwd else None,
-                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
     if commit is not None: info["commit"] = commit
     if branch is not None: info["branch"] = branch
     return info
 
 def build_cli_cmd() -> str:
     """
-    Return the full CLI command used to invoke the current script,
-    prefixed with 'python3 ' (for reproducible info bundles).
+    Return the full CLI command used to invoke the script.
     """
-    return "python3 " + " ".join(shlex.quote(a) for a in sys.argv)
+    return "python " + " ".join(shlex.quote(a) for a in sys.argv)
 
 def write_info_file(
     out_path: Path | str,
@@ -129,23 +137,11 @@ def write_info_file(
 ) -> None:
     """
     Generic helper to write an info YAML bundle.
-    Structure:
-      meta:
-        timestamp: ...
-        git: ...
-        ...meta_extra...
-      inputs:  (optional)
-        ...inputs...
-    - out_path: target YAML path.
-    - meta_extra: additional keys to merge into 'meta'.
-    - inputs: dictionary to be stored under 'inputs'.
     """
     try:
+        from scripts.helpers.general_helpers import get_git_info, get_timestamp
         p = Path(out_path)
         p.parent.mkdir(parents=True, exist_ok=True)
-
-        from scripts.helpers.general_helpers import get_git_info, get_timestamp  # if not in same file, adjust
-
         git_info = get_git_info(Path.cwd())
         meta = {
             "timestamp": get_timestamp(),
@@ -153,15 +149,11 @@ def write_info_file(
         }
         if meta_extra:
             meta.update(meta_extra)
-
         payload: dict = {"meta": meta}
-
         if inputs is not None:
             payload["inputs"] = inputs
-
         with open(p, "w", encoding="utf-8") as fh:
             yaml.safe_dump(payload, fh, sort_keys=False)
-
         if logger:
             logger.info("wrote info bundle to %s", p)
     except Exception as e:
@@ -169,16 +161,51 @@ def write_info_file(
             logger.warning("failed to write info bundle to %s: %s", out_path, e)
 
 def log_field_fmt(v):
+    """
+    Format a log field value for display in a kv-block.
+    """
     return "<unset>" if v in (None, "") else str(v)
 
+def log_kv_block(logger: logging.Logger, title: str, fields: List[Tuple[str, Any]]) -> None:
+    """
+    Log a stable, aligned key/value block with a header/footer.
+    """
+    if not fields:
+        header, footer = make_header_footer(str(title))
+        logger.info("\n%s\n%s\n%s", header, "<no fields>", footer)
+        return
+    pad = max(len(str(k)) for k, _ in fields)
+    lines = [f"{str(k).rjust(pad)} = {log_field_fmt(v)}" for k, v in fields]
+    block = "\n".join(lines)
+    header, footer = make_header_footer(str(title))
+    logger.info("\n%s\n%s\n%s", header, block, footer)
+
+def log_args_block(logger, args, *, title="ARGS", include=None, exclude=None, sort_keys=True) -> None:
+    """
+    Log argparse.Namespace (or any object with vars()) as a kv-block.
+    """
+    try:
+        d = vars(args)
+    except Exception:
+        d = {}
+    exclude_set = set(exclude or [])
+    if include is not None:
+        keys = [k for k in include if k in d and k not in exclude_set]
+    else:
+        keys = list(d.keys())
+        if sort_keys:
+            keys.sort()
+        keys = [k for k in keys if k not in exclude_set]
+    fields = [(k, d.get(k)) for k in keys]
+    log_kv_block(logger, title, fields)
+
 ##############################################
-# ------------ Parser helpers----------------
+# ------------ Parser helpers-----------------
 ##############################################
+
 def normalize_interval(doc: Dict[str, Any], key_combo: Tuple[str, str, str], *, allow_none: bool = True) -> Optional[str]:
     """
     Normalize a (single) or (lo, hi) interval from the document.
-    It first checks for 'single' key; if not found, it looks for 'lo_key' and 'hi_key'.
-    Returns "lo,hi" or "" if not found (or None if allow_none and not found).
     """
     single, lo_key, hi_key = key_combo
     if single in doc and doc[single] is not None:
@@ -212,19 +239,16 @@ def parse_duration_to_seconds(s: str) -> float:
         "30m" -> 30 minutes
         "1h"  -> 1 hour
         "1d"  -> 1 day
-    Units: s = seconds, m = minutes, h = hours, d = days.
     """
     s = s.strip().lower()
     if not s:
         raise ValueError("trace-time duration string cannot be empty")
-
     unit_multipliers = {
         "s": 1.0,
         "m": 60.0,
         "h": 3600.0,
         "d": 86400.0,
     }
-
     # If last char is a letter, treat it as unit
     if s[-1].isalpha():
         unit = s[-1]
@@ -257,6 +281,9 @@ def parse_int_interval(s: Optional[str], *, min_lo: int = 1) -> Optional[Tuple[i
     return lo, hi
 
 def parse_qty_interval(s: Optional[str]) -> Optional[Tuple[str, str]]:
+    """
+    Parse a quantity interval "lo,hi" or "x" into a (lo, hi) tuple.
+    """
     if not s:
         return None
     parts = [x.strip() for x in s.split(",", 1)]
@@ -280,6 +307,9 @@ def parse_timeout_s(t:str | None, default: int = 60) -> int:
         return default
 
 def coerce_bool(v, default=False):
+    """
+    Coerce a value to boolean, with a default if unrecognized.
+    """
     if v is None: return default
     if isinstance(v, bool): return v
     s = str(v).strip().lower()
@@ -288,6 +318,9 @@ def coerce_bool(v, default=False):
     return default
 
 def get_str(v):
+    """
+    Get a string value, or None if v is None or empty.
+    """
     if v is None: return None
     s = str(v).strip()
     return s if s else None
@@ -323,8 +356,9 @@ def get_str_from_dict(doc: Dict[str, Any], key: str, default: Optional[str]) -> 
     return s if s else default
 
 ##############################################
-# ------------ Quantity helpers----------------
+# ------------ Quantity helpers---------------
 ##############################################
+
 def qty_to_mcpu_int(token: str) -> int:
     """
     Convert any CPU quantity to millicores.
@@ -346,7 +380,6 @@ def qty_to_mcpu_int(token: str) -> int:
     return max(1, int(milli))
 
 def qty_to_bytes_int(token: str) -> int:
-    
     """
     Convert any Kubernetes-like memory quantity to integer bytes.
     Accepts: '1536Mi', '1.5Gi', '500MB', '4G', '1024', '42 kib', etc.
@@ -371,14 +404,19 @@ def qty_to_mcpu_str(m: int) -> str:
     return str(m // 1000) if m % 1000 == 0 else f"{m}m"
 
 def qty_to_bytes_str(b: int) -> str:
-    """Return bytes as a decimal quantity string for K8s."""
+    """
+    Return bytes as a decimal quantity string for K8s.
+    """
     return str(int(max(1, b)))
 
 ##############################################
 # ------------ CSV helpers----------------
 ##############################################
+
 def csv_read_header(path: Path) -> list[str] | None:
-    """Return the header row for a CSV file, or None if unreadable/empty."""
+    """
+    Return the header row for a CSV file, or None if unreadable/empty.
+    """
     try:
         with open(path, "r", encoding="utf-8", newline="") as fh:
             rdr = csv.reader(fh)
@@ -397,10 +435,6 @@ def csv_append_row(
 ) -> None:
     """
     Append a row to CSV, writing the header if the file is new.
-    Rules:
-      - Reject if 'row' contains any keys not in 'header'.
-      - Missing header fields are written as empty strings.
-      - File column order always follows 'header' (incoming row order ignored).
     """
     p = Path(file_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -421,6 +455,7 @@ def csv_append_row(
 ######################################################
 # ---------- Seed helpers --------------
 ######################################################
+
 def derive_seed(base_seed: int, *labels: object, nbytes: int = 16) -> int:
     """
     Deterministically derive a child seed from a base seed and a sequence of labels.
@@ -440,14 +475,46 @@ def seeded_random(base_seed: int, *labels: object) -> random.Random:
     """
     return random.Random(derive_seed(base_seed, *labels))
 
+def read_seeds_file(path: str | Path, *, logger: logging.Logger | None = None) -> list[int]:
+    """
+    Read seeds from a txt file.
+    """
+    log = logger
+    seeds: list[int] = []
+    seen: set[int] = set()
+
+    def _add(n: int) -> None:
+        if n is None or n <= 0:
+            return
+        if n not in seen:
+            seen.add(n)
+            seeds.append(n)
+
+    p = Path(path)
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for i, line in enumerate(f, 1):
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                try:
+                    _add(int(s))
+                except Exception:
+                    if log:
+                        log.debug("seed-file %s:%d ignored non-integer line: %r", p, i, s[:120])
+                    continue
+    except Exception as e:
+        raise ValueError(f"Failed reading seed-file {p}: {e}")
+    if log:
+        if not seeds:
+            log.warning("no seeds parsed from %s", p)
+        else:
+            log.info("parsed %d seed(s) from %s", len(seeds), p)
+    return seeds
+
 def generate_seeds(gen_seeds_to_file: Optional[List[str]]) -> None:
     """
     Generate random seeds and if requested, write them to one or multiple files.
-    Modes:
-    --generate-seeds-to-file PATH NUM
-    --generate-seeds-to-file PATH NUM PARTS
-    If PARTS provided and PATH contains '{i}', substitute it with 1..PARTS.
-    Else, create PATH_part-<i>(.ext)
     """
     argsv = gen_seeds_to_file
     if not argsv or len(argsv) not in (2, 3):
@@ -506,8 +573,9 @@ def generate_seeds(gen_seeds_to_file: Optional[List[str]]) -> None:
     print(f"wrote {written_total} seeds across {parts} file(s)")
     
 #############################################
-# Solver HTTP trigger helper
+# HTTP trigger helpers
 #############################################
+
 def solver_trigger_http(logger: logging.Logger, url: str, timeout: float) -> tuple[int, str]:
     """
     POST /solve endpoint. Returns (status_code, body_str).
@@ -550,3 +618,99 @@ def get_solver_active_status_http(url: str, *, timeout: float = 3.0) -> tuple[in
         return e.code, body
     except Exception as e:
         return 0, f"connect-failed: {e}"
+
+def strip_outer_quotes(s: Optional[str]) -> Optional[str]:
+    """
+    Strip matching outer quotes from a string.
+    """
+    if s is None:
+        return None
+    s = str(s)
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        return s[1:-1]
+    return s
+
+def parse_json_cell(raw):
+    """
+    Parse a raw cell value into JSON, trying various unquoting strategies.
+    """
+    if raw is None:
+        return None
+    s = strip_outer_quotes(str(raw).strip())
+    if not s:
+        return None
+    for cand in (s, s.replace('""', '"').replace("''", '"')):
+        try:
+            return json.loads(cand)
+        except Exception:
+            continue
+    return None
+
+#############################################
+# Placement compare helpers
+#############################################
+
+def prio_map(raw) -> Dict[int, int]:
+    """
+    Parse a raw priority map into Dict[int priority, int count].
+    """
+    out: Dict[int, int] = {}
+    obj = raw if isinstance(raw, dict) else parse_json_cell(raw)
+    if not isinstance(obj, dict):
+        return out
+    for k, v in obj.items():
+        ks = str(k).strip()
+        if ks.lower().startswith("p"):
+            ks = ks[1:]
+        pk = int(ks)
+        out[pk] = int(v)
+    return out
+
+def place_compare(a: Dict[int, int], b: Dict[int, int]) -> int:
+    """
+    1 if a>b
+    0 if equal,
+    -1 if a<b
+    (compare from highest priority down).
+    """
+    keys = sorted(set(a.keys()) | set(b.keys()), reverse=True)
+    for k in keys:
+        av = int(a.get(k, 0))
+        bv = int(b.get(k, 0))
+        if av > bv:
+            return 1
+        if av < bv:
+            return -1
+    return 0
+
+def cmp_placed_by_prio_row(row) -> int:
+    """
+    Compare placed_by_prio_solver vs placed_by_prio_default in a row.
+    Returns 1 if solver better, -1 if default better, 0 if equal.
+    """
+    s_map = prio_map(row.get("placed_by_prio_solver", ""))
+    d_map = prio_map(row.get("placed_by_prio_default", ""))
+    return place_compare(s_map, d_map)
+
+#############################################
+# Deps
+#############################################
+
+class Clock(Protocol):
+    """
+    Clock protocol for time-related operations.
+    """
+    def time(self) -> float: ...
+    def sleep(self, seconds: float) -> None: ...
+
+class SystemClock:
+    """
+    System clock implementation.
+    """
+    def time(self) -> float:
+        return time.time()
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+Runner = Callable[..., subprocess.CompletedProcess]

@@ -4,6 +4,11 @@
 import time, subprocess, shlex, json, logging, textwrap
 from typing import Optional
 
+# ====================================================================
+# YAML helpers.
+# Due to proper indentation, we keep them outside class
+# ====================================================================
+
 def yaml_priority_class(name: str, value: int) -> str:
     return textwrap.dedent(f"""\
     apiVersion: scheduling.k8s.io/v1
@@ -16,6 +21,10 @@ def yaml_priority_class(name: str, value: int) -> str:
     description: "pod priority {value}"
     ---
     """)
+
+# ====================================================================
+# Kubectl helpers
+# ====================================================================
 
 def run_kubectl_logged(logger: logging.Logger, ctx: str, *args: str, input_bytes: bytes | None = None, check: bool = True) -> subprocess.CompletedProcess:
     """
@@ -37,6 +46,10 @@ def kubectl_apply_yaml(logger: logging.Logger, ctx: str, yaml_text: str) -> subp
     Apply a YAML configuration to the cluster, logging kubectl output with worker prefix.
     """
     return run_kubectl_logged(logger, ctx, "apply", "-f", "-", input_bytes=yaml_text.encode(), check=True)
+
+# ====================================================================
+# Ensure helpers
+# ====================================================================
 
 def ensure_namespace(logger: logging.Logger, ctx: str, ns: str) -> None:
     """
@@ -62,6 +75,10 @@ def ensure_priority_classes(logger: logging.Logger, ctx: str, num_priorities: in
     If delete_extras=True, remove any of our prefixed PCs outside that set.
     """
     kubectl_apply_yaml(logger, ctx, "".join(yaml_priority_class(f"{prefix}{v}", v) for v in range(start, start + num_priorities)))
+
+# ====================================================================
+# Wait helpers
+# ====================================================================
 
 def wait_each(logger: logging.Logger, ctx: str, kind: str, name: str, ns: str, timeout_sec: int, mode: str) -> int:
     """
@@ -163,6 +180,10 @@ def wait_rs_pods(logger: logging.Logger, ctx: str, rs_name: str, ns: str, timeou
     logger.warning("timeout waiting for RS '%s' in ns '%s' to have desired pods %s", rs_name, ns, mode)
     return last_count
 
+# ====================================================================
+# Delete helpers
+# ====================================================================
+
 def delete_pod(logger: logging.Logger, ctx: str, ns: str, name: str) -> None:
     """
     Delete a pod (ignore not-found).
@@ -185,6 +206,10 @@ def delete_rs(logger: logging.Logger, ctx: str, ns: str, name: str) -> None:
         check=False,
     )
 
+# ====================================================================
+# JSON helpers
+# ====================================================================
+
 def get_json_ctx(ctx: str, base_cmd: list[str]) -> dict:
     """
     Get the JSON output from a kubectl command.
@@ -196,7 +221,8 @@ def get_json_ctx(ctx: str, base_cmd: list[str]) -> dict:
     try:
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        msg = (e.stdout or b"").decode("utf-8", "replace")
+        raw = getattr(e, "output", None) or getattr(e, "stdout", None) or b""
+        msg = raw.decode("utf-8", "replace")
         tail = msg[-1200:]
         raise RuntimeError(
             f"kubectl failed: rc={e.returncode} cmd={' '.join(cmd)} output_tail={tail!r}"

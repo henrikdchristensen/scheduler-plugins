@@ -4,29 +4,31 @@ package mypriorityoptimizer
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	clientv1 "k8s.io/client-go/listers/core/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
+
+// -------------------------
+// isAnySolverEnabled
+// -------------------------
 
 // isAnySolverEnabled checks if any solver is enabled.
 func (pl *SharedState) isAnySolverEnabled() bool {
 	return SolverPythonEnabled // add more using ORs as needed
 }
 
-// buildSolverInput builds the solver input from live nodes/pods (and optional preemptor)
-// in a single pass. It:
-//   - Filters to usable nodes only
-//   - Adds all RUNNING pods that are bound to usable nodes
-//   - Adds all PENDING pods
-//   - Excludes the preemptor from Pods (it is provided via in.Preemptor)
-//   - Marks preemptor as pending in the input
+// -------------------------
+// buildSolverInput
+// -------------------------
+
+// buildSolverInput from live nodes/pods (and optional preemptor)
 func (pl *SharedState) buildSolverInput(
 	nodes []*v1.Node,
 	pods []*v1.Pod,
@@ -35,13 +37,11 @@ func (pl *SharedState) buildSolverInput(
 
 	in := SolverInput{
 		IgnoreAffinity: true,
-		LogProgress:    SolverLogProgress,
 		Nodes:          make([]SolverNode, 0, len(nodes)),
 		Pods:           make([]SolverPod, 0, len(pods)),
-		TimeoutMs:      0, // filled by caller
 	}
 
-	// ----- Nodes: keep only usable -----
+	// Nodes: keep only usable
 	usable := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
 		if !isNodeUsable(n) {
@@ -49,8 +49,8 @@ func (pl *SharedState) buildSolverInput(
 		}
 		in.Nodes = append(in.Nodes, SolverNode{
 			Name:        n.Name,
-			CapCPUm:     n.Status.Allocatable.Cpu().MilliValue(),
-			CapMemBytes: n.Status.Allocatable.Memory().Value(),
+			CapCPUm:     getNodeCPUAllocatable(n),
+			CapMemBytes: getNodeMemoryAllocatable(n),
 		})
 		usable[n.Name] = true
 	}
@@ -58,7 +58,7 @@ func (pl *SharedState) buildSolverInput(
 		return SolverInput{}, ErrNoUsableNodes
 	}
 
-	// ----- Preemptor: include as pending (not in Pods list) -----
+	// Preemptor: include as pending (not in Pods list)
 	preUID := ""
 	if preemptor != nil {
 		pre := toSolverPod(preemptor, "")
@@ -66,73 +66,65 @@ func (pl *SharedState) buildSolverInput(
 		preUID = string(preemptor.UID)
 	}
 
-	// ----- Pods: add running-on-usable + all pending, skip preemptor -----
+	// Pods: add running-on-usable + all pending, skip preemptor
 	seen := make(map[types.UID]bool, len(pods))
 	for _, p := range pods {
 		if p == nil {
 			continue
 		}
 		if string(p.UID) == preUID {
-			// preemptor is represented via in.Preemptor, never duplicated in Pods
 			continue
 		}
-
 		where := getPodAssignedNodeName(p)
-		switch {
-		case where == "":
-			// pending → always include
-			sp := toSolverPod(p, "")
-			if isPodProtected(p) {
-				sp.Protected = true
-			}
-			if !seen[sp.UID] {
-				in.Pods = append(in.Pods, sp)
-				seen[sp.UID] = true
-			}
-
-		default:
-			// running → include only if bound to a usable node
-			if !usable[where] {
-				continue
-			}
-			sp := toSolverPod(p, where)
-			if isPodProtected(p) {
-				sp.Protected = true
-			}
-			if !seen[sp.UID] {
-				in.Pods = append(in.Pods, sp)
-				seen[sp.UID] = true
-			}
+		if where == "" {
+			addUniqueSolverPod(&in, seen, p, "")
+			continue
+		}
+		if usable[where] {
+			addUniqueSolverPod(&in, seen, p, where)
 		}
 	}
+
+	// Baseline score
+	in.BaselineScore = buildBaselineScore(pods)
 
 	return in, nil
 }
 
+// -------------------------
+// buildBaselineScore
+// -------------------------
+
 // buildBaselineScore computes the baseline score from the solver input.
-func buildBaselineScore(in SolverInput) *SolverScore {
+func buildBaselineScore(pods []*v1.Pod) SolverScore {
 	placedByPri := map[string]int{}
-	for _, sp := range in.Pods {
-		if sp.Node == "" {
+	for _, p := range pods {
+		if !isPodAssigned(p) {
 			continue // pending doesn't count into "placed"
 		}
-		pr := strconv.Itoa(int(sp.Priority))
+		pr := strconv.Itoa(int(getPodPriority(p)))
 		placedByPri[pr] = placedByPri[pr] + 1
 	}
-	return &SolverScore{
+	return SolverScore{
 		PlacedByPriority: placedByPri,
-		Evicted:          0,
-		Moved:            0,
+		Evicted:          0, // baseline: no evictions
+		Moved:            0, // baseline: no moves
 	}
 }
 
-// solverConfigArgs builds a list of key-value pairs representing the active solver configuration.
+// -------------------------
+// solverConfigArgs
+// -------------------------
+
+// solverConfigArgs builds a list of key-value pairs representing the active
+// solver configuration. Add new config flags here as needed.
 func solverConfigArgs() []any {
-	args := make([]any, 0, 10)
+	args := make([]any, 0, 12)
 	if SolverPythonEnabled {
 		args = append(
 			args,
 			"pythonSolver", true,
+			"pythonScriptPath", SolverPythonScriptPath,
 			"pythonTimeout", SolverPythonTimeout.String(),
 			"pythonGapLimit", fmt.Sprintf("%.2f", SolverPythonGapLimit),
 			"pythonGuaranteedTierFraction", fmt.Sprintf("%.2f", SolverPythonGuaranteedTierFraction),
@@ -144,31 +136,39 @@ func solverConfigArgs() []any {
 	return args
 }
 
-// isImprovement compares two scores lexicographically:
-// 1) More placed per priority (lexicographic map compare)
-// 2) Fewer evictions
-// 3) Fewer moves
-// Returns 1 if suggested is better, -1 if worse, 0 if equal.
+// -------------------------
+// isSolutionBetter
+// -------------------------
+
+// isSolutionBetter compares two scores lexicographically:
+//  1. More placed per priority (lexicographically)
+//  2. Fewer evictions
+//  3. Fewer moves
+//
+// Returns:
+// 1 if suggested is better,
+// -1 if worse,
+// 0 if equal.
 // Returns as soon as a difference is found.
-func isImprovement(baseline, suggested SolverScore) int {
-	// 1) Placed-by-priority (more is better)
-	if cmp := comparePlaced(suggested.PlacedByPriority, baseline.PlacedByPriority); cmp != 0 {
+func isSolutionBetter(old, new *SolverScore) int {
+	// Placed-by-priority (more is better)
+	if cmp := cmpLexi(new.PlacedByPriority, old.PlacedByPriority); cmp != 0 {
 		klog.V(MyV).InfoS("compare placed-by-priority", "result", cmp,
-			"suggested", suggested.PlacedByPriority, "baseline", baseline.PlacedByPriority)
+			"new", new.PlacedByPriority, "old", old.PlacedByPriority)
 		return cmp
 	}
 
-	// 2) Evictions (fewer is better)
-	if cmp := cmpInt(suggested.Evicted, baseline.Evicted); cmp != 0 {
+	// Evictions (fewer is better)
+	if cmp := cmpInt(new.Evicted, old.Evicted); cmp != 0 {
 		klog.V(MyV).InfoS("compare evictions", "result", cmp,
-			"suggested", suggested.Evicted, "baseline", baseline.Evicted)
+			"new", new.Evicted, "old", old.Evicted)
 		return cmp
 	}
 
-	// 3) Moves (fewer is better)
-	if cmp := cmpInt(suggested.Moved, baseline.Moved); cmp != 0 {
+	// Moves (fewer is better)
+	if cmp := cmpInt(new.Moved, old.Moved); cmp != 0 {
 		klog.V(MyV).InfoS("compare moves", "result", cmp,
-			"suggested", suggested.Moved, "baseline", baseline.Moved)
+			"new", new.Moved, "old", old.Moved)
 		return cmp
 	}
 
@@ -177,83 +177,51 @@ func isImprovement(baseline, suggested SolverScore) int {
 	return 0
 }
 
-// comparePlaced returns 1 if a>b, -1 if a<b, 0 if equal (lexi by priority desc).
-func comparePlaced(a, b map[string]int) int {
-	keys := map[int]struct{}{}
-	for key := range a {
-		if value, err := strconv.Atoi(key); err == nil {
-			keys[value] = struct{}{}
-		}
-	}
-	for key := range b {
-		if value, err := strconv.Atoi(key); err == nil {
-			keys[value] = struct{}{}
-		}
-	}
-	priorities := make([]int, 0, len(keys))
-	for k := range keys {
-		priorities = append(priorities, k)
-	}
-	// returns as soon as a difference is found starting from highest prio
-	// meaning that placing more high-prio pods is better
-	// (even if it means placing fewer low-prio pods, we trust the solver to optimize that)
-	sort.Sort(sort.Reverse(sort.IntSlice(priorities)))
-	for _, pr := range priorities {
-		ai := a[strconv.Itoa(pr)]
-		bi := b[strconv.Itoa(pr)]
-		if ai != bi {
-			if ai > bi {
-				return 1
-			}
-			return -1
-		}
-	}
-	return 0
+// -------------------------
+// isSolutionUsable
+// -------------------------
+
+// isSolutionUsable checks if the solver output status indicates a usable
+// result. OPTIMAL means the solution is perfect and meets all constraints
+// (there can be multiple optimal solutions and the solver is
+// non-deterministic). FEASIBLE means the solution is not optimal but still
+// meets all constraints.
+func isSolutionUsable(status string) bool {
+	s := strings.ToLower(status)
+	return s != "" && (s == strings.ToLower(SolverStatusOptimal) || s == strings.ToLower(SolverStatusFeasible))
 }
 
-// cmpInt returns +1 if a<b (improvement because smaller is better),
-// -1 if a>b (worse), 0 if equal.
-func cmpInt(suggested, baseline int) int {
-	switch {
-	case suggested < baseline:
-		return 1
-	case suggested > baseline:
-		return -1
-	default:
-		return 0
-	}
-}
+// -------------------------
+// isSolutionApplicable
+// -------------------------
 
-// hasSolverFeasibleResult checks if the solver output is feasible.
-// OPTIMAL means the solution is perfect and meets all constraints
-// (Note there can be multiple optimal solutions and that the solver is non-deterministic).
-// FEASIBLE means the solution is not optimal (not perfect) but still meets all constraints.
-func hasSolverFeasibleResult(status string) bool {
-	return status != "" && (status == "OPTIMAL" || status == "FEASIBLE")
-}
-
-// planApplicable checks whether a SolverOutput (plan) can still be safely
+// isSolutionApplicable checks whether a SolverOutput can still be safely
 // applied on the current cluster state. It allows unrelated drift and only
 // insists that the concrete preconditions for the plan still hold.
-func (pl *SharedState) planApplicable(out *SolverOutput, nodes []*v1.Node, pods []*v1.Pod) (bool, string) {
+func (pl *SharedState) isSolutionApplicable(
+	out *SolverOutput,
+	nodes []*v1.Node,
+	pods []*v1.Pod,
+) (bool, string) {
 	if out == nil {
 		return false, "nil plan"
 	}
 
-	// Index live state
+	// Index live, usable nodes and their capacities.
 	usable := map[string]bool{}
 	capCPU := map[string]int64{}
 	capMem := map[string]int64{}
 	for _, n := range nodes {
-		if isNodeUsable(n) {
-			usable[n.Name] = true
-			capCPU[n.Name] = n.Status.Allocatable.Cpu().MilliValue()
-			capMem[n.Name] = n.Status.Allocatable.Memory().Value()
+		if !isNodeUsable(n) {
+			continue
 		}
+		usable[n.Name] = true
+		capCPU[n.Name] = getNodeCPUAllocatable(n)
+		capMem[n.Name] = getNodeMemoryAllocatable(n)
 	}
 
 	type res struct{ cpu, mem int64 }
-	used := map[string]res{} // by node
+	used := map[string]res{} // current usage per node
 	pByUID := podsByUID(pods)
 
 	addUse := func(node string, cpu, mem int64) {
@@ -263,136 +231,138 @@ func (pl *SharedState) planApplicable(out *SolverOutput, nodes []*v1.Node, pods 
 		used[node] = u
 	}
 
-	// Tally current usage
+	// Current usage from existing pods.
 	for _, p := range pods {
-		if p == nil || p.DeletionTimestamp != nil || getPodAssignedNodeName(p) == "" {
+		if !isPodAssignedAndAlive(p) {
 			continue
 		}
-		addUse(getPodAssignedNodeName(p), getPodCPURequest(p), getPodMemoryRequest(p))
+		node := getPodAssignedNodeName(p)
+		addUse(node, getPodCPURequest(p), getPodMemoryRequest(p))
 	}
 
-	// Simulate the plan on top of current usage:
-	// - Evictions free resources on their current node
+	// Apply evictions from the plan: free resources on their current node.
 	for _, e := range out.Evictions {
-		p := pByUID[e.Pod.UID]
-		if p == nil || getPodAssignedNodeName(p) == "" {
-			// Already gone or pending now: keep going.
+		p := pByUID[e.UID]
+		if !isPodAssignedAndAlive(p) {
+			// Pod vanished or is pending.
 			continue
 		}
-		// If a node became unusable, fail.
-		if !usable[getPodAssignedNodeName(p)] {
-			return false, fmt.Sprintf("evict node now unusable: %s", getPodAssignedNodeName(p))
+		node := getPodAssignedNodeName(p)
+		if !usable[node] {
+			return false, fmt.Sprintf("evict node now unusable: %s", node)
 		}
-		addUse(getPodAssignedNodeName(p), -getPodCPURequest(p), -getPodMemoryRequest(p))
+		addUse(node, -getPodCPURequest(p), -getPodMemoryRequest(p))
 	}
 
-	// - Moves/placements: check pod still where we expect (pending or src), then add to dst
+	// Apply moves/placements from the plan.
 	for _, np := range out.Placements {
-		p := pByUID[np.Pod.UID]
-		if p == nil || p.DeletionTimestamp != nil {
-			return false, fmt.Sprintf("pod vanished: %s", mergeNsName(np.Pod.Namespace, np.Pod.Name))
+		p := pByUID[np.UID]
+		if isPodDeleted(p) {
+			return false, fmt.Sprintf("pod vanished: %s", mergeNsName(np.Namespace, np.Name))
 		}
-		// Source must still be consistent enough:
-		//   - if it was a move (FromNode != ""), pod should still be on that source
-		//   - if it was a new/pending placement (FromNode == ""), pod should still be pending
-		if np.FromNode != "" {
-			if getPodAssignedNodeName(p) != np.FromNode {
-				return false, fmt.Sprintf("move precondition changed for %s/%s: was on %q, now on %q",
-					p.Namespace, p.Name, np.FromNode, getPodAssignedNodeName(p))
+
+		currentNode := getPodAssignedNodeName(p)
+
+		// Source must still hold the pod (if move).
+		if np.OldNode != "" {
+			if currentNode != np.OldNode {
+				return false, fmt.Sprintf(
+					"move precondition changed for %s/%s: was on %q, now on %q",
+					p.Namespace, p.Name, np.OldNode, currentNode,
+				)
 			}
-			// remove from src (already accounted by evictions? No — moves are distinct)
-			addUse(np.FromNode, -getPodCPURequest(p), -getPodMemoryRequest(p))
+			// Remove from source node (moves are distinct from evictions).
+			addUse(np.OldNode, -getPodCPURequest(p), -getPodMemoryRequest(p))
 		} else {
-			// pending expected
-			if getPodAssignedNodeName(p) != "" {
-				return false, fmt.Sprintf("pending precondition changed for %s/%s: now bound to %q",
-					p.Namespace, p.Name, getPodAssignedNodeName(p))
+			// Expected to be pending.
+			if currentNode != "" {
+				return false, fmt.Sprintf(
+					"pending precondition changed for %s/%s: now bound to %q",
+					p.Namespace, p.Name, currentNode,
+				)
 			}
 		}
 
-		// Destination must still be usable & have capacity
-		if !usable[np.ToNode] {
-			return false, fmt.Sprintf("dest node now unusable: %s", np.ToNode)
+		// Destination must still be usable and have capacity.
+		if !usable[np.Node] {
+			return false, fmt.Sprintf("dest node now unusable: %s", np.Node)
 		}
-		addUse(np.ToNode, getPodCPURequest(p), getPodMemoryRequest(p))
+		addUse(np.Node, getPodCPURequest(p), getPodMemoryRequest(p))
 	}
 
-	// Check that every node remains within capacity
+	// Final capacity check per node.
 	for node, u := range used {
 		if u.cpu > capCPU[node] || u.mem > capMem[node] {
-			return false, fmt.Sprintf("capacity exceeded on %s after sim: usedCPU=%d capCPU=%d usedMem=%d capMem=%d",
-				node, u.cpu, capCPU[node], u.mem, capMem[node])
+			return false, fmt.Sprintf(
+				"capacity exceeded on %s after sim: usedCPU=%d capCPU=%d usedMem=%d capMem=%d",
+				node, u.cpu, capCPU[node], u.mem, capMem[node],
+			)
 		}
 	}
+
 	return true, ""
 }
 
-// copy to a "summary": drop Output/CmpBase and fill Status from Output.
-func summarizeAttempt(r SolverResult) SolverResult {
-	status := r.Status
-	if status == "" && r.Output != nil {
-		status = r.Output.Status
-	}
-	return SolverResult{
-		Name:       r.Name,
-		Status:     status,
-		DurationMs: r.DurationMs,
-		Score:      r.Score,
-		Stages:     r.Stages,
-	}
-}
+// -------------------------
+// logLeaderboard
+// -------------------------
 
 // logLeaderboard prints a compact solver leaderboard relative to baseline.
 // It groups attempts as better/equal/worse vs baseline and tags adjacent ties.
+// If best is nil, it logs only the baseline row.
 func logLeaderboard(
 	label string,
 	attempts []SolverResult,
 	baseline SolverScore,
-	best SolverResult,
+	best *SolverResult,
 ) {
+	// No best attempt – only log baseline
+	if best == nil {
+		klog.InfoS(
+			msg(label, "solver leaderboard"),
+			"ranking", []string{"baseline"},
+			"status", []string{"BASELINE"},
+			"durationsUs", []int64{0},
+			"evictions", []int{baseline.Evicted},
+			"moves", []int{baseline.Moved},
+			"placedByPri", baseline.PlacedByPriority,
+			"prevPlacedByPri", baseline.PlacedByPriority,
+		)
+		return
+	}
+
 	if len(attempts) == 0 {
-		// still include baseline-only view
 		attempts = nil
 	}
 
-	// Classify relative to baseline while preserving attempt order inside groups.
 	var better, equal, worse []SolverResult
 	for _, r := range attempts {
-		rr := SolverResult{
-			Name:       r.Name,
-			DurationMs: r.DurationMs,
-			Score:      r.Score,
-			Status:     r.Status,
-			CmpBase:    isImprovement(baseline, r.Score),
-		}
-		switch rr.CmpBase {
+		cmp := isSolutionBetter(&baseline, &r.Score)
+		switch cmp {
 		case 1:
-			better = append(better, rr)
+			better = append(better, r)
 		case 0:
-			equal = append(equal, rr)
+			equal = append(equal, r)
 		default:
-			worse = append(worse, rr)
+			worse = append(worse, r)
 		}
 	}
 
-	// Include the baseline as an entry, and make it the first among equals.
+	// Baseline entry – always first
 	baselineEntry := SolverResult{
 		Name:       "baseline",
 		Status:     "BASELINE",
 		DurationMs: 0,
 		Score:      baseline,
-		CmpBase:    0,
 	}
 	equal = append([]SolverResult{baselineEntry}, equal...)
 
 	ranking := append(append(better, equal...), worse...)
 
-	// Tie helper
 	tied := func(a, b SolverScore) bool {
-		return isImprovement(a, b) == 0 && isImprovement(b, a) == 0
+		return isSolutionBetter(&a, &b) == 0 && isSolutionBetter(&b, &a) == 0
 	}
 
-	// Build log arrays
 	names := make([]string, len(ranking))
 	statuses := make([]string, len(ranking))
 	evictions := make([]int, len(ranking))
@@ -427,6 +397,10 @@ func logLeaderboard(
 	)
 }
 
+// -------------------------
+// scoreSolution
+// -------------------------
+
 // scoreSolution computes final Score from the snapshot given to the solver:
 //   - placed_by_priority: number of pods that were placed for each priority
 //   - evicted:            number of pods that were evicted
@@ -456,18 +430,18 @@ func scoreSolution(in SolverInput, out *SolverOutput) SolverScore {
 		afterWhere[uid] = w
 	}
 	for _, plm := range out.Placements {
-		if plm.ToNode == "" {
+		if plm.Node == "" {
 			continue
 		}
-		if _, known := afterWhere[plm.Pod.UID]; known {
-			afterWhere[plm.Pod.UID] = plm.ToNode
+		if _, known := afterWhere[plm.UID]; known {
+			afterWhere[plm.UID] = plm.Node
 		}
 	}
 
 	// Evicted
 	evicted := make(map[types.UID]struct{}, len(out.Evictions))
 	for _, e := range out.Evictions {
-		evicted[e.Pod.UID] = struct{}{}
+		evicted[e.UID] = struct{}{}
 	}
 
 	// Placed by priority
@@ -501,6 +475,10 @@ func scoreSolution(in SolverInput, out *SolverOutput) SolverScore {
 	}
 }
 
+// -------------------------
+// toSolverPod
+// -------------------------
+
 // toSolverPod converts a Pod to a SolverPod.
 func toSolverPod(p *v1.Pod, node string) SolverPod {
 	return SolverPod{
@@ -514,51 +492,68 @@ func toSolverPod(p *v1.Pod, node string) SolverPod {
 	}
 }
 
-// exportSolverStatsToConfigMap exports a compact run record to the stats ConfigMap.
-// Only runs when `hadFeasible` is true.
+// -------------------------
+// addUniqueSolverPod
+// -------------------------
+
+// addUniqueSolverPod adds a SolverPod to SolverInput if not already present.
+func addUniqueSolverPod(in *SolverInput, seen map[types.UID]bool, p *v1.Pod, node string) {
+	sp := toSolverPod(p, node)
+	if isPodProtected(p) {
+		sp.Protected = true
+	}
+	if !seen[sp.UID] {
+		in.Pods = append(in.Pods, sp)
+		seen[sp.UID] = true
+	}
+}
+
+// -------------------------
+// exportSolverStatsToConfigMap
+// -------------------------
+
+// exportSolverStatsToConfigMap exports a compact run record to the stats
+// ConfigMap. Only runs when 'hadFeasible' is true.
 func (pl *SharedState) exportSolverStatsToConfigMap(
 	ctx context.Context,
 	strategy string,
-	baseline *SolverScore,
+	baseline SolverScore,
 	best string,
 	attempts []SolverResult,
 	err string,
 ) {
-	// Build summarized attempts to keep payload lean
-	slim := make([]SolverResult, 0, len(attempts))
-	for _, r := range attempts {
-		slim = append(slim, summarizeAttempt(r))
-	}
-
 	entry := ExportedSolverStats{
 		TimestampNs: time.Now().UnixNano(),
 		BestName:    best,
 		Error:       err,
 		Baseline:    baseline,
-		Attempts:    slim,
+		Attempts:    attempts,
 	}
 	pl.appendSolverStatsCM(ctx, entry)
 	klog.V(MyV).InfoS(msg(strategy, "exported solver stats"),
-		"attempts", len(slim),
+		"attempts", len(attempts),
 		"bestAttempt", best,
 		"error", err,
 	)
 }
 
-var appendSolverStatsCMHook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)
+// -------------------------
+// appendSolverStatsCM
+// -------------------------
 
-func (pl *SharedState) appendSolverStatsCM(ctx context.Context, entry ExportedSolverStats) {
+// appendSolverStatsCM appends an entry to the solver stats ConfigMap.
+func (pl *SharedState) appendSolverStatsCM(ctx context.Context, entry ExportedSolverStats) error {
 	// Allow unit tests to intercept ConfigMap writes and avoid real K8s clients.
 	if appendSolverStatsCMHook != nil {
 		appendSolverStatsCMHook(pl, ctx, entry)
-		return
+		return nil
 	}
 
 	cli := pl.Handle.ClientSet()
 	if cli == nil {
-		klog.V(1).Info("no clientset; skip stats CM")
-		return
+		return ErrNoClientset
 	}
+
 	doc := ConfigMapDoc{
 		Namespace: SystemNamespace,
 		Name:      SolverStatsConfigMapName,
@@ -566,22 +561,46 @@ func (pl *SharedState) appendSolverStatsCM(ctx context.Context, entry ExportedSo
 		DataKey:   SolverStatsConfigMapLabelKey + ".json",
 	}
 
-	err := mutateJson(
+	// Get ConfigMap client and lister
+	cms := solverStatsConfigMapsFor(pl)
+	nsLister := solverStatsConfigMapNsListerFor(pl)
+
+	// Read existing JSON data
+	_, found, err := doc.readJson(nsLister)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return doc.ensureJson(ctx, cms, []ExportedSolverStats{entry})
+	}
+
+	// Append entry to existing array
+	return mutateJson(
 		ctx,
-		cli.CoreV1(),
-		func(ns string) clientv1.ConfigMapNamespaceLister {
-			return pl.Handle.SharedInformerFactory().Core().V1().ConfigMaps().Lister().ConfigMaps(ns)
-		},
+		cms,
+		nsLister,
 		doc,
 		func(existing []ExportedSolverStats) ([]ExportedSolverStats, error) {
 			return append(existing, entry), nil
 		},
 	)
-	if apierrors.IsNotFound(err) {
-		_ = doc.ensureJson(ctx, cli.CoreV1(), []ExportedSolverStats{entry})
-		return
-	}
-	if err != nil {
-		klog.ErrorS(err, "append solver stats failed")
-	}
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	appendSolverStatsCMHook func(pl *SharedState, ctx context.Context, entry ExportedSolverStats)
+
+	solverStatsConfigMapsFor = func(pl *SharedState) corev1client.ConfigMapInterface {
+		return pl.Handle.ClientSet().CoreV1().ConfigMaps(SystemNamespace)
+	}
+
+	solverStatsConfigMapNsListerFor = func(pl *SharedState) corev1listers.ConfigMapNamespaceLister {
+		return pl.Handle.SharedInformerFactory().
+			Core().V1().ConfigMaps().
+			Lister().
+			ConfigMaps(SystemNamespace)
+	}
+)

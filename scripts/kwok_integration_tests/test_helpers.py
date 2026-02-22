@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
 # test_helpers.py
-import logging
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Any, List, Optional
 
-import yaml
+import logging, os, yaml
+
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Dict, Any, List, Optional
 
 from scripts.helpers.general_helpers import (
     qty_to_mcpu_str,
@@ -14,7 +15,7 @@ from scripts.helpers.kubectl_helpers import (
     kubectl_apply_yaml,
     wait_rs_pods,
 )
-from scripts.helpers.kwok_helpers import (
+from scripts.helpers.kwokctl_helpers import (
     merge_kwokctl_envs,
     yaml_kwok_rs,
 )
@@ -36,7 +37,11 @@ NUM_PRIORITIES = 3
 POD_TIMEOUT_S = 10
 
 # Valid optimization modes (just for CLI/pytest validation)
-VALID_OPT_MODES = {"per_pod", "periodic", "interlude", "manual", "manual_blocking"}
+VALID_OPT_MODES = {"scheduling_failure", "periodic", "stable_queue", "manual", "manual_blocking"}
+
+# Valid solver types
+VALID_SOLVER_TYPES = {"cp_sat", "gurobi"}
+DEFAULT_SOLVER_TYPE = "cp_sat"
 
 # Global default: by default we DO NOT disable waits & active checks.
 DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS = False
@@ -52,9 +57,7 @@ class Workload:
     mem: float
     priority: int
     replicas: int = 1
-    # Only used by tests; setup_cluster ignores this.
     expected_assignment: Optional[bool] = None
-
 
 @dataclass
 class WorkloadStep:
@@ -62,9 +65,7 @@ class WorkloadStep:
     pods: List[Workload]
     wait_mode: str = "exist"  # "exist", "running", or "none"
     wait_timeout_s: int = POD_TIMEOUT_S
-    # Only used by tests; setup_cluster ignores this.
     active_plan_check_mode: str = "none" # "each_pod", "after_step", "none"
-
 
 @dataclass
 class WorkloadScenario:
@@ -72,17 +73,15 @@ class WorkloadScenario:
     description: str
     steps: List[WorkloadStep]
 
-
 # ---------------------------------------------------------------------------
 # Scenario helpers + definitions
 # ---------------------------------------------------------------------------
 
-def rs_name_for_pod(scenario: WorkloadScenario, pod: Workload) -> str:
-    """Stable ReplicaSet name derived from (scenario.id, pod.id)."""
-    return f"{scenario.id}-pod-{pod.id:03d}"
+def rs_name_for_pod(scenario: WorkloadScenario, rs: Workload) -> str:
+    """Stable ReplicaSet name derived from (scenario.id, rs.id)."""
+    return f"{scenario.id}-rs-{rs.id:03d}"
 
-
-def _scenario_all_scheduled_by_default() -> WorkloadScenario:
+def scenario_all_scheduled_by_default() -> WorkloadScenario:
     step = WorkloadStep(
         name="all-scheduled",
         pods=[
@@ -104,8 +103,7 @@ def _scenario_all_scheduled_by_default() -> WorkloadScenario:
         steps=[step],
     )
 
-
-def _scenario_same_priority() -> WorkloadScenario:
+def scenario_same_priority() -> WorkloadScenario:
     big_step = WorkloadStep(
         name="big-first",
         pods=[
@@ -137,8 +135,7 @@ def _scenario_same_priority() -> WorkloadScenario:
         steps=[big_step, small_step],
     )
 
-
-def _scenario_different_priority() -> WorkloadScenario:
+def scenario_different_priority() -> WorkloadScenario:
     """
     Mixed priorities:
 
@@ -176,8 +173,7 @@ def _scenario_different_priority() -> WorkloadScenario:
         steps=[low_step, high_step],
     )
 
-
-def _scenario_high_arrival() -> WorkloadScenario:
+def scenario_high_arrival() -> WorkloadScenario:
     steps1 = [
         WorkloadStep(
             name=f"step-{100+i}",
@@ -218,21 +214,19 @@ def _scenario_high_arrival() -> WorkloadScenario:
         id="higharrival",
         description=(
             "High-arrival scenario: many small p1 pods in quick succession, "
-            "useful for testing 'interlude' behavior."
+            "useful for testing 'stable_queue' behavior."
         ),
         steps=steps1 + steps2,
     )
 
-
 WORKLOAD_SCENARIOS: Dict[str, WorkloadScenario] = {
-    "allscheduled": _scenario_all_scheduled_by_default(),
-    "sameprio": _scenario_same_priority(),
-    "prioaware": _scenario_different_priority(),
-    "higharrival": _scenario_high_arrival(),
+    "allscheduled": scenario_all_scheduled_by_default(),
+    "sameprio": scenario_same_priority(),
+    "prioaware": scenario_different_priority(),
+    "higharrival": scenario_high_arrival(),
 }
 
 DEFAULT_WORKLOAD_ID = "sameprio"
-
 
 def scenario_max_priority(scenario: WorkloadScenario) -> int:
     m = 0
@@ -241,14 +235,12 @@ def scenario_max_priority(scenario: WorkloadScenario) -> int:
             m = max(m, pod.priority)
     return m
 
-
 def scenario_total_replicas(scenario: WorkloadScenario) -> int:
     total = 0
     for step in scenario.steps:
         for pod in step.pods:
             total += int(pod.replicas)
     return total
-
 
 # ---------------------------------------------------------------------------
 # KWOK / kube-scheduler helpers
@@ -265,22 +257,38 @@ def load_kwokctl_config(path: str | Path) -> Dict[str, Any]:
         raise SystemExit(f"{p}: expected KwokctlConfiguration mapping")
     return doc
 
-
 def build_kwokctl_config_for_mode(
     base_doc: Dict[str, Any],
     opt_mode: str,
     opt_sync: bool,
+    solver_type: str = DEFAULT_SOLVER_TYPE,
 ) -> Dict[str, Any]:
     """
-    Return a copy of base_doc that injects OPTIMIZE_MODE
+    Return a copy of base_doc that injects OPTIMIZE_MODE and SOLVER_TYPE
     envs into the kube-scheduler component.
     """
     envs = [
         {"name": "OPTIMIZE_MODE", "value": opt_mode},
-        {"name": "OPTIMIZE_SOLVE_SYNCH", "value": "true" if opt_sync else "false"},
+        {"name": "OPTIMIZE_BLOCKING_SOLVING", "value": "true" if opt_sync else "false"},
+        {"name": "SOLVER_TYPE", "value": solver_type},
     ]
+    # Add SOLVER_PATH from environment if set (for local development)
+    # If SOLVER_PATH is set, derive the solver-specific path based on solver_type
+    solver_path_base = os.environ.get("SOLVER_PATH")
+    if solver_path_base:
+        # If pointing to a specific solver.py, derive the directory and select the right script
+        solver_dir = os.path.dirname(solver_path_base)
+        solver_script = f"solver_{solver_type}.py"
+        solver_path = os.path.join(solver_dir, solver_script)
+        # Always use the solver-specific path - run_tests.sh copies both solvers
+        # Log which path we're using for debugging
+        print(f"[build_kwokctl_config] solver_type={solver_type} solver_path={solver_path} exists={os.path.exists(solver_path)}")
+        envs.append({"name": "SOLVER_PATH", "value": solver_path})
+    # Add SOLVER_PYTHON_BIN from environment if set (for local venv)
+    solver_python_bin = os.environ.get("SOLVER_PYTHON_BIN")
+    if solver_python_bin:
+        envs.append({"name": "SOLVER_PYTHON_BIN", "value": solver_python_bin})
     return merge_kwokctl_envs(base_doc, envs, component="kube-scheduler")
-
 
 def apply_workload_step(
     logger: logging.Logger,
@@ -329,7 +337,6 @@ def apply_workload_step(
 
     yaml_text = "".join(yaml_chunks)
     kubectl_apply_yaml(logger, ctx, yaml_text)
-
 
 def wait_for_workload_step_simple(
     logger: logging.Logger,

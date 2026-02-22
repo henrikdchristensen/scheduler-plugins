@@ -1,115 +1,154 @@
 // optimization_flow.go
-
 package mypriorityoptimizer
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
-// runOptimizationFlow runs the optimisation flow for the given phase (AllSynch,
-// AllAsynch, Single). For Single phase, the preemptor must be provided.
-// Returns the target node name for the preemptor pod (if any) and error (if any).
-func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Pod) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
-	strategy := combinedModeToString()
+// -------------------------
+// runOptimizationFlow
+// -------------------------
 
-	// Periodic-sync/Per-pod: take Active early.
-	// Async modes: take Active later.
-	if !isAsyncSolving() {
-		if !pl.tryEnterActive() {
+// runOptimizationFlow runs the optimisation flow for the given phase. For
+// Single phase, the preemptor must be provided. Returns the target node name
+// for the preemptor pod (if any) and error (if any).
+func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Pod) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
+	strategy := getModeCombinedAsString()
+
+	// Cumulative persistent stats (one write per optimization-flow call).
+	delta := &OptimizationStatsDelta{OptimizationFlowCalls: 1}
+	defer func() {
+		pl.persistOptimizationStatsDelta(context.Background(), *delta)
+	}()
+
+	// Sync modes: take PlanActive now.
+	// Async modes: will take PlanActive later, after plan computation.
+	if !isNonBlockingSolvingFn() {
+		if !pl.tryEnterActivePlan() {
 			klog.InfoS(msg(strategy, InfoActivePlanInProgress))
 			return nil, nil, "", nil, nil, ErrActiveInProgress
 		}
 	}
 
+	// Ensure only one optimization flow at a time.
+	if !pl.tryEnterOptimizationFlow() {
+		klog.InfoS(msg(strategy, InfoOptimizationInProgress))
+		return nil, nil, "", nil, nil, ErrOptimizationInProgress
+	}
+	delta.OptimizationFlowEntered = 1
+	defer pl.tryLeaveOptimizationFlow()
+
 	start := time.Now()
 
 	// Plan context: snapshot, solver input, baseline, pending count.
-	nodes, pods, inp, baselineScore, pendingPrePlan, err := pl.planContext(preemptor)
+	nodes, pods, inp, err := planContextFn(pl, preemptor)
 	if err != nil {
-		klog.Error(msg(strategy, InfoPlanPreparationFailed), "err", err)
-		pl.leaveActive()
+		klog.Error(msg(strategy, InfoPlanContextFailed), "err", err)
+		pl.tryLeaveActivePlan()
 		return nil, nil, "", nil, nil, err
 	}
+	baselineScore := inp.BaselineScore
 
-	// Nothing to do
+	// Only proceed if there are pending pods to schedule.
+	pendingPrePlan := countPendingPods(pods)
 	if pendingPrePlan == 0 {
 		klog.InfoS(msg(strategy, InfoNoPendingPods))
-		pl.leaveActive()
-		return nil, baselineScore, "baseline", nil, nil, ErrNoPendingPods
+		pl.tryLeaveActivePlan()
+		return nil, &baselineScore, "", nil, nil, ErrNoPendingPods
 	}
-
-	klog.InfoS(
-		msg(strategy, "starting solvers"),
-		"pending", pendingPrePlan,
-		"totalPods", len(pods),
-		"nodes", len(nodes),
-	)
 
 	// Plan computation
-	bestName, hadImproving, bestAttempt, attempts := pl.planComputation(ctx, inp, nodes, pods, baselineScore)
+	bestName, hadImp, bestAttempt, bestOut, attempts := planComputationFn(pl, ctx, inp)
 
-	// Check if anything was feasible and improving
-	if !hadImproving {
+	// Count solver calls (attempts = one entry per enabled solver attempt run).
+	delta.SolverAttempts = int64(len(attempts))
+
+	// Check if any solver solution was improving, if not, exit early.
+	if !hadImp {
 		klog.Error(msg(strategy, InfoNoImprovingSolutionFromAnySolver))
-		pl.leaveActive()
-		pl.exportSolverStatsToConfigMap(context.Background(), strategy, baselineScore, bestName, attempts, ErrNoImprovingSolutionFromAnySolver.Error())
-		return nil, baselineScore, bestName, bestAttempt, attempts, ErrNoImprovingSolutionFromAnySolver
+		pl.tryLeaveActivePlan()
+		if len(attempts) > 0 {
+			delta.BestSolverFailed = 1
+		}
+		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrNoImprovingSolutionFromAnySolver.Error())
+		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrNoImprovingSolutionFromAnySolver
 	}
 
-	// Async modes: take Active now that we know it is worth applying the plan.
-	if isAsyncSolving() {
-		if !pl.tryEnterActive() {
+	// Best solver status counters (when we have an improving solution).
+	if bestAttempt != nil {
+		if strings.EqualFold(bestAttempt.Status, SolverStatusOptimal) {
+			delta.BestSolverOptimal = 1
+		} else if strings.EqualFold(bestAttempt.Status, SolverStatusFeasible) {
+			delta.BestSolverFeasible = 1
+		}
+	}
+
+	// Verify that plan (still) can be applied
+	// Mainly for async modes, where the cluster state may have changed since plan computation.
+	ok, why := isSolutionApplicableFn(pl, bestOut, nodes, pods)
+	if !ok {
+		klog.Error(msg(strategy, InfoPlanNotApplicable), "solver", bestName, "status", bestOut.Status, "reason", why)
+		pl.tryLeaveActivePlan()
+		delta.PlanNotApplicable = 1
+		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrPlanNotApplicable.Error())
+		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrPlanNotApplicable
+	}
+
+	// Async modes: take PlanActive now that we know it is worth applying the plan.
+	if isNonBlockingSolvingFn() {
+		if !pl.tryEnterActivePlan() {
 			klog.InfoS(msg(strategy, InfoActivePlanInProgress))
-			pl.exportSolverStatsToConfigMap(context.Background(), strategy, baselineScore, bestName, attempts, ErrActiveInProgress.Error())
+			exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrActiveInProgress.Error())
 			return nil, nil, "", nil, nil, ErrActiveInProgress
 		}
 	}
 
 	// How much is actually schedulable?
-	pendingScheduled, totalPrePlan, totalPostPlan := pl.countNewAndTotalPods(bestAttempt.Output, pods)
+	pendingScheduled, totalPrePlan, totalPostPlan := computePlanPodCountsFn(bestOut, pods)
 	if pendingScheduled == 0 {
-		klog.InfoS(msg(strategy, InfoNoPendingPodsToSchedule))
-		pl.leaveActive()
-		pl.exportSolverStatsToConfigMap(context.Background(), strategy, baselineScore, bestName, attempts, ErrNoPendingPodsToSchedule.Error())
-		return nil, baselineScore, bestName, bestAttempt, attempts, ErrNoPendingPodsToSchedule
+		klog.InfoS(msg(strategy, InfoNoPendingPodsScheduled))
+		pl.tryLeaveActivePlan()
+		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrNoPendingPodsScheduled.Error())
+		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrNoPendingPodsScheduled
 	}
 
+	// NOTE: If any error occurs from here on, we must call onPlanCompleted instead of just leaveActivePlan.
+
 	// Plan registration
-	plan, ap, err := pl.planRegistration(ctx, *bestAttempt, preemptor, pods)
+	plan, ap, err := planRegistrationFn(pl, ctx, *bestAttempt, bestOut, preemptor, pods)
 	if err != nil {
 		klog.Error(msg(strategy, InfoPlanRegistrationFailed))
 		pl.onPlanCompleted(PlanStatusFailed)
-		pl.exportSolverStatsToConfigMap(
-			context.Background(), strategy, baselineScore, bestName, attempts,
-			ErrPlanRegistration.Error(),
-		)
-		return nil, baselineScore, bestName, bestAttempt, attempts, ErrPlanRegistration
+		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrPlanRegistration.Error())
+		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrPlanRegistration
 	}
 
 	// Plan eviction and recreate standalone pods
-	if err := pl.planActivation(plan, pods); err != nil {
+	if err := planActivationFn(pl, plan, pods); err != nil {
 		klog.Error(msg(strategy, InfoPlanActivationFailed))
 		pl.onPlanCompleted(PlanStatusFailed)
-		pl.exportSolverStatsToConfigMap(context.Background(), strategy, baselineScore, bestName, attempts, ErrPlanActivationFailed.Error())
-		return nil, baselineScore, bestName, bestAttempt, attempts, ErrPlanActivationFailed
+		exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, ErrPlanActivationFailed.Error())
+		return nil, &baselineScore, bestName, bestAttempt, attempts, ErrPlanActivationFailed
 	}
 
+	delta.PlanActivated = 1
+
 	// Start a periodically plan completion watcher. The watcher stops itself.
-	pl.startPlanCompletionWatch(ap)
+	startPlanCompletionWatchFn(pl, ap)
 
 	// Export stats (success)
-	pl.exportSolverStatsToConfigMap(context.Background(), strategy, baselineScore, bestName, attempts, "")
+	exportSolverStatsFn(pl, strategy, baselineScore, bestName, attempts, "")
 
 	// Log summary
-	bestSummary := summarizeAttempt(*bestAttempt)
 	klog.InfoS(
 		msg(strategy, InfoPlanExecutionFinished),
 		"planID", ap.ID,
-		"bestAttempt", bestSummary,
+		"bestAttempt", bestAttempt,
 		"pendingPrePlan", pendingPrePlan,
 		"pendingScheduled", pendingScheduled,
 		"totalPrePlan", totalPrePlan,
@@ -117,5 +156,38 @@ func (pl *SharedState) runOptimizationFlow(ctx context.Context, preemptor *v1.Po
 		"totalDuration", time.Since(start),
 	)
 
-	return plan, baselineScore, bestName, bestAttempt, attempts, nil
+	return plan, &baselineScore, bestName, bestAttempt, attempts, nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	isNonBlockingSolvingFn = isNonBlockingSolving
+
+	planContextFn = func(pl *SharedState, preemptor *v1.Pod) ([]*v1.Node, []*v1.Pod, SolverInput, error) {
+		return pl.planContext(preemptor)
+	}
+	planComputationFn = func(pl *SharedState, ctx context.Context, in SolverInput) (string, bool, *SolverResult, *SolverOutput, []SolverResult) {
+		return pl.planComputation(ctx, in)
+	}
+	isSolutionApplicableFn = func(pl *SharedState, out *SolverOutput, nodes []*v1.Node, pods []*v1.Pod) (bool, string) {
+		return pl.isSolutionApplicable(out, nodes, pods)
+	}
+	computePlanPodCountsFn = func(out *SolverOutput, pods []*v1.Pod) (int, int, int) {
+		return computePlanPodCounts(out, pods)
+	}
+	planRegistrationFn = func(pl *SharedState, ctx context.Context, res SolverResult, out *SolverOutput, preemptor *v1.Pod, pods []*v1.Pod) (*Plan, *ActivePlan, error) {
+		return pl.planRegistration(ctx, res, out, preemptor, pods)
+	}
+	planActivationFn = func(pl *SharedState, plan *Plan, pods []*v1.Pod) error {
+		return pl.planActivation(plan, pods)
+	}
+	startPlanCompletionWatchFn = func(pl *SharedState, ap *ActivePlan) {
+		pl.startPlanCompletionWatch(ap)
+	}
+	exportSolverStatsFn = func(pl *SharedState, strategy string, baseline SolverScore, bestName string, attempts []SolverResult, errMsg string) {
+		pl.exportSolverStatsToConfigMap(context.Background(), strategy, baseline, bestName, attempts, errMsg)
+	}
+)

@@ -1,263 +1,214 @@
-// solver_external_test.go
+// solver_external_test.gos
 package mypriorityoptimizer
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os/exec"
-	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
 
-// -----------------------------------------------------------------------------
+// -------------------------
 // runSolverExternal
-// -----------------------------------------------------------------------------
+// -------------------------
 
 func TestRunSolverExternal_Success(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("runSolverExternal test requires bash on PATH")
-	}
+	requireBash(t)
 
-	// Save & restore injected globals
-	origBin := solverBinary
-	origPath := solverScriptPath
-	origExec := execCommandContext
-	defer func() {
-		solverBinary = origBin
-		solverScriptPath = origPath
-		execCommandContext = origExec
-	}()
-
-	tmpDir := t.TempDir()
-
-	// Script: consume stdin, then output valid SolverOutput JSON
+	// Script that writes to stderr and stdout.
 	script := `#!/usr/bin/env bash
-# Consume all stdin (the solver input JSON)
 cat >/dev/null
-# Emit a minimal valid SolverOutput JSON
-echo '{"Status":"OPTIMAL"}'
+echo "log line 1" 1>&2
+echo "log line 2" 1>&2
+printf '{"status":"OPTIMAL"}'
 `
-	scriptPath := writeFakeSolverScript(t, tmpDir, script)
-	solverBinary = "bash"
-	solverScriptPath = scriptPath
-
-	pl := &SharedState{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	in := SolverInput{} // contents not important for this test
-	out, err := pl.runSolverExternal(ctx, in)
+	out, err := runBashSolver(t, script, []byte(`{"dummy":"input"}`))
 	if err != nil {
-		t.Fatalf("runSolverExternal returned error: %v", err)
+		t.Fatalf("unexpected err: %v", err)
 	}
-	if out == nil {
-		t.Fatalf("runSolverExternal returned nil output without error")
-	}
-	if out.Status != "OPTIMAL" {
-		t.Fatalf("runSolverExternal output Status = %q, want %q", out.Status, "OPTIMAL")
+	if got := strings.TrimSpace(string(out)); got != `{"status":"OPTIMAL"}` {
+		t.Fatalf("out=%q, want %q", got, `{"status":"OPTIMAL"}`)
 	}
 }
 
-func TestRunSolverExternal_InvalidJSON(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("runSolverExternal test requires bash on PATH")
-	}
-
-	// Save & restore injected globals
-	origBin := solverBinary
-	origPath := solverScriptPath
-	origExec := execCommandContext
-	defer func() {
-		solverBinary = origBin
-		solverScriptPath = origPath
-		execCommandContext = origExec
-	}()
-
-	tmpDir := t.TempDir()
-
-	// Script: consume stdin, then output invalid JSON
-	script := `#!/usr/bin/env bash
-cat >/dev/null
-echo 'this-is-not-json'
-`
-	scriptPath := writeFakeSolverScript(t, tmpDir, script)
-
-	solverBinary = "bash"
-	solverScriptPath = scriptPath
-
-	pl := &SharedState{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	in := SolverInput{}
-	out, err := pl.runSolverExternal(ctx, in)
-	if err == nil {
-		t.Fatalf("expected error for invalid JSON output, got nil")
-	}
-	if out != nil {
-		t.Fatalf("expected nil output on invalid JSON, got %#v", out)
-	}
-}
-
-// StdoutPipe error: simulate by starting the command before runSolverExternal
-// calls StdoutPipe, which violates the os/exec contract.
-func TestRunSolverExternal_StdoutPipeError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("runSolverExternal test requires bash on PATH")
-	}
-
-	origBin := solverBinary
-	origPath := solverScriptPath
-	origExec := execCommandContext
-	defer func() {
-		solverBinary = origBin
-		solverScriptPath = origPath
-		execCommandContext = origExec
-	}()
-
-	tmpDir := t.TempDir()
-
-	script := `#!/usr/bin/env bash
-# trivial script
-exit 0
-`
-	scriptPath := writeFakeSolverScript(t, tmpDir, script)
-	solverBinary = "bash"
-	solverScriptPath = scriptPath
-
-	// Wrap execCommandContext so the command is started before StdoutPipe().
-	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cmd := exec.CommandContext(ctx, name, args...)
-		_ = cmd.Start() // ignore error; we just want StdoutPipe() to fail later
-		return cmd
-	}
-
-	pl := &SharedState{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	out, err := pl.runSolverExternal(ctx, SolverInput{})
-	if err == nil {
-		t.Fatalf("expected error from StdoutPipe, got nil (out=%#v)", out)
-	}
-	if out != nil {
-		t.Fatalf("expected nil output when StdoutPipe fails, got %#v", out)
-	}
-}
-
-// StderrPipe error: simulate by pre-setting cmd.Stderr, so StderrPipe()
-// returns an error ("exec: Stderr already set").
-func TestRunSolverExternal_StderrPipeError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("runSolverExternal test requires bash on PATH")
-	}
-
-	origBin := solverBinary
-	origPath := solverScriptPath
-	origExec := execCommandContext
-	defer func() {
-		solverBinary = origBin
-		solverScriptPath = origPath
-		execCommandContext = origExec
-	}()
-
-	tmpDir := t.TempDir()
-
-	script := `#!/usr/bin/env bash
-cat >/dev/null
-echo '{"Status":"OPTIMAL"}'
-`
-	scriptPath := writeFakeSolverScript(t, tmpDir, script)
-	solverBinary = "bash"
-	solverScriptPath = scriptPath
-
-	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cmd := exec.CommandContext(ctx, name, args...)
-		// Pre-assign Stderr so StderrPipe() will fail.
-		cmd.Stderr = &bytes.Buffer{}
-		return cmd
-	}
-
-	pl := &SharedState{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	out, err := pl.runSolverExternal(ctx, SolverInput{})
-	if err == nil {
-		t.Fatalf("expected error from StderrPipe, got nil (out=%#v)", out)
-	}
-	if out != nil {
-		t.Fatalf("expected nil output when StderrPipe fails, got %#v", out)
-	}
-}
-
-// Start error: point solverBinary to a non-existent executable so Start() fails.
-func TestRunSolverExternal_StartError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("runSolverExternal test requires bash on PATH")
-	}
-
-	origBin := solverBinary
-	origPath := solverScriptPath
-	origExec := execCommandContext
-	defer func() {
-		solverBinary = origBin
-		solverScriptPath = origPath
-		execCommandContext = origExec
-	}()
-
-	// Any name very unlikely to exist on PATH.
-	solverBinary = "definitely-not-a-real-executable-xyz"
-	solverScriptPath = "unused"
-
-	pl := &SharedState{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	out, err := pl.runSolverExternal(ctx, SolverInput{})
-	if err == nil {
-		t.Fatalf("expected solver start error, got nil (out=%#v)", out)
-	}
-	if out != nil {
-		t.Fatalf("expected nil output on start error, got %#v", out)
-	}
-}
-
-// Wait error: script emits valid JSON but exits with non-zero status,
-// so cmd.Wait() returns an error and we hit the "solver run: %w" path.
 func TestRunSolverExternal_WaitError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("runSolverExternal test requires bash on PATH")
-	}
-
-	origBin := solverBinary
-	origPath := solverScriptPath
-	origExec := execCommandContext
-	defer func() {
-		solverBinary = origBin
-		solverScriptPath = origPath
-		execCommandContext = origExec
-	}()
-
-	tmpDir := t.TempDir()
+	requireBash(t)
 
 	script := `#!/usr/bin/env bash
 cat >/dev/null
-echo '{"Status":"OPTIMAL"}'
+printf '{"status":"OPTIMAL"}'
 exit 3
 `
-	scriptPath := writeFakeSolverScript(t, tmpDir, script)
-	solverBinary = "bash"
-	solverScriptPath = scriptPath
-
-	pl := &SharedState{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	out, err := pl.runSolverExternal(ctx, SolverInput{})
-	if err == nil {
-		t.Fatalf("expected error from solver run (non-zero exit), got nil")
+	out, err := runBashSolver(t, script, []byte(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "solver run") {
+		t.Fatalf("err=%v, want contains %q", err, "solver run")
 	}
 	if out != nil {
-		t.Fatalf("expected nil output on solver run error, got %#v", out)
+		t.Fatalf("out=%q, want nil on error", string(out))
 	}
+}
+
+func TestRunSolverExternal_ForwardsStdin(t *testing.T) {
+	requireBash(t)
+
+	script := `#!/usr/bin/env bash
+# Echo stdin back to stdout
+cat
+`
+	payload := []byte("hello solver\n")
+	out, err := runBashSolver(t, script, payload)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if string(out) != string(payload) {
+		t.Fatalf("out=%q want %q", string(out), string(payload))
+	}
+}
+
+func TestRunSolverExternal_ReadStdoutError(t *testing.T) {
+	requireBash(t)
+
+	withReadAllStdout(t, func(r io.Reader) ([]byte, error) {
+		return nil, fmt.Errorf("forced read error")
+	})
+
+	// The script is irrelevant since we force readAllStdout to fail.
+	script := `#!/usr/bin/env bash
+cat >/dev/null
+printf '{"status":"OPTIMAL"}'
+`
+	out, err := runBashSolver(t, script, []byte(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "read solver stdout") {
+		t.Fatalf("err=%v, want contains %q", err, "read solver stdout")
+	}
+	if out != nil {
+		t.Fatalf("out=%q, want nil on error", string(out))
+	}
+}
+
+func TestRunSolverExternal_StdoutPipeError(t *testing.T) {
+	requireNonWindows(t)
+
+	// Force StdoutPipe() to fail by pre-setting cmd.Stdout.
+	withExecCommandContext(t, func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Stdout = &bytes.Buffer{}
+		return cmd
+	})
+
+	pl := &SharedState{}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "bash", "/does/not/matter.sh")
+	if err == nil || !strings.Contains(err.Error(), "stdout pipe") {
+		t.Fatalf("err=%v, want contains %q", err, "stdout pipe")
+	}
+	if out != nil {
+		t.Fatalf("out=%q, want nil on error", string(out))
+	}
+}
+
+func TestRunSolverExternal_StderrPipeError(t *testing.T) {
+	requireNonWindows(t)
+
+	// Force StderrPipe() to fail by pre-setting cmd.Stderr.
+	withExecCommandContext(t, func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Stderr = &bytes.Buffer{}
+		return cmd
+	})
+
+	pl := &SharedState{}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "bash", "/does/not/matter.sh")
+	if err == nil || !strings.Contains(err.Error(), "stderr pipe") {
+		t.Fatalf("err=%v, want contains %q", err, "stderr pipe")
+	}
+	if out != nil {
+		t.Fatalf("out=%q, want nil on error", string(out))
+	}
+}
+
+func TestRunSolverExternal_StartError(t *testing.T) {
+	requireNonWindows(t)
+
+	pl := &SharedState{}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	// Non-existent binary triggers cmd.Start() error branch.
+	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "not-a-real-executable-xyz", "unused")
+	if err == nil || !strings.Contains(err.Error(), "solver start") {
+		t.Fatalf("err=%v, want contains %q", err, "solver start")
+	}
+	if out != nil {
+		t.Fatalf("out=%q, want nil on error", string(out))
+	}
+}
+
+func TestRunSolverExternal_ContextDeadlineExceeded(t *testing.T) {
+	requireBash(t)
+
+	script := `#!/usr/bin/env bash
+cat >/dev/null
+sleep 5
+echo "never"
+`
+	pl := &SharedState{}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "bash", writeFakeSolverScript(t, t.TempDir(), script))
+	if err == nil {
+		t.Fatalf("expected error, got nil (out=%q)", string(out))
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v, want deadline exceeded (wrapped)", err)
+	}
+	if out != nil {
+		t.Fatalf("out=%q, want nil on error", string(out))
+	}
+}
+
+// -------------------------
+// streamSolverStderr
+// -------------------------
+
+func TestStreamSolverStderr_ScansLines(t *testing.T) {
+	err := streamSolverStderr(strings.NewReader("line1\nline2\n"))
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+}
+
+func TestStreamSolverStderr_TokenTooLong(t *testing.T) {
+	tooBig := bytes.Repeat([]byte("a"), 1024*1024+1) // > 1MB token
+	err := streamSolverStderr(bytes.NewReader(tooBig))
+	if err == nil {
+		t.Fatalf("expected scanner error, got nil")
+	}
+	if !errors.Is(err, bufio.ErrTooLong) {
+		t.Fatalf("err=%v, want bufio.ErrTooLong", err)
+	}
+}
+
+// -------------------------
+// Test Helpers
+// -------------------------
+
+// withReadAllStdout temporarily replaces readAllStdout for the duration of the test.
+func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
+	t.Helper()
+	orig := readAllStdout
+	readAllStdout = f
+	t.Cleanup(func() { readAllStdout = orig })
 }

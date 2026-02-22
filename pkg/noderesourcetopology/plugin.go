@@ -25,11 +25,13 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 
 	apiconfig "sigs.k8s.io/scheduler-plugins/apis/config"
 	"sigs.k8s.io/scheduler-plugins/apis/config/validation"
 	nrtcache "sigs.k8s.io/scheduler-plugins/pkg/noderesourcetopology/cache"
+	"sigs.k8s.io/scheduler-plugins/pkg/noderesourcetopology/nodeconfig"
 
 	"github.com/go-logr/logr"
 	topologyapi "github.com/k8stopologyawareschedwg/noderesourcetopology-api/pkg/apis/topology"
@@ -48,8 +50,23 @@ func init() {
 	utilruntime.Must(topologyv1alpha2.AddToScheme(scheme))
 }
 
-type filterFn func(lh logr.Logger, pod *v1.Pod, zones topologyv1alpha2.ZoneList, nodeInfo *framework.NodeInfo) *framework.Status
-type scoringFn func(logr.Logger, *v1.Pod, topologyv1alpha2.ZoneList) (int64, *framework.Status)
+type filterInfo struct {
+	nodeName        string // shortcut, used very often
+	node            fwk.NodeInfo
+	topologyManager nodeconfig.TopologyManager
+	numaNodes       NUMANodeList
+	qos             v1.PodQOSClass
+}
+
+type filterFn func(logr.Logger, *v1.Pod, *filterInfo) *fwk.Status
+
+type scoreInfo struct {
+	topologyManager nodeconfig.TopologyManager
+	qos             v1.PodQOSClass
+	numaNodes       NUMANodeList
+}
+
+type scoringFn func(logr.Logger, *v1.Pod, *scoreInfo) (int64, *fwk.Status)
 
 // TopologyMatch plugin which run simplified version of TopologyManager's admit handler
 type TopologyMatch struct {
@@ -73,7 +90,7 @@ func (tm *TopologyMatch) Name() string {
 
 // New initializes a new plugin and returns it.
 func New(ctx context.Context, args runtime.Object, handle framework.Handle) (framework.Plugin, error) {
-	lh := klog.FromContext(ctx).WithValues("plugin", Name)
+	lh := klog.FromContext(ctx)
 
 	lh.V(5).Info("creating new noderesourcetopology plugin")
 	tcfg, ok := args.(*apiconfig.NodeResourceTopologyMatchArgs)
@@ -122,14 +139,14 @@ func New(ctx context.Context, args runtime.Object, handle framework.Handle) (fra
 // NOTE: if in-place-update (KEP 1287) gets implemented, then PodUpdate event
 // should be registered for this plugin since a Pod update may free up resources
 // that make other Pods schedulable.
-func (tm *TopologyMatch) EventsToRegister(_ context.Context) ([]framework.ClusterEventWithHint, error) {
+func (tm *TopologyMatch) EventsToRegister(_ context.Context) ([]fwk.ClusterEventWithHint, error) {
 	// To register a custom event, follow the naming convention at:
 	// https://github.com/kubernetes/kubernetes/pull/101394
 	// Please follow: eventhandlers.go#L403-L410
 	nrtGVK := fmt.Sprintf("noderesourcetopologies.v1alpha2.%v", topologyapi.GroupName)
-	return []framework.ClusterEventWithHint{
-		{Event: framework.ClusterEvent{Resource: framework.Pod, ActionType: framework.Delete}},
-		{Event: framework.ClusterEvent{Resource: framework.Node, ActionType: framework.Add | framework.UpdateNodeAllocatable}},
-		{Event: framework.ClusterEvent{Resource: framework.EventResource(nrtGVK), ActionType: framework.Add | framework.Update}},
+	return []fwk.ClusterEventWithHint{
+		{Event: fwk.ClusterEvent{Resource: fwk.Pod, ActionType: fwk.Delete}},
+		{Event: fwk.ClusterEvent{Resource: fwk.Node, ActionType: fwk.Add | fwk.UpdateNodeAllocatable}},
+		{Event: fwk.ClusterEvent{Resource: fwk.EventResource(nrtGVK), ActionType: fwk.Add | fwk.Update}},
 	}, nil
 }

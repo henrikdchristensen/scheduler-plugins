@@ -1,4 +1,7 @@
 pytest==9.0.1
 pytest-cov==7.0.0
+pytest-timeout==2.4.0
 PyYAML==6.0.2
+scipy==1.14.1
+matplotlib==3.10.6
 ortools==9.14.6206

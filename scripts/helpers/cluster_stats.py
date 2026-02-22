@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
 # cluster_stats.py
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
 from scripts.helpers.general_helpers import qty_to_mcpu_int, qty_to_bytes_int
 from scripts.helpers.kubectl_helpers import get_json_ctx
 
+LOG = logging.getLogger(__name__)
+
 @dataclass
 class Snapshot:
     cpu_run_util: float                 # running requests / total alloc CPU
     mem_run_util: float                 # running requests / total alloc MEM
     pods_running: List[Tuple[str,str]]  # [(pod, node), ...] for Running pods
-    pods_unscheduled: List[str]         # not-Running pod names
+    pods_unscheduled: List[str]         # not-running pod names
     pods_run_by_node: Dict[str,int]     # node -> running pods count
-    cpu_req_by_node: Dict[str,int]      # node -> mCPU (Running & assigned only)
-    mem_req_by_node: Dict[str,int]      # node -> bytes (Running & assigned only)
+    cpu_req_by_node: Dict[str,int]      # node -> mCPU (running & assigned only)
+    mem_req_by_node: Dict[str,int]      # node -> bytes (running & assigned only)
     cpu_alloc_by_node: Dict[str,int]    # node -> allocatable mCPU
     mem_alloc_by_node: Dict[str,int]    # node -> allocatable bytes
-    running_placed_by_prio: Dict[str,int] = None  # priorityClassName -> count (Running only)
-    unschedulable_by_prio: Dict[str,int] = None  # priorityClassName
+    running_placed_by_prio: Dict[str,int] = None  # priorities -> count (running only)
+    unschedulable_by_prio: Dict[str,int] = None  # priorities
 
-def stat_snapshot(ctx: str, ns: str, expected: int) -> Snapshot:
-    _, running, unscheduled = get_running_and_unscheduled(ctx, ns, expected)
+def stat_snapshot(ctx: str, ns: str, expected: int, timeout: Optional[int] = None) -> Snapshot:
+    _, running, unscheduled = get_running_and_unscheduled(ctx, ns, expected, timeout=timeout)
     nodes = get_json_ctx(ctx, ["get","nodes","-o","json"])
     pods  = get_json_ctx(ctx, ["-n", ns, "get","pods","-o","json"])
 
@@ -88,7 +91,8 @@ def stat_snapshot(ctx: str, ns: str, expected: int) -> Snapshot:
 
 def sum_pod_requests(pod: dict) -> tuple[int, int]:
     """
-    Sum the CPU and memory requests for a pod by checking its containers and initContainers.
+    Sum the CPU and memory requests for a pod by checking its containers and
+    initContainers.
     """
     cpu_sum = 0
     mem_sum_b = 0
@@ -113,7 +117,7 @@ def get_running_and_unscheduled(
     ns: str,
     expected: int,
     interval: float = 0.5,
-    timeout: Optional[int] = 3,
+    timeout: Optional[int] = 10,
 ) -> Tuple[str, List[Tuple[str, str]], List[str]]:
     """
     Poll pods until we can decide:
@@ -125,7 +129,9 @@ def get_running_and_unscheduled(
     "unschedulable" is every created pod that's not Running.
     """
     start = time.time()
+    poll_count = 0
     while True:
+        poll_count += 1
         pods_obj = get_json_ctx(ctx, ["-n", ns, "get", "pods", "-o", "json"])
         pods = pods_obj.get("items", []) or []
 
@@ -154,15 +160,24 @@ def get_running_and_unscheduled(
         # "unscheduled" == created pods that are not Running
         unschedulable = sorted([n for n in created if n not in running_names])
 
-        # Keep "success" logic identical to before (just using Running instead of events)
+        # All expected pods are running
         if len(running_pairs) >= expected:
             return "all_running", running_pairs, []
 
-        # Created enough pods to decide, and some won't run
+        # Some pods are unschedulable
         if (len(running_pairs) + len(unschedulable)) >= expected and len(unschedulable) > 0:
             return "some_unschedulable", running_pairs, unschedulable
 
+        # Check for timeout
         if timeout is not None and (time.time() - start) >= timeout:
+            LOG.warning(
+                "get_running_and_unscheduled timed out after %.1fs (%d polls): "
+                "expected=%d, found=%d (running=%d, unscheduled=%d)",
+                time.time() - start, poll_count,
+                expected, len(running_pairs) + len(unschedulable),
+                len(running_pairs), len(unschedulable),
+            )
             return "timeout", running_pairs, unschedulable
 
+        # Wait before polling again
         time.sleep(interval)

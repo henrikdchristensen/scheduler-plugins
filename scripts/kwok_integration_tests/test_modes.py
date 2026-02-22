@@ -1,4 +1,9 @@
+#!/usr/bin/env python3
 # test_modes.py
+
+# ---------------------------------------------------------------------------
+# python -m pytest -s scripts/kwok_integration_tests/test_modes.py 
+# ---------------------------------------------------------------------------
 
 import argparse, csv, json, logging, sys, time
 from pathlib import Path
@@ -11,46 +16,31 @@ except ImportError:  # pragma: no cover
     pytest = None  # type: ignore
 
 from scripts.helpers.general_helpers import (
-    setup_logging,
-    make_header_footer,
-    qty_to_mcpu_int,
-    qty_to_bytes_int,
-    solver_trigger_http,
-    get_solver_active_status_http,
+    setup_logging, make_header_footer,
+    qty_to_mcpu_int, qty_to_bytes_int,
+    solver_trigger_http, get_solver_active_status_http,
 )
 from scripts.helpers.kubectl_helpers import (
-    ensure_namespace,
-    ensure_priority_classes,
-    wait_rs_pods,
-    get_json_ctx,
+    ensure_namespace, ensure_priority_classes,
+    wait_rs_pods, get_json_ctx,
 )
-from scripts.helpers.kwok_helpers import (
-    ensure_kwok_cluster,
-    create_kwok_nodes,
+from scripts.helpers.kwokctl_helpers import (
+    ensure_kwok_cluster, create_kwok_nodes,
     kwok_pods_cap,
 )
 from scripts.kwok_integration_tests.test_helpers import (
-    DEFAULT_CLUSTER_NAME,
-    DEFAULT_KWOK_RUNTIME,
-    DEFAULT_KWOKCTL_CONFIG,
-    NUM_NODES,
-    NODE_CPU,
-    NODE_MEM,
-    NUM_PRIORITIES,
-    VALID_OPT_MODES,
-    WorkloadStep,
-    WorkloadScenario,
-    WORKLOAD_SCENARIOS,
-    DEFAULT_WORKLOAD_ID,
+    DEFAULT_CLUSTER_NAME, DEFAULT_KWOK_RUNTIME,
+    DEFAULT_KWOKCTL_CONFIG, NUM_NODES,
+    NODE_CPU, NODE_MEM, NUM_PRIORITIES,
+    VALID_OPT_MODES, VALID_SOLVER_TYPES, DEFAULT_SOLVER_TYPE,
+    WORKLOAD_SCENARIOS, DEFAULT_WORKLOAD_ID,
     DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS,
-    rs_name_for_pod,
-    load_kwokctl_config,
+    WorkloadStep, WorkloadScenario,
+    rs_name_for_pod, load_kwokctl_config,
     build_kwokctl_config_for_mode,
-    scenario_max_priority,
-    scenario_total_replicas,
+    scenario_max_priority, scenario_total_replicas,
     apply_workload_step,
 )
-
 
 # ---------------------------------------------------------------------------
 # Constants specific to the integration tests
@@ -59,14 +49,12 @@ from scripts.kwok_integration_tests.test_helpers import (
 TEST_NAMESPACE = "integration-test"
 SYSTEM_NAMESPACE = "kube-system"
 
-# Must match your plugin's ConfigMap label & data key
 PLAN_LABEL_KEY = "plan"
 PLAN_DATA_KEY = PLAN_LABEL_KEY + ".json"
 
-# Plugin readiness ConfigMap (created once the plugin is fully ready)
 PLUGIN_CFG_NAME = "plugin-config"
 PLUGIN_CFG_DATA_KEY = "plugin-config.json"
-PLUGIN_CFG_TIMEOUT_S = 10  # timeout for waiting for plugin readiness
+PLUGIN_CFG_TIMEOUT_S = 10
 
 # Timing model:
 # 1) After creating workload & pods -> wait WORKLOAD_SETTLE_TIME_S
@@ -74,11 +62,11 @@ PLUGIN_CFG_TIMEOUT_S = 10  # timeout for waiting for plugin readiness
 # 3) Once plan is present -> wait PLAN_EXECUTION_TIME_S to be sure evictions/new pods are done
 WORKLOAD_SETTLE_TIME_S = 5
 PLAN_CFG_TIMEOUT_S = 20 # 
-PLAN_EXECUTION_MAX_WAIT_S = 10
+PLAN_EXECUTION_MAX_WAIT_S = 20
 PLAN_EXECUTION_MIN_WAIT_S = 5
 PLAN_EXECUTION_POLL_INTERVAL_S = 1
 
-# Manual HTTP trigger (same style as test_runner)
+# Manual HTTP trigger
 SOLVER_TRIGGER_URL = "http://localhost:18080/solve"
 SOLVER_TRIGGER_TIMEOUT_S = 60
 
@@ -89,19 +77,19 @@ SOLVER_ACTIVE_TIMEOUT_S = 5.0
 # KWOK node names
 NODE_NAMES = [f"kwok-node-{i+1}" for i in range(NUM_NODES)]
 
-# Mode combinations to exercise in pytest (central place to tweak)
-# Each entry: (opt_mode, opt_sync, workload_ids)
-# We just test using sync=True for all modes.
-PYTEST_MODE_CASES: List[Tuple[str, bool, List[str]]] = [
-    ("manual_blocking", True, ["prioaware"]),
-    ("manual", True, ["sameprio"]),
-    ("per_pod", True, ["sameprio"]),
-    ("periodic", True, ["sameprio"]),
-    ("interlude", True, ["higharrival"]),
+# Mode combinations to exercise in pytest
+# Each entry: (opt_mode, opt_blocking, workload_ids, solver_types)
+# solver_types is a list of solver types to test (cp_sat, gurobi)
+PYTEST_MODE_CASES: List[Tuple[str, bool, List[str], List[str]]] = [
+    ("manual_blocking", True, ["prioaware"], ["cp_sat", "gurobi"]),
+    ("manual", True, ["sameprio"], ["cp_sat", "gurobi"]),
+    ("scheduling_failure", True, ["sameprio"], ["cp_sat", "gurobi"]),
+    ("periodic", True, ["sameprio"], ["cp_sat", "gurobi"]),
+    ("stable_queue", True, ["higharrival"], ["cp_sat", "gurobi"]),
 ]
 
 # ---------------------------------------------------------------------------
-# Helpers reused from setup_cluster + extra test-only helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def wait_for_plugin_configmap(
@@ -112,16 +100,9 @@ def wait_for_plugin_configmap(
 ) -> Optional[Dict[str, Any]]:
     """
     Wait until the plugin readiness ConfigMap appears.
-
-    The plugin is considered 'ready' once it has created the ConfigMap:
-      - namespace: SYSTEM_NAMESPACE
-      - name:      PLUGIN_CFG_NAME
-
-    Returns the ConfigMap JSON dict, or None on timeout.
     """
     deadline = time.time() + timeout_s
     last_err: Optional[Exception] = None
-
     while time.time() < deadline:
         try:
             cm = get_json_ctx(
@@ -147,7 +128,6 @@ def wait_for_plugin_configmap(
                 e,
             )
             time.sleep(1.0)
-
     logger.warning(
         "plugin ConfigMap %s/%s did not appear within %.1fs (last error: %s)",
         SYSTEM_NAMESPACE,
@@ -156,7 +136,6 @@ def wait_for_plugin_configmap(
         last_err,
     )
     return None
-
 
 def get_latest_plan_configmap(
     ctx: str,
@@ -184,7 +163,6 @@ def get_latest_plan_configmap(
             logger.info("waiting for plan ConfigMap (kubectl failed): %s", e)
             time.sleep(1.0)
             continue
-
         items = data.get("items", [])
         if items:
             items.sort(
@@ -194,13 +172,10 @@ def get_latest_plan_configmap(
                 )
             )
             return items[-1]
-
         logger.info("no plan ConfigMap yet; sleeping...")
         time.sleep(1.0)
-
     logger.warning("no plan ConfigMap found within %ss", timeout_s)
     return None
-
 
 def stored_plan_is_done(sp: Dict[str, Any]) -> bool:
     """
@@ -210,7 +185,6 @@ def stored_plan_is_done(sp: Dict[str, Any]) -> bool:
     if isinstance(status, str):
         return status.lower() == "completed"
     return False
-
 
 def wait_for_plan_done(
     logger: logging.Logger,
@@ -227,7 +201,6 @@ def wait_for_plan_done(
     """
     start = time.time()
     deadline = start + max_wait_s
-
     if min_wait_s > 0:
         logger.info(
             "Waiting %.1fs minimum before checking plan status in ConfigMap %s/%s.",
@@ -236,10 +209,8 @@ def wait_for_plan_done(
             cm_name,
         )
         time.sleep(min_wait_s)
-
     attempt = 0
     last_err: Optional[Exception] = None
-
     while time.time() < deadline:
         attempt += 1
         try:
@@ -290,7 +261,6 @@ def wait_for_plan_done(
                         cm_name,
                         attempt,
                     )
-
         except RuntimeError as e:
             last_err = e
             logger.warning(
@@ -300,12 +270,10 @@ def wait_for_plan_done(
                 attempt,
                 e,
             )
-
         remaining = deadline - time.time()
         if remaining <= 0:
             break
         time.sleep(min(poll_interval_s, max(0.0, remaining)))
-
     logger.error(
         "Plan status did not reach 'done' within %.1fs for ConfigMap %s/%s (last_err=%r)",
         max_wait_s,
@@ -315,22 +283,12 @@ def wait_for_plan_done(
     )
     return None
 
-
 def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
     """
-    Given a StoredPlan dict, compute the FINAL planned placement:
-
-      - Start from plan.old_placements as baseline.
-      - Remove pods listed in plan.evicts.
-      - Override/add pods from plan.new_placements.
-
-    Returns mapping: (namespace, name) -> final planned node.
-    Evicted pods are intentionally omitted (no final node).
+    Given a StoredPlan dict, compute the FINAL planned placement.
     """
     plan = sp.get("plan") or {}
-
     mapping: Dict[Tuple[str, str], str] = {}
-
     # 1) Baseline: old placements
     for op in plan.get("old_placements") or []:
         pod = op.get("pod") or {}
@@ -339,7 +297,6 @@ def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
         node = op.get("node")
         if ns and name and node:
             mapping[(str(ns), str(name))] = str(node)
-
     # 2) Evicts: remove from mapping
     for ev in plan.get("evicts") or []:
         pod = ev.get("pod") or {}
@@ -347,7 +304,6 @@ def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
         name = pod.get("name")
         if ns and name:
             mapping.pop((str(ns), str(name)), None)
-
     # 3) New placements: override / add
     for pl in plan.get("new_placements") or []:
         pod = pl.get("pod") or {}
@@ -356,18 +312,11 @@ def plan_placements_by_pod(sp: Dict[str, Any]) -> Dict[Tuple[str, str], str]:
         to_node = pl.get("to_node")
         if ns and name and to_node:
             mapping[(str(ns), str(name))] = str(to_node)
-
     return mapping
 
-
-def build_expected_assignment(
-    scenario: WorkloadScenario,
-    namespace: str,
-) -> Dict[Tuple[str, str], bool]:
+def build_expected_assignment(scenario: WorkloadScenario, namespace: str) -> Dict[Tuple[str, str], bool]:
     """
-    Build expected assignment mapping at ReplicaSet level:
-      (namespace, rs_name) -> should_run
-    Only pods with expected_assignment != None are included.
+    Build expected assignment mapping at ReplicaSet level.
     """
     mapping: Dict[Tuple[str, str], bool] = {}
     for step in scenario.steps:
@@ -377,7 +326,6 @@ def build_expected_assignment(
             rs_name = rs_name_for_pod(scenario, pod)
             mapping[(namespace, rs_name)] = bool(pod.expected_assignment)
     return mapping
-
 
 def wait_for_workload_step(
     logger: logging.Logger,
@@ -485,7 +433,6 @@ def wait_for_workload_step(
 
     return True
 
-
 def write_plan_debug_files(
     logger: logging.Logger,
     out_dir: Path,
@@ -512,10 +459,10 @@ def write_plan_debug_files(
             writer = csv.writer(f)
             writer.writerow(
                 [
-                    "pod",              # real pod name
+                    "pod",
                     "planned_node",
                     "actual_node",
-                    "expected_assignment",  # from owning ReplicaSet (if any)
+                    "expected_assignment",
                 ]
             )
             for ns, name in all_keys:
@@ -546,7 +493,6 @@ def write_plan_debug_files(
         )
     except Exception as e:
         logger.warning("failed to write plan debug files: %s", e)
-
 
 def evaluate_plan_and_cluster_state(
     logger: logging.Logger,
@@ -582,13 +528,10 @@ def evaluate_plan_and_cluster_state(
         ns = meta.get("namespace", namespace)
         node = spec.get("nodeName", "") or ""
         labels = meta.get("labels") or {}
-
         if not name:
             continue
-
         key_pod = (str(ns), str(name))
         actual_nodes[key_pod] = node
-
         rs_name = labels.get("app")
         if rs_name:
             key_rs = (str(ns), str(rs_name))
@@ -599,7 +542,7 @@ def evaluate_plan_and_cluster_state(
             else:
                 rs_assigned.setdefault(key_rs, False)
 
-    # Sanity: make sure we saw at least one pod for each logical ReplicaSet
+    # Make sure we saw at least one pod for each logical ReplicaSet
     for step in scenario.steps:
         for pod in step.pods:
             rs_name = rs_name_for_pod(scenario, pod)
@@ -662,7 +605,6 @@ def evaluate_plan_and_cluster_state(
     )
     return True
 
-
 def assert_no_active_plan_http(logger: logging.Logger, *, when: str) -> bool:
     """
     Call GET /active via the shared helper and assert that no active plan is reported.
@@ -671,57 +613,51 @@ def assert_no_active_plan_http(logger: logging.Logger, *, when: str) -> bool:
     body_compact = (body or "").replace("\n", "\\n")
     if len(body_compact) > 600:
         body_compact = body_compact[:600] + "...(truncated)"
-
     logger.info("solver /active %s: code=%s body=%s", when, code, body_compact)
-
     if code != 200:
         logger.error("Unexpected /active status=%s %s", code, when)
         return False
-
     try:
         payload = json.loads(body)
     except Exception as e:
         logger.error("Failed to parse /active JSON %s: %s body=%r", when, e, body)
         return False
-
     active = bool(payload.get("active", False))
     if active:
         logger.error("Expected no active plan %s, but /active reported active=true: %s", when, payload)
         return False
-
     return True
 
-
 # ---------------------------------------------------------------------------
-# Core integration function
+# Core integration test runner
 # ---------------------------------------------------------------------------
 
 def run_mode_integration(
     opt_mode: str,
-    opt_sync: bool,
+    opt_blocking: bool,
     *,
     scenario: WorkloadScenario,
+    solver_type: str = DEFAULT_SOLVER_TYPE,
     cluster_name: str = DEFAULT_CLUSTER_NAME,
     kwok_runtime: str = DEFAULT_KWOK_RUNTIME,
     kwokctl_config_file: str = DEFAULT_KWOKCTL_CONFIG,
     disable_wait_and_active_checks: bool = DEFAULT_DISABLE_WAIT_AND_ACTIVE_CHECKS,
 ) -> bool:
     """
-    End-to-end integration test for a given (opt_mode, scenario).
-
-    If disable_wait_and_active_checks is True, pod waits and /active checks
-    during workload application are skipped.
+    End-to-end integration test for a given (opt_mode, opt_blocking, scenario, solver_type).
     """
     if opt_mode not in VALID_OPT_MODES:
         raise ValueError(f"Invalid opt_mode={opt_mode!r}; expected one of {sorted(VALID_OPT_MODES)}")
+    if solver_type not in VALID_SOLVER_TYPES:
+        raise ValueError(f"Invalid solver_type={solver_type!r}; expected one of {sorted(VALID_SOLVER_TYPES)}")
 
     LOG = setup_logging(
-        name=f"mpo-itest-{scenario.id}-{opt_mode}-{opt_sync}",
-        prefix=f"[mpo-itest scenario={scenario.id} mode={opt_mode} sync={opt_sync}] ",
+        name=f"mpo-itest-{scenario.id}-{opt_mode}-{opt_blocking}-{solver_type}",
+        prefix=f"[mpo-itest scenario={scenario.id} mode={opt_mode} blocking={opt_blocking} solver={solver_type}] ",
         level="INFO",
     )
     header, footer = make_header_footer(
-        f"MPOptimizer KWOK integration: scenario={scenario.id}, mode={opt_mode}, sync={opt_sync}"
+        f"MPOptimizer KWOK integration: scenario={scenario.id}, mode={opt_mode}, blocking={opt_blocking}, solver={solver_type}"
     )
     LOG.info("\n%s\ncluster=%s\n%s", header, cluster_name, footer)
     LOG.info("Scenario description: %s", scenario.description)
@@ -734,7 +670,7 @@ def run_mode_integration(
 
     # --- KWOK cluster (always recreate) ---
     base_cfg = load_kwokctl_config(kwokctl_config_file)
-    cfg_for_mode = build_kwokctl_config_for_mode(base_cfg, opt_mode, opt_sync)
+    cfg_for_mode = build_kwokctl_config_for_mode(base_cfg, opt_mode, opt_blocking, solver_type)
 
     ensure_kwok_cluster(
         LOG,
@@ -755,7 +691,7 @@ def run_mode_integration(
         pods_cap=kwok_pods_cap(total_pods),
     )
 
-    # --- Namespace + PCs ---
+    # --- Namespace + Priority Classes ---
     ensure_namespace(LOG, ctx, TEST_NAMESPACE)
     num_prios = max(NUM_PRIORITIES, scenario_max_priority(scenario))
     ensure_priority_classes(LOG, ctx, num_prios, prefix="p", start=1)
@@ -810,23 +746,32 @@ def run_mode_integration(
     LOG.info("Sleeping %.1fs for workload to settle before expecting a plan.", WORKLOAD_SETTLE_TIME_S)
     time.sleep(WORKLOAD_SETTLE_TIME_S)
 
+    # Track solver timing
+    solver_start = time.time()
+
     # Manual modes: trigger optimization via HTTP
     if opt_mode.startswith("manual"):
         LOG.info("Manual mode: triggering solver via HTTP: %s", SOLVER_TRIGGER_URL)
         code, body = solver_trigger_http(LOG, SOLVER_TRIGGER_URL, SOLVER_TRIGGER_TIMEOUT_S)
+        solver_elapsed = time.time() - solver_start
         body_compact = (body or "").replace("\n", "\\n")
         if len(body_compact) > 600:
             body_compact = body_compact[:600] + "...(truncated)"
-        LOG.info("solver_response code=%s body=%s", code, body_compact)
+        LOG.info("solver_response code=%s elapsed=%.3fs body=%s", code, solver_elapsed, body_compact)
+    else:
+        LOG.info("Non-manual mode (%s): waiting for solver to produce plan automatically...", opt_mode)
 
     # 2) Wait for plan ConfigMap (with timeout)
     cm = get_latest_plan_configmap(ctx, LOG, timeout_s=PLAN_CFG_TIMEOUT_S)
+    plan_appeared_elapsed = time.time() - solver_start
     if cm is None:
         LOG.warning(
             "No plan ConfigMap found within %.1fs; treating as integration failure.",
             PLAN_CFG_TIMEOUT_S,
         )
         return False
+
+    LOG.info("Plan ConfigMap appeared after %.3fs (solver_type=%s)", plan_appeared_elapsed, solver_type)
 
     cm_name = (cm.get("metadata") or {}).get("name")
     if not cm_name:
@@ -868,34 +813,34 @@ def run_mode_integration(
     )
     return ok
 
-
 # ---------------------------------------------------------------------------
 # Pytest entrypoint
 # ---------------------------------------------------------------------------
 
 if pytest is not None:
-    # Flatten (workload_ids, mode, sync) -> (workload_id, mode, sync)
-    PARAM_CASES: List[Tuple[str, bool, str]] = [
-        (opt_mode, opt_sync, wid)
-        for (opt_mode, opt_sync, workload_ids) in PYTEST_MODE_CASES
+    # Flatten (opt_mode, opt_blocking, workload_ids, solver_types) -> (opt_mode, opt_blocking, workload_id, solver_type)
+    PARAM_CASES: List[Tuple[str, bool, str, str]] = [
+        (opt_mode, opt_blocking, wid, solver)
+        for (opt_mode, opt_blocking, workload_ids, solver_types) in PYTEST_MODE_CASES
         for wid in workload_ids
+        for solver in solver_types
     ]
 
     @pytest.mark.parametrize(
-        "opt_mode,opt_sync,workload_id",
+        "opt_mode,opt_blocking,workload_id,solver_type",
         PARAM_CASES,
     )
-    def test_modes_end_to_end(opt_mode: str, opt_sync: bool, workload_id: str):
+    def test_modes_end_to_end(opt_mode: str, opt_blocking: bool, workload_id: str, solver_type: str):
         scenario = WORKLOAD_SCENARIOS[workload_id]
         assert run_mode_integration(
             opt_mode,
-            opt_sync,
+            opt_blocking,
             scenario=scenario,
+            solver_type=solver_type,
             cluster_name=DEFAULT_CLUSTER_NAME,
             kwok_runtime=DEFAULT_KWOK_RUNTIME,
             kwokctl_config_file=DEFAULT_KWOKCTL_CONFIG,
         )
-
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -915,29 +860,28 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--optimize-mode", required=True,
                     choices=sorted(VALID_OPT_MODES),
                     help="OPTIMIZE_MODE value")
-    ap.add_argument("--optimize-sync", action="store_true",
-                    help="Set OPTIMIZE_SYNC=true (default: false)")
+    ap.add_argument("--optimize-blocking", action="store_true",
+                    help="Set OPTIMIZE_BLOCKING_SOLVING=true (default: false)")
+    ap.add_argument("--solver-type", default=DEFAULT_SOLVER_TYPE,
+                    choices=sorted(VALID_SOLVER_TYPES),
+                    help=f"Solver type: cp_sat, gurobi (default: {DEFAULT_SOLVER_TYPE})")
     ap.add_argument("--workload-id", default=DEFAULT_WORKLOAD_ID,
                     choices=sorted(WORKLOAD_SCENARIOS.keys()),
                     help=f"Workload scenario id (default: {DEFAULT_WORKLOAD_ID})")
-    ap.add_argument(
-        "--disable-wait-and-active-checks",
-        action="store_true",
+    ap.add_argument("--disable-wait-and-active-checks", action="store_true",
         help="Disable waiting for pods and /active invariants while applying workloads.",
     )
     return ap
 
-
 def main() -> None:
     ap = build_argparser()
     args = ap.parse_args()
-
     scenario = WORKLOAD_SCENARIOS[args.workload_id]
-
     ok = run_mode_integration(
         opt_mode=args.optimize_mode,
-        opt_sync=args.optimize_sync,
+        opt_blocking=args.optimize_blocking,
         scenario=scenario,
+        solver_type=args.solver_type,
         cluster_name=args.cluster_name,
         kwok_runtime=args.kwok_runtime,
         kwokctl_config_file=args.kwokctl_config_file,

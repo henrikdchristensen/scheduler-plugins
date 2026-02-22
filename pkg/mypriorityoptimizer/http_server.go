@@ -7,43 +7,103 @@ import (
 	"net/http"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
+// -------------------------
+// /healthz endpoint
+// -------------------------
 
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+// httpHealthzHandler handles /healthz requests.
+func (pl *SharedState) httpHealthzHandler(w http.ResponseWriter, r *http.Request) {
+	klog.InfoS("HTTP /healthz requested")
+	if !pl.PluginReady.Load() {
+		http.Error(w, "warming", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }
 
-// -----------------------------------------------------------------------------
-// Test hooks
-// -----------------------------------------------------------------------------
+// -------------------------
+// /active endpoint
+// -------------------------
 
-var (
-	getPodsForHTTP = func(pl *SharedState) ([]*v1.Pod, error) {
-		return pl.getPods()
+// httpActiveHandler handles /active requests.
+func (pl *SharedState) httpActiveHandler(w http.ResponseWriter, r *http.Request) {
+	klog.InfoS("HTTP /active requested")
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	runFlowForHTTP = func(pl *SharedState, ctx context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
-		return pl.runOptimizationFlow(ctx, nil)
+	resp := HttpResponse{
+		Active: pl.ActivePlanInProgress.Load(),
 	}
-)
+	writeHttpJson(w, http.StatusOK, resp)
+}
 
-// -----------------------------------------------------------------------------
-// HTTP server entrypoint
-// -----------------------------------------------------------------------------
+// -------------------------
+// /solve endpoint
+// -------------------------
 
-func (pl *SharedState) startHTTPServer(ctx context.Context, addr string) {
+// httpSolveHandler handles /solve requests.
+func (pl *SharedState) httpSolveHandler(w http.ResponseWriter, r *http.Request) {
+	klog.InfoS("HTTP /solve requested")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	start := time.Now()
+	resp := HttpResponse{
+		Active: pl.ActivePlanInProgress.Load(),
+	}
+
+	// Not ready yet -> early exit
+	if !pl.PluginReady.Load() {
+		resp.Status = "not-ready"
+		resp.DurationMs = time.Since(start).Milliseconds()
+		writeHttpJson(w, http.StatusPreconditionFailed, resp)
+		return
+	}
+
+	// Count pending pods before running any solvers.
+	pods, _ := pl.getPods()
+	resp.PendingBefore = countPendingPods(pods)
+
+	_, baseline, bestName, _, attempts, err := runOptFlow(pl, context.Background())
+	resp.Baseline = baseline
+	resp.BestName = bestName
+	resp.Attempts = attempts
+	resp.DurationMs = time.Since(start).Milliseconds()
+	if err != nil {
+		resp.Error = err.Error()
+	}
+
+	switch err {
+	case nil:
+		resp.Status = "ok"
+	case ErrActiveInProgress:
+		resp.Status = "busy"
+	case ErrNoImprovingSolutionFromAnySolver, ErrNoPendingPodsScheduled, ErrNoPendingPods:
+		resp.Status = "noop"
+	default:
+		resp.Status = "error"
+	}
+
+	writeHttpJson(w, http.StatusOK, resp)
+}
+
+// -------------------------
+// startHttpServer
+// -------------------------
+
+// startHttpServer starts the HTTP server for health checks and manual solving.
+func (pl *SharedState) startHttpServer(ctx context.Context, addr string) {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/healthz", pl.healthzHandler)
-	mux.HandleFunc("/active", pl.activeHandler)
-	mux.HandleFunc("/solve", pl.solveHandler)
+	mux.HandleFunc("/healthz", pl.httpHealthzHandler)
+	mux.HandleFunc("/active", pl.httpActiveHandler)
+	mux.HandleFunc("/solve", pl.httpSolveHandler)
 
 	server := &http.Server{
 		Addr:    addr,
@@ -65,76 +125,21 @@ func (pl *SharedState) startHTTPServer(ctx context.Context, addr string) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Handlers
-// -----------------------------------------------------------------------------
+// -------------------------
+// writeHttpJson
+// -------------------------
 
-// healthz
-func (pl *SharedState) healthzHandler(w http.ResponseWriter, r *http.Request) {
-	klog.InfoS("HTTP /healthz requested")
-	if !pl.PluginReady.Load() {
-		http.Error(w, "warming", http.StatusServiceUnavailable)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
+// writeHttpJson writes a JSON response with the given status code.
+func writeHttpJson(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
-// active
-func (pl *SharedState) activeHandler(w http.ResponseWriter, r *http.Request) {
-	klog.InfoS("HTTP /active requested")
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	resp := HttpResponse{
-		Active: pl.Active.Load(),
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
+// -------------------------
+// Test Hooks
+// -------------------------
 
-// solve
-func (pl *SharedState) solveHandler(w http.ResponseWriter, r *http.Request) {
-	klog.InfoS("HTTP /solve requested")
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	start := time.Now()
-	resp := HttpResponse{
-		Active: pl.Active.Load(),
-	}
-
-	// Not ready yet -> early exit
-	if !pl.PluginReady.Load() {
-		resp.Status = "not-ready"
-		resp.DurationMs = time.Since(start).Milliseconds()
-		writeJSON(w, http.StatusPreconditionFailed, resp)
-		return
-	}
-
-	// Count pending pods before running any solvers.
-	pods, _ := getPodsForHTTP(pl)
-	resp.PendingBefore = countPendingPods(pods)
-	_, baseline, bestName, _, attempts, err := runFlowForHTTP(pl, context.Background())
-	resp.Baseline = baseline
-	resp.BestName = bestName
-	resp.Attempts = attempts
-	resp.DurationMs = time.Since(start).Milliseconds()
-	if err != nil {
-		resp.Error = err.Error()
-	}
-
-	switch err {
-	case nil:
-		resp.Status = "ok"
-	case ErrActiveInProgress:
-		resp.Status = "busy"
-	case ErrNoImprovingSolutionFromAnySolver, ErrNoPendingPodsToSchedule, ErrNoPendingPods:
-		resp.Status = "noop"
-	default:
-		resp.Status = "error"
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+var runOptFlow = func(pl *SharedState, ctx context.Context) (*Plan, *SolverScore, string, *SolverResult, []SolverResult, error) {
+	return pl.runOptimizationFlow(ctx, nil)
 }

@@ -1,0 +1,29 @@
+\begin{table}[htbp]
+\centering
+\caption{Mean paired differences in number of plan activations between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities (mean ± std). p1 is the lowest priority.}
+\label{tab:plan_activations-defpreempt1-prio4}
+\adjustbox{max width=\linewidth, max totalheight=0.9\textheight}{%
+\begin{tabular}{l w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em}}
+\toprule
+\multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{3}{c}{\# Nodes =\,16} & \multicolumn{3}{c}{\# Nodes =\,32} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & \llap{Inter-arrival =\,}4s & 8s & 16s & 4s & 8s & 16s \\
+\midrule
+Scheduling-failure (blocking) & $168\pm39.4$ & $116\pm25.0$ & $72\pm16.3$ & $175\pm14.1$ & $77\pm11.3$ & $45\pm5.3$ \\
+Scheduling-failure (non-blocking) & $175\pm42.5$ & $120\pm23.5$ & $66\pm18.6$ & $138\pm12.8$ & $77\pm15.0$ & $46\pm8.2$ \\
+Periodic (blocking), 4s interval & $72\pm22.3$ & $61\pm6.8$ & $41\pm11.2$ & $67\pm10.0$ & $44\pm7.0$ & $32\pm3.8$ \\
+Periodic (non-blocking), 4s interval & $74\pm17.0$ & $59\pm15.3$ & $40\pm12.6$ & $63\pm9.3$ & $40\pm7.8$ & $31\pm8.5$ \\
+Periodic (blocking), 8s interval & $43\pm18.4$ & $40\pm10.1$ & $32\pm7.0$ & $44\pm2.9$ & $29\pm7.8$ & $24\pm8.0$ \\
+Periodic (non-blocking), 8s interval & $42\pm16.9$ & $44\pm13.0$ & $30\pm10.1$ & $46\pm7.4$ & $30\pm5.5$ & $25\pm8.5$ \\
+Periodic (blocking), 16s interval & $24\pm11.2$ & $27\pm2.9$ & $23\pm5.9$ & $29\pm6.9$ & $23\pm6.9$ & $19\pm2.7$ \\
+Periodic (non-blocking), 16s interval & $23\pm9.0$ & $26\pm11.3$ & $22\pm7.6$ & $30\pm9.4$ & $24\pm7.1$ & $19\pm5.0$ \\
+Stable-queue (blocking), 4s delay & $62\pm20.7$ & $51\pm15.2$ & $40\pm5.4$ & $50\pm8.2$ & $33\pm7.4$ & $24\pm5.9$ \\
+Stable-queue (non-blocking), 4s delay & $64\pm23.6$ & $51\pm10.0$ & $36\pm7.3$ & $50\pm10.0$ & $31\pm4.5$ & $26\pm4.8$ \\
+Stable-queue (blocking), 8s delay & $40\pm18.4$ & $37\pm9.8$ & $28\pm9.2$ & $38\pm9.9$ & $27\pm5.8$ & $21\pm4.6$ \\
+Stable-queue (non-blocking), 8s delay & $38\pm18.1$ & $36\pm10.2$ & $29\pm6.7$ & $36\pm5.8$ & $27\pm5.3$ & $22\pm1.1$ \\
+Stable-queue (blocking), 16s delay & $21\pm13.6$ & $23\pm8.4$ & $22\pm4.4$ & $20\pm8.0$ & $22\pm5.8$ & $18\pm4.1$ \\
+Stable-queue (non-blocking), 16s delay & $22\pm10.3$ & $24\pm8.4$ & $22\pm5.8$ & $23\pm7.4$ & $21\pm3.9$ & $18\pm4.5$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

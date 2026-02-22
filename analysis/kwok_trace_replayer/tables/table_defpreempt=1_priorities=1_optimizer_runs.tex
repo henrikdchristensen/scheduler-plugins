@@ -1,0 +1,29 @@
+\begin{table}[htbp]
+\centering
+\caption{Mean paired differences in number of optimizer runs between the plugin with DefaultPreemption enabled and the default scheduler for runs with one priority (mean ± std).}
+\label{tab:optimizer_runs-defpreempt1-prio1}
+\adjustbox{max width=\linewidth, max totalheight=0.9\textheight}{%
+\begin{tabular}{l w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em}}
+\toprule
+\multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{3}{c}{\# Nodes =\,16} & \multicolumn{3}{c}{\# Nodes =\,32} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & \llap{Inter-arrival =\,}4s & 8s & 16s & 4s & 8s & 16s \\
+\midrule
+Scheduling-failure (blocking) & $218\pm10.3$ & $152\pm17.5$ & $108\pm30.0$ & $191\pm22.2$ & $147\pm20.9$ & $109\pm40.4$ \\
+Scheduling-failure (non-blocking) & $226\pm18.5$ & $156\pm18.0$ & $114\pm30.4$ & $184\pm24.1$ & $149\pm30.2$ & $110\pm35.1$ \\
+Periodic (blocking), 4s interval & $86\pm14.4$ & $80\pm17.2$ & $75\pm28.8$ & $101\pm19.5$ & $92\pm23.4$ & $96\pm42.8$ \\
+Periodic (non-blocking), 4s interval & $87\pm15.9$ & $76\pm15.6$ & $80\pm36.0$ & $96\pm15.5$ & $95\pm22.9$ & $93\pm42.6$ \\
+Periodic (blocking), 8s interval & $47\pm4.1$ & $45\pm8.8$ & $51\pm16.7$ & $65\pm11.1$ & $71\pm21.6$ & $61\pm23.8$ \\
+Periodic (non-blocking), 8s interval & $47\pm9.8$ & $46\pm9.7$ & $50\pm13.6$ & $63\pm14.8$ & $76\pm26.5$ & $70\pm29.5$ \\
+Periodic (blocking), 16s interval & $23\pm4.8$ & $26\pm4.8$ & $27\pm10.4$ & $37\pm10.8$ & $44\pm11.4$ & $42\pm12.8$ \\
+Periodic (non-blocking), 16s interval & $25\pm5.7$ & $25\pm4.8$ & $30\pm7.7$ & $34\pm7.3$ & $44\pm15.0$ & $44\pm16.6$ \\
+Stable-queue (blocking), 4s delay & $129\pm25.2$ & $110\pm29.6$ & $98\pm42.5$ & $162\pm39.7$ & $155\pm53.4$ & $120\pm48.3$ \\
+Stable-queue (non-blocking), 4s delay & $131\pm19.4$ & $111\pm24.2$ & $132\pm104.2$ & $173\pm37.2$ & $157\pm52.6$ & $123\pm46.6$ \\
+Stable-queue (blocking), 8s delay & $62\pm2.9$ & $57\pm12.1$ & $74\pm26.1$ & $92\pm15.1$ & $101\pm24.0$ & $93\pm41.5$ \\
+Stable-queue (non-blocking), 8s delay & $65\pm10.6$ & $60\pm14.2$ & $69\pm24.3$ & $99\pm24.3$ & $102\pm28.6$ & $83\pm34.5$ \\
+Stable-queue (blocking), 16s delay & $31\pm4.5$ & $33\pm8.0$ & $40\pm15.2$ & $49\pm4.7$ & $70\pm19.5$ & $65\pm30.9$ \\
+Stable-queue (non-blocking), 16s delay & $28\pm3.4$ & $31\pm6.7$ & $45\pm18.9$ & $47\pm9.9$ & $66\pm18.7$ & $39\pm11.0$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

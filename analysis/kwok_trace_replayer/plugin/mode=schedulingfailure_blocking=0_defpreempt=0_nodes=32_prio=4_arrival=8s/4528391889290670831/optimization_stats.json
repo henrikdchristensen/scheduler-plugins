@@ -1,0 +1,12 @@
+{
+  "updated_at": "2026-02-03T22:30:12.781290102Z",
+  "optimization_flow_calls_total": 127,
+  "optimization_flow_entered_total": 127,
+  "solver_attempts_total": 127,
+  "best_solver_optimal_total": 76,
+  "best_solver_feasible_total": 6,
+  "best_solver_failed_total": 45,
+  "plan_not_applicable_total": 0,
+  "no_improving_solution_total": 0,
+  "plan_activated_total": 82
+}

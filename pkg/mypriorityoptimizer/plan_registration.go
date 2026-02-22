@@ -4,53 +4,59 @@ package mypriorityoptimizer
 import (
 	"context"
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
+// -------------------------
+// planRegistration
+// -------------------------
+
 // planRegistration builds and registers a new plan as active, exporting it to a ConfigMap.
 func (pl *SharedState) planRegistration(
 	ctx context.Context,
-	solver SolverResult,
+	solverResult SolverResult,
+	out *SolverOutput,
 	preemptor *v1.Pod,
 	pods []*v1.Pod,
 ) (*Plan, *ActivePlan, error) {
-	// Build the plan from the solver output
-	plan, err := pl.buildPlan(solver.Output, preemptor, pods)
+	if out == nil {
+		return nil, nil, fmt.Errorf("nil solver output for plan registration")
+	}
+
+	plan, err := buildPlanFn(pl, out, preemptor, pods)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build actions: %w", err)
 	}
 
-	// Unique plan id
-	id := fmt.Sprintf(PlanConfigMapNamePrefix+"%d", time.Now().UnixNano())
-
-	// Set active plan
+	id := getUniqueId(PlanConfigMapNamePrefix)
 	pl.setActivePlan(plan, id, pods)
 
-	// Store plan in ConfigMap for debugging purposes
 	storedPlan := &StoredPlan{
-		PluginVersion:        Version,
-		OptimizationStrategy: combinedModeToString(),
-		GeneratedAt:          time.Now().UTC(),
+		PluginVersion:        PluginVersion,
+		OptimizationStrategy: getModeCombinedAsString(),
+		GeneratedAt:          getTimestampNowUtc(),
 		PlanStatus:           PlanStatusActive,
 		Plan:                 plan,
-		Solver:               summarizeAttempt(solver),
+		SolverResult:         solverResult,
 	}
-	if preemptor != nil {
-		storedPlan.Preemptor = &Preemptor{
-			Pod: Pod{
-				UID:       preemptor.UID,
-				Namespace: preemptor.Namespace,
-				Name:      preemptor.Name,
-			},
-			NominatedNode: plan.NominatedNode,
-		}
-	}
-	if err := pl.exportPlanToConfigMap(ctx, id, storedPlan); err != nil {
+	if err := exportPlanToConfigMapFn(pl, ctx, id, storedPlan); err != nil {
 		klog.ErrorS(err, "export plan to ConfigMap failed")
 	}
 
 	return plan, pl.getActivePlan(), nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	buildPlanFn = func(pl *SharedState, out *SolverOutput, preemptor *v1.Pod, pods []*v1.Pod) (*Plan, error) {
+		return pl.buildPlan(out, preemptor, pods)
+	}
+	exportPlanToConfigMapFn = func(pl *SharedState, ctx context.Context, id string, stored *StoredPlan) error {
+		return pl.exportPlanToConfigMap(ctx, id, stored)
+	}
+)

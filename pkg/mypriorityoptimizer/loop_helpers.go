@@ -11,21 +11,12 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type OptimizeLoopConfig struct {
-	Label          string        // log label
-	Interval       time.Duration // base tick interval
-	InterludeDelay time.Duration // 0 => no "idle window"; >0 => require this long of stability
-	CancelOnChange bool          // cancel in-flight run if pending set changes
-}
+// -------------------------
+// startLoops
+// -------------------------
 
-// By default this just calls (*SharedState).optimizeBackgroundLoop.
-// Tests can override this variable to intercept the cfg passed in.
-var optimizeBackgroundLoopFunc = func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
-	pl.optimizeBackgroundLoop(ctx, cfg)
-}
-
-// startLoops launches background loops exactly once, after caches are warm.
-// It is safe to call multiple times; only the first call does anything.
+// startLoops launches background loops exactly once, after plugin is ready. It
+// is safe to call multiple times; only the first call does anything.
 func (pl *SharedState) startLoops(ctx context.Context) {
 	if !pl.PluginReady.Load() {
 		return
@@ -33,13 +24,19 @@ func (pl *SharedState) startLoops(ctx context.Context) {
 	switch OptimizeMode {
 	case ModePeriodic:
 		go pl.loopPeriodic(ctx)
-	case ModeInterlude:
-		go pl.loopInterlude(ctx)
+	case ModeStableQueue:
+		go pl.loopStableQueue(ctx)
 	}
 }
 
+// -------------------------
+// optimizeBackgroundLoop
+// -------------------------
+
+// optimizeBackgroundLoop runs optimization in the background periodically or in
+// stable queue mode, based on the provided configuration.
 func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeLoopConfig) {
-	strategy := combinedModeToString()
+	strategy := getModeCombinedAsString()
 
 	interval := cfg.Interval
 	if interval <= 0 {
@@ -49,7 +46,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 	klog.InfoS(msg(cfg.Label, "started"),
 		"mode", strategy,
 		"interval", interval,
-		"interludeDelay", cfg.InterludeDelay,
+		"stableQueueDelay", cfg.StableQueueDelay,
 		"cancelOnChange", cfg.CancelOnChange,
 	)
 
@@ -62,10 +59,10 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 	lastChange := time.Now()
 
 	var (
-		runCancel           context.CancelFunc
-		runDone             chan bool
-		baselineSet         map[types.UID]struct{}
-		baselineFingerprint string
+		runCancel      context.CancelFunc
+		runDone        chan bool
+		runSet         map[types.UID]struct{}
+		runFingerprint string
 	)
 
 	for {
@@ -80,7 +77,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 			return
 
 		case <-timer.C:
-			// 1) Cache warm-up
+			// Plugin ready check
 			if !pl.PluginReady.Load() {
 				klog.V(MyV).InfoS(msg(cfg.Label, InfoCachesNotWarmedUp))
 				lastPendingSet = nil
@@ -91,15 +88,15 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 2) If a plan is active, let it finish.
+			// If a plan is active, let it finish.
 			if ap := pl.getActivePlan(); ap != nil {
 				klog.V(MyV).InfoS(msg(cfg.Label, InfoActivePlanInProgress))
 				timer.Reset(interval)
 				continue
 			}
 
-			// 3) Snapshot
-			snap, err := pl.buildPendingSnapshot()
+			// Snapshot pending pods and cluster state.
+			snap, err := buildPendingSnapshotHook(pl)
 			if err != nil {
 				klog.V(MyV).InfoS(msg(cfg.Label, "buildPendingSnapshot failed"),
 					"err", err)
@@ -111,24 +108,24 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 			pendingCount := snap.PendingCount
 			currentFingerprint := snap.Fingerprint
 
-			// 4) In-flight run handling
+			// Check for background run completion
 			if runDone != nil {
 				select {
 				case solved := <-runDone:
 					klog.InfoS(msg(cfg.Label, "background run finished"), "solved", solved)
 
-					if solved && baselineSet != nil && baselineFingerprint != "" {
-						lastSolvedSet = cloneUIDSet(baselineSet)
-						lastSolvedFingerprint = baselineFingerprint
+					if solved && runSet != nil && runFingerprint != "" {
+						lastSolvedSet = cloneUIDSet(runSet)
+						lastSolvedFingerprint = runFingerprint
 					}
 					runDone = nil
 					runCancel = nil
-					baselineSet = nil
-					baselineFingerprint = ""
+					runSet = nil
+					runFingerprint = ""
 
 				default:
 					// Still running
-					if cfg.CancelOnChange && !sameUIDSet(currentSet, baselineSet) {
+					if cfg.CancelOnChange && runCancel != nil && !isSameUIDSet(currentSet, runSet) {
 						klog.V(MyV).InfoS(
 							msg(cfg.Label, "pending set changed; cancelling run"),
 							"pending", pendingCount,
@@ -140,10 +137,10 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				}
 			}
 
-			// 5) If we already solved exactly this set + fingerprint, skip.
+			// If we already solved exactly this set + fingerprint, skip.
 			if lastSolvedSet != nil &&
 				lastSolvedFingerprint != "" &&
-				sameUIDSet(currentSet, lastSolvedSet) &&
+				isSameUIDSet(currentSet, lastSolvedSet) &&
 				currentFingerprint == lastSolvedFingerprint {
 				klog.V(MyV).InfoS(
 					msg(cfg.Label, "pending set + fingerprint match last solved; skipping optimization"),
@@ -153,7 +150,7 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 6) No pending → reset state
+			// No pending -> reset state
 			if pendingCount == 0 {
 				if lastPendingSet != nil || lastSolvedSet != nil || lastSolvedFingerprint != "" {
 					lastPendingSet = nil
@@ -165,10 +162,12 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 7) Track whether the pending set changed
-			if !sameUIDSet(currentSet, lastPendingSet) {
+			// Track whether the pending set changed
+			if !isSameUIDSet(currentSet, lastPendingSet) {
 				lastPendingSet = cloneUIDSet(currentSet)
 				lastChange = time.Now()
+				lastSolvedSet = nil
+				lastSolvedFingerprint = ""
 				klog.V(MyV).InfoS(
 					msg(cfg.Label, "pending set changed; reset idle timer"),
 					"pending", pendingCount,
@@ -177,48 +176,39 @@ func (pl *SharedState) optimizeBackgroundLoop(ctx context.Context, cfg OptimizeL
 				continue
 			}
 
-			// 8) Free-time gating: require a stable window if FreeTimeDelay > 0
-			if cfg.InterludeDelay > 0 {
+			// Free-time gating: require a stable window if StableQueueDelay > 0
+			if cfg.StableQueueDelay > 0 {
 				idleFor := time.Since(lastChange)
-				if idleFor < cfg.InterludeDelay {
-					timer.Reset(cfg.InterludeDelay - idleFor)
+				if idleFor < cfg.StableQueueDelay {
+					timer.Reset(cfg.StableQueueDelay - idleFor)
 					continue
 				}
 			}
 
-			// 9 Start a background run
+			// Start a background run
 			klog.InfoS(msg(cfg.Label, InfoCycleStarted),
 				"pendingPods", pendingCount)
 
-			baselineSet = cloneUIDSet(currentSet)
-			baselineFingerprint = currentFingerprint
+			runSet = cloneUIDSet(currentSet)
+			runFingerprint = currentFingerprint
 
 			ctxRun, cancelRun := context.WithCancel(ctx)
 			runCancel = cancelRun
 			runDone = make(chan bool, 1)
 
-			go func() {
-				_, _, _, bestAttempt, _, err := pl.runOptimizationFlow(ctxRun, nil)
-				solved := isAlreadySolvedForPendingSet(err, bestAttempt)
-
-				if err != nil &&
-					err != context.Canceled &&
-					err != ErrNoImprovingSolutionFromAnySolver &&
-					err != ErrNoPendingPodsToSchedule {
-					klog.V(MyV).InfoS(msg(cfg.Label, "runFlow completed with error"),
-						"err", err.Error())
-				}
-
-				runDone <- solved
-			}()
+			startBackgroundOptimization(pl, cfg, ctxRun, runDone)
 
 			timer.Reset(interval)
 		}
 	}
 }
 
-// sameUIDSet returns true if a and b contain exactly the same UIDs.
-func sameUIDSet(a, b map[types.UID]struct{}) bool {
+// -------------------------
+// isSameUIDSet
+// -------------------------
+
+// isSameUIDSet returns true if a and b contain exactly the same UIDs.
+func isSameUIDSet(a, b map[types.UID]struct{}) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -236,6 +226,10 @@ func sameUIDSet(a, b map[types.UID]struct{}) bool {
 	return true
 }
 
+// -------------------------
+// cloneUIDSet
+// -------------------------
+
 // cloneUIDSet shallow-copies a UID set (so we don't alias maps by accident).
 func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 	if in == nil {
@@ -248,38 +242,31 @@ func cloneUIDSet(in map[types.UID]struct{}) map[types.UID]struct{} {
 	return out
 }
 
-// isAlreadySolvedForPendingSet decides whether a run of runFlow has
-// "fully solved" the current pending set, i.e. there is nothing
-// better to do for this set of pending pods under the current cluster state.
-// We only consider it solved when:
-//   - runFlow returned ErrNoImprovingSolutionFromAnySolver OR
-//     ErrNoPendingPodsToSchedule, AND
-//   - bestAttempt is non-nil with Status == "OPTIMAL".
-//
-// If the solver only found a FEASIBLE solution, hit a time limit,
-// was cancelled, or otherwise did not prove optimality, we return false
-// so that the same pending set may be retried later.
-func isAlreadySolvedForPendingSet(err error, bestAttempt *SolverResult) bool {
+// -------------------------
+// isAlreadyComputedForPendingSet
+// -------------------------
+
+// isAlreadyComputedForPendingSet decides whether a optimization run has "fully
+// solved" the current pending set, i.e. there is nothing better to do for this
+// set of pending pods under the current cluster state. If the solver only found
+// a FEASIBLE solution, hit a time limit, was cancelled, or otherwise did not
+// prove optimality, we return false so that the same pending set may be retried
+// later.
+func isAlreadyComputedForPendingSet(err error, bestAttempt *SolverResult) bool {
 	if bestAttempt == nil {
 		return false
 	}
 	if bestAttempt.Status != "OPTIMAL" {
-		// Not a proven optimal solution → allow re-runs.
+		// Not a proven optimal solution -> allow re-runs.
 		return false
 	}
 	return err == ErrNoImprovingSolutionFromAnySolver ||
-		err == ErrNoPendingPodsToSchedule
+		err == ErrNoPendingPodsScheduled
 }
 
-// PendingSnapshot bundles the pieces of state that both the periodic and
-// free-time loops need in order to decide whether to run the solver.
-type PendingSnapshot struct {
-	PendingUIDs  map[types.UID]struct{}
-	PendingCount int
-	Fingerprint  string     // clusterFingerprint(nodes, pods)
-	Pods         []*v1.Pod  // live snapshot (for priority checks)
-	Nodes        []*v1.Node // live snapshot (for solver input)
-}
+// -------------------------
+// buildPendingSnapshot
+// -------------------------
 
 // buildPendingSnapshot:
 //   - lists current pods and nodes via informers
@@ -300,7 +287,6 @@ func (pl *SharedState) buildPendingSnapshot() (*PendingSnapshot, error) {
 		if p == nil || p.DeletionTimestamp != nil {
 			continue
 		}
-		// You currently check Status.Phase == "Pending" – use constant for clarity.
 		if p.Status.Phase != v1.PodPending {
 			continue
 		}
@@ -317,3 +303,37 @@ func (pl *SharedState) buildPendingSnapshot() (*PendingSnapshot, error) {
 		Nodes:        nodes,
 	}, nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	optimizeBackgroundLoopFunc = func(pl *SharedState, ctx context.Context, cfg OptimizeLoopConfig) {
+		pl.optimizeBackgroundLoop(ctx, cfg)
+	}
+	buildPendingSnapshotHook = func(pl *SharedState) (*PendingSnapshot, error) {
+		return pl.buildPendingSnapshot()
+	}
+	startBackgroundOptimization = func(
+		pl *SharedState,
+		cfg OptimizeLoopConfig,
+		ctxRun context.Context,
+		runDone chan<- bool,
+	) {
+		go func() {
+			_, _, _, bestAttempt, _, err := pl.runOptimizationFlow(ctxRun, nil)
+			solved := isAlreadyComputedForPendingSet(err, bestAttempt)
+
+			if err != nil &&
+				err != context.Canceled &&
+				err != ErrNoImprovingSolutionFromAnySolver &&
+				err != ErrNoPendingPodsScheduled {
+				klog.V(MyV).InfoS(msg(cfg.Label, "runFlow completed with error"),
+					"err", err.Error())
+			}
+
+			runDone <- solved
+		}()
+	}
+)

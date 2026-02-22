@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -13,19 +12,19 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var (
-	execCommandContext = exec.CommandContext
-	solverBinary       = SolverPythonBin
-	solverScriptPath   = SolverPythonScriptPath
-	readAllStdout      = io.ReadAll
-)
+// -------------------------
+// runSolverExternal
+// -------------------------
 
-func (pl *SharedState) runSolverExternal(ctx context.Context, in SolverInput) (*SolverOutput, error) {
-	rawInput, _ := json.Marshal(in)
-	klog.V(MyV).InfoS("Solver input", "nodes", len(in.Nodes), "pods", len(in.Pods), "hasPreemptor", in.Preemptor != nil)
-
-	cmd := execCommandContext(ctx, solverBinary, solverScriptPath)
-	cmd.Stdin = bytes.NewReader(rawInput)
+// runSolverExternal is the generic external solver runner.
+func (pl *SharedState) runSolverExternal(
+	ctx context.Context,
+	payload []byte,
+	binary string,
+	scriptPath string,
+) ([]byte, error) {
+	cmd := execCommandContext(ctx, binary, scriptPath)
+	cmd.Stdin = bytes.NewReader(payload)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -36,35 +35,74 @@ func (pl *SharedState) runSolverExternal(ctx context.Context, in SolverInput) (*
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 
-	go func() {
-		s := bufio.NewScanner(stderr)
-		buf := make([]byte, 0, 256*1024)
-		s.Buffer(buf, 1024*1024)
-		for s.Scan() {
-			klog.V(MyV).Info("solver: " + s.Text())
-		}
-		if err := s.Err(); err != nil {
-			klog.Info("solver scan failed: " + err.Error())
-		}
-	}()
+	// Stream solver logs from stderr (best-effort).
+	go func() { _ = streamSolverStderrFn(stderr) }()
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("solver start: %w", err)
 	}
 
-	outBuf, err := readAllStdout(stdout)
-	if err != nil {
-		_ = cmd.Wait()
-		return nil, fmt.Errorf("read solver stdout: %w", err)
+	type readRes struct {
+		b   []byte
+		err error
 	}
+	stdoutCh := make(chan readRes, 1)
+	go func() {
+		b, e := readAllStdout(stdout)
+		stdoutCh <- readRes{b: b, err: e}
+	}()
 
-	if err := cmd.Wait(); err != nil {
-		return nil, fmt.Errorf("solver run: %w", err)
-	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
 
-	var out SolverOutput
-	if err := json.Unmarshal(outBuf, &out); err != nil {
-		return nil, fmt.Errorf("decode solver output: %w", err)
+	select {
+	case <-ctx.Done():
+		// Ensure the process is gone quickly.
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		// Wait for goroutines to finish.
+		<-waitCh
+		<-stdoutCh
+		return nil, fmt.Errorf("solver context: %w", ctx.Err())
+
+	case waitErr := <-waitCh:
+		r := <-stdoutCh
+		if r.err != nil {
+			return nil, fmt.Errorf("read solver stdout: %w", r.err)
+		}
+		if waitErr != nil {
+			return nil, fmt.Errorf("solver run: %w", waitErr)
+		}
+		return r.b, nil
 	}
-	return &out, nil
 }
+
+// -------------------------
+// streamSolverStderr
+// -------------------------
+
+// streamSolverStderr scans stderr and logs it. Returns scanner error (if any).
+func streamSolverStderr(r io.Reader) error {
+	s := bufio.NewScanner(r)
+	buf := make([]byte, 0, 256*1024) // 256KB initial buffer
+	s.Buffer(buf, 1024*1024)         // 1MB max token size
+	for s.Scan() {
+		klog.V(MyV).Info("solver: " + s.Text())
+	}
+	if err := s.Err(); err != nil {
+		klog.Info("solver scan failed: " + err.Error())
+		return err
+	}
+	return nil
+}
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	execCommandContext   = exec.CommandContext
+	readAllStdout        = io.ReadAll
+	streamSolverStderrFn = streamSolverStderr
+)

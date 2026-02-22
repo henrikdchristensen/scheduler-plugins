@@ -1,928 +1,1525 @@
 #!/usr/bin/env python3
 # trace_generator.py
+"""
+python -m scripts.kwok_trace_replayer.trace_generator --job-dir data/jobs/kwok_trace_generator/
+"""
 
-import argparse, heapq, json, logging
-from dataclasses import dataclass, asdict
-from typing import List, Tuple
+import os, argparse, math, copy, heapq, json, logging, yaml
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-
-import matplotlib.pyplot as plt
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from scripts.helpers.general_helpers import (
-    parse_duration_to_seconds,
-    setup_logging,
-    make_header_footer,
-    log_field_fmt,
-    build_cli_cmd,
-    write_info_file,
+    build_cli_cmd, derive_seed, log_args_block, make_header_footer,
+    parse_duration_to_seconds, read_seeds_file, setup_logging, write_info_file,
 )
-from scripts.kwok_trace_replayer.trace_helpers import (
-    TraceRecord,
-    plot_histogram_with_pareto,
-    plot_bar_with_geometric
+from scripts.helpers.job_helpers import (
+    JobField, merge_job_fields_into_args,
+    parse_optional_bool, parse_optional_duration_seconds, parse_optional_float,
+    parse_optional_int, parse_optional_str,
 )
+from scripts.kwok_trace_replayer.plot_helpers import (
+    plot_generator_histograms, plot_utilization_and_num_pods,
+)
+from scripts.kwok_trace_replayer.trace_helpers import TraceRecord
 
-#####################################################################
+# -----------------------------------------------------------------------------
 # Constants
-#####################################################################
-SOLVE_ALPHA_MAX_ITERATIONS  = 10_000 # number of bisection iterations
-SOLVE_ALPHA_TOLERANCE       = 1e-3   # tolerance on mean error for alpha solving
-SOLVE_ALPHA_SAMPLES         = 50_000 # Monte Carlo samples per mean evaluation
-SOLVE_ALPHA_LOWER_BOUND     = 0.1    # lower bound on alpha search
-SOLVE_ALPHA_UPPER_BOUND     = 10.0   # upper bound on alpha search
+# -----------------------------------------------------------------------------
+MAX_DECIMALS = 6
 
-MAX_DECIMALS = 6                     # number of decimals to round floats to (CPU, MEM, times, etc.). 6 is enough for microsecond precision.
+MIN_LIFETIME_S = 2.0
 
-#####################################################################
-# Logging setup
-#####################################################################
+MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE = 0.01
+MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS = 20
+
+# Maximum initial pods to prevent runaway.
+MAX_INITIAL_PODS = 200_000
+
+# Monte Carlo sample count for estimating E[max(cpu, mem)] per replica in the
+# Little's-law-style mean-life inference.
+EFFECTIVE_MAX_REQ_MC_SAMPLES = 50_000
+
+ALPHA_SOLVE_MAX_ITER = 200
+ALPHA_SOLVE_TOLERANCE = 1e-10
+
 LOGGER_NAME = "trace-generator"
 LOG = logging.getLogger(LOGGER_NAME)
 
-#####################################################################
-# Cluster state dataclass
-#####################################################################
+DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_SHOW_PLOTS = False
+
+# -----------------------------------------------------------------------------
+# Small state models
+# -----------------------------------------------------------------------------
+
 @dataclass
 class ClusterState:
-    num_nodes: int
-    live_cpu: float = 0.0
-    live_mem: float = 0.0
+    live_cpu_req: float = 0.0
+    live_mem_req: float = 0.0
     live_pods: int = 0
 
-#####################################################################
-# Argument parser
-#####################################################################
+@dataclass(order=True)
+class EndHeapEntry:
+    end_time: float
+    cpu_req: float = field(compare=False)
+    mem_req: float = field(compare=False)
+    replicas: int = field(compare=False)
+
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
+
 def build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description=("Generate pod traces."))
+    p = argparse.ArgumentParser(description="Generate initial + trace workload JSON files.")
 
     # General
-    p.add_argument("--output-dir", dest="output_dir", default="./output-traces",
-        help="Directory to store generated JSON and plots (default: ./output-traces).",
+    p.add_argument("--job-file", dest="job_file", default=None,
+                   help="Path to a YAML job file describing arguments. CLI overrides job file.")
+    p.add_argument("--job-dir", dest="job_dir", default=None,
+        help="Directory containing YAML job files; when set, all *.yaml/*.yml files are generated.",
     )
-    p.add_argument("--seed", type=int, default=42, help="Random seed.")
-    p.add_argument("--log-level", dest="log_level", default="INFO",
-        help="Logging level (DEBUG, INFO, WARNING, ERROR).",
-    )
-
-    # Cluster / utilization
-    p.add_argument("--num-nodes", type=int, default=8,
-        help="Number of nodes (each has capacity 1.0 CPU, 1.0 MEM).",
-    )
-    p.add_argument("--trace-time", type=str, default="3600s",
-        help="Trace time; seconds or suffixed like '1h', '30m', ...",
+    p.add_argument("--output-dir", dest="output_dir", default=None)
+    p.add_argument("--seed", type=int, default=None, help="Run exactly this seed.")
+    p.add_argument("--seed-file", dest="seed_file", default=None,
+                   help="Path to a seed list file (one integer per line).")
+    p.add_argument("--log-level", dest="log_level", default=None)
+    p.add_argument("--show-plots", dest="show_plots", action=argparse.BooleanOptionalAction, default=None,
+        help="Show plots after generation (plots are always saved).",
     )
 
-    # Inter-arrival times (seconds)
-    p.add_argument("--xmin-arrival", type=float, default=0.01,
-        help="Pareto I x_min for inter-arrival times (seconds).",
-    )
-    p.add_argument("--xmax-arrival", type=float, default=None,
-        help="Maximum inter-arrival time (seconds, upper clamp).",
-    )
-    p.add_argument("--mean-arrival", type=float, required=True,
-        help="Target mean inter-arrival time (seconds).",
-    )
+    # Cluster / horizon
+    p.add_argument("--num-nodes", type=int, default=None)
+    p.add_argument("--trace-time", type=str, default=None)
+    p.add_argument("--target-util", type=float, default=None)
 
-    # Lifetimes (seconds)
-    p.add_argument("--xmin-life", type=float, default=10.0,
-        help="Pareto I x_min for lifetimes (seconds).",
-    )
-    p.add_argument("--xmax-life", type=float, default=None,
-        help="Maximum lifetime (seconds, upper clamp).",
-    )
-    p.add_argument("--mean-life", type=float, required=True,
-        help="Target mean lifetime (seconds).",
-    )
+    # Inter-arrival (bounded Pareto)
+    p.add_argument("--xmin-arrival", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--xmax-arrival", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--mean-arrival", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
 
-    # CPU distribution params
-    p.add_argument("--xmin-cpu", type=float, default=0.01,
-        help="Pareto I x_min (lower bound) for CPU requests.",
-    )
-    p.add_argument("--xmax-cpu", type=float, default=1.0,
-        help="Maximum CPU request (upper clamp).",
-    )
-    p.add_argument("--mean-cpu", type=float, required=True,
-        help="Target mean CPU request (fraction of node capacity).",
-    )
+    # Lifetime (bounded Pareto; mean inferred/calibrated)
+    p.add_argument("--xmin-life", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--xmax-life", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
+    p.add_argument("--mean-life", type=lambda s: float(parse_duration_to_seconds(s)), default=None)
 
-    # MEM distribution params
-    p.add_argument("--xmin-mem", type=float, default=0.01,
-        help="Pareto I x_min (lower bound) for MEM requests.",
-    )
-    p.add_argument("--xmax-mem", type=float, default=1.0,
-        help="Maximum MEM request (upper clamp).",
-    )
-    p.add_argument("--mean-mem", type=float, required=True,
-        help="Target mean MEM request (fraction of node capacity).",
-    )
+    # CPU requests (bounded Pareto)
+    p.add_argument("--xmin-cpu", type=float, default=None)
+    p.add_argument("--xmax-cpu", type=float, default=None)
+    p.add_argument("--mean-cpu", type=float, default=None)
 
-    # Priority (min/max like replicas)
-    p.add_argument("--priority-min", type=int, default=1,
-        help="Minimum priority value (inclusive).",
-    )
-    p.add_argument("--priority-max", type=int, default=3,
-        help="Maximum priority value (inclusive).",
-    )
-    p.add_argument("--priority-ratio", type=float, default=1.0,
-        help=("Geometric ratio factor in (0,1]. Use ratio=1.0 for uniform."),
-    )
+    # Memory requests (bounded Pareto)
+    p.add_argument("--xmin-mem", type=float, default=None)
+    p.add_argument("--xmax-mem", type=float, default=None)
+    p.add_argument("--mean-mem", type=float, default=None)
 
-    # Replica counts
-    p.add_argument("--replicas-min", type=int, default=1,
-        help="Minimum replicas per trace pod (default: 1).",
-    )
-    p.add_argument("--replicas-max", type=int, default=1,
-        help="Maximum replicas per trace pod (inclusive, default: 1).",
-    )
-    p.add_argument("--replicas-ratio", type=float, default=1.0,
-        help=("Geometric ratio factor in (0,1]. Use ratio=1.0 for uniform."),
-    )
+    # Priority + replicas (geometric / uniform)
+    p.add_argument("--priority-min", type=int, default=None)
+    p.add_argument("--priority-max", type=int, default=None)
+    p.add_argument("--priority-ratio", type=float, default=None)
+
+    p.add_argument("--replicas-min", type=int, default=None)
+    p.add_argument("--replicas-max", type=int, default=None)
+    p.add_argument("--replicas-ratio", type=float, default=None)
 
     return p
 
-def round_float_args(args, ndigits: int) -> None:
-    """
-    Round all float fields on the argparse Namespace to a fixed number of decimals.
-    """
-    for name, value in vars(args).items():
-        if isinstance(value, float):
-            setattr(args, name, round(value, ndigits))
+# -----------------------------------------------------------------------------
+# Generator
+# -----------------------------------------------------------------------------
 
-#####################################################################
-# Trace generator class
-#####################################################################
 class TraceGenerator:
-    """
-    Encapsulates based trace generation, statistics, and plotting.
-    """
-    def __init__(self, args: argparse.Namespace) -> None:
-        self.args = args
-        self.rng = np.random.default_rng(args.seed)
+    def __init__(
+        self,
+        cli_args: argparse.Namespace,
+        *,
+        resolved: bool = False,
+        create_figures_dir: Optional[bool] = None,
+        log_args: bool = True,
+        setup_logger: bool = True,
+    ) -> None:
+        """
+        Create a TraceGenerator.
+        """
+        args = cli_args if resolved else TraceGenerator.resolve_args(cli_args)
+        if setup_logger:
+            setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=args.log_level)
 
-        # Resolve and create output directory
-        self.output_dir: Path = Path(self.args.output_dir).resolve()
+        if create_figures_dir is None:
+            create_figures_dir = not bool(getattr(args, "seed_file", None))
+
+        self.init_from_args(args, create_figures_dir=bool(create_figures_dir), log_args=bool(log_args))
+
+    def init_from_args(self, args: argparse.Namespace, *, create_figures_dir: bool, log_args: bool) -> None:
+        """
+        Shared initializer for both __init__ (CLI/job-file resolved) and per-seed resolved runs.
+        """
+        self.args = args
+        self.base_seed = int(getattr(args, "seed", 0) or 0)
+        self.trace_time_s = float(parse_duration_to_seconds(self.args.trace_time))
+
+        # Output dirs / files
+        self.output_dir = Path(self.args.output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.figures_dir: Path = self.output_dir / "figures"
-        self.figures_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Build paths under output_dir
+        self.figures_dir = self.output_dir / "figures"
+        if create_figures_dir:
+            self.figures_dir.mkdir(parents=True, exist_ok=True)
+
+        self.initial_path = self.output_dir / "initial.json"
         self.trace_path = self.output_dir / "trace.json"
+        self.info_path = self.output_dir / "info_generate.yaml"
         self.util_plot_path = self.figures_dir / "utilization.png"
         self.hist_plot_path = self.figures_dir / "histograms.png"
 
-        # These will be filled by _fit_alphas() using (xmin, xmax, mean)
-        self.alpha_cpu: float | None = None
-        self.alpha_mem: float | None = None
-        self.alpha_arrival: float | None = None
-        self.alpha_life: float | None = None
+        # Fitted Pareto alphas
+        self.alpha_arrival = None
+        self.alpha_life = None
+        self.alpha_cpu = None
+        self.alpha_mem = None
 
-        # Results of _generate()
-        self.pods: List[TraceRecord] = []           # generated records
-        self.times: List[float] = []                # timestamps of utilization snapshots
-        self.u_cpu_hist: List[float] = []           # CPU utilization over time
-        self.u_mem_hist: List[float] = []           # memory utilization over time
-        self.max_runnable_pods_hist: List[int] = [] # number of maximum possible runnable pods over time
+        # Plot series
+        self.times = []
+        self.u_eff_hist = []
+        self.u_cpu_hist = []
+        self.u_mem_hist = []
+        self.pods_hist = []
+        self.initial_pods_count = 0
 
-        # Parse trace_time duration string into seconds
-        self.trace_time_s = parse_duration_to_seconds(self.args.trace_time)
+        if log_args:
+            self.log_args()
 
-        # Write metadata bundle
-        LOG.info("logging arguments and git info to output_dir...")
-        self._write_info_file()
-        self.log_args()
-        
-        # Fit alphas from (xmin, xmax, mean)
-        LOG.info("fitting Pareto alphas parameters...")
-        self._fit_alphas()
+    # -------------------------------------------------------------------------
+    # Argument resolution + validation
+    # -------------------------------------------------------------------------
 
-    ##############################################
-    # ------------ Info/logging helpers ----------
-    ##############################################
-    def log_args(self) -> None:
+    @staticmethod
+    def resolve_args(cli_args: argparse.Namespace) -> argparse.Namespace:
         """
-        Log the main arguments (similar style to test_generator).
+        Resolve effective args from CLI + job file.
+        """
+        args = cli_args
+        job_doc = TraceGenerator.load_job_doc(args.job_file) if getattr(args, "job_file", None) else None
+        if job_doc is not None:
+            args = TraceGenerator.merge_job_fields(args, job_doc)
+        args = TraceGenerator.apply_defaults(args)
+        TraceGenerator.validate_args(args)
+        TraceGenerator.round_float_args(args, MAX_DECIMALS)
+        return args
+
+    @staticmethod
+    def expand_job_dir_runs(cli_args: argparse.Namespace) -> list[argparse.Namespace]:
+        """
+        Expand a --job-dir into one resolved args object per job file.
+        """
+        if getattr(cli_args, "job_file", None) and getattr(cli_args, "job_dir", None):
+            raise SystemExit("--job-file and --job-dir cannot be used together")
+
+        job_dir = getattr(cli_args, "job_dir", None)
+        if not job_dir:
+            # Not in job-dir mode. Resolve single run normally.
+            return [TraceGenerator.resolve_args(cli_args)]
+
+        p = Path(job_dir).resolve()
+        if not p.exists() or not p.is_dir():
+            raise SystemExit(f"--job-dir must be an existing directory: {p}")
+
+        job_files = sorted(list(p.glob("*.yaml")) + list(p.glob("*.yml")))
+        if not job_files:
+            raise SystemExit(f"--job-dir contains no *.yaml/*.yml job files: {p}")
+
+        runs: list[argparse.Namespace] = []
+        for jf in job_files:
+            a = copy.copy(cli_args)
+            a.job_file = str(jf)
+            a.job_dir = None
+
+            resolved = TraceGenerator.resolve_args(a)
+            base_out = Path(resolved.output_dir)
+            resolved.output_dir = str(base_out)
+            runs.append(resolved)
+
+        return runs
+
+    @staticmethod
+    def load_job_doc(path: str | Path) -> dict:
+        """
+        Load and parse a job YAML file.
+        """
+        p = Path(path).resolve()
+        if not p.exists():
+            raise SystemExit(f"--job-file not found: {p}")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+        except Exception as e:
+            raise SystemExit(f"failed reading --job-file {p}: {e}")
+        if not isinstance(doc, dict):
+            raise SystemExit(f"--job-file must be a YAML mapping/object: {p}")
+        return doc
+
+    @staticmethod
+    def merge_job_fields(args: argparse.Namespace, job: dict) -> argparse.Namespace:
+        """
+        Merge job-file fields into args.
         """
         fields = [
-            ("output_dir", self.args.output_dir),
-            ("seed", self.args.seed),
-            ("log_level", self.args.log_level),
-            ("num_nodes", self.args.num_nodes),
-            ("trace_time", self.args.trace_time),
-            ("priority_min", self.args.priority_min),
-            ("priority_max", self.args.priority_max),
-            ("priority_ratio", self.args.priority_ratio),
-            ("replicas_min", self.args.replicas_min),
-            ("replicas_max", self.args.replicas_max),
-            ("replicas_ratio", self.args.replicas_ratio),
-            ("xmin_cpu", self.args.xmin_cpu),
-            ("xmax_cpu", self.args.xmax_cpu),
-            ("mean_cpu", self.args.mean_cpu),
-            ("xmin_mem", self.args.xmin_mem),
-            ("xmax_mem", self.args.xmax_mem),
-            ("mean_mem", self.args.mean_mem),
-            ("xmin_arrival", self.args.xmin_arrival),
-            ("xmax_arrival", self.args.xmax_arrival),
-            ("mean_arrival", self.args.mean_arrival),
-            ("xmin_life", self.args.xmin_life),
-            ("xmax_life", self.args.xmax_life),
-            ("mean_life", self.args.mean_life),
+            # General
+            JobField("output-dir", "output_dir", parse=parse_optional_str),
+            JobField("seed", "seed", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("seed-file", "seed_file", parse=parse_optional_str),
+            JobField("log-level", "log_level", parse=parse_optional_str),
+            JobField("show-plots", "show_plots", parse=parse_optional_bool, accept=lambda v: v is not None),
+
+            # Cluster / horizon
+            JobField("num-nodes", "num_nodes", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("trace-time", "trace_time", parse=parse_optional_str),
+            JobField("target-util", "target_util", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+            # Inter-arrival
+            JobField("xmin-arrival", "xmin_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("xmax-arrival", "xmax_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("mean-arrival", "mean_arrival", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+
+            # Lifetime
+            JobField("xmin-life", "xmin_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("xmax-life", "xmax_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+            JobField("mean-life", "mean_life", parse=parse_optional_duration_seconds, accept=lambda v: isinstance(v, float)),
+
+            # CPU requests
+            JobField("xmin-cpu", "xmin_cpu", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+            JobField("xmax-cpu", "xmax_cpu", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+            JobField("mean-cpu", "mean_cpu", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+        
+            # Memory requests
+            JobField("xmin-mem", "xmin_mem", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+            JobField("xmax-mem", "xmax_mem", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+            JobField("mean-mem", "mean_mem", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+            # Priority
+            JobField("priority-min", "priority_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("priority-max", "priority_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("priority-ratio", "priority_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
+
+            # Replicas
+            JobField("replicas-min", "replicas_min", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("replicas-max", "replicas_max", parse=parse_optional_int, accept=lambda v: isinstance(v, int)),
+            JobField("replicas-ratio", "replicas_ratio", parse=parse_optional_float, accept=lambda v: isinstance(v, float)),
         ]
-        pad = max(len(k) for k, _ in fields)
-        lines = [f"{k.rjust(pad)} = {log_field_fmt(v)}" for k, v in fields]
-        block = "\n".join(lines)
-        header, footer = make_header_footer("ARGS")
-        LOG.info("\n%s\n%s\n%s", header, block, footer)
 
-    def _write_info_file(self) -> None:
-        """
-        Write info_generate.yaml in output_dir with git + CLI + args (like test_generator).
-        """
-        try:
-            out_path = self.output_dir / "info_generate.yaml"
-            inputs = {
-                "cli-cmd": build_cli_cmd(),
-                "args": {k: v for k, v in vars(self.args).items()},
-            }
-            write_info_file(
-                out_path,
-                inputs=inputs,
-                logger=LOG,
-            )
-        except Exception as e:
-            LOG.warning("failed to write info_generate.yaml: %s", e)
+        return merge_job_fields_into_args(args, job or {}, fields)
 
-    ##############################################
-    # ------------ Pareto helpers ----------------
-    ##############################################
     @staticmethod
-    def _sample_pareto(
+    def apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
+        """
+        Apply default values to args when unset.
+        """
+        if getattr(args, "log_level", None) is None:
+            args.log_level = DEFAULT_LOG_LEVEL
+        if getattr(args, "show_plots", None) is None:
+            args.show_plots = bool(DEFAULT_SHOW_PLOTS)
+        return args
+
+    @staticmethod
+    def validate_args(args: argparse.Namespace) -> None:
+        """
+        Validate required args and value ranges.
+        """
+        missing: list[str] = []
+
+        if getattr(args, "job_file", None) and getattr(args, "job_dir", None):
+            raise SystemExit("--job-file and --job-dir cannot be used together")
+        if getattr(args, "output_dir", None) is None:
+            missing.append("output_dir")
+
+        # Seed selection: require exactly one mode.
+        seed = getattr(args, "seed", None)
+        seed_file = getattr(args, "seed_file", None)
+        if seed is not None and seed_file:
+            raise SystemExit("--seed and --seed-file cannot be used together")
+        if seed is None and not seed_file:
+            missing.append("seed or seed_file")
+
+        for k in (
+            "num_nodes",
+            "trace_time",
+            "target_util",
+            "xmin_arrival",
+            "xmax_arrival",
+            "mean_arrival",
+            "xmin_life",
+            "xmax_life",
+            "xmin_cpu",
+            "xmax_cpu",
+            "mean_cpu",
+            "xmin_mem",
+            "xmax_mem",
+            "mean_mem",
+            "priority_min",
+            "priority_max",
+            "priority_ratio",
+            "replicas_min",
+            "replicas_max",
+            "replicas_ratio",
+        ):
+            if getattr(args, k, None) is None:
+                missing.append(k)
+
+        if missing:
+            raise SystemExit(f"missing required arguments (via CLI or job-file): {', '.join(missing)}")
+
+        def _positive_val(name: str) -> float:
+            """Ensure arg is > 0 and return its float value."""
+            v = float(getattr(args, name))
+            if v <= 0:
+                raise SystemExit(f"{name} must be > 0 (got {v})")
+            return v
+
+        _positive_val("num_nodes")
+
+        _positive_val("xmin_arrival")
+        _positive_val("xmax_arrival")
+        _positive_val("mean_arrival")
+        
+        _positive_val("xmin_life")
+        _positive_val("xmax_life")
+        
+        _positive_val("xmin_cpu")
+        _positive_val("xmax_cpu")
+        _positive_val("mean_cpu")
+        
+        _positive_val("xmin_mem")
+        _positive_val("xmax_mem")
+        _positive_val("mean_mem")
+
+        _positive_val("priority_ratio")
+        _positive_val("replicas_ratio")
+
+        # Bounds ordering
+        if float(args.xmin_life) < MIN_LIFETIME_S:
+            raise SystemExit(f"xmin-life must be >= {MIN_LIFETIME_S:.1f}s (got {float(args.xmin_life):.6f})")
+        if float(args.xmax_arrival) <= float(args.xmin_arrival):
+            raise SystemExit("require xmax-arrival > xmin-arrival")
+        if float(args.xmax_life) <= float(args.xmin_life):
+            raise SystemExit("require xmax-life > xmin-life")
+        if float(args.xmax_cpu) <= float(args.xmin_cpu):
+            raise SystemExit("require xmax-cpu > xmin-cpu")
+        if float(args.xmax_mem) <= float(args.xmin_mem):
+            raise SystemExit("require xmax-mem > xmin-mem")
+
+        # Discrete supports must be ordered
+        if int(args.priority_max) < int(args.priority_min):
+            raise SystemExit("require priority-max >= priority-min")
+        if int(args.replicas_max) < int(args.replicas_min):
+            raise SystemExit("require replicas-max >= replicas-min")
+
+        # Target util
+        target_util = float(args.target_util)
+        if not (0.0 < target_util <= 1.0):
+            raise SystemExit("target-util must be in (0,1]")
+
+        def _validate_bounded_pareto_mean(mean_name: str, xmin_name: str, xmax_name: str) -> None:
+            mu = float(getattr(args, mean_name))
+            xmin = float(getattr(args, xmin_name))
+            xmax = float(getattr(args, xmax_name))
+
+            if not (xmin < mu < xmax):
+                raise SystemExit(f"require {mean_name} in ({xmin_name}, {xmax_name}); got {mu} with bounds [{xmin}, {xmax}]")
+
+            mu_max = TraceGenerator.bounded_pareto_max_mean(xmin, xmax)
+            if mu >= mu_max:
+                raise SystemExit(
+                    f"{mean_name}={mu} is not achievable for bounded Pareto on [{xmin}, {xmax}]. "
+                    f"Maximum achievable mean is about {mu_max:.6f}. Increase {xmax_name} or reduce {mean_name}."
+                )
+
+        # Validate bounded Pareto means
+        _validate_bounded_pareto_mean("mean_arrival", "xmin_arrival", "xmax_arrival")
+        _validate_bounded_pareto_mean("mean_cpu", "xmin_cpu", "xmax_cpu")
+        _validate_bounded_pareto_mean("mean_mem", "xmin_mem", "xmax_mem")
+
+        # mean-life is optional (can be inferred) - only validate if provided.
+        if getattr(args, "mean_life", None) is not None:
+            _positive_val("mean_life")
+            _validate_bounded_pareto_mean("mean_life", "xmin_life", "xmax_life")
+
+        # File existence checks
+        if getattr(args, "job_file", None):
+            p = Path(args.job_file).resolve()
+            if not p.exists():
+                raise SystemExit(f"--job-file not found: {p}")
+        if getattr(args, "job_dir", None):
+            p = Path(args.job_dir).resolve()
+            if not p.exists() or not p.is_dir():
+                raise SystemExit(f"--job-dir must be an existing directory: {p}")
+        if getattr(args, "seed_file", None):
+            p = Path(args.seed_file).resolve()
+            if not p.exists():
+                raise SystemExit(f"--seed-file not found: {p}")
+
+    @staticmethod
+    def round_float_args(args: argparse.Namespace, ndigits: int) -> None:
+        """
+        Round all float args to ndigits decimal places.
+        """
+        for k, v in vars(args).items():
+            if isinstance(v, float):
+                setattr(args, k, round(v, ndigits))
+
+    # -------------------------------------------------------------------------
+    # Seed expansion for multi-run
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def expand_seed_runs(args: argparse.Namespace) -> list[argparse.Namespace]:
+        """
+        Expand args into multiple runs based on seed or seed-file.
+        """
+        if getattr(args, "seed_file", None):
+            seeds = read_seeds_file(Path(args.seed_file).resolve(), logger=LOG)
+        else:
+            seeds = [int(args.seed)]
+        base_out = Path(args.output_dir).resolve()
+
+        runs: list[argparse.Namespace] = []
+        for s in seeds:
+            a = copy.copy(args)
+            a.seed = int(s)
+            if getattr(args, "seed_file", None):
+                a.output_dir = str(base_out / str(int(s)))
+            runs.append(a)
+        return runs
+
+    # -------------------------------------------------------------------------
+    # Logging + info file
+    # -------------------------------------------------------------------------
+
+    def log_args(self) -> None:
+        """
+        Log effective args.
+        """
+        include = [
+            "job_file",
+            "job_dir",
+            "output_dir",
+            "seed",
+            "seed_file",
+            "log_level",
+            "show_plots",
+            "num_nodes",
+            "trace_time",
+            "target_util",
+            "xmin_arrival",
+            "xmax_arrival",
+            "mean_arrival",
+            "xmin_life",
+            "xmax_life",
+            "mean_life",
+            "xmin_cpu",
+            "xmax_cpu",
+            "mean_cpu",
+            "xmin_mem",
+            "xmax_mem",
+            "mean_mem",
+            "priority_min",
+            "priority_max",
+            "priority_ratio",
+            "replicas_min",
+            "replicas_max",
+            "replicas_ratio",
+        ]
+        log_args_block(LOG, self.args, title="ARGS", include=include)
+
+    # -------------------------------------------------------------------------
+    # Bounded Pareto: sampling + alpha solve + mean
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def sample_bounded_pareto(
         rng: np.random.Generator,
+        *,
         alpha: float,
         x_min: float,
-        x_max: float | None = None,
+        x_max: float,
         size: int = 1,
     ) -> np.ndarray:
         """
-        Sample from a Pareto Type I distribution with parameters (alpha, x_min):
-            f(x) = alpha * x_min^alpha / x^(alpha + 1),  x >= x_min > 0
-        using the inverse CDF:
-            X = x_min / U^(1/alpha),  U ~ Uniform(0, 1).
-        With optional hard upper truncation at x_max.
-        """
-        if alpha <= 0.0 or x_min <= 0.0:
-            raise ValueError("Pareto alpha and x_min must be > 0.")
-        u = rng.random(size)
-        if x_max is not None:  # lower bound on U so that x <= x_max
-            u_min_tail = (x_min / x_max) ** alpha  # in (0, 1)
-            u_min = max(1e-12, float(u_min_tail))
-            u = np.clip(u, u_min, 1.0)
-        else:  # no upper clamp: keep generic numerical safety bound
-            u = np.clip(u, 1e-12, 1.0)
-        x = x_min / (u ** (1.0 / alpha))
-        return x
+        Sample from the upper-truncated Pareto (Type I) distribution on [x_min, x_max]
+        via inverse-CDF sampling.
+        
+        See papers:
+        - Truncated Pareto CDF: Zaninetti & Ferraro (2008), Eq. (4), p. 2.
+        - Random variate generation: Zaninetti & Ferraro (2008), Eq. (13), p. 3.
 
-    @classmethod
-    def _solve_alpha_of_pareto_for_mean(self,
-        rng: np.random.Generator,
+        Using Eq. (13) with our notation (a=x_min, b=x_max, c=alpha):
+            X = x_min * ( 1 - R * (1 - (x_min/x_max)^alpha) )^(-1/alpha),
+        where R ~ Uniform(0,1).
+
+        Args:
+            rng: NumPy Generator
+            alpha: shape parameter (>0)
+            x_min: lower bound (>0)
+            x_max: upper bound (>x_min)
+            size: number of samples
+
+        Returns:
+            np.ndarray of shape (size,)
+        """
+        if not (alpha > 0 and x_min > 0 and x_max > x_min):
+            raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
+        if not (isinstance(size, int) and size >= 1):
+            raise ValueError("Require size to be a positive int")
+
+        r = rng.random(size)
+        r = np.clip(r, 1e-12, 1.0 - 1e-12)
+
+        # Eq. (13): base = 1 - R*(1 - (a/b)^c)  in ( (a/b)^c, 1 ]
+        tail_factor = (x_min / x_max) ** alpha
+        base = 1.0 - r * (1.0 - tail_factor)
+        base = np.clip(base, 1e-300, 1.0)
+
+        return (x_min * np.power(base, -1.0 / alpha)).astype(float)
+
+    @staticmethod
+    def bounded_pareto_mean(alpha: float, x_min: float, x_max: float) -> float:
+        """
+        Mean E[X] of the upper-truncated Pareto (Type I) on [x_min, x_max].
+
+        See paper:
+          - Zaninetti & Ferraro (2008), Eq. (5), p. 2 (mean for c != 1 and c = 1).
+
+        With a=x_min, b=x_max, c=alpha:
+
+        If alpha != 1:
+            E[X] = (alpha * x_min / (alpha - 1))
+                   * (1 - (x_min/x_max)^(alpha-1)) / (1 - (x_min/x_max)^alpha)
+        If alpha == 1:
+            E[X] = (alpha * x_min^alpha / (1 - (x_min/x_max)^alpha)) * ln(x_max/x_min)
+                 = (x_min / (1 - x_min/x_max)) * ln(x_max/x_min)
+        """
+        if not (x_min > 0 and x_max > x_min and alpha > 0):
+            raise ValueError("Require x_min>0, x_max>x_min, alpha>0")
+
+        r = x_min / x_max  # in (0,1)
+        log_r = math.log(r)  # < 0
+
+        # alpha == 1 case (Eq. 5, c=1)
+        if abs(alpha - 1.0) < 1e-10:
+            # Use stable forms for (1 - r) and log(x_max/x_min)
+            one_minus_r = -math.expm1(log_r)          # 1 - r
+            return (x_min / one_minus_r) * math.log(x_max / x_min)
+
+        # alpha != 1 case (Eq. 5, c != 1)
+        den = -math.expm1(alpha * log_r)              # 1 - r^alpha
+        num = -math.expm1((alpha - 1.0) * log_r)      # 1 - r^(alpha-1)
+        return (alpha * x_min / (alpha - 1.0)) * (num / den)
+
+    @staticmethod
+    def bounded_pareto_max_mean(x_min: float, x_max: float) -> float:
+        """
+        Maximum achievable mean for a truncated Pareto on [x_min, x_max].
+
+        This value is obtained by taking the limit alpha -> 0+ in the mean
+        expression of Zaninetti & Ferraro (2008), Eq. (5), p. 2, yielding:
+            mean_max = (x_max - x_min) / ln(x_max / x_min)
+
+        Used to validate that a requested target mean is achievable for the given
+        bounds.
+        """
+        if not (x_min > 0 and x_max > x_min):
+            raise ValueError("Require x_min>0, x_max>x_min")
+        return (x_max - x_min) / math.log(x_max / x_min)
+
+    @staticmethod
+    def solve_alpha_for_bounded_mean(
+        *,
         x_min: float,
-        x_max: float | None,
+        x_max: float,
         target_mean: float,
+        max_iterations: int = ALPHA_SOLVE_MAX_ITER,
+        relative_tolerance: float = ALPHA_SOLVE_TOLERANCE,
     ) -> float:
         """
-        Find alpha such that E[X | alpha, x_min, x_max] ≈ target_mean using
-        Monte Carlo + bisection. Assumes target_mean is between x_min and x_max.
+        Solve the bounded Pareto shape parameter alpha from a target mean.
+
+        We solve for alpha > 0 such that:
+            bounded_pareto_mean(alpha, x_min, x_max) == target_mean
+
+        See paper:
+          - Mean formula is from Zaninetti & Ferraro (2008), Eq. (5), p. 2.
+          - Sampling (used elsewhere) is from Eq. (13), p. 3.
+
+        We rely on the fact that for fixed bounds [x_min, x_max], the mean is a
+        monotone decreasing function of alpha, so bisection applies.
         """
-        if x_min <= 0.0:
-            raise ValueError("x_min must be > 0.")
-        if x_max is not None and not (x_min < target_mean < x_max):
+        if not (x_min > 0 and x_max > x_min):
+            raise ValueError("Require x_min>0 and x_max>x_min")
+        if not (x_min < target_mean < x_max):
+            raise ValueError(f"target_mean must be in (x_min, x_max); got {target_mean}")
+
+        mean_max = TraceGenerator.bounded_pareto_max_mean(x_min, x_max)
+        if target_mean >= mean_max:
             raise ValueError(
-                f"target_mean={target_mean} must lie between x_min={x_min} and x_max={x_max}"
+                f"target_mean={target_mean} is not achievable for bounded Pareto on [{x_min}, {x_max}]. "
+                f"Maximum achievable mean is about {mean_max:.6f}. Increase x_max or reduce target_mean."
             )
-        if x_max is None and target_mean <= x_min:
-            raise ValueError(
-                f"target_mean={target_mean} must be > x_min={x_min} for unbounded Pareto."
-            )
+        lo = 1e-12
+        hi = 1.0
+        while TraceGenerator.bounded_pareto_mean(hi, x_min, x_max) > target_mean:
+            hi *= 2.0
+            if hi > 1e12:
+                raise RuntimeError("Failed to bracket alpha; hi grew too large.")
+        for _ in range(max_iterations):
+            mid = 0.5 * (lo + hi)
+            mm = TraceGenerator.bounded_pareto_mean(mid, x_min, x_max)
+            if abs(mm - target_mean) <= relative_tolerance * target_mean:
+                return float(mid)
+            if mm >= target_mean:
+                lo = mid
+            else:
+                hi = mid
+        return float(0.5 * (lo + hi))
 
-        alpha_lo, alpha_hi = SOLVE_ALPHA_UPPER_BOUND, SOLVE_ALPHA_LOWER_BOUND
-        
-        # Monte Carlo means at the endpoints
-        m_lo = float(self._sample_pareto(rng, alpha_lo, x_min, x_max, size=SOLVE_ALPHA_SAMPLES).mean())
-        m_hi = float(self._sample_pareto(rng, alpha_hi, x_min, x_max, size=SOLVE_ALPHA_SAMPLES).mean())
-
-        # Ensure m_lo >= m_hi (mean decreases with alpha)
-        if m_lo < m_hi:
-            m_lo, m_hi = m_hi, m_lo
-            alpha_lo, alpha_hi = alpha_hi, alpha_lo
-
-        if not (m_hi <= target_mean <= m_lo):
-            raise ValueError(
-                f"Target mean {target_mean} not bracketed by MC means "
-                f"[{m_hi:.4f}, {m_lo:.4f}] for alpha in [{alpha_hi}, {alpha_lo}]. "
-                "Adjust xmin/xmax or alpha bounds."
-            )
-
-        # Bisection
-        for _ in range(SOLVE_ALPHA_MAX_ITERATIONS):
-            alpha_mid = 0.5 * (alpha_lo + alpha_hi)
-            m_mid = float(
-                self._sample_pareto(rng, alpha_mid, x_min, x_max, size=SOLVE_ALPHA_SAMPLES).mean()
-            )
-            # Maintain m_lo >= target >= m_hi.
-            if m_mid >= target_mean:  # mid mean too high: move lower bound up
-                alpha_lo, m_lo = alpha_mid, m_mid
-            else:  # mid mean too low: move upper bound down
-                alpha_hi, m_hi = alpha_mid, m_mid
-            # Check convergence
-            if abs(m_mid - target_mean) <= SOLVE_ALPHA_TOLERANCE * target_mean:
-                return alpha_mid
-
-        raise RuntimeError("Failed to converge to target mean within max_iter")
-
-    def _fit_alphas(self) -> None:
-        """Derive Pareto alphas from (xmin, xmax, mean) and attach them to args."""
-        args = self.args
-
-        alpha_cpu = self._solve_alpha_of_pareto_for_mean(
-            self.rng,
-            x_min=args.xmin_cpu,
-            x_max=args.xmax_cpu,
-            target_mean=args.mean_cpu,
-        )
-        alpha_mem = self._solve_alpha_of_pareto_for_mean(
-            self.rng,
-            x_min=args.xmin_mem,
-            x_max=args.xmax_mem,
-            target_mean=args.mean_mem,
-        )
-        alpha_arrival = self._solve_alpha_of_pareto_for_mean(
-            self.rng,
-            x_min=args.xmin_arrival,
-            x_max=args.xmax_arrival,
-            target_mean=args.mean_arrival,
-        )
-        alpha_life = self._solve_alpha_of_pareto_for_mean(
-            self.rng,
-            x_min=args.xmin_life,
-            x_max=args.xmax_life,
-            target_mean=args.mean_life,
-        )
-
-        self.alpha_cpu      = round(alpha_cpu, MAX_DECIMALS)
-        self.alpha_mem      = round(alpha_mem, MAX_DECIMALS)
-        self.alpha_arrival  = round(alpha_arrival, MAX_DECIMALS)
-        self.alpha_life     = round(alpha_life, MAX_DECIMALS)
-
-        # Attach them back onto args so existing plotting helpers keep working
-        args.alpha_cpu      = alpha_cpu
-        args.alpha_mem      = alpha_mem
-        args.alpha_arrival  = alpha_arrival
-        args.alpha_life     = alpha_life
-
-        LOG.info(
-            "[pareto-fit] CPU:      mean=%.4f  xmin=%.4f  xmax=%.4f  alpha≈%.4f",
-            args.mean_cpu, args.xmin_cpu, args.xmax_cpu, alpha_cpu,
-        )
-        LOG.info(
-            "[pareto-fit] MEM:      mean=%.4f  xmin=%.4f  xmax=%.4f  alpha≈%.4f",
-            args.mean_mem, args.xmin_mem, args.xmax_mem, alpha_mem,
-        )
-        LOG.info(
-            "[pareto-fit] arrival:  mean=%.4f  xmin=%.4f  xmax=%s  alpha≈%.4f",
-            args.mean_arrival, args.xmin_arrival, str(args.xmax_arrival), alpha_arrival,
-        )
-        LOG.info(
-            "[pareto-fit] lifetime: mean=%.4f  xmin=%.4f  xmax=%s  alpha≈%.4f",
-            args.mean_life, args.xmin_life, str(args.xmax_life), alpha_life,
-        )
-
-    ##############################################
-    # ------------ Geometric helpers ------------
-    ##############################################
     @staticmethod
-    def _build_geometric_support(
-        min_val: int,
-        max_val: int,
-        ratio: float,
-    ) -> tuple[np.ndarray, np.ndarray | None]:
+    def sample_steady_state_residual_lifetime(
+        rng: np.random.Generator,
+        *,
+        alpha: float,
+        x_min: float,
+        x_max: float,
+        size: int = 1,
+    ) -> np.ndarray:
         """
-        Build a discrete support and (optional) geometric-like probabilities.
+        Sample the steady-state residual lifetime for a bounded Pareto. In a
+        renewal process observed at a random time, the residual lifetime R (time
+        remaining until completion) is not distributed as the original lifetime
+        X. Instead, X is length-biased and then R is uniform on [0, X].
 
-        - Support is the integer range [min_val, max_val] (inclusive).
-        - If ratio == 1.0 or the range has length 1, returns probs=None
-          meaning "use uniform / deterministic" with rng.choice(...).
-        - Otherwise, weights are ratio**(k - min_val) for each integer k.
+        For bounded Pareto with lifetime pdf f(x) ∝ x^{-(alpha+1)} on [x_min,
+        x_max], the length-biased lifetime has pdf g(x) ∝ x f(x) ∝ x^{-alpha} on
+        the same bounds.
+
+        Returns:
+            An array of shape (size,) with values in [0, x_max].
         """
-        if ratio <= 0.0:
-            raise ValueError("Geometric ratio factor must be > 0.")
-
-        lo = int(min_val)
-        hi = int(max_val)
-        if hi < lo:
-            hi = lo
-
-        values = np.arange(lo, hi + 1, dtype=int)
-        n = values.size
-
-        # Single value or r≈1.0 → deterministic/uniform, no probs needed
-        if n == 1 or np.isclose(ratio, 1.0):
-            return values, None
-
-        # Geometric-like weights based on offset from lo
-        exponents = np.arange(n, dtype=float)  # 0,1,2,...
-        weights = ratio ** exponents
-        probs = weights / weights.sum()
-        return values, probs
-
-    ##############################################
-    # ------------ Utilization helpers -----------
-    ##############################################
-    @staticmethod
-    def _delete_completed_pods(
-        state: ClusterState,
-        end_heap: List[Tuple[float, float, float, int]],
-        t: float,
-    ) -> None:
-        """
-        Delete completed pods (with end_time <= t) from the heap and update live_cpu/mem.
-        """
-        while end_heap and end_heap[0][0] <= t: # TODO: I find this a little wierd end_heap[0][0], can we make it more readable
-            end_time, cpu, mem, replicas = heapq.heappop(end_heap)
-            total_cpu = cpu * replicas
-            total_mem = mem * replicas
-            state.live_cpu = max(0.0, state.live_cpu - total_cpu)
-            state.live_mem = max(0.0, state.live_mem - total_mem)
-            state.live_pods = max(0, state.live_pods - replicas)
-
-    def _summarize_utilization(self) -> None:
-        """Print basic utilization stats."""
-        if not self.times:
-            LOG.info("[utilization] no utilization snapshots recorded.")
-            return
-
-        u_cpu_arr = np.asarray(self.u_cpu_hist, dtype=float)
-        u_mem_arr = np.asarray(self.u_mem_hist, dtype=float)
-        u_eff_arr = np.maximum(u_cpu_arr, u_mem_arr)
-
-        from typing import Tuple
-
-        def _stats(arr: np.ndarray) -> Tuple[float, float, float]:
-            return float(arr.mean()), float(arr.min()), float(arr.max())
-
-        mean_cpu, min_cpu, max_cpu = _stats(u_cpu_arr)
-        mean_mem, min_mem, max_mem = _stats(u_mem_arr)
-        mean_eff, min_eff, max_eff = _stats(u_eff_arr)
-
-        LOG.info(
-            "[utilization] CPU: mean=%.3f, min=%.3f, max=%.3f",
-            mean_cpu, min_cpu, max_cpu,
-        )
-        LOG.info(
-            "[utilization] MEM: mean=%.3f, min=%.3f, max=%.3f",
-            mean_mem, min_mem, max_mem,
-        )
-        LOG.info(
-            "[utilization] EFF(max(cpu,mem)): mean=%.3f, min=%.3f, max=%.3f",
-            mean_eff, min_eff, max_eff,
-        )
-
-    ##############################################
-    # ------------ Plotting helpers --------------
-    ##############################################
-    def _plot_trace_utilization(self) -> None:
-        """
-        Plot CPU/MEM utilization and max runnable pods over time,
-        including creation/deletion counts per x-tick.
-        """
-        max_time = max(self.times)
-
-        # Choose x-axis units based on total duration
-        # <= 7h -> minutes, <= 7d -> hours, else days
-        if max_time <= 7 * 3600:
-            x_scale = 1.0 / 60.0        # seconds -> minutes
-            x_label = "Time (minutes)"
-        elif max_time <= 7 * 24 * 3600:
-            x_scale = 1.0 / 3600.0      # seconds -> hours
-            x_label = "Time (hours)"
+        if not (alpha > 0 and x_min > 0 and x_max > x_min):
+            raise ValueError("Require alpha>0, x_min>0, x_max>x_min")
+        if not (isinstance(size, int) and size >= 1):
+            raise ValueError("Require size to be a positive int")
+        u = rng.random(size)
+        # Sample length-biased lifetime X with pdf ∝ x^{-alpha} on [x_min, x_max].
+        # CDF inversion:
+        #   alpha != 1: F(x) = (x^(1-alpha) - x_min^(1-alpha)) / (x_max^(1-alpha) - x_min^(1-alpha))
+        #   alpha == 1: F(x) = (ln x - ln x_min) / (ln x_max - ln x_min)
+        if abs(alpha - 1.0) < 1e-12:
+            log_min = math.log(x_min)
+            log_max = math.log(x_max)
+            x = np.exp(log_min + (log_max - log_min) * u)
         else:
-            x_scale = 1.0 / (24.0 * 3600.0)  # seconds -> days
-            x_label = "Time (days)"
+            p = 1.0 - alpha
+            a = x_min ** p
+            b = x_max ** p
+            x = np.power(a + (b - a) * u, 1.0 / p)
+        # Given X, residual lifetime R is uniform on [0, X].
+        r = x * (1.0 - rng.random(size))
+        return r.astype(float)
 
-        fig, ax1 = plt.subplots(figsize=(9, 4))
+    # -------------------------------------------------------------------------
+    # Mean-life inference and alpha fitting
+    # -------------------------------------------------------------------------
 
-        # CPU/MEM utilization
-        ax1.plot(
-            self.times,
-            self.u_cpu_hist,
-            label="CPU utilization",
-            linestyle="--",
-            color="tab:blue",
-            alpha=0.7,
-            linewidth=0.5,
-        )
-        ax1.plot(
-            self.times,
-            self.u_mem_hist,
-            label="Memory utilization",
-            linestyle="--",
-            color="tab:orange",
-            alpha=0.7,
-            linewidth=0.5,
-        )
-
-        ax1.set_xlabel(x_label, labelpad=20)
-        ax1.set_ylabel("Utilization (fraction of total capacity)")
-
-        # Second axis for max runnable pods
-        ax2 = ax1.twinx()
-        ax2.plot(
-            self.times,
-            self.max_runnable_pods_hist,
-            linestyle="-",
-            linewidth=1.0,
-            color="tab:green",
-            alpha=0.7,
-            label="Max runnable pods",
-        )
-        ax2.set_ylabel("Max runnable pods")
-
-        # Grid and legends
-        ax1.grid(True, linestyle="--", alpha=0.4)
-
-        # Combine legends from both axes
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc="lower right")
-
-        # Build event list for tick annotation (C = creation, D = deletion)
-        events: List[Tuple[float, str]] = []
-        for p in self.pods:
-            events.append((p.start_time, "C"))
-            events.append((p.end_time, "D"))
-        events.sort(key=lambda e: e[0])
-
-        # get x ticks (in seconds) and add C/D annotations below
-        xticks = ax1.get_xticks()
-        xticks = [t for t in xticks if 0.0 <= t <= max_time]
-
-        if len(events) > 0 and len(xticks) > 0:
-            ax1.set_xticks(xticks)
-            base_labels = [f"{t * x_scale:.0f}" for t in xticks]
-            ax1.set_xticklabels(base_labels)
-
-            idx = 0
-            n_events = len(events)
-            for i, tick in enumerate(xticks):
-                if tick < 0:
-                    continue
-                left = 0.0 if i == 0 else xticks[i - 1]
-                right = tick
-                c_count = 0
-                d_count = 0
-                while idx < n_events and events[idx][0] <= right:
-                    t_ev, kind = events[idx]
-                    idx += 1
-                    if t_ev > left:
-                        if kind == "C":
-                            c_count += 1
-                        else:
-                            d_count += 1
-                if c_count or d_count:
-                    ax1.text(
-                        tick,
-                        -0.1,  # position below axis
-                        f"+{c_count} -{d_count}",
-                        transform=ax1.get_xaxis_transform(),
-                        ha="center",
-                        va="top",
-                        fontsize=8,
-                    )
-
-        plt.tight_layout()
-        plt.subplots_adjust(bottom=0.22)
-        plt.savefig(self.util_plot_path)
-        plt.close(fig)
-        LOG.info("saved utilization plot to %s", self.util_plot_path)
-
-    def _plot_generated_histograms(self) -> None:
+    def infer_mean_lifetime_from_target_util(self) -> float:
         """
-        Build histograms of the generated data and save them as a 3x2 grid PNG.
+        Infer an initial guess for mean pod lifetime from the target
+        steady-state utilization.
+
+        We approximate steady-state (Little's-law style) under effective-load:
+            eff(t) = max(total_cpu_req(t), total_mem_req(t))
+
+        In expectation, the long-run average effective requested load across the
+        cluster is:
+            E[eff_total] ≈ arrival_rate * E[replicas] * E[max(cpu_req, mem_req)]
+            * E[lifetime]
+
+        We set E[eff_total] equal to the target effective requested capacity:
+            target_eff_total = target_util * num_nodes
+
+        Solving for E[lifetime]:
+            mean_life = (target_util * num_nodes) /
+                        (arrival_rate * E[replicas] * E[max(cpu_req, mem_req)])
+
+        Notes: - arrival_rate = 1/mean_arrival - E[replicas] comes from the
+        truncated geometric/uniform replica model - E[max(cpu_req, mem_req)] is
+        estimated via deterministic Monte Carlo
+
+        This is an initial guess; calibration adjusts mean_life to match the
+        measured time-mean effective utilization of a generated trace.
         """
-        # Sort by start_time to get sensible inter-arrivals
-        pods_sorted = sorted(self.pods, key=lambda p: p.start_time)
-        start_times = np.array([p.start_time for p in pods_sorted], dtype=float)
-        cpu_vals = np.array([p.cpu for p in pods_sorted], dtype=float)
-        mem_vals = np.array([p.mem for p in pods_sorted], dtype=float)
-        lifetimes = np.array(
-            [p.end_time - p.start_time for p in pods_sorted],
-            dtype=float,
+        mean_arrival = float(self.args.mean_arrival)
+        _lambda = 1.0 / mean_arrival
+        rep_vals, rep_probs = self.build_trunc_geometric_support(
+            int(self.args.replicas_min),
+            int(self.args.replicas_max),
+            float(self.args.replicas_ratio),
         )
-        prio_vals = np.array([p.priority for p in pods_sorted], dtype=int)
-        replicas_vals = np.array([p.replicas for p in pods_sorted], dtype=int)
-
-        # Inter-arrival times (Δt between sorted start_times)
-        inter_arrivals = np.empty_like(start_times)
-        if len(start_times) > 0:
-            inter_arrivals[0] = start_times[0]  # from t=0 to first pod
-        if len(start_times) > 1:
-            inter_arrivals[1:] = np.diff(start_times)
-
-        # 3x2 grid: [0] inter-arrival, [1] lifetime, [2] CPU, [3] MEM, [4] priority, [5] replicas
-        fig, axes = plt.subplots(3, 2, figsize=(5, 4.5))
-        axes = axes.flatten()
-
-        # Inter-arrival times
-        plot_histogram_with_pareto(
-            axes[0],
-            inter_arrivals,
-            title="Generated inter-arrival times",
-            x_label="Δt (seconds)",
-            y_label="Probability density",
-            bins=80,
-            log_y=True,
-            x_max=self.args.xmax_arrival,
-            scale=1.0,
-            pareto_fit=True,
-            pareto_alpha=self.args.alpha_arrival,
-            pareto_xmin=self.args.xmin_arrival,
-        )
-
-        # Lifetimes
-        plot_histogram_with_pareto(
-            axes[1],
-            lifetimes,
-            title="Generated lifetimes",
-            x_label="Lifetime (seconds)",
-            y_label="Probability density",
-            bins=80,
-            log_y=True,
-            x_max=self.args.xmax_life,
-            scale=1.0,
-            pareto_fit=True,
-            pareto_alpha=self.args.alpha_life,
-            pareto_xmin=self.args.xmin_life,
-        )
-
-        # CPU
-        plot_histogram_with_pareto(
-            axes[2],
-            cpu_vals,
-            title="Generated CPU requests",
-            x_label="Requested CPU (fraction of node capacity)",
-            y_label="Probability density",
-            bins=80,
-            log_y=True,
-            x_max=self.args.xmax_cpu,
-            scale=1.0,
-            pareto_fit=True,
-            pareto_alpha=self.args.alpha_cpu,
-            pareto_xmin=self.args.xmin_cpu,
-        )
-
-        # MEM
-        plot_histogram_with_pareto(
-            axes[3],
-            mem_vals,
-            title="Generated memory requests",
-            x_label="Requested memory (fraction of node capacity)",
-            y_label="Probability density",
-            bins=80,
-            log_y=True,
-            x_max=self.args.xmax_mem,
-            scale=1.0,
-            pareto_fit=True,
-            pareto_alpha=self.args.alpha_mem,
-            pareto_xmin=self.args.xmin_mem,
-        )
-
-        # Priorities (discrete PMF with geometric-like overlay)
-        plot_bar_with_geometric(
-            axes[4],
-            prio_vals,
-            title="Generated priorities",
-            x_label="Priority",
-            y_label="Probability mass",
-            geom_fit=True,
-            geom_ratio=self.args.priority_ratio,
-            x_min=self.args.priority_min,
-            x_max=self.args.priority_max,
-        )
+        e_rep = self.expected_value(rep_vals, rep_probs)
         
-        # Replicas (discrete PMF with geometric-like overlay)
-        plot_bar_with_geometric(
-            axes[5],
-            replicas_vals,
-            title="Generated replicas",
-            x_label="Replicas",
-            y_label="Probability mass",
-            geom_fit=True,
-            geom_ratio=self.args.replicas_ratio,
-            x_min=self.args.replicas_min,
-            x_max=self.args.replicas_max,
-        )
+        e_req_eff = self.mc_estimate_eff_mean_max_req()
 
-        fig.tight_layout()
-        fig.savefig(self.hist_plot_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        LOG.info("saved generated histograms to %s", self.hist_plot_path)
-    
-    ##############################################
-    # ------------ Trace generator ---------------
-    ##############################################
-    def _generate_trace(self) -> None:
+        U = float(self.args.target_util)
+        N = float(self.args.num_nodes)
+
+        mean_life = (U * N) / (_lambda * e_rep * e_req_eff)
+
+        xmin = float(self.args.xmin_life)
+        xmax = float(self.args.xmax_life)
+        if mean_life <= xmin:
+            raise ValueError(f"Inferred mean_life={mean_life:.6f}s <= xmin-life={xmin}.")
+        if mean_life >= xmax:
+            raise ValueError(f"Inferred mean_life={mean_life:.6f}s >= xmax-life={xmax}.")
+
+        LOG.info(
+            "[infer-mean-life] using E[max(cpu,mem)]=%.6f (per replica), E[replicas]=%.3f, lambda=%.6f",
+            float(e_req_eff),
+            float(e_rep),
+            float(_lambda),
+        )
+        return float(mean_life)
+
+    def mc_estimate_eff_mean_max_req(self) -> float:
         """
-        Generate the trace.
+        Estimate E[max(cpu_req, mem_req)] per replica under the configured bounded-Pareto
+        request distribution using deterministic (derived seed) Monte Carlo.
         """
-        rng = self.rng
+        # Solve alpha for requests deterministically from bounds + mean.
+        alpha_cpu = self.solve_alpha_for_bounded_mean(
+            x_min=float(self.args.xmin_cpu),
+            x_max=float(self.args.xmax_cpu),
+            target_mean=float(self.args.mean_cpu),
+        )
+        alpha_mem = self.solve_alpha_for_bounded_mean(
+            x_min=float(self.args.xmin_mem),
+            x_max=float(self.args.xmax_mem),
+            target_mean=float(self.args.mean_mem),
+        )
+        rng = np.random.default_rng(derive_seed(self.base_seed, "infer-mean-life-e-max-req"))
+        cpu = self.sample_bounded_pareto(
+            rng,
+            alpha=float(alpha_cpu),
+            x_min=float(self.args.xmin_cpu),
+            x_max=float(self.args.xmax_cpu),
+            size=EFFECTIVE_MAX_REQ_MC_SAMPLES,
+        ).astype(float)
+        mem = self.sample_bounded_pareto(
+            rng,
+            alpha=float(alpha_mem),
+            x_min=float(self.args.xmin_mem),
+            x_max=float(self.args.xmax_mem),
+            size=EFFECTIVE_MAX_REQ_MC_SAMPLES,
+        ).astype(float)
+        eff_mean_max = float(np.mean(np.maximum(cpu, mem)))
+        if not (eff_mean_max > 0.0):
+            raise ValueError(f"Invalid E[max(cpu,mem)] estimate: {eff_mean_max}")
+        return eff_mean_max
 
-        # Sanity for x_min > 0
-        if self.args.xmin_arrival <= 0.0:
-            raise ValueError("xmin_arrival must be > 0 for Pareto I.")
-        if self.args.xmin_life <= 0.0:
-            raise ValueError("xmin_life must be > 0 for Pareto I.")
+    def fit_pareto_alphas(self) -> None:
+        """
+        Fit bounded-Pareto shape parameters (alphas) from configured bounds and
+        means. For each bounded Pareto distribution (inter-arrival time,
+        lifetime, request size), we solve the shape parameter alpha such that
+        the distribution on [x_min, x_max] has the desired mean.
+        """
+        if self.alpha_arrival is None:
+            self.alpha_arrival = round(
+                self.solve_alpha_for_bounded_mean(
+                    x_min=float(self.args.xmin_arrival),
+                    x_max=float(self.args.xmax_arrival),
+                    target_mean=float(self.args.mean_arrival),
+                ),
+                MAX_DECIMALS,
+            )
+            self.args.alpha_arrival = float(self.alpha_arrival)
 
-        # Priority distribution: discrete geometric on {p_min, ..., p_max}
-        p_min = max(1, int(self.args.priority_min))
-        p_max = max(p_min, int(self.args.priority_max))
-        prio_values, prio_probs = self._build_geometric_support(
-            min_val=p_min,
-            max_val=p_max,
-            ratio=self.args.priority_ratio,
+        self.alpha_life = round(
+            self.solve_alpha_for_bounded_mean(
+                x_min=float(self.args.xmin_life),
+                x_max=float(self.args.xmax_life),
+                target_mean=float(self.args.mean_life),
+            ),
+            MAX_DECIMALS,
+        )
+        self.args.alpha_life = float(self.alpha_life)
+
+        if self.alpha_cpu is None:
+            self.alpha_cpu = round(
+                self.solve_alpha_for_bounded_mean(
+                    x_min=float(self.args.xmin_cpu),
+                    x_max=float(self.args.xmax_cpu),
+                    target_mean=float(self.args.mean_cpu),
+                ),
+                MAX_DECIMALS,
+            )
+            self.args.alpha_cpu = float(self.alpha_cpu)
+        if self.alpha_mem is None:
+            self.alpha_mem = round(
+                self.solve_alpha_for_bounded_mean(
+                    x_min=float(self.args.xmin_mem),
+                    x_max=float(self.args.xmax_mem),
+                    target_mean=float(self.args.mean_mem),
+                ),
+                MAX_DECIMALS,
+            )
+            self.args.alpha_mem = float(self.alpha_mem)
+        
+        LOG.info("[pareto-fit] arrival:  mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+                 float(self.args.mean_arrival), float(self.args.xmin_arrival), float(self.args.xmax_arrival), float(self.alpha_arrival))
+        LOG.info("[pareto-fit] lifetime: mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+                 float(self.args.mean_life), float(self.args.xmin_life), float(self.args.xmax_life), float(self.alpha_life))
+        LOG.info("[pareto-fit] cpu request:  mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+                 float(self.args.mean_cpu), float(self.args.xmin_cpu), float(self.args.xmax_cpu), float(self.alpha_cpu))
+        LOG.info("[pareto-fit] mem request:  mean=%.6f xmin=%.6f xmax=%.6f alpha=%.6f",
+                 float(self.args.mean_mem), float(self.args.xmin_mem), float(self.args.xmax_mem), float(self.alpha_mem))
+
+    # -------------------------------------------------------------------------
+    # Calibrate mean-life to hit target utilization
+    # -------------------------------------------------------------------------
+
+    def calibrate_mean_lifetime(
+        self,
+        tolerance=float(MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE),
+        max_iterations=int(MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS),
+    ) -> Tuple[List[TraceRecord], List[TraceRecord], Dict[str, object]]:
+        """
+        Calibrate args.mean_life to match the requested target utilization.
+        Effective utilization is defined as:
+            eff(t) = max(cpu_util(t), mem_util(t))
+        How it works:
+        1) Use a fixed iteration seed (CRN: common random numbers) across calibration
+            iterations.
+        2) For each iteration, generate a full trace realization and
+            measure time-mean effective utilization.
+        3) Compute relative error err = |measured - target| / target. If within
+           tolerance, stop and return the best trace seen. Otherwise update
+           mean_life proportionally:
+                mean_life <- mean_life * (target / measured)
+        """
+        target = float(self.args.target_util)
+        iteration_seed = int(derive_seed(self.base_seed, "calibrate-mean-life-crn"))
+        best_error = float("inf")
+        best_initial: List[TraceRecord] = []
+        best_trace: List[TraceRecord] = []
+        best_extra: Dict[str, object] = {}
+        for it in range(1, max_iterations + 1):
+            initial_pods, trace_pods, measured, extra = self.make_trace(iteration_seed)
+            err = abs(measured - target) / max(1e-12, target)
+            if err < best_error:
+                best_error = err
+                best_initial, best_trace, best_extra = initial_pods, trace_pods, extra
+            LOG.info(
+                "[calibrate-mean-life] iteration=%d measured=%.4f target=%.4f rel_err=%.2f%% mean_life=%.3fs",
+                it, measured, target, 100.0 * err, float(self.args.mean_life),
+            )
+            if err <= tolerance:
+                return best_initial, best_trace, best_extra
+            if measured <= 1e-12:
+                raise RuntimeError("Measured utilization is ~0; cannot calibrate mean-life.")
+            new_mean = float(self.args.mean_life) * (target / measured)
+            xmin = float(self.args.xmin_life)
+            xmax = float(self.args.xmax_life)
+            new_mean = max(new_mean, xmin * 1.001)
+            new_mean = min(new_mean, xmax * 0.999)
+            self.args.mean_life = float(new_mean)
+        LOG.warning("[calibrate-mean-life] did not reach util-tolerance; best error=%.2f%%", 100.0 * best_error)
+        return best_initial, best_trace, best_extra
+
+    # -------------------------------------------------------------------------
+    # Geometric support + expected value
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def build_trunc_geometric_support(min_val: int, max_val: int, ratio: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Build the discrete integer support and PMF for a truncated geometric
+        distribution on the inclusive range k ∈ [min_val, max_val].
+
+        See paper (geometric + truncation):
+          - Geometric PMF: Chattopadhyay et al. (2014), Eq. (7), p. 31:
+                f(x) = p (1-p)^(x-1) = p q^(x-1),  x = 1,2,...
+          - Truncation/renormalization to a finite range: Chattopadhyay et al.
+            (2014), p. 26 (definition of truncation + table of truncated PMFs).
+        For k in [min_val, max_val], we assign unnormalized weights
+            w(k) = ratio^(k - min_val)
+        and normalize over the finite interval to obtain probabilities.
+        """
+        if ratio <= 0:
+            raise ValueError("ratio must be > 0.")
+        lo = int(min_val)
+        hi = max(int(max_val), lo)
+        vals = np.arange(lo, hi + 1, dtype=int)
+        if vals.size == 1 or np.isclose(ratio, 1.0):
+            return vals, None
+        exps = np.arange(vals.size, dtype=float)
+        w = ratio ** exps
+        p = w / w.sum()
+        return vals, p
+
+    @staticmethod
+    def expected_value(vals: np.ndarray, probs: Optional[np.ndarray]) -> float:
+        """
+        Compute expectation for a discrete random variable on a finite support.
+        """
+        return float(np.mean(vals)) if probs is None else float(np.sum(vals.astype(float) * probs.astype(float)))
+
+    # -------------------------------------------------------------------------
+    # Util metric
+    # -------------------------------------------------------------------------
+
+    def time_mean_utils_from_hist(
+        self,
+        times: List[float],
+        u_cpu_hist: List[float],
+        u_mem_hist: List[float],
+    ) -> Tuple[float, float, float]:
+        """
+        Compute time-mean utilization (cpu_util, mem_util, eff_util).
+
+        The histories are assumed to represent a right-continuous step function:
+        value[i] applies on [times[i], times[i+1]) and value[-1] applies on
+        [times[-1], T].
+        """
+        T_end = float(self.trace_time_s)
+        if T_end <= 0.0:
+            return 0.0, 0.0, 0.0
+        if not times or len(times) != len(u_cpu_hist) or len(times) != len(u_mem_hist):
+            return 0.0, 0.0, 0.0
+        area_cpu = 0.0
+        area_mem = 0.0
+        area_eff = 0.0
+        # Integrate over consecutive segments.
+        for i in range(len(times) - 1):
+            t0 = float(times[i])
+            t1 = float(times[i + 1])
+            dt = t1 - t0
+            if dt <= 0.0:
+                continue
+            cpu_u = float(u_cpu_hist[i])
+            mem_u = float(u_mem_hist[i])
+            area_cpu += cpu_u * dt
+            area_mem += mem_u * dt
+            area_eff += max(cpu_u, mem_u) * dt
+        # Tail to T.
+        last_t = float(times[-1])
+        if last_t < T_end:
+            dt = T_end - last_t
+            cpu_u = float(u_cpu_hist[-1])
+            mem_u = float(u_mem_hist[-1])
+            area_cpu += cpu_u * dt
+            area_mem += mem_u * dt
+            area_eff += max(cpu_u, mem_u) * dt
+        return area_cpu / T_end, area_mem / T_end, area_eff / T_end
+
+    # -------------------------------------------------------------------------
+    # Initial pods via warm-up simulation
+    # -------------------------------------------------------------------------
+
+    def generate_initial_pods(
+        self,
+        rng: np.random.Generator,
+        *,
+        priority_vals: np.ndarray,
+        priority_probs: Optional[np.ndarray],
+        replicas_vals: np.ndarray,
+        replicas_probs: Optional[np.ndarray],
+        next_id: int,
+        max_pods: int = MAX_INITIAL_PODS,
+    ) -> Tuple[List[TraceRecord], int]:
+        """
+        Generate the initial snapshot at t=0.
+        We generate a list of pods that are alive at the snapshot and aim for an
+        effective requested load close to the target utilization, where:
+            effective = max(total_cpu_req, total_mem_req)
+        Notes:
+        - All returned pods have start_time = 0.0.
+        - end_time is a residual lifetime sampled from the steady-state residual distribution (not the original lifetime distribution).
+        - We add pods until we reach the target request, and if the last pod causes an
+        overshoot we pop it.
+        """
+        pods: List[TraceRecord] = []
+        total_cpu_req = 0.0
+        total_mem_req = 0.0
+        target_total_req = float(self.args.target_util) * float(self.args.num_nodes)
+
+        while max(total_cpu_req, total_mem_req) < target_total_req and len(pods) < int(max_pods):
+            cpu_req = float(self.sample_bounded_pareto(
+                rng,
+                alpha=float(self.alpha_cpu),
+                x_min=float(self.args.xmin_cpu),
+                x_max=float(self.args.xmax_cpu),
+                size=1,
+            )[0])
+
+            mem_req = float(self.sample_bounded_pareto(
+                rng,
+                alpha=float(self.alpha_mem),
+                x_min=float(self.args.xmin_mem),
+                x_max=float(self.args.xmax_mem),
+                size=1,
+            )[0])
+
+            remaining = float(self.sample_steady_state_residual_lifetime(
+                rng,
+                alpha=float(self.alpha_life),
+                x_min=float(self.args.xmin_life),
+                x_max=float(self.args.xmax_life),
+                size=1,
+            )[0])
+            if remaining <= 0.0:
+                continue
+
+            replicas = int(rng.choice(replicas_vals, p=replicas_probs))
+            priority = int(rng.choice(priority_vals, p=priority_probs))
+
+            next_id += 1
+            rec = TraceRecord(
+                id=next_id,
+                start_time=0.0,
+                end_time=round(remaining, MAX_DECIMALS),
+                cpu=round(cpu_req, MAX_DECIMALS),
+                mem=round(mem_req, MAX_DECIMALS),
+                priority=priority,
+                replicas=replicas,
+            )
+            pods.append(rec)
+            total_cpu_req += float(rec.replicas) * float(rec.cpu)
+            total_mem_req += float(rec.replicas) * float(rec.mem)
+
+            # If we overshoot, pop the last pod and roll back the id counter.
+            if max(total_cpu_req, total_mem_req) > target_total_req + 1e-12:
+                last = pods.pop()
+                total_cpu_req -= float(last.replicas) * float(last.cpu)
+                total_mem_req -= float(last.replicas) * float(last.mem)
+                next_id -= 1
+                break
+
+        N = float(self.args.num_nodes)
+        cpu_util = (total_cpu_req / N) if N > 0 else 0.0
+        mem_util = (total_mem_req / N) if N > 0 else 0.0
+        eff_util = max(cpu_util, mem_util)
+
+        LOG.info(
+            "[initial-pods] records=%d cpu≈%.3f mem≈%.3f eff≈%.3f target=%.3f",
+            len(pods),
+            cpu_util,
+            mem_util,
+            eff_util,
+            float(self.args.target_util),
         )
 
-        # Replica distribution: discrete geometric on {r_min, ..., r_max}
-        r_min = max(1, int(self.args.replicas_min))
-        r_max = max(r_min, int(self.args.replicas_max))
-        replica_values, replica_probs = self._build_geometric_support(
-            min_val=r_min,
-            max_val=r_max,
-            ratio=self.args.replicas_ratio,
-        )
+        return pods, next_id
 
-        state = ClusterState(num_nodes=self.args.num_nodes)
-        end_heap: List[Tuple[float, float, float, int]] = []  # (end_time, cpu, mem, replicas)
+    # -------------------------------------------------------------------------
+    # Generate trace pod events
+    # -------------------------------------------------------------------------
+
+    def generate_trace_pod_events(
+        self,
+        rng: np.random.Generator,
+        *,
+        prio_vals: np.ndarray,
+        prio_probs: Optional[np.ndarray],
+        rep_vals: np.ndarray,
+        rep_probs: Optional[np.ndarray],
+        next_id: int,
+        initial_pods: List[TraceRecord],
+    ) -> Tuple[List[TraceRecord], int, List[float], List[float], List[float], List[float], List[int]]:
+        """
+        Generate trace pod events over the trace horizon.
+        """
+        state = ClusterState()
+        end_heap: List[EndHeapEntry] = []
+
+        for p in initial_pods:
+            cpu_req = float(p.cpu)
+            mem_req = float(p.mem)
+            replicas = int(p.replicas)
+            state.live_cpu_req += replicas * cpu_req
+            state.live_mem_req += replicas * mem_req
+            state.live_pods += replicas
+            heapq.heappush(
+                end_heap,
+                EndHeapEntry(end_time=float(p.end_time), cpu_req=cpu_req, mem_req=mem_req, replicas=replicas),
+            )
+
         pods: List[TraceRecord] = []
 
-        # Utilization / max runnable pods history at each accepted pod
+        N = float(self.args.num_nodes)
+
         times: List[float] = [0.0]
-        u_cpu_hist: List[float] = [0.0]
-        u_mem_hist: List[float] = [0.0]
-        max_runnable_pods_hist: List[int] = [0]
-        current_time = 0.0
-        pod_id = 0
+        u_cpu_hist: List[float] = [state.live_cpu_req / N]
+        u_mem_hist: List[float] = [state.live_mem_req / N]
+        u_eff_hist: List[float] = [max(u_cpu_hist[-1], u_mem_hist[-1])]
+        pods_hist: List[int] = [state.live_pods]
 
-        LOG.info("starting trace generation (trace_time=%.1f seconds)", self.trace_time_s)
-        #
-        # Run until a record's start_time would exceed trace_time_s
-        while True:
-            # Stop if current_time already >= trace_time_s
-            if current_time >= self.trace_time_s:
+        t = 0.0
+        while t < self.trace_time_s:
+            dt = float(self.sample_bounded_pareto(
+                rng,
+                alpha=float(self.alpha_arrival),
+                x_min=float(self.args.xmin_arrival),
+                x_max=float(self.args.xmax_arrival),
+                size=1,
+            )[0])
+
+            start = t + dt
+            if start >= self.trace_time_s:
                 break
 
-            # Sample inter-arrival time and compute next start_time
-            delta_t = float(self._sample_pareto(rng, self.args.alpha_arrival, self.args.xmin_arrival, self.args.xmax_arrival, size=1)[0])
-            start_time = current_time + delta_t
-            
-            # Stop when next pod would start at time >= trace_time_s
-            if start_time >= self.trace_time_s:
-                break
+            while end_heap and end_heap[0].end_time <= start:
+                end_t = float(end_heap[0].end_time)
+                while end_heap and float(end_heap[0].end_time) == end_t:
+                    entry = heapq.heappop(end_heap)
+                    state.live_cpu_req = max(0.0, state.live_cpu_req - entry.cpu_req * entry.replicas)
+                    state.live_mem_req = max(0.0, state.live_mem_req - entry.mem_req * entry.replicas)
+                    state.live_pods = max(0, state.live_pods - entry.replicas)
 
-            # First, remove pod completions up to this start_time
-            self._delete_completed_pods(state, end_heap, start_time)
+                if end_t <= self.trace_time_s and end_t >= times[-1]:
+                    times.append(end_t)
+                    u_cpu_hist.append(state.live_cpu_req / N)
+                    u_mem_hist.append(state.live_mem_req / N)
+                    u_eff_hist.append(max(u_cpu_hist[-1], u_mem_hist[-1]))
+                    pods_hist.append(state.live_pods)
 
-            # Sample lifetime
-            lifetime = float(self._sample_pareto(rng, self.args.alpha_life, self.args.xmin_life, self.args.xmax_life, size=1)[0])
-            end_time = start_time + lifetime
+            lifetime = float(self.sample_bounded_pareto(
+                rng,
+                alpha=float(self.alpha_life),
+                x_min=float(self.args.xmin_life),
+                x_max=float(self.args.xmax_life),
+                size=1,
+            )[0])
 
-            # Sample CPU/MEM resources using Pareto
-            cpu = float(self._sample_pareto(rng, self.args.alpha_cpu, self.args.xmin_cpu, self.args.xmax_cpu, size=1)[0])
-            mem = float(self._sample_pareto(rng, self.args.alpha_mem, self.args.xmin_mem, self.args.xmax_mem, size=1)[0])
-            
-            # Sample priority using discrete geometric
-            priority = int(rng.choice(prio_values, p=prio_probs))
+            end = round(start + lifetime, MAX_DECIMALS)
 
-            # Determine replicas for this pod using discrete geometric
-            replicas = int(rng.choice(replica_values, p=replica_probs))
+            cpu_req = float(self.sample_bounded_pareto(
+                rng,
+                alpha=float(self.alpha_cpu),
+                x_min=float(self.args.xmin_cpu),
+                x_max=float(self.args.xmax_cpu),
+                size=1,
+            )[0])
 
-            # Check utilization if we accept this pod (for logging)
-            new_live_cpu = state.live_cpu + replicas * cpu
-            new_live_mem = state.live_mem + replicas * mem
-            u_cpu = new_live_cpu / float(self.args.num_nodes)
-            u_mem = new_live_mem / float(self.args.num_nodes)
+            mem_req = float(self.sample_bounded_pareto(
+                rng,
+                alpha=float(self.alpha_mem),
+                x_min=float(self.args.xmin_mem),
+                x_max=float(self.args.xmax_mem),
+                size=1,
+            )[0])
 
-            pod_id += 1
-            pods.append(
-                TraceRecord(
-                    id=pod_id,
-                    start_time=round(start_time, MAX_DECIMALS),
-                    end_time=round(end_time, MAX_DECIMALS),
-                    cpu=round(cpu, MAX_DECIMALS),
-                    mem=round(mem, MAX_DECIMALS),
-                    priority=priority,
-                    replicas=replicas,
-                )
-            )
-            state.live_cpu = new_live_cpu
-            state.live_mem = new_live_mem
+            replicas = int(rng.choice(rep_vals, p=rep_probs))
+            priority = int(rng.choice(prio_vals, p=prio_probs))
+
+            state.live_cpu_req += replicas * cpu_req
+            state.live_mem_req += replicas * mem_req
             state.live_pods += replicas
-            heapq.heappush(end_heap, (end_time, cpu, mem, replicas))
-            current_time = start_time
+            heapq.heappush(
+                end_heap,
+                EndHeapEntry(end_time=float(end), cpu_req=cpu_req, mem_req=mem_req, replicas=replicas),
+            )
 
-            # Record utilization snapshot and max runnable pods (after adding)
-            times.append(start_time)
-            u_cpu_hist.append(u_cpu)
-            u_mem_hist.append(u_mem)
-            max_runnable_pods_hist.append(state.live_pods)
+            next_id += 1
+            pods.append(TraceRecord(
+                id=next_id,
+                start_time=round(start, MAX_DECIMALS),
+                end_time=float(end),
+                cpu=round(cpu_req, MAX_DECIMALS),
+                mem=round(mem_req, MAX_DECIMALS),
+                priority=priority,
+                replicas=replicas,
+            ))
+            times.append(start)
+            u_cpu_hist.append(state.live_cpu_req / N)
+            u_mem_hist.append(state.live_mem_req / N)
+            u_eff_hist.append(max(u_cpu_hist[-1], u_mem_hist[-1]))
+            pods_hist.append(state.live_pods)
 
-        # Store on instance
-        self.pods = pods
+            t = start
+
+        while end_heap and float(end_heap[0].end_time) <= float(self.trace_time_s):
+            end_t = float(end_heap[0].end_time)
+            while end_heap and float(end_heap[0].end_time) == end_t:
+                entry = heapq.heappop(end_heap)
+                state.live_cpu_req = max(0.0, state.live_cpu_req - entry.cpu_req * entry.replicas)
+                state.live_mem_req = max(0.0, state.live_mem_req - entry.mem_req * entry.replicas)
+                state.live_pods = max(0, state.live_pods - entry.replicas)
+
+            if end_t >= times[-1]:
+                times.append(end_t)
+                u_cpu_hist.append(state.live_cpu_req / N)
+                u_mem_hist.append(state.live_mem_req / N)
+                u_eff_hist.append(max(u_cpu_hist[-1], u_mem_hist[-1]))
+                pods_hist.append(state.live_pods)
+
+        return pods, next_id, times, u_eff_hist, u_cpu_hist, u_mem_hist, pods_hist
+
+    # -------------------------------------------------------------------------
+    # Make trace
+    # -------------------------------------------------------------------------
+
+    def make_trace(self, iter_seed: int) -> Tuple[List[TraceRecord], List[TraceRecord], float, Dict[str, object]]:
+        """
+        Make one trace generation pass: initial pods + trace pods.
+        """
+        rng_initial = np.random.default_rng(derive_seed(iter_seed, "initial-pods"))
+        rng_trace = np.random.default_rng(derive_seed(iter_seed, "trace-pods"))
+
+        self.fit_pareto_alphas()
+
+        priority_vals, priority_probs = self.build_trunc_geometric_support(
+            int(self.args.priority_min),
+            int(self.args.priority_max),
+            float(self.args.priority_ratio),
+        )
+        replicas_vals, replicas_probs = self.build_trunc_geometric_support(
+            int(self.args.replicas_min),
+            int(self.args.replicas_max),
+            float(self.args.replicas_ratio),
+        )
+
+        next_id = 0
+        initial_pods, next_id = self.generate_initial_pods(
+            rng_initial,
+            priority_vals=priority_vals, priority_probs=priority_probs,
+            replicas_vals=replicas_vals, replicas_probs=replicas_probs,
+            next_id=next_id,
+        )
+
+        trace_pods, next_id, times, u_eff_hist, u_cpu_hist, u_mem_hist, pods_hist = self.generate_trace_pod_events(
+            rng_trace,
+            prio_vals=priority_vals, prio_probs=priority_probs,
+            rep_vals=replicas_vals, rep_probs=replicas_probs,
+            next_id=next_id,
+            initial_pods=initial_pods,
+        )
+
+        # Store plot series
         self.times = times
+        self.u_eff_hist = u_eff_hist
         self.u_cpu_hist = u_cpu_hist
         self.u_mem_hist = u_mem_hist
-        self.max_runnable_pods_hist = max_runnable_pods_hist
-        
-        LOG.info("total pods %d generated before stopping at t=%.1f seconds.", len(self.pods), self.trace_time_s)
-    
-    def _write_trace(self) -> None:
-        """
-        Write trace to a JSON file.
-        """
-        obj = {
-            "meta": {
-                "num_nodes": self.args.num_nodes,
-                "trace_time_s": round(self.trace_time_s, 2),
-                "seed": self.args.seed,
-                "cpu_params": {
-                    "pareto_alpha": self.alpha_cpu,
-                    "pareto_xmin":  self.args.xmin_cpu,
-                    "pareto_xmax":  self.args.xmax_cpu,
-                    "pareto_mean":  self.args.mean_cpu,
-                },
-                "mem_params": {
-                    "pareto_alpha": self.alpha_mem,
-                    "pareto_xmin":  self.args.xmin_mem,
-                    "pareto_xmax":  self.args.xmax_mem,
-                    "pareto_mean":  self.args.mean_mem,
-                },
-                "arrival_params": {
-                    "pareto_alpha": self.alpha_arrival,
-                    "pareto_xmin":  self.args.xmin_arrival,
-                    "pareto_xmax":  self.args.xmax_arrival,
-                    "pareto_mean":  self.args.mean_arrival,
-                },
-                "lifetime_params": {
-                    "pareto_alpha": self.alpha_life,
-                    "pareto_xmin":  self.args.xmin_life,
-                    "pareto_xmax":  self.args.xmax_life,
-                    "pareto_mean":  self.args.mean_life,
-                },
-                "priority_params": {
-                    "priority_min": self.args.priority_min,
-                    "priority_max": self.args.priority_max,
-                    "ratio":        self.args.priority_ratio,
-                },
-                "replica_params": {
-                    "replicas_min": self.args.replicas_min,
-                    "replicas_max": self.args.replicas_max,
-                    "ratio":        self.args.replicas_ratio,
+        self.pods_hist = pods_hist
+        self.initial_pods_count = int(sum(int(p.replicas) for p in initial_pods))
+
+        # Measure util from histories
+        util_cpu, util_mem, util_eff = self.time_mean_utils_from_hist(times, u_cpu_hist, u_mem_hist)
+        util = float(util_eff)
+
+        all_pods = initial_pods + trace_pods
+        max_priority = max((int(p.priority) for p in all_pods), default=0)
+
+        extra_info: Dict[str, object] = {
+            "num_nodes": int(self.args.num_nodes),
+            "trace_time_s": round(float(self.trace_time_s), 6),
+            "seed": int(self.args.seed),
+            "rng": {
+                "iter_seed": int(iter_seed),
+                "derived": {
+                    "initial_pods": int(derive_seed(iter_seed, "initial-pods")),
+                    "trace_pods": int(derive_seed(iter_seed, "trace-pods")),
                 },
             },
-            "pods": [asdict(p) for p in self.pods],
+            "measured_cpu_util_time_mean": float(util_cpu),
+            "measured_mem_util_time_mean": float(util_mem),
+            "measured_util_time_mean": float(util_eff),  # effective
+            "target_util_time_mean": float(self.args.target_util),
+            "calibration": {
+                "util_tol": float(MEAN_LIFETIME_CALIBRATION_UTIL_TOLERANCE),
+                "calib_max_iter": int(MEAN_LIFETIME_CALIBRATION_MAX_ITERATIONS),
+                "initial_max_pods": int(MAX_INITIAL_PODS),
+            },
+            "derived_mean_lifetime_s": round(float(self.args.mean_life), 6),
+            "pareto": {
+                "cpu": {"alpha": float(self.alpha_cpu), "xmin": float(self.args.xmin_cpu), "xmax": float(self.args.xmax_cpu), "mean": float(self.args.mean_cpu)},
+                "mem": {"alpha": float(self.alpha_mem), "xmin": float(self.args.xmin_mem), "xmax": float(self.args.xmax_mem), "mean": float(self.args.mean_mem)},
+                "arrival": {"alpha": float(self.alpha_arrival), "xmin": float(self.args.xmin_arrival), "xmax": float(self.args.xmax_arrival), "mean": float(self.args.mean_arrival)},
+                "life": {"alpha": float(self.alpha_life), "xmin": float(self.args.xmin_life), "xmax": float(self.args.xmax_life), "mean": float(self.args.mean_life)},
+            },
+            "priority": {"min": int(self.args.priority_min), "max": int(self.args.priority_max), "ratio": float(self.args.priority_ratio)},
+            "replicas": {"min": int(self.args.replicas_min), "max": int(self.args.replicas_max), "ratio": float(self.args.replicas_ratio)},
+            "counts": {
+                "initial_pods": int(len(initial_pods)),
+                "trace_pods": int(len(trace_pods)),
+                "initial_replicas_total": int(sum(int(p.replicas) for p in initial_pods)),
+                "trace_replicas_total": int(sum(int(p.replicas) for p in trace_pods)),
+            },
+            "max_priority_seen": int(max_priority),
+            "files": {
+                "initial_json": str(self.initial_path),
+                "trace_json": str(self.trace_path),
+                "utilization_plot": str(self.util_plot_path),
+                "histograms_plot": str(self.hist_plot_path),
+            },
         }
-        with open(self.trace_path, "w", encoding="utf-8") as f:
+
+        return initial_pods, trace_pods, util, extra_info
+
+    # -------------------------------------------------------------------------
+    # Write outputs: JSON and info YAML
+    # -------------------------------------------------------------------------
+
+    def write_outputs(self, initial_pods: List[TraceRecord], trace_pods: List[TraceRecord], extra_info: Dict[str, object]) -> None:
+        """
+        Write output files: initial JSON, trace JSON, info YAML.
+        """
+        _, _, util_eff = self.time_mean_utils_from_hist(self.times, self.u_cpu_hist, self.u_mem_hist)
+        self.pods_to_json(self.initial_path, initial_pods)
+        self.pods_to_json(self.trace_path, trace_pods)
+        LOG.info("[utilization] util-time-mean over whole trace: %.4f (target=%.4f)",
+                float(util_eff), float(self.args.target_util))
+        self.write_info_file(extra=extra_info)
+
+    @staticmethod
+    def pods_to_json(path: Path, pods: List[TraceRecord]) -> None:
+        """
+        Write pods to a JSON file at the given path.
+        """
+        obj = {"pods": [asdict(p) for p in pods]}
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2)
-        LOG.info("wrote trace JSON to %s", self.trace_path)
-    
-    ##############################################
-    # ------------ Runner ------------------------
-    ##############################################
+        LOG.info("wrote %s (%d records)", path, len(pods))
+
+    def write_info_file(self, extra: Dict[str, object]) -> None:
+        """
+        Write info_generate.yaml with inputs + generated params.
+        """
+        try:
+            inputs = {
+                "cli-cmd": build_cli_cmd(),
+                "args": {k: v for k, v in vars(self.args).items()},
+                "generated": extra,
+            }
+            write_info_file(self.info_path, inputs=inputs, logger=LOG)
+            LOG.info("wrote %s", self.info_path)
+        except Exception as e:
+            LOG.warning("failed to write info_generate.yaml: %s", e)
+
+    # -------------------------------------------------------------------------
+    # Runner
+    # -------------------------------------------------------------------------
+
+    def run_seed(self) -> None:
+        """
+        Run one seeded experiment and generate outputs + plots.
+        """
+        if self.args.mean_life is None:
+            self.args.mean_life = self.infer_mean_lifetime_from_target_util()
+            LOG.info(
+                "[inferred-mean-life] mean_life=%.3fs from target-util=%.3f",
+                float(self.args.mean_life),
+                float(self.args.target_util),
+            )
+            initial_pods, trace_pods, extra_info = self.calibrate_mean_lifetime()
+        else:
+            iteration_seed = int(derive_seed(self.base_seed, "provided-mean-life"))
+            initial_pods, trace_pods, measured, extra_info = self.make_trace(iteration_seed)
+            extra_info.setdefault("calibration", {})
+            extra_info["calibration"].update({"mode": "skipped", "reason": "mean_lifetime_provided", "iterations": 1})
+            LOG.info(
+                "[provided-mean-life] skipping calibration; measured=%.4f target=%.4f mean_life=%.3fs",
+                float(measured),
+                float(self.args.target_util),
+                float(self.args.mean_life),
+            )
+        all_pods = initial_pods + trace_pods
+
+        self.write_outputs(initial_pods, trace_pods, extra_info)
+
+        plot_utilization_and_num_pods(
+            times=self.times,
+            u_req_hist=self.u_eff_hist,
+            pods_hist=self.pods_hist,
+            all_pods=all_pods,
+            initial_pods_count=int(self.initial_pods_count),
+            out_path=str(self.util_plot_path),
+            show_plots=bool(getattr(self.args, "show_plots", False)),
+            logger=LOG,
+        )
+
+        plot_generator_histograms(
+            all_pods=all_pods,
+            out_path=str(self.hist_plot_path),
+            alpha_arrival=float(self.args.alpha_arrival),
+            xmin_arrival=float(self.args.xmin_arrival),
+            xmax_arrival=float(self.args.xmax_arrival),
+            alpha_life=float(self.args.alpha_life),
+            xmin_life=float(self.args.xmin_life),
+            xmax_life=float(self.args.xmax_life),
+            alpha_cpu=float(self.args.alpha_cpu),
+            xmin_cpu=float(self.args.xmin_cpu),
+            xmax_cpu=float(self.args.xmax_cpu),
+            alpha_mem=float(self.args.alpha_mem),
+            xmin_mem=float(self.args.xmin_mem),
+            xmax_mem=float(self.args.xmax_mem),
+            priority_ratio=float(self.args.priority_ratio),
+            priority_min=int(self.args.priority_min),
+            priority_max=int(self.args.priority_max),
+            replicas_ratio=float(self.args.replicas_ratio),
+            replicas_min=int(self.args.replicas_min),
+            replicas_max=int(self.args.replicas_max),
+            show_plots=bool(getattr(self.args, "show_plots", False)),
+            logger=LOG,
+        )
+
     def run(self) -> None:
         """
-        Top-level entry point used by main().
+        Run the trace generator, possibly expanding multiple seed runs.
         """
-        # Generate the trace
-        self._generate_trace()
+        runs = TraceGenerator.expand_seed_runs(self.args)
+        total = len(runs)
+        for i, a in enumerate(runs, start=1):
+            header, footer = make_header_footer(
+                f"SEED RUN {int(a.seed)} ({i}/{total})" if total > 1 else f"SEED RUN {int(a.seed)}"
+            )
+            LOG.info("\n%s\nseed=%d output_dir=%s\n%s", header, int(a.seed), str(a.output_dir), footer)
+            setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=a.log_level)
+            gen = TraceGenerator(
+                a,
+                resolved=True,
+                create_figures_dir=True,
+                log_args=False,
+                setup_logger=False,
+            )
+            gen.run_seed()
+        header, footer = make_header_footer("DONE")
+        LOG.info("\n%s\n%s\n%s", header, "All runs complete.", footer)
 
-        # Write the trace JSON file
-        self._write_trace()
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
 
-        # Summarize utilization stats
-        self._summarize_utilization()
-        
-        # Create plots
-        self._plot_trace_utilization()
-        self._plot_generated_histograms()
-
-###############################################
-# ------------ Main entry point ---------------
-###############################################
 def main() -> None:
+    if os.getenv("TRACE_GENERATOR_NOOP") == "1":
+        return
     args = build_arg_parser().parse_args()
-    round_float_args(args, ndigits=MAX_DECIMALS)
-    setup_logging(name=LOGGER_NAME, prefix="[trace-generator] ", level=args.log_level)
-    generator = TraceGenerator(args)
-    generator.run()
-    LOG.info("done.")
+    if getattr(args, "job_dir", None):
+        job_runs = TraceGenerator.expand_job_dir_runs(args)
+        total = len(job_runs)
+        for i, a in enumerate(job_runs, start=1):
+            header, footer = make_header_footer(
+                f"JOB {Path(a.job_file).name} ({i}/{total})" if total > 1 else f"JOB {Path(a.job_file).name}"
+            )
+            setup_logging(name=LOGGER_NAME, prefix=f"[{LOGGER_NAME}] ", level=a.log_level)
+            LOG.info("\n%s\njob_file=%s\noutput_dir=%s\n%s", header, str(a.job_file), str(a.output_dir), footer)
+            gen = TraceGenerator(
+                a,
+                resolved=True,
+                create_figures_dir=None,
+                log_args=True,
+                setup_logger=False,
+            )
+            gen.run()
+        return
+    trace_generator = TraceGenerator(args)
+    trace_generator.run()
 
 if __name__ == "__main__":
     main()

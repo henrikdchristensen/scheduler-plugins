@@ -2,47 +2,46 @@
 package mypriorityoptimizer
 
 import (
-	"fmt"
-
 	v1 "k8s.io/api/core/v1"
 )
 
-// planContext gathers the current cluster view, builds solver input,
-// computes the baseline score, and counts pending pods.
+// -------------------------
+// planContext
+// -------------------------
+
+// planContext builds the context (nodes, pods, solver input) for optimization.
 func (pl *SharedState) planContext(preemptor *v1.Pod) (
-	[]*v1.Node,
-	[]*v1.Pod,
-	SolverInput,
-	*SolverScore,
-	int, // pendingPrePlan
-	error,
+	nodes []*v1.Node,
+	pods []*v1.Pod,
+	inp SolverInput,
+	err error,
 ) {
-	// Fetch nodes
-	nodes, err := pl.getNodes()
+	nodes, err = getNodesForPlanContext(pl)
 	if err != nil {
-		var zeroInp SolverInput
-		return nil, nil, zeroInp, nil, 0, fmt.Errorf("failed to list nodes: %w", err)
+		return nil, nil, SolverInput{}, ErrFailedToListNodes
 	}
 
-	// Fetch pods
-	pods, err := pl.getPods()
+	pods, err = getPodsForPlanContext(pl)
 	if err != nil {
-		var zeroInp SolverInput
-		return nil, nil, zeroInp, nil, 0, fmt.Errorf("failed to list pods: %w", err)
+		return nodes, nil, SolverInput{}, ErrFailedToListPods
 	}
 
-	// Build solver input for this snapshot
-	inp, err := pl.buildSolverInput(nodes, pods, preemptor) // inp is SolverInput
+	inp, err = buildInputForPlanCtx(pl, nodes, pods, preemptor)
 	if err != nil {
-		var zeroInp SolverInput
-		return nil, nil, zeroInp, nil, 0, fmt.Errorf("failed to build solver input: %w", err)
+		return nodes, pods, SolverInput{}, ErrFailedToBuildSolverInput
 	}
 
-	// Compute baseline score
-	baselineScore := buildBaselineScore(inp)
-
-	// Count pending pods before any plan is applied
-	pendingPrePlan := countPendingPods(pods)
-
-	return nodes, pods, inp, baselineScore, pendingPrePlan, nil
+	return nodes, pods, inp, nil
 }
+
+// -------------------------
+// Test Hooks
+// -------------------------
+
+var (
+	getNodesForPlanContext = func(pl *SharedState) ([]*v1.Node, error) { return pl.getNodes() }
+	getPodsForPlanContext  = func(pl *SharedState) ([]*v1.Pod, error) { return pl.getPods() }
+	buildInputForPlanCtx   = func(pl *SharedState, nodes []*v1.Node, pods []*v1.Pod, preemptor *v1.Pod) (SolverInput, error) {
+		return pl.buildSolverInput(nodes, pods, preemptor)
+	}
+)

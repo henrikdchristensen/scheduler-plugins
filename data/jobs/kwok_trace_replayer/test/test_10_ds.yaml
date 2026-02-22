@@ -1,3 +1,0 @@
-trace-dir: data/traces/test_10
-result-dir: results/test_10/default
-kwokctl-config-file: data/configs-kwokctl/default.yaml

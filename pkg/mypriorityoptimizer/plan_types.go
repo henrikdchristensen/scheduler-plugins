@@ -1,17 +1,20 @@
 // plan_types.go
 package mypriorityoptimizer
 
-import "time"
+import (
+	"time"
+)
 
+// Plan represents the optimization plan with evictions and moves.
 type Plan struct {
 	// Evicted pods
-	Evicts []Placement `json:"evicts"`
+	Evicts []SolverPod `json:"evicts"`
 	// Moved pods
-	Moves []NewPlacement `json:"moves"`
+	Moves []SolverPod `json:"moves"`
 	// All pods and their old placements
-	OldPlacements []Placement `json:"old_placements"`
+	OldPlacements []SolverPod `json:"old_placements"`
 	// All pods and their new placements
-	NewPlacements []NewPlacement `json:"new_placements"`
+	NewPlacements []SolverPod `json:"new_placements"`
 	// Placement by name for standalone pods: ns/name -> node
 	PlacementByName map[string]string `json:"placement_by_name"`
 	// Workload quotas for new placed pods that are part of a workload
@@ -29,11 +32,9 @@ type StoredPlan struct {
 	// When the plan was generated
 	GeneratedAt time.Time `json:"generated_at"`
 	// When the plan was completed (if ever)
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	// Solver summary (status & score)
-	Solver SolverResult `json:"solver"`
-	// Single-preemptor metadata
-	Preemptor *Preemptor `json:"preemptor,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
+	// SolverResult summary (status & score)
+	SolverResult SolverResult `json:"solver_result"`
 	// PlanStatus of the plan
 	PlanStatus PlanStatus `json:"plan_status"`
 	// The actual plan
@@ -54,11 +55,3 @@ const (
 
 // WorkloadQuotas is a map of workloadKey -> node -> remaining count
 type WorkloadQuotas map[string]map[string]int32
-
-// Preemptor represents a preemptor pod and its nominated node.
-type Preemptor struct {
-	// Pod being preempted
-	Pod Pod `json:"pod"`
-	// Nominated node for the preemptor pod
-	NominatedNode string `json:"nominated_node"`
-}

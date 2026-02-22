@@ -1,0 +1,29 @@
+\begin{table}[htbp]
+\centering
+\caption{Mean paired differences in number of optimizer runs between the plugin with DefaultPreemption enabled and the default scheduler for runs with 4 priorities (mean ± std). p1 is the lowest priority.}
+\label{tab:optimizer_runs-defpreempt1-prio4}
+\adjustbox{max width=\linewidth, max totalheight=0.9\textheight}{%
+\begin{tabular}{l w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em} w{c}{5.0em}}
+\toprule
+\multirow{2}{*}{\textbf{Trigger Mode}} & \multicolumn{3}{c}{\# Nodes =\,16} & \multicolumn{3}{c}{\# Nodes =\,32} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & \llap{Inter-arrival =\,}4s & 8s & 16s & 4s & 8s & 16s \\
+\midrule
+Scheduling-failure (blocking) & $260\pm56.7$ & $193\pm44.5$ & $123\pm35.8$ & $181\pm13.5$ & $123\pm9.5$ & $80\pm15.7$ \\
+Scheduling-failure (non-blocking) & $266\pm67.2$ & $190\pm30.7$ & $118\pm29.3$ & $190\pm16.5$ & $127\pm10.0$ & $84\pm23.5$ \\
+Periodic (blocking), 4s interval & $104\pm41.4$ & $95\pm23.6$ & $94\pm56.1$ & $86\pm13.7$ & $71\pm8.9$ & $57\pm21.5$ \\
+Periodic (non-blocking), 4s interval & $109\pm41.9$ & $117\pm67.8$ & $78\pm35.1$ & $84\pm16.1$ & $69\pm9.3$ & $54\pm23.3$ \\
+Periodic (blocking), 8s interval & $56\pm25.8$ & $65\pm26.5$ & $52\pm18.4$ & $53\pm4.8$ & $46\pm5.1$ & $46\pm19.3$ \\
+Periodic (non-blocking), 8s interval & $59\pm26.3$ & $58\pm10.6$ & $58\pm30.0$ & $55\pm9.9$ & $50\pm3.3$ & $40\pm15.1$ \\
+Periodic (blocking), 16s interval & $29\pm13.5$ & $31\pm2.8$ & $30\pm6.2$ & $35\pm10.3$ & $29\pm4.9$ & $28\pm7.0$ \\
+Periodic (non-blocking), 16s interval & $34\pm24.4$ & $32\pm7.7$ & $31\pm7.2$ & $33\pm9.5$ & $32\pm5.5$ & $26\pm7.0$ \\
+Stable-queue (blocking), 4s delay & $167\pm88.5$ & $161\pm98.6$ & $135\pm86.1$ & $137\pm13.0$ & $106\pm9.7$ & $76\pm26.2$ \\
+Stable-queue (non-blocking), 4s delay & $241\pm251.5$ & $142\pm46.0$ & $120\pm73.4$ & $128\pm21.8$ & $105\pm11.9$ & $75\pm24.0$ \\
+Stable-queue (blocking), 8s delay & $85\pm48.1$ & $139\pm140.7$ & $76\pm44.1$ & $81\pm22.5$ & $68\pm12.7$ & $50\pm14.3$ \\
+Stable-queue (non-blocking), 8s delay & $108\pm94.5$ & $154\pm185.7$ & $93\pm59.6$ & $74\pm12.6$ & $71\pm9.4$ & $50\pm13.2$ \\
+Stable-queue (blocking), 16s delay & $54\pm63.8$ & $43\pm18.2$ & $44\pm18.6$ & $37\pm10.0$ & $40\pm8.3$ & $40\pm16.7$ \\
+Stable-queue (non-blocking), 16s delay & $44\pm37.5$ & $63\pm61.2$ & $50\pm24.2$ & $38\pm8.3$ & $42\pm10.3$ & $37\pm11.1$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

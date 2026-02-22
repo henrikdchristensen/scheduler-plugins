@@ -1,272 +1,714 @@
 #!/usr/bin/env python3
-# plots_and_tables.py
+# scripts/kwok_workload_once/plots_and_tables.py
+"""
+python -m scripts.kwok_workload_once.plots_and_tables
+python -m scripts.kwok_workload_once.plots_and_tables --solver gurobi
+"""
 
+import argparse
 from pathlib import Path
+from typing import List, Optional, Tuple
+
 import pandas as pd
 import numpy as np
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mtick
 
-#################################################################
-# Load data
-# Note: combine_results.py must be run first to produce the required CSV
-#################################################################
-DF_PER_COMBO_PATH = Path("analysis/per_combo_results.csv")
-df_per_combo = pd.read_csv(DF_PER_COMBO_PATH)
+from matplotlib.lines import Line2D
 
-OUT_DIR = Path("analysis")
+from scripts.helpers.plot_config import (
+    PLOT_TITLE_FONTSIZE,
+    PLOT_AXIS_LABEL_FONTSIZE,
+    PLOT_TICK_FONTSIZE,
+    PLOT_LEGEND_FONTSIZE,
+    PLOT_LEGEND_HANDLE_LENGTH,
+    PLOT_LEGEND_COLUMN_SPACING,
+    PLOT_LEGEND_HANDLE_TEXT_PAD,
+    PLOT_FORMATS,
+)
 
-OUT_FIGURES_DIR = OUT_DIR / "figures"
-OUT_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
-OUT_TABLES_DIR = OUT_DIR / "tables"
-OUT_TABLES_DIR.mkdir(parents=True, exist_ok=True)
+from scripts.helpers.data_helpers import is_finite, safe_div
+from scripts.helpers.table_helpers import fmt_pct, latex_cmidrules, write_latex_table
+from scripts.helpers.plot_helpers import configure_matplotlib, save_figure
 
 #################################################################
-# Global plotting settings
+# CONFIG (constants)
 #################################################################
-# filters
-PLOT_PPNS       = [4, 8]
+
+# Default paths (can be overridden by --solver argument)
+DEFAULT_RESULTS_ROOT = Path("analysis/kwok_workload_once")
+DEFAULT_SOLVER = "cp_sat"  # Default solver name
+ALL_SOLVERS = ["cp_sat", "gurobi"]  # All available solvers
+
+
+def get_paths_for_solver(solver: str, results_root: Path = DEFAULT_RESULTS_ROOT):
+    """Get input/output paths for a specific solver."""
+    df_path = results_root / f"results_per_combo_{solver}.csv"
+    figures_dir = results_root / "figures" / solver
+    tables_dir = results_root / "tables" / solver
+    return df_path, figures_dir, tables_dir
+
+# filters - FIXED configurations (always show these even if data is missing)
+PLOT_PPNS = [4, 8]
 PLOT_PRIORITIES = [1, 2, 4]
-PLOT_TIMEOUTS   = [1, 10, 20]
+PLOT_TIMEOUTS = [1, 10, 20]#, 60]  # Fixed timeouts to show in plots
+PLOT_NODES = [4, 8, 16, 32]#, 64]  # Fixed node counts for x-axis
+PLOT_UTILS = [90, 95, 100, 105]  # Fixed target utilizations for 3D plots
 
 # precision
 EPS = 1e-9
 
 # fonts
-TITLE_FS  = 7
-LABEL_FS  = 7
-TICK_FS   = 6
-LEGEND_FS = 6
-ANNOT_FS  = 4
-mpl.rcParams.update({
-    "axes.titlesize": TITLE_FS,
-    "axes.labelsize": LABEL_FS,
-    "xtick.labelsize": TICK_FS,
-    "ytick.labelsize": TICK_FS,
-})
+ANNOT_FS = 5.0
 
 # labels
-TARGET_UTIL_LABEL   = "target util (%)"
-NODES_LABEL         = "# of nodes"
-INSTANCES_LABEL     = "% of instances"
-PODS_PER_NODE_LABEL = "pods/node"
-
-# Legend formatting
-LEGEND_HANDLE_LENGTH=1.0  # length of color boxes
-LEGEND_TEXT_PAD=0.3       # space between box and text
-LEGEND_COLUMN_SPACING=0.8 # space between entries
+TARGET_UTIL_LABEL = "target usage (%)"
+NODES_PLOT_LABEL = "#nodes"
+NODES_TABLE_LABEL = rf"\# Nodes"
+INSTANCES_LABEL = "% of instances"
+PODS_PER_NODE_PLOT_LABEL = "pods/node"
+PODS_PER_NODE_TABLE_LABEL = "Pods/Node"
+PRIORITIES_PLOT_LABEL = "#priorities"
+PRIORITIES_TABLE_LABEL = rf"\# Priorities"
+SOLVER_TIMEOUT_LABEL = "Optimizer timeout"
 
 # figure saving
-FIGURE_DPI = 300 # default = 100
-FIGURE_FORMATS = ["pdf", "png"]
 
 # 2d sizes
-FIGSIZE_2D = (3.5, 2.5)
-CELL_FIGSIZE_2D = (2.2, 1.6)
-BAR_WIDTH_2D = 0.9
+GRID_2D_CELL_FIGSIZE = (2.6, 1.6)
+GRID_2D_BAR_WIDTH = 0.88
+GRID_2D_WSPACE = 0.06
+GRID_2D_HSPACE = 0.10
+GRID_2D_LEFT = 0.1
+GRID_2D_RIGHT = 0.995
+GRID_2D_BOTTOM = 0.0
+GRID_2D_TOP = 0.88
+GRID_2D_YLABEL_XPOS = 0.017
 
 # 3d sizes
 FIGSIZE_3D = (8, 4)
 BAR_WIDTH_3D = 0.13
 ELEV_3D, AZIM_3D = 20.0, -54.0
 
+# Grid dot-chart sizes / style
+DOT_CELL_FIGSIZE = (1.5, 1.0)
+DOT_MARKER_SIZE = 4.0
+DOT_MARKER_LINEWIDTH = 0.5
+DOT_WSPACE = 0.12
+DOT_HSPACE = 0.16
+DOT_LEFT = 0.14
+DOT_RIGHT = 0.99
+DOT_BOTTOM = 0.07
+DOT_TOP = 0.82
+DOT_YLABEL_XPOS = 0.02
+
+# Fixed y-axis limits for grid dot charts (None = auto-scale)
+DOT_YLIM_DIFF_USAGE: Optional[Tuple[float, float]] = (-5.0, 15.0)   # e.g. (-1.0, 5.0) in %
+DOT_YLIM_SOLVER_DUR: Optional[Tuple[float, float]] = (0.0, 25.0)    # duration is non-negative
+
+# Number of horizontal grid lines / y-ticks (None = matplotlib auto)
+DOT_NTICKS_DIFF_USAGE: Optional[int] = 5   # e.g. 6 ticks → 5 intervals
+DOT_NTICKS_SOLVER_DUR: Optional[int] = 6    # 0, 5, 10, 15, 20, 25
+
+# Y-label positioning per plot (supylabel x-position and per-axis labelpad)
+DOT_YLABEL_X_DIFF: float = 0.03   # figure-fraction x for supylabel
+DOT_YLABEL_PAD_DIFF: float = 10.0  # axis labelpad (pts) for per-row ylabel
+
 # colors / series (stack order = bottom -> top)
 set2, set3 = plt.get_cmap("Set2").colors, plt.get_cmap("Set3").colors
+
+# Timeout colours (Set2 to match 2D/3D grid plots)
+TIMEOUT_COLORS = {t: set2[i % len(set2)] for i, t in enumerate(PLOT_TIMEOUTS)}
+
 CATEGORIES = [
-    {"key": "other",             "label": "Other",          "col": "other_rate",               "color": set2[3]},
-    {"key": "solver_optimal",    "label": "Better&Optimal", "col": "solver_optimal_rate",      "color": set2[0]},
-    {"key": "solver_feasible",   "label": "Better",         "col": "solver_feasible_rate",     "color": set2[1]},
-    {"key": "default_optimal",   "label": "KWOK Optimal",   "col": "default_optimal_rate",     "color": set2[2]},
-    {"key": "default_all",       "label": "No Calls",       "col": "default_all_running_rate", "color": set3[11]},
-    {"key": "solver_failed",     "label": "Failures",       "col": "solver_failed_rate",       "color": set2[7]},
+    {"key": "other", "label": "Other", "col": "other_rate", "color": set2[3]},
+    {"key": "solver_optimal", "label": "Better&Optimal", "col": "solver_optimal_rate", "color": set2[0]},
+    {"key": "solver_feasible", "label": "Better", "col": "solver_feasible_rate", "color": set2[1]},
+    {"key": "default_optimal", "label": "KWOK Optimal", "col": "default_optimal_rate", "color": set2[2]},
+    {"key": "default_all", "label": "No Calls", "col": "default_all_running_rate", "color": set3[11]},
+    {"key": "solver_failed", "label": "Failures", "col": "solver_failed_rate", "color": set2[7]},
 ]
 
 #################################################################
-# Global table settings
+# Aggregation helpers
 #################################################################
-TABLE_PPNS       = [4, 8]
-TABLE_UTILS      = [90.0, 95.0, 100.0, 105.0]
-TABLE_NODES      = [4, 8, 16, 32]
-TABLE_PRIORITIES = [4]
-TABLE_TIMEOUTS   = [1, 10]
-TABLE_DECIMALS   = 1
 
-#################################################################
-# Plotting helpers
-#################################################################
-def save_figure(fig: mpl.figure.Figure, out_path: Path):
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    for ext in FIGURE_FORMATS:
-        fname = out_path.with_suffix(f".{ext}")
-        fig.savefig(fname, dpi=FIGURE_DPI, bbox_inches="tight")
-    plt.close(fig)
-    print(f"[ok] saved figure: {out_path} ({', '.join(FIGURE_FORMATS)})")
+def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> pd.DataFrame:
+    """
+    Aggregate by `keys` (sum counts/sums) and compute rate columns.
 
-#################################################################
-# 2D bar plot as a grid: ppn vs priorities w/ util aggregated
-#################################################################
-def aggregate_over_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
-    keys = ["pods_per_node","priorities","timeout_s","nodes"]
-    
-    # Sum counts & sums over util
+    NOTE:
+    - If keys exclude 'util' -> results are aggregated over util (used for plots).
+    - If keys include 'util'  -> results preserve util (used for tables with util breaker).
+    """
+    df = per_combo_df.copy()
+    # Compute effective usage (max of cpu/mem) per row *before* aggregation,
+    # so the per-row max is preserved rather than taking max of aggregated means.
+    df["eff_delta_sum"] = np.maximum(df["cpu_delta_sum"], df["mem_delta_sum"])
+
     g = (
-        per_combo_df
-        .groupby(keys, as_index=False)
-        .agg({
-            "n_seeds": "sum",
-            "n_seeds_not_all_running": "sum",
-            "n_default_all_running": "sum",
-            "n_solver_called": "sum",
-            "n_solver_failed": "sum",
-            "n_default_optimal": "sum",
-            "n_solver_optimal": "sum",
-            "n_solver_feasible": "sum",
-            "n_solver_improve": "sum",
-            "n_other": "sum",
-            "solver_duration_ms_sum": "sum",
-            "cpu_delta_sum": "sum",
-            "mem_delta_sum": "sum",
-        })
+        df.groupby(keys, as_index=False).agg(
+            {
+                "n_seeds": "sum",
+                "n_seeds_not_all_running": "sum",
+                "n_default_all_running": "sum",
+                "n_solver_called": "sum",
+                "n_solver_failed": "sum",
+                "n_default_optimal": "sum",
+                "n_solver_optimal": "sum",
+                "n_solver_feasible": "sum",
+                "n_solver_improve": "sum",
+                "n_other": "sum",
+                "solver_duration_ms_sum": "sum",
+                "cpu_delta_sum": "sum",
+                "mem_delta_sum": "sum",
+                "eff_delta_sum": "sum",
+            }
+        )
     )
 
-    def safe_div(num, den):
-        return num.div(den.replace(0, np.nan)).fillna(0.0)
-    
-    # Rates from summed counts
     g["default_all_running_rate"] = safe_div(g["n_default_all_running"], g["n_seeds"])
-    g["solver_called_rate"]       = safe_div(g["n_solver_called"],        g["n_seeds"])
-    g["solver_failed_rate"]       = safe_div(g["n_solver_failed"],        g["n_seeds"])
-    g["default_optimal_rate"]     = safe_div(g["n_default_optimal"],      g["n_seeds"])
-    g["solver_optimal_rate"]      = safe_div(g["n_solver_optimal"],       g["n_seeds"])
-    g["solver_feasible_rate"]     = safe_div(g["n_solver_feasible"],      g["n_seeds"])
-    g["solver_improve_rate"]      = safe_div(g["n_solver_improve"],       g["n_seeds"])
-    g["other_rate"]               = safe_div(g["n_other"],                g["n_seeds"])
-    g["solver_duration_ms_mean"]  = safe_div(g["solver_duration_ms_sum"], g["n_solver_called"])
-    g["cpu_delta_mean"]           = safe_div(g["cpu_delta_sum"],          g["n_seeds"])
-    g["mem_delta_mean"]           = safe_div(g["mem_delta_sum"],          g["n_seeds"])
+    g["solver_called_rate"] = safe_div(g["n_solver_called"], g["n_seeds"])
+    g["solver_failed_rate"] = safe_div(g["n_solver_failed"], g["n_seeds"])
+    g["default_optimal_rate"] = safe_div(g["n_default_optimal"], g["n_seeds"])
+    g["solver_optimal_rate"] = safe_div(g["n_solver_optimal"], g["n_seeds"])
+    g["solver_feasible_rate"] = safe_div(g["n_solver_feasible"], g["n_seeds"])
+    g["solver_improve_rate"] = safe_div(g["n_solver_improve"], g["n_seeds"])
+    g["other_rate"] = safe_div(g["n_other"], g["n_seeds"])
+
+    g["solver_duration_ms_mean"] = safe_div(g["solver_duration_ms_sum"], g["n_solver_called"])
+    g["cpu_delta_mean"] = safe_div(g["cpu_delta_sum"], g["n_seeds"])
+    g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
+    g["eff_delta_mean"] = safe_div(g["eff_delta_sum"], g["n_seeds"])
     return g.copy()
+
+def aggregate_over_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
+    # Used by plots: util is aggregated away (unchanged behavior)
+    keys = ["pods_per_node", "priorities", "timeout_s", "nodes"]
+    return _aggregate_counts_to_rates(per_combo_df, keys)
+
+def aggregate_keep_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
+    # Used by tables: keep util so breaker can show (timeout, util)
+    keys = ["util", "pods_per_node", "priorities", "timeout_s", "nodes"]
+    return _aggregate_counts_to_rates(per_combo_df, keys)
+
+def aggregate_over_all_except_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
+    # Used by the single-panel plot: aggregate over priorities, timeout, nodes, pods_per_node
+    keys = ["util"]
+    return _aggregate_counts_to_rates(per_combo_df, keys)
+
+#################################################################
+# Tables
+#################################################################
+
+# Metric rows for the "dot-plot style" metric tables
+METRIC_ROWS: List[Tuple[str, str, float, int, bool]] = [
+    # (label, column, scale, decimals, signed)
+    (r"Optimizer\,duration\,(s)",       "solver_duration_ms_mean", 1.0 / 1000.0, 1, False),
+    (r"Diff.\,eff.\,usage\,(\%)",    "eff_delta_mean",          100.0,         1, True),
+]
+
+
+def write_metric_table_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    ppns: List[int],
+    nodes: List[int],
+    timeout: int,
+    priorities_list: List[int],
+    breaker_col: Optional[str] = None,
+    caption: str = "",
+    label: str = "",
+) -> None:
+    """
+    Metric breakdown table (solver duration, diff eff. usage).
+
+    Priorities are placed side-by-side as top-level column groups.
+    Under each priority: pods/node groups, then individual node columns.
+    The ``Pods/Node`` and ``# Nodes`` labels only appear in the first
+    priority group.
+    """
+    from scripts.helpers.table_helpers import nan_str
+
+    # ---- filter --------------------------------------------------------
+    dff = df_table[df_table["timeout_s"].astype(int) == int(timeout)].copy()
+    dff = dff[dff["priorities"].astype(int).isin(priorities_list)]
+
+    nodes_order = sorted(int(x) for x in dff["nodes"].dropna().unique())
+    nodes_order = [n for n in nodes if n in set(nodes_order)]
+    ppn_present = set(int(x) for x in dff["pods_per_node"].dropna().unique())
+    ppn_order = [p for p in ppns if p in ppn_present]
+    prio_order = [p for p in priorities_list if p in set(dff["priorities"].astype(int).unique())]
+
+    if not nodes_order or not ppn_order or not prio_order:
+        out_path.write_text("% empty: no data after filters\n", encoding="utf-8")
+        print(f"[warn] metric table empty -> {out_path}")
+        return
+
+    # ---- index ---------------------------------------------------------
+    idx_cols: List[str] = ["priorities", "timeout_s"]
+    if breaker_col and breaker_col in dff.columns:
+        idx_cols.append(breaker_col)
+    idx_cols.extend(["pods_per_node", "nodes"])
+
+    for c in ["timeout_s", "nodes", "pods_per_node", "priorities"]:
+        if c in dff.columns:
+            dff[c] = dff[c].astype(int)
+    if breaker_col and breaker_col in dff.columns:
+        dff[breaker_col] = pd.to_numeric(dff[breaker_col], errors="coerce").round().astype(int)
+
+    metric_cols = [col for _, col, _, _, _ in METRIC_ROWS]
+    keep_cols = idx_cols + metric_cols
+    dff = dff[keep_cols].drop_duplicates(subset=idx_cols, keep="last")
+    dff = dff.set_index(idx_cols).sort_index()
+
+    # ---- lookup closure ------------------------------------------------
+    def _make_lookup(breaker_val=None):
+        def get_val(prio: int, ppn: int, node: int, col: str) -> float:
+            try:
+                if breaker_val is not None:
+                    key = (int(prio), int(timeout), int(breaker_val), int(ppn), int(node))
+                else:
+                    key = (int(prio), int(timeout), int(ppn), int(node))
+                return float(dff.at[key, col])
+            except Exception:
+                return float("nan")
+        return get_val
+
+    # ---- sections ------------------------------------------------------
+    sections: List[Tuple[Optional[str], object]] = []
+    if breaker_col:
+        breaker_vals = sorted(dff.index.get_level_values(breaker_col).unique())
+        for bv in breaker_vals:
+            sections.append((f"{int(bv)}\\%", _make_lookup(int(bv))))
+    else:
+        sections.append((None, _make_lookup()))
+
+    # ---- determine layout ----------------------------------------------
+    has_breaker = breaker_col is not None and len(sections) > 1 or (len(sections) == 1 and sections[0][0] is not None)
+    n_nodes = len(nodes_order)
+    n_ppn = len(ppn_order)
+    n_prio = len(prio_order)
+    cols_per_prio = n_ppn * n_nodes
+    data_cols = n_prio * cols_per_prio
+    n_metrics = len(METRIC_ROWS)
+
+    if has_breaker:
+        lead_cols = 2
+        colspec = "c l" + " c" * data_cols
+    else:
+        lead_cols = 1
+        colspec = "l" + " c" * data_cols
+
+    lines: List[str] = []
+    lines.append(r"\begin{tabular}{" + colspec + "}")
+    lines.append(r"\toprule")
+
+    n_header_rows = 3
+    # ---- header row 1: priorities --------------------------------------
+    if has_breaker:
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Usage}}}} & \multirow{{{n_header_rows}}}{{*}}{{\textbf{{Metric}}}} & "
+    else:
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Metric}}}} & "
+    prio_cells = [
+        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}"
+        for prio in prio_order
+    ]
+    lines.append(lead_hdr + " & ".join(prio_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio, cols_per_prio, start_col=lead_cols + 1))
+
+    # ---- header row 2: pods/node --------------------------------------
+    lead_prefix = " & " * lead_cols
+    ppn_cells: List[str] = []
+    for _ in prio_order:
+        for ppn in ppn_order:
+            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}")
+    lines.append(lead_prefix + " & ".join(ppn_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio * n_ppn, n_nodes, start_col=lead_cols + 1))
+
+    # ---- header row 3: nodes (label only on very first cell) -----------
+    node_cells: List[str] = []
+    is_first = True
+    for _ in prio_order:
+        for _ in ppn_order:
+            for n in nodes_order:
+                if is_first:
+                    node_cells.append(rf"\llap{{{NODES_TABLE_LABEL} =\,}}{n}")
+                    is_first = False
+                else:
+                    node_cells.append(rf"{n}")
+    lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
+    lines.append(r"\midrule")
+
+    # ---- data rows -----------------------------------------------------
+    first_section = True
+    for section_title, get_val in sections:
+        if not first_section:
+            lines.append(r"\midrule")
+        first_section = False
+
+        for m_idx, (row_label, col, scale, decimals, signed) in enumerate(METRIC_ROWS):
+            cells: List[str] = []
+            for prio in prio_order:
+                for ppn in ppn_order:
+                    for n in nodes_order:
+                        raw = get_val(prio, ppn, n, col)
+                        if is_finite(raw):
+                            v = raw * scale
+                            if signed:
+                                if abs(v) < 5e-13:
+                                    v = 0.0
+                                cells.append(f"{v:+.{decimals}f}")
+                            else:
+                                cells.append(f"{v:.{decimals}f}")
+                        else:
+                            cells.append(nan_str())
+
+            if has_breaker:
+                if m_idx == 0:
+                    lead = rf"\multirow{{{n_metrics}}}{{*}}{{{section_title}}}" + " & " + row_label
+                else:
+                    lead = " & " + row_label
+            else:
+                lead = row_label
+
+            lines.append(f"{lead} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    write_latex_table(out_path, lines, caption=caption, label=label)
+
+
+OUTCOME_ROWS: List[Tuple[str, str]] = [
+    (r"Failures (\%)", "solver_failed_rate"),
+    (r"No Calls (\%)", "default_all_running_rate"),
+    (r"KWOK Optimal (\%)", "default_optimal_rate"),
+    (r"Better (\%)", "solver_feasible_rate"),
+    (r"Better\&Optimal (\%)", "solver_optimal_rate"),
+]
+
+def write_outcome_table_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    ppns: List[int],
+    timeout: int,
+    priorities_list: List[int],
+    breaker_col: Optional[str] = None,
+    decimals: int = 1,
+    caption: str = "",
+    label: str = "",
+) -> None:
+    """
+    Outcome breakdown table (% of instances).
+
+    Priorities are placed side-by-side as top-level column groups.
+    Under each priority: pods/node groups, then individual node columns.
+    The ``Pods/Node`` and ``# Nodes`` labels only appear in the first
+    priority group.
+    """
+    # ---- filter --------------------------------------------------------
+    dff = df_table[df_table["timeout_s"].astype(int) == int(timeout)].copy()
+    dff = dff[dff["priorities"].astype(int).isin(priorities_list)]
+
+    # ---- infer column orders -------------------------------------------
+    nodes_order = sorted(int(x) for x in dff["nodes"].dropna().unique())
+    ppn_present = set(int(x) for x in dff["pods_per_node"].dropna().unique())
+    ppn_order = [p for p in ppns if p in ppn_present]
+    prio_order = [p for p in priorities_list if p in set(dff["priorities"].astype(int).unique())]
+
+    if not nodes_order or not ppn_order or not prio_order:
+        out_path.write_text("% empty: no data after filters\n", encoding="utf-8")
+        print(f"[warn] table empty -> {out_path}")
+        return
+
+    # ---- prepare indexed DataFrame for fast lookup ---------------------
+    idx_cols: List[str] = ["priorities", "timeout_s"]
+    if breaker_col and breaker_col in dff.columns:
+        idx_cols.append(breaker_col)
+    idx_cols.extend(["pods_per_node", "nodes"])
+
+    for c in ["timeout_s", "nodes", "pods_per_node", "priorities"]:
+        if c in dff.columns:
+            dff[c] = dff[c].astype(int)
+    if breaker_col and breaker_col in dff.columns:
+        dff[breaker_col] = pd.to_numeric(dff[breaker_col], errors="coerce").round().astype(int)
+
+    keep_cols = idx_cols + [c for _, c in OUTCOME_ROWS]
+    dff = dff[keep_cols].drop_duplicates(subset=idx_cols, keep="last")
+    dff = dff.set_index(idx_cols).sort_index()
+
+    # ---- rate lookup closures ------------------------------------------
+    def _make_rate_fn(breaker_val=None):
+        def get_rate(prio: int, ppn: int, nodes: int, col: str) -> float:
+            try:
+                if breaker_val is not None:
+                    key = (int(prio), int(timeout), int(breaker_val), int(ppn), int(nodes))
+                else:
+                    key = (int(prio), int(timeout), int(ppn), int(nodes))
+                return float(dff.at[key, col])
+            except Exception:
+                return float("nan")
+        return get_rate
+
+    # ---- build sections ------------------------------------------------
+    sections: List[Tuple[Optional[str], object]] = []
+    if breaker_col:
+        breaker_vals = sorted(dff.index.get_level_values(breaker_col).unique())
+        for bv in breaker_vals:
+            sections.append((f"{int(bv)}\\%", _make_rate_fn(int(bv))))
+    else:
+        sections.append((None, _make_rate_fn()))
+
+    # ---- determine layout ----------------------------------------------
+    has_breaker = breaker_col is not None and len(sections) > 1 or (len(sections) == 1 and sections[0][0] is not None)
+    n_nodes = len(nodes_order)
+    n_ppn = len(ppn_order)
+    n_prio = len(prio_order)
+    cols_per_prio = n_ppn * n_nodes
+    data_cols = n_prio * cols_per_prio
+    n_outcomes = len(OUTCOME_ROWS)
+
+    if has_breaker:
+        lead_cols = 2
+        colspec = "c l" + " c" * data_cols
+    else:
+        lead_cols = 1
+        colspec = "l" + " c" * data_cols
+
+    lines: List[str] = []
+    lines.append(r"\begin{tabular}{" + colspec + "}")
+    lines.append(r"\toprule")
+
+    n_header_rows = 3
+    # ---- header row 1: priorities --------------------------------------
+    if has_breaker:
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Usage}}}} & \multirow{{{n_header_rows}}}{{*}}{{\textbf{{Outcome}}}} & "
+    else:
+        lead_hdr = rf"\multirow{{{n_header_rows}}}{{*}}{{\textbf{{Outcome}}}} & "
+    prio_cells = [
+        rf"\multicolumn{{{cols_per_prio}}}{{c}}{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}"
+        for prio in prio_order
+    ]
+    lines.append(lead_hdr + " & ".join(prio_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio, cols_per_prio, start_col=lead_cols + 1))
+
+    # ---- header row 2: pods/node --------------------------------------
+    lead_prefix = " & " * lead_cols
+    ppn_cells: List[str] = []
+    for _ in prio_order:
+        for ppn in ppn_order:
+            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}")
+    lines.append(lead_prefix + " & ".join(ppn_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio * n_ppn, n_nodes, start_col=lead_cols + 1))
+
+    # ---- header row 3: nodes (label only on very first cell) -----------
+    node_cells: List[str] = []
+    is_first = True
+    for _ in prio_order:
+        for _ in ppn_order:
+            for n in nodes_order:
+                if is_first:
+                    node_cells.append(rf"\llap{{{NODES_TABLE_LABEL} =\,}}{n}")
+                    is_first = False
+                else:
+                    node_cells.append(rf"{n}")
+    lines.append(lead_prefix + " & ".join(node_cells) + r" \\")
+    lines.append(r"\midrule")
+
+    # ---- data rows -----------------------------------------------------
+    first_section = True
+    for section_title, get_rate in sections:
+        if not first_section:
+            lines.append(r"\midrule")
+        first_section = False
+
+        for m_idx, (row_label, col) in enumerate(OUTCOME_ROWS):
+            cells: List[str] = []
+            for prio in prio_order:
+                for ppn in ppn_order:
+                    for n in nodes_order:
+                        r_ = get_rate(prio, ppn, n, col)
+                        if is_finite(r_):
+                            pct = 100.0 * r_
+                        elif col == "default_all_running_rate":
+                            pct = 100.0  # no data → assume all pods running
+                        else:
+                            pct = 0.0
+                        cells.append(fmt_pct(pct, decimals=decimals))
+
+            if has_breaker:
+                if m_idx == 0:
+                    lead = rf"\multirow{{{n_outcomes}}}{{*}}{{{section_title}}}" + " & " + row_label
+                else:
+                    lead = " & " + row_label
+            else:
+                lead = row_label
+
+            lines.append(f"{lead} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    write_latex_table(out_path, lines, caption=caption, label=label)
+
+
+#################################################################
+# Plots
+#################################################################
 
 def plot_2d_grid_ppn_prio_with_aggregated_util(
     df_util_agg: pd.DataFrame,
     ppns: list[int],
     priorities: list[int],
     out_path: Path,
-    cell_figsize: tuple[float, float]
-):
+    cell_figsize: tuple[float, float],
+    *,
+    fixed_nodes: list[int] = PLOT_NODES,
+    fixed_timeouts: list[int] = PLOT_TIMEOUTS,
+) -> None:
     nrows, ncols = len(ppns), len(priorities)
     fig, axes = plt.subplots(
-        nrows, ncols,
+        nrows,
+        ncols,
         figsize=(ncols * cell_figsize[0], nrows * cell_figsize[1]),
-        sharex=True, sharey=True, squeeze=False
+        sharex=True,
+        sharey=True,
+        squeeze=False,
     )
 
-    # Shared y-label for the whole figure
-    fig.supylabel("% of instances", fontsize=LABEL_FS, x=0.03)
+    fig.supylabel("% of instances", fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=GRID_2D_YLABEL_XPOS, y=(GRID_2D_BOTTOM + GRID_2D_TOP) / 2)
 
     seen_keys = set()
-    
+
     for r, ppn in enumerate(ppns):
-        
         for c, prio in enumerate(priorities):
             ax = axes[r][c]
             panel = df_util_agg[(df_util_agg["pods_per_node"] == ppn) & (df_util_agg["priorities"] == prio)].copy()
+
+            # Always use fixed nodes and timeouts for consistent x-axis
+            nodes_vals = fixed_nodes
+            ts = fixed_timeouts
             
-            # if no data for this (ppn, prio), skip
-            if panel.empty:
-                ax.axis("off")
-                continue
-            
-            # one row per (nodes, timeout_s)
-            panel = panel.groupby(["nodes", "timeout_s"], as_index=False)[[s["col"] for s in CATEGORIES if s["col"].endswith("_rate")]].mean()
-            nodes_vals = sorted(panel["nodes"].unique().tolist())
-            ts = sorted(panel["timeout_s"].unique().tolist())
+            if not panel.empty:
+                panel = panel.groupby(["nodes", "timeout_s"], as_index=False)[
+                    [s["col"] for s in CATEGORIES if s["col"].endswith("_rate")]
+                ].mean()
+
             bars_per_group = max(1, len(ts))
-            width = BAR_WIDTH_2D / bars_per_group
+            width = GRID_2D_BAR_WIDTH / bars_per_group
             x = np.arange(len(nodes_vals))
 
             for j, timeout in enumerate(ts):
-                sub = panel[panel["timeout_s"] == timeout].set_index("nodes")
+                if not panel.empty:
+                    sub = panel[panel["timeout_s"] == timeout].set_index("nodes")
+                else:
+                    sub = pd.DataFrame()
                 xj = x + (j - (bars_per_group - 1) / 2.0) * width
                 bar_height = np.zeros(len(nodes_vals), dtype=float)
 
                 for category in CATEGORIES:
-                    vals = (sub.get(category["col"], pd.Series(0.0, index=sub.index)).reindex(nodes_vals).fillna(0.0).values)
+                    if not sub.empty:
+                        vals = (
+                            sub.get(category["col"], pd.Series(0.0, index=sub.index))
+                            .reindex(nodes_vals)
+                            .fillna(0.0)
+                            .values
+                        )
+                    else:
+                        vals = np.zeros(len(nodes_vals))
                     h = vals * 100.0
-                    if np.any(h > EPS): # if any height > small threshold (epsilon)
+                    if np.any(h > EPS):
                         ax.bar(
-                            xj, h, width=width, bottom=bar_height,
-                            color=category["color"], edgecolor="black", linewidth=0.35
+                            xj,
+                            h,
+                            width=width,
+                            bottom=bar_height,
+                            color=category["color"],
+                            edgecolor="black",
+                            linewidth=0.35,
                         )
                         bar_height += h
                         seen_keys.add(category["key"])
 
-                # annotate timeout above each bar
                 for xi, top in zip(xj, bar_height):
-                    ax.text(float(xi), float(top) + 1.0, f"{int(timeout)}s", ha="center", va="bottom", fontsize=ANNOT_FS)
+                    if top > EPS:  # Only show label if there's a bar
+                        ax.text(
+                            float(xi),
+                            float(top) + 1.0,
+                            f"{int(timeout)}s",
+                            ha="center",
+                            va="bottom",
+                            fontsize=ANNOT_FS,
+                        )
 
             ax.set_xticks(x)
-            ax.set_xticklabels([str(n) for n in nodes_vals], fontsize=TICK_FS)
+            ax.set_xticklabels([str(n) for n in nodes_vals], fontsize=PLOT_TICK_FONTSIZE)
             ax.set_ylim(0, 110)
             ax.set_yticks([0, 20, 40, 60, 80, 100])
             ax.yaxis.set_major_formatter(mtick.PercentFormatter(100.0))
-            ax.tick_params(axis='y', labelsize=TICK_FS)
+            ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
 
-            # columns (priorities)
             if r == 0:
-                ax.set_title(f"priority={prio}", fontsize=TITLE_FS)
+                ax.set_title(rf"{PRIORITIES_PLOT_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
 
-            # rows (pods per node)
             if c == 0:
                 if nrows % 2 == 1 and r == nrows // 2:
-                    axis_text = f"{INSTANCES_LABEL}\n{PODS_PER_NODE_LABEL}={ppn}"
+                    axis_text = f"{INSTANCES_LABEL}\n{PODS_PER_NODE_PLOT_LABEL}={ppn}"
                 else:
-                    axis_text = f"\n{PODS_PER_NODE_LABEL}={ppn}"
-                lbl = ax.set_ylabel(axis_text, fontsize=LABEL_FS, labelpad=10)
-                lbl.set_va('center')
-                lbl.set_ha('center')
+                    axis_text = f"\n{PODS_PER_NODE_PLOT_LABEL}={ppn}"
+                lbl = ax.set_ylabel(axis_text, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=10)
+                lbl.set_va("center")
+                lbl.set_ha("center")
                 lbl.set_linespacing(1.8)
 
-            # bottom row (nodes)
             if r == nrows - 1:
-                ax.set_xlabel(NODES_LABEL, fontsize=LABEL_FS)
+                ax.set_xlabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
-    # legend
     legends = [s for s in CATEGORIES if s["key"] in seen_keys][::-1]
-    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"]) for s in legends]
-    legend_labels  = [s["label"] for s in legends]
+    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"], ec="black", linewidth=0.4) for s in legends]
+    legend_labels = [s["label"] for s in legends]
     fig.legend(
-        legend_handles, legend_labels,
+        legend_handles,
+        legend_labels,
         loc="upper center",
         bbox_to_anchor=(0.51, 1.02),
-        prop={"size": LEGEND_FS},
+        fontsize=PLOT_LEGEND_FONTSIZE,
         ncol=len(legend_labels),
-        handlelength=LEGEND_HANDLE_LENGTH,
-        handletextpad=LEGEND_TEXT_PAD,
-        columnspacing=LEGEND_COLUMN_SPACING,
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
     )
     
+    # Make the grid tighter (reduce space between panels)
+    fig.subplots_adjust(
+        left=GRID_2D_LEFT,
+        right=GRID_2D_RIGHT,
+        bottom=GRID_2D_BOTTOM,
+        top=GRID_2D_TOP,
+        wspace=GRID_2D_WSPACE,
+        hspace=GRID_2D_HSPACE,
+    )
+
     save_figure(fig, out_path)
 
-plot_2d_grid_ppn_prio_with_aggregated_util(
-    df_util_agg=aggregate_over_util(df_per_combo),
-    ppns=PLOT_PPNS,
-    priorities=PLOT_PRIORITIES,
-    out_path=OUT_FIGURES_DIR / "2d_grid_ppn_prio",
-    cell_figsize=CELL_FIGSIZE_2D,
-)
+def plot_3d_ppn_prio_timeout(
+    df: pd.DataFrame,
+    title: str,
+    out_path: Path,
+    fixed_utils: List[int] = PLOT_UTILS,
+    fixed_nodes: List[int] = PLOT_NODES,
+) -> None:
+    utils = fixed_utils
+    nodes = fixed_nodes
 
-###############################################################
-# 3D bar plot: ppn vs priorities vs timeout
-###############################################################
-def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path):
-    utils = sorted(df["util"].unique().tolist())
-    nodes = sorted(int(n) for n in df["nodes"].unique().tolist())
-
-    def get_rate(df: pd.DataFrame, util_val, nodes_val, col):
-        df_idx = df.set_index(["util","nodes"])
+    def get_rate(df_: pd.DataFrame, util_val, nodes_val, col):
+        df_idx = df_.set_index(["util", "nodes"])
         try:
             return float(df_idx.loc[(util_val, nodes_val), col])
         except KeyError:
@@ -274,11 +716,8 @@ def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path):
 
     x_index = {r: i for i, r in enumerate(utils)}
     y_index = {n: j for j, n in enumerate(nodes)}
-    
-    fig, ax = plt.subplots(
-        figsize=FIGSIZE_3D,
-        subplot_kw={"projection": "3d"}
-    )
+
+    fig, ax = plt.subplots(figsize=FIGSIZE_3D, subplot_kw={"projection": "3d"})
     ax.view_init(elev=ELEV_3D, azim=AZIM_3D)
     ax.set_proj_type("ortho")
 
@@ -290,255 +729,480 @@ def plot_3d_ppn_prio_timeout(df: pd.DataFrame, title: str, out_path: Path):
     ax.set_yticks([y_index[n] + 0.5 for n in nodes])
     ax.set_zticks([0, 20, 40, 60, 80, 100])
     ax.zaxis.set_major_formatter(mtick.PercentFormatter(100.0))
-    
-    ax.set_xticklabels([f"{int(round(r))}%" for r in utils], fontsize=TICK_FS)
-    ax.set_yticklabels([str(n) for n in nodes], fontsize=TICK_FS)
-    
-    ax.tick_params(axis='x', labelsize=TICK_FS, pad=-2)
-    ax.tick_params(axis='y', labelsize=TICK_FS, pad=-2)
-    ax.tick_params(axis='z', labelsize=TICK_FS, pad=-1)
-    
-    ax.set_xlabel(TARGET_UTIL_LABEL, fontsize=LABEL_FS, labelpad=-4.0)
-    ax.set_ylabel(NODES_LABEL, fontsize=LABEL_FS, labelpad=-5.5)
-    ax.set_zlabel(INSTANCES_LABEL, fontsize=LABEL_FS, labelpad=-5.0)
-    
-    ax.set_title(title, fontsize=TITLE_FS, y=1.01, pad=0)
+
+    ax.set_xticklabels([f"{int(round(r))}%" for r in utils], fontsize=PLOT_TICK_FONTSIZE)
+    ax.set_yticklabels([str(n) for n in nodes], fontsize=PLOT_TICK_FONTSIZE)
+
+    ax.tick_params(axis="x", labelsize=PLOT_TICK_FONTSIZE, pad=-2)
+    ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE, pad=-2)
+    ax.tick_params(axis="z", labelsize=PLOT_TICK_FONTSIZE, pad=-1)
+
+    ax.set_xlabel(TARGET_UTIL_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=-4.0)
+    ax.set_ylabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=-5.5)
+    ax.set_zlabel(INSTANCES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=-5.0)
+
+    ax.set_title(title, fontsize=PLOT_TITLE_FONTSIZE, y=1.01, pad=0)
 
     dx = max(0.05, min(1.0, BAR_WIDTH_3D))
     dy = max(0.05, min(1.0, BAR_WIDTH_3D))
 
     seen_keys = set()
-    for u in utils:
+    for util in utils:
         for n in nodes:
-            x0 = x_index[u] + (1 - dx)/2
-            y0 = y_index[n] + (1 - dy)/2
+            x0 = x_index[util] + (1 - dx) / 2
+            y0 = y_index[n] + (1 - dy) / 2
             z = 0.0
 
-            rate_solver_opt    = get_rate(df, u, n, "solver_optimal_rate")
-            rate_solver_feas   = get_rate(df, u, n, "solver_feasible_rate")
-            rate_solver_fail   = get_rate(df, u, n, "solver_failed_rate")
-            rate_default_opt   = get_rate(df, u, n, "default_optimal_rate")
-            rate_default_all   = get_rate(df, u, n, "default_all_running_rate")
-            rate_other         = get_rate(df, u, n, "other_rate")
+            rate_solver_opt = get_rate(df, util, n, "solver_optimal_rate")
+            rate_solver_feas = get_rate(df, util, n, "solver_feasible_rate")
+            rate_solver_fail = get_rate(df, util, n, "solver_failed_rate")
+            rate_default_opt = get_rate(df, util, n, "default_optimal_rate")
+            rate_default_all = get_rate(df, util, n, "default_all_running_rate")
+            rate_other = get_rate(df, util, n, "other_rate")
 
-            for key, rate in [
-                ("other",           rate_other),
-                ("solver_optimal",  rate_solver_opt),
+            for key, rate_ in [
+                ("other", rate_other),
+                ("solver_optimal", rate_solver_opt),
                 ("solver_feasible", rate_solver_feas),
                 ("default_optimal", rate_default_opt),
-                ("default_all",     rate_default_all),
-                ("solver_failed",   rate_solver_fail),
+                ("default_all", rate_default_all),
+                ("solver_failed", rate_solver_fail),
             ]:
-                h = rate * 100.0
-                if h > EPS: # if height > small threshold (epsilon)
+                h = rate_ * 100.0
+                if h > EPS:
                     color = next(s["color"] for s in CATEGORIES if s["key"] == key)
                     ax.bar3d(
-                        x0, y0, z, dx, dy, h,
-                        color=color, edgecolor="black", linewidth=0.35, shade=False,
+                        x0,
+                        y0,
+                        z,
+                        dx,
+                        dy,
+                        h,
+                        color=color,
+                        edgecolor="black",
+                        linewidth=0.35,
+                        shade=False,
                     )
                     z += h
                     seen_keys.add(key)
 
-    # legend
     legends = [s for s in CATEGORIES if s["key"] in seen_keys][::-1]
-    legend_handles = [mpatches.Rectangle((0,0),1,1, fc=s["color"]) for s in legends]
-    legend_labels  = [s["label"] for s in legends]
+    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"], ec="black", linewidth=0.6) for s in legends]
+    legend_labels = [s["label"] for s in legends]
     fig.legend(
-        legend_handles, legend_labels,
+        legend_handles,
+        legend_labels,
         loc="upper center",
         bbox_to_anchor=(0.545, 0.92),
-        prop={"size": LEGEND_FS},
-        ncol=len(legend_labels),  # one row
-        handlelength=LEGEND_HANDLE_LENGTH,  # shorter color boxes
-        handletextpad=LEGEND_TEXT_PAD, # space between box and text
-        columnspacing=LEGEND_COLUMN_SPACING, # space between entries
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        ncol=len(legend_labels),
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
     )
 
     save_figure(fig, out_path)
 
-# one 3D bar plot per (ppn, prio, timeout)
-for ppn in PLOT_PPNS:
-    for prio in PLOT_PRIORITIES:
-        for t in PLOT_TIMEOUTS:
-            sub = df_per_combo[(df_per_combo["pods_per_node"] == ppn) & (df_per_combo["priorities"] == prio) & (df_per_combo["timeout_s"] == t)]
-            if sub.empty:
-                print(f"[skip] no per-combo rows for ppn={ppn}, prio={prio}, t={t}")
-                continue
-            title = f"{PODS_PER_NODE_LABEL}={ppn}, priorities={prio}, timeout={t}s"
-            out_file = OUT_FIGURES_DIR / f"3d_ppn{ppn}_prio{prio}_timeout{t:02d}"
-            plot_3d_ppn_prio_timeout(sub, title, out_file)
+
+# 2d single-panel sizes (aggregated over everything except util)
+GRID_2D_SINGLE_FIGSIZE = (2.8, 2.0)
+GRID_2D_SINGLE_BAR_WIDTH = 0.55
 
 
-###############################################################
-# Tables for solver duration/utils and success shares
-# for multiple timeouts (e.g., 1s and 10s)
-###############################################################
-def metric_pivot(df_solver_stats: pd.DataFrame, values: pd.Series) -> pd.DataFrame:
-    p = (
-        pd.concat(
-            [df_solver_stats[["util", "pods_per_node", "nodes"]], values],
-            axis=1,
-        )
-        .pivot_table(
-            index="util",
-            columns=["pods_per_node", "nodes"],
-            values=values.name,
-            aggfunc="mean",
-        )
-    )
-    p = p.reindex(
-        index=TABLE_UTILS,
-        columns=pd.MultiIndex.from_product(
-            [TABLE_PPNS, TABLE_NODES],   # <- FIX HERE
-            names=["ppn", "nodes"],
-        ),
-    )
-    p = p.astype(float).round(TABLE_DECIMALS)
-    return p.map(lambda x: f"{x:.{TABLE_DECIMALS}f}" if pd.notna(x) else "—")
+def plot_2d_single_aggregated_by_util(
+    df_agg: pd.DataFrame,
+    out_path: Path,
+    *,
+    fixed_utils: List[int] = PLOT_UTILS,
+    figsize: Tuple[float, float] = GRID_2D_SINGLE_FIGSIZE,
+) -> None:
+    """Single stacked-bar plot: usage levels on x-axis, % of instances on y.
 
-# build and print LaTeX tabular to console
-def fmt_cell(s: str) -> str:
-    return r"\multicolumn{1}{c}{—}" if s == "—" else s
+    All other dimensions (priorities, timeout, nodes, pods/node) are
+    aggregated away so each bar represents the average over every
+    configuration at that target usage level.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
 
-for timeout_s in TABLE_TIMEOUTS:
-    
-    for priority in TABLE_PRIORITIES:
-        # filter data for this timeout and priority
-        df_solver_stats = df_per_combo[
-            (df_per_combo["priorities"] == priority)
-            & (df_per_combo["timeout_s"] == timeout_s)
-            & (df_per_combo["pods_per_node"].isin(TABLE_PPNS))
-            & (df_per_combo["util"].isin(TABLE_UTILS))
-            & (df_per_combo["nodes"].isin(TABLE_NODES))
-        ].copy()
+    x = np.arange(len(fixed_utils))
+    width = GRID_2D_SINGLE_BAR_WIDTH
+    bar_height = np.zeros(len(fixed_utils), dtype=float)
+    seen_keys: set = set()
 
-        ####################################################################
-        # Table solver duration and utils (this timeout): duration, cpu, mem
-        ####################################################################
-        solver_sec = (df_solver_stats["solver_duration_ms_mean"] / 1000.0).rename(
-            "solver_sec"
-        )
-        cpu_delta_pc = (df_solver_stats["cpu_delta_mean"] * 100.0).rename("cpu_delta_pc")
-        mem_delta_pc = (df_solver_stats["mem_delta_mean"] * 100.0).rename("mem_delta_pc")
+    df_idx = df_agg.set_index("util") if not df_agg.empty else pd.DataFrame()
 
-        tab_dur = metric_pivot(df_solver_stats, solver_sec)
-        tab_cpu = metric_pivot(df_solver_stats, cpu_delta_pc)
-        tab_mem = metric_pivot(df_solver_stats, mem_delta_pc)
-
-        # assemble console DataFrame (rows=(util, metric), cols=(ppn,nodes))
-        rows = []
-        for u in TABLE_UTILS:
-            rows.append(pd.Series(tab_dur.loc[u], name=(f"{int(u)}%", "solver duration (s)")))
-            rows.append(pd.Series(tab_cpu.loc[u], name=(f"{int(u)}%", "Δ cpu util (%)")))
-            rows.append(pd.Series(tab_mem.loc[u], name=(f"{int(u)}%", "Δ mem util (%)")))
-
-        # build LaTeX tabular
-        lines = []
-        lines.append(r"\begin{tabular}{@{}c l *{8}{c}@{}}")
-        lines.append(r"\toprule")
-        lines.append(r"\multirow{2}{*}{\textbf{util}} & \multirow{2}{*}{\textbf{metric}} &")
-        lines.append(
-            r"\multicolumn{4}{c}{\textbf{ppn = 4}} & \multicolumn{4}{c}{\textbf{ppn = 8}}\\"
-        )
-        lines.append(r"\cmidrule(lr){3-6}\cmidrule(lr){7-10}")
-        lines.append(
-            r" &  & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32} & \textbf{4} & \textbf{8} & \textbf{16} & \textbf{32}\\"
-        )
-        lines.append(r"\midrule")
-
-        for u in TABLE_UTILS:
-            util_label = f"{int(u)}\\%"
-            lines.append(rf"\multirow{{3}}{{*}}{{{util_label}}}")
-
-            def emit_row(metric_label: str, tab: pd.DataFrame):
-                left = [fmt_cell(tab.loc[u, (4, n)]) for n in TABLE_NODES]
-                right = [fmt_cell(tab.loc[u, (8, n)]) for n in TABLE_NODES]
-                lines.append("& " + metric_label + " & " + " & ".join(left + right) + r" \\")
-
-            emit_row(r"solver\,duration\,(s)", tab_dur)
-            emit_row(r"$\Delta$\,cpu\,util\,(\%)", tab_cpu)
-            emit_row(r"$\Delta$\,mem\,util\,(\%)", tab_mem)
-            lines.append(r"\midrule" if u != TABLE_UTILS[-1] else r"\bottomrule")
-        lines.append(r"\end{tabular}")
-        latex_block = "\n".join(lines)
-
-        # save to file, with timeout in filename
-        out_path_dur = OUT_TABLES_DIR / f"table_solver_duration_and_utils_timeout{timeout_s:02d}s_priority{priority}_latex.txt"
-        with open(out_path_dur, "w") as f:
-            f.write(latex_block)
-        print(f"[ok] saved latex table solver duration and utils (timeout={timeout_s}s, priority={priority}): {out_path_dur}")
-        
-        # also save a pandas-style version for easier reading
-        dur_df = pd.DataFrame(rows)
-        out_path_dur_csv = OUT_TABLES_DIR / f"table_solver_duration_and_utils_timeout{timeout_s:02d}s_priority{priority}.csv"
-        dur_df.to_csv(out_path_dur_csv)
-        print(f"[ok] saved CSV solver duration and utils (timeout={timeout_s}s, priority={priority}): {out_path_dur_csv}")
-
-        ####################################################################
-        # Table: split "better" (green+red) vs "kwok optimal" (blue)
-        ####################################################################
-        better_counts = (
-            df_solver_stats["n_solver_optimal"].astype(float)
-            + df_solver_stats["n_solver_feasible"].astype(float)
-        )
-        kowk_opt_counts = df_solver_stats["n_default_optimal"].astype(float)
-
-        solver_run_counts = (
-            df_solver_stats["n_seeds"].astype(float)
-            - df_solver_stats["n_default_all_running"].astype(float)
-        )
-
-        # only keep combos where solver_run_counts > 0
-        mask_valid = solver_run_counts > 0
-        better_total = better_counts[mask_valid].sum()
-        kwok_opt_total = kowk_opt_counts[mask_valid].sum()
-        solver_runs_total = solver_run_counts[mask_valid].sum()
-
-        if solver_runs_total > 0:
-            better_share = better_total / solver_runs_total
-            kwok_opt_share = kwok_opt_total / solver_runs_total
+    for category in CATEGORIES:
+        if not df_idx.empty and category["col"] in df_idx.columns:
+            vals = (
+                df_idx[category["col"]]
+                .reindex(fixed_utils)
+                .fillna(0.0)
+                .values
+            )
         else:
-            better_share = float("nan")
-            kwok_opt_share = float("nan")
+            vals = np.zeros(len(fixed_utils))
+        h = vals * 100.0
+        if np.any(h > EPS):
+            ax.bar(
+                x,
+                h,
+                width=width,
+                bottom=bar_height,
+                color=category["color"],
+                edgecolor="black",
+                linewidth=0.35,
+                label=category["label"],
+            )
+            bar_height += h
+            seen_keys.add(category["key"])
 
-        better_share_pc_str = f"{better_share * 100:.{TABLE_DECIMALS}f}"
-        proved_opt_share_pc_str = f"{kwok_opt_share * 100:.{TABLE_DECIMALS}f}"
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{u}%" for u in fixed_utils], fontsize=PLOT_TICK_FONTSIZE)
+    ax.set_xlabel(TARGET_UTIL_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+    ax.set_ylim(0, 110)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.yaxis.set_major_formatter(mtick.PercentFormatter(100.0))
+    ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
+    ax.set_ylabel(INSTANCES_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
-        lines = []
-        lines.append(r"\begin{tabular}{@{}l c@{}}")
-        lines.append(r"\toprule")
-        lines.append(r"\textbf{metric} & \textbf{value}\\")
-        lines.append(r"\midrule")
-        lines.append(
-            rf"share of instances where solver finds a better placement, possibly optimal (green+red) & {better_share_pc_str}\%\\"
-        )
-        lines.append(
-            rf"share of instances where solver proves KWOK is optimal (blue) & {proved_opt_share_pc_str}\%\\"
-        )
-        lines.append(r"\bottomrule")
-        lines.append(r"\end{tabular}")
-        latex_block = "\n".join(lines)
+    # legend
+    legends = [s for s in CATEGORIES if s["key"] in seen_keys][::-1]
+    legend_handles = [mpatches.Rectangle((0, 0), 1, 1, fc=s["color"], ec="black", linewidth=0.4) for s in legends]
+    legend_labels = [s["label"] for s in legends]
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="upper center",
+        bbox_to_anchor=(0.48, 0.96),
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        ncol=min(len(legend_labels), 5),
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
 
-        out_path_frac = OUT_TABLES_DIR / f"table_solver_better_vs_kwok_optimal_timeout{timeout_s:02d}s_priority{priority}_latex.txt"
-        with open(out_path_frac, "w") as f:
-            f.write(latex_block)
-        print(
-            f"[ok] saved latex table solver better/kwok optimal (timeout={timeout_s}s, priority={priority}): {out_path_frac}"
+    fig.subplots_adjust(
+        left=0.14,
+        right=0.98,
+        bottom=0.15,
+        top=0.82,
+    )
+
+    save_figure(fig, out_path)
+
+
+def plot_grid(
+    df_util_agg: pd.DataFrame,
+    *,
+    metric_col: str,
+    y_label: str,
+    ppns: List[int],
+    priorities: List[int],
+    out_path: Path,
+    cell_figsize: Tuple[float, float] = DOT_CELL_FIGSIZE,
+    fixed_nodes: List[int] = PLOT_NODES,
+    fixed_timeouts: List[int] = PLOT_TIMEOUTS,
+    y_scale: float = 1.0,
+    y_lim: Optional[Tuple[float, float]] = None,
+    y_nticks: Optional[int] = None,
+    y_label_x: float = DOT_YLABEL_XPOS,
+    y_label_pad: float = 10.0,
+    show_zero_line: bool = True,
+) -> None:
+    nrows, ncols = len(ppns), len(priorities)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * cell_figsize[0], nrows * cell_figsize[1]),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+
+    x = np.arange(len(fixed_nodes))
+    n_timeouts = len(fixed_timeouts)
+    jitter_width = 0.6          # total width to spread dots across
+    offsets = np.linspace(
+        -jitter_width / 2, jitter_width / 2, n_timeouts
+    ) if n_timeouts > 1 else np.array([0.0])
+
+    for r, ppn in enumerate(ppns):
+        for c, prio in enumerate(priorities):
+            ax = axes[r][c]
+            panel = df_util_agg[
+                (df_util_agg["pods_per_node"] == ppn)
+                & (df_util_agg["priorities"] == prio)
+            ].copy()
+
+            for j, timeout in enumerate(fixed_timeouts):
+                sub = panel[panel["timeout_s"] == timeout].set_index("nodes") if not panel.empty else pd.DataFrame()
+                vals = (
+                    sub[metric_col].reindex(fixed_nodes).values
+                    if not sub.empty and metric_col in sub.columns
+                    else np.full(len(fixed_nodes), np.nan)
+                )
+                ax.plot(
+                    x + offsets[j],
+                    vals * y_scale,
+                    marker="D",
+                    linestyle="None",
+                    markersize=DOT_MARKER_SIZE,
+                    markerfacecolor=TIMEOUT_COLORS.get(timeout, "grey"),
+                    markeredgecolor="black",
+                    markeredgewidth=DOT_MARKER_LINEWIDTH,
+                    zorder=5,
+                )
+
+            # cosmetics
+            ax.set_xticks(x)
+            ax.set_xticklabels([str(n) for n in fixed_nodes], fontsize=PLOT_TICK_FONTSIZE)
+            ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
+            ax.grid(axis="y", linewidth=0.4, alpha=0.4)
+
+            # horizontal reference line at zero (same style as trace replayer)
+            if show_zero_line:
+                ax.axhline(0.0, linewidth=0.8, color="black", linestyle="-", alpha=0.7)
+
+            # fixed y-axis limits (shared across all panels)
+            if y_lim is not None:
+                ax.set_ylim(y_lim)
+
+            # fixed number of y-ticks / horizontal grid lines
+            if y_nticks is not None and y_nticks >= 2:
+                lo, hi = ax.get_ylim()
+                ticks = np.linspace(lo, hi, y_nticks)
+                # round to integers when all ticks are close to whole numbers
+                if all(abs(t - round(t)) < 1e-9 for t in ticks):
+                    ticks = [int(round(t)) for t in ticks]
+                ax.set_yticks(ticks)
+
+            # vertical boundary lines between node groups (same style as trace replayer)
+            for bx in [xi - 0.5 for xi in range(len(fixed_nodes) + 1)]:
+                ax.axvline(bx, linewidth=0.8, color="black", linestyle="--", alpha=0.7, zorder=0)
+            ax.set_xlim(-0.5, len(fixed_nodes) - 0.5)
+
+            if r == 0:
+                ax.set_title(rf"{PRIORITIES_PLOT_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
+            if c == 0:
+                ppn_text = f"{PODS_PER_NODE_PLOT_LABEL}={ppn}"
+                if nrows % 2 == 1 and r == nrows // 2:
+                    axis_text = f"{y_label}\n{ppn_text}"
+                else:
+                    axis_text = f"\n{ppn_text}"
+                lbl = ax.set_ylabel(axis_text, fontsize=PLOT_AXIS_LABEL_FONTSIZE, labelpad=y_label_pad)
+                lbl.set_va("center")
+                lbl.set_ha("center")
+                lbl.set_linespacing(1.8)
+            if r == nrows - 1:
+                ax.set_xlabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    # shared y-label for cases where the per-axis label is only the ppn tag
+    fig.supylabel(y_label, fontsize=PLOT_AXIS_LABEL_FONTSIZE, x=y_label_x)
+
+    # legend (one entry per timeout)
+    legend_handles = [
+        Line2D(
+            [0], [0],
+            marker="D",
+            linestyle="None",
+            markersize=DOT_MARKER_SIZE,
+            markerfacecolor=TIMEOUT_COLORS.get(t, "grey"),
+            markeredgecolor="black",
+            markeredgewidth=DOT_MARKER_LINEWIDTH,
         )
-        
-        # also save a pandas-style version (CSV) of the shares
-        shares_df = pd.DataFrame(
-            {
-                "metric": [
-                    "better_placement_share",
-                    "kwok_optimal_share",
-                ],
-                "share": [better_share, kwok_opt_share],
-                "share_percent": [better_share * 100.0, kwok_opt_share * 100.0],
-            }
+        for t in fixed_timeouts
+    ]
+    legend_labels = [f"{SOLVER_TIMEOUT_LABEL}={t}s" for t in fixed_timeouts]
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="upper center",
+        bbox_to_anchor=(0.56, 1.02),
+        fontsize=PLOT_LEGEND_FONTSIZE,
+        ncol=len(legend_labels),
+        handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+        handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+        columnspacing=PLOT_LEGEND_COLUMN_SPACING,
+    )
+
+    fig.subplots_adjust(
+        left=DOT_LEFT,
+        right=DOT_RIGHT,
+        bottom=DOT_BOTTOM,
+        top=DOT_TOP,
+        wspace=DOT_WSPACE,
+        hspace=DOT_HSPACE,
+    )
+
+    save_figure(fig, out_path)
+
+
+#################################################################
+# main
+#################################################################
+
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = argparse.ArgumentParser(description="Generate plots and tables from solver results")
+    parser.add_argument(
+        "--solver", 
+        type=str, 
+        default=None,
+        choices=ALL_SOLVERS,
+        help="Solver name (determines input/output paths). If omitted, runs all solvers."
+    )
+    parser.add_argument(
+        "--results-root",
+        type=Path,
+        default=DEFAULT_RESULTS_ROOT,
+        help="Root directory for results"
+    )
+    args = parser.parse_args(argv)
+    
+    solvers = [args.solver] if args.solver else ALL_SOLVERS
+    configure_matplotlib()
+
+    for solver in solvers:
+        _run_solver(solver, args.results_root)
+
+
+def _run_solver(solver: str, results_root: Path) -> None:
+    df_path, out_figures_dir, out_tables_dir = get_paths_for_solver(solver, results_root)
+    
+    print(f"Generating tables and figures for solver={solver}...")
+    print(f"  Input: {df_path}")
+    print(f"  Figures: {out_figures_dir}")
+    print(f"  Tables: {out_tables_dir}")
+    
+    if not df_path.exists():
+        print(f"[error] Input file not found: {df_path}")
+        print(f"  Run: python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-{solver}")
+        return
+
+    out_figures_dir.mkdir(parents=True, exist_ok=True)
+    out_tables_dir.mkdir(parents=True, exist_ok=True)
+
+    df_per_combo = pd.read_csv(df_path)
+
+    produced_tables: List[Path] = []
+    produced_figs: List[Path] = []
+
+    # --- TABLES (per timeout, all priorities side-by-side)
+    df_table = aggregate_keep_util(df_per_combo)
+    present_prios = set(df_table["priorities"].astype(int).unique().tolist())
+    prio_list = [p for p in PLOT_PRIORITIES if p in present_prios]
+    for t in PLOT_TIMEOUTS:
+        out_tex = out_tables_dir / f"table_outcomes_timeout={int(t)}.tex"
+        write_outcome_table_tex(
+            df_table=df_table,
+            out_path=out_tex,
+            ppns=PLOT_PPNS,
+            timeout=int(t),
+            priorities_list=prio_list,
+            breaker_col="util",
+            decimals=1,
+            caption=f"Outcome breakdown for {t}\\,s optimizer timeout. Values show the mean paired differences between the optimizer and default scheduler over 100 instances (\\% of instances).",
+            label=f"tab:outcomes-timeout{t}",
         )
-        out_path_frac_csv = OUT_TABLES_DIR / f"table_solver_better_vs_kwok_optimal_timeout{timeout_s:02d}s_priority{priority}.csv"
-        shares_df.to_csv(out_path_frac_csv, index=False)
-        print(
-            f"[ok] saved CSV solver better/kwok optimal (timeout={timeout_s}s, priority={priority}): {out_path_frac_csv}"
+        produced_tables.append(out_tex)
+
+    # --- METRIC TABLES (per timeout, all priorities side-by-side)
+    ppn_str = " and ".join(str(p) for p in PLOT_PPNS)
+    df_metric_keep_util = aggregate_keep_util(df_per_combo)
+    for t in PLOT_TIMEOUTS:
+        out_tex_metric_util = out_tables_dir / f"table_metrics_timeout={int(t)}.tex"
+        write_metric_table_tex(
+            df_table=df_metric_keep_util,
+            out_path=out_tex_metric_util,
+            ppns=PLOT_PPNS,
+            nodes=PLOT_NODES,
+            timeout=int(t),
+            priorities_list=prio_list,
+            breaker_col="util",
+            caption=(
+                f"Optimizer performance metrics with different cluster sizes and different target usage levels "
+                f"with {t}\\,s optimizer timeout. "
+                f"Values show the mean paired differences between the optimizer and default scheduler over 100 instances. "
+                f"Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; "
+                f"the reported time also includes solution extraction and I/O."
+            ),
+            label=f"tab:metrics-timeout{t}",
         )
+        produced_tables.append(out_tex_metric_util)
+
+    # --- PLOTS
+    df_util_agg = aggregate_over_util(df_per_combo)
+
+    # --- Single-panel plot: outcomes by usage level (all other dims aggregated)
+    df_util_only = aggregate_over_all_except_util(df_per_combo)
+    out_path_2d_util = out_figures_dir / "2d_by_usage"
+    plot_2d_single_aggregated_by_util(
+        df_agg=df_util_only,
+        out_path=out_path_2d_util,
+    )
+    produced_figs.extend([out_path_2d_util.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    out_path_2d = out_figures_dir / "2d_main"
+    plot_2d_grid_ppn_prio_with_aggregated_util(
+        df_util_agg=df_util_agg,
+        ppns=PLOT_PPNS,
+        priorities=PLOT_PRIORITIES,
+        out_path=out_path_2d,
+        cell_figsize=GRID_2D_CELL_FIGSIZE,
+    )
+    produced_figs.extend([out_path_2d.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    # --- Grid chart: diff. usage (plugin − baseline)
+    out_dot_usage = out_figures_dir / "diff_usage"
+    plot_grid(
+        df_util_agg,
+        metric_col="eff_delta_mean",
+        y_label="diff. usage (%)",
+        ppns=PLOT_PPNS,
+        priorities=PLOT_PRIORITIES,
+        out_path=out_dot_usage,
+        y_scale=100.0,
+        y_lim=DOT_YLIM_DIFF_USAGE,
+        y_nticks=DOT_NTICKS_DIFF_USAGE,
+        y_label_x=DOT_YLABEL_X_DIFF,
+        y_label_pad=DOT_YLABEL_PAD_DIFF,
+    )
+    produced_figs.extend([out_dot_usage.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    # --- Grid chart: solver duration
+    out_dot_solver = out_figures_dir / "optimizer_duration"
+    plot_grid(
+        df_util_agg,
+        metric_col="solver_duration_ms_mean",
+        y_label=r"optimizer duration (s)",
+        ppns=PLOT_PPNS,
+        priorities=PLOT_PRIORITIES,
+        out_path=out_dot_solver,
+        y_scale=1.0 / 1000.0,
+        y_lim=DOT_YLIM_SOLVER_DUR,
+        y_nticks=DOT_NTICKS_SOLVER_DUR,
+        y_label_x=DOT_YLABEL_X_DIFF,
+        y_label_pad=DOT_YLABEL_PAD_DIFF,
+        show_zero_line=False,
+    )
+    produced_figs.extend([out_dot_solver.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+
+    for ppn in PLOT_PPNS:
+        for prio in PLOT_PRIORITIES:
+            for t in PLOT_TIMEOUTS:
+                sub = df_per_combo[
+                    (df_per_combo["pods_per_node"] == ppn)
+                    & (df_per_combo["priorities"] == prio)
+                    & (df_per_combo["timeout_s"] == t)
+                ]
+                if sub.empty:
+                    print(f"[skip] no per-combo rows for ppn={ppn}, prio={prio}, t={t}")
+                    continue
+                title = rf"{PODS_PER_NODE_PLOT_LABEL}={ppn}, {PRIORITIES_PLOT_LABEL}={prio}, {SOLVER_TIMEOUT_LABEL}={t}s"
+                out_file = out_figures_dir / f"3d_ppn={ppn}_priorities={prio}_timeout={t:02d}"
+                plot_3d_ppn_prio_timeout(sub, title, out_file)
+                produced_figs.extend([out_file.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+    for label, paths in [("Tables", produced_tables), ("Figures", produced_figs)]:
+        print(f"{label}:\n" + "\n".join(f"  - {p}" for p in paths))
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,36 @@
+meta:
+  timestamp: 2026/02/04/17:54:09
+  git: {}
+  kind: trace_replayer
+  job_file: /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=periodic16s_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=16s.yaml
+  kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml
+inputs:
+  cli-cmd: python /work/2026-02-04-03/content/scripts/kwok_trace_replayer/trace_replayer.py
+    --kwok-runtime binary --job-file /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=periodic16s_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=16s.yaml
+  args:
+    job_file: /work/2026-02-04-03/content/data/jobs/kwok_trace_replayer/plugin/mode=periodic16s_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=16s.yaml
+    result_dir: /work/2026-02-04-03/content/results/plugin/mode=periodic16s_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=16s/2219457405427907235
+    trace_dir: /work/2026-02-04-03/content/data/traces/nodes=32_prio=1_arrival=16s/2219457405427907235
+    cluster_name: kwok1
+    kwok_runtime: binary
+    kwokctl_config_file: data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml
+    namespace: trace
+    node_cpu: 1000m
+    node_mem: 1Gi
+    save_scheduler_logs: false
+    monitor_interval: 1.0
+    start_delay: 0.0
+    log_level: INFO
+  job:
+    trace-dir: data/traces/nodes=32_prio=1_arrival=16s
+    result-dir: results/plugin/mode=periodic16s_blocking=0_defpreempt=1_nodes=32_prio=1_arrival=16s
+    kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml
+    override-kwokctl-envs:
+    - name: SOLVER_PYTHON_TIMEOUT
+      value: 16s
+    - name: OPTIMIZE_MODE
+      value: periodic
+    - name: OPTIMIZE_BLOCKING_SOLVING
+      value: 'false'
+    - name: OPTIMIZE_PERIODIC_INTERVAL
+      value: 16s

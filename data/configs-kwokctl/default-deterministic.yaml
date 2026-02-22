@@ -4,3 +4,5 @@ options:
   kubeSchedulerConfig: manifests/mydeterministicscore/default-deterministic-scheduler-config.yaml
   kubeSchedulerBinary: bin/kube-scheduler
   kubeSchedulerImage: localhost:5000/scheduler-plugins/kube-scheduler:dev
+  kubeApiserverBinary: bin/kube-apiserver
+  kubeControllerManagerBinary: bin/kube-controller-manager

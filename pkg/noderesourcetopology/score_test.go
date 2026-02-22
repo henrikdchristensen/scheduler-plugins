@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	topologyv1alpha2 "github.com/k8stopologyawareschedwg/noderesourcetopology-api/pkg/apis/topology/v1alpha2"
+	fwk "k8s.io/kube-scheduler/framework"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -88,7 +89,7 @@ func TestNodeResourceScorePlugin(t *testing.T) {
 	type podRequests struct {
 		pod        *v1.Pod
 		name       string
-		wantStatus *framework.Status
+		wantStatus *fwk.Status
 	}
 	pRequests := []podRequests{
 		{
@@ -155,11 +156,13 @@ func TestNodeResourceScorePlugin(t *testing.T) {
 			for _, req := range test.requests {
 				nodeToScore := make(nodeToScoreMap, len(nodesMap))
 				for _, node := range nodesMap {
+					nodeInfo := framework.NewNodeInfo()
+					nodeInfo.SetNode(node)
 					score, gotStatus := tm.Score(
 						context.Background(),
 						framework.NewCycleState(),
 						req.pod,
-						node.ObjectMeta.Name)
+						nodeInfo)
 
 					t.Logf("%v; %v; %v; score: %v; status: %v\n",
 						test.name,
@@ -450,11 +453,13 @@ func TestNodeResourceScorePluginLeastNUMA(t *testing.T) {
 			pod := makePodByResourceLists(tc.podRequests...)
 
 			for _, node := range nodesMap {
+				nodeInfo := framework.NewNodeInfo()
+				nodeInfo.SetNode(node)
 				score, gotStatus := tm.Score(
 					context.Background(),
 					framework.NewCycleState(),
 					pod,
-					node.Name)
+					nodeInfo)
 
 				t.Logf("%v; %v; %v; score: %v; status: %v\n",
 					tc.name,
@@ -479,7 +484,7 @@ func TestNodeResourcePartialDataScorePlugin(t *testing.T) {
 	type podRequests struct {
 		pod        *v1.Pod
 		name       string
-		wantStatus *framework.Status
+		wantStatus *fwk.Status
 	}
 	pRequests := []podRequests{
 		{
@@ -576,11 +581,13 @@ func TestNodeResourcePartialDataScorePlugin(t *testing.T) {
 			for _, req := range test.requests {
 				nodeToScore := make(nodeToScoreMap, len(nodesMap))
 				for _, node := range nodesMap {
+					nodeInfo := framework.NewNodeInfo()
+					nodeInfo.SetNode(node)
 					score, gotStatus := tm.Score(
 						context.Background(),
 						framework.NewCycleState(),
 						req.pod,
-						node.ObjectMeta.Name)
+						nodeInfo)
 
 					t.Logf("%v; %v; %v; score: %v; status: %v\n",
 						test.name,

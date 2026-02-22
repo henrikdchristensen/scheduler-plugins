@@ -1,0 +1,12 @@
+trace-dir: data/traces/nodes=16_prio=1_arrival=1s
+result-dir: results/plugin/mode=stablequeue16s_blocking=1_defpreempt=0_nodes=16_prio=1_arrival=1s
+kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
+override-kwokctl-envs:
+  - name: SOLVER_PYTHON_TIMEOUT
+    value: "16s"
+  - name: OPTIMIZE_MODE
+    value: "stable_queue"
+  - name: OPTIMIZE_BLOCKING_SOLVING
+    value: "true"
+  - name: OPTIMIZE_STABLE_QUEUE_DELAY
+    value: "16s"

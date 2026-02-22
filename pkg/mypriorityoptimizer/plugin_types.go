@@ -5,7 +5,9 @@ import (
 	"context"
 	"sync/atomic"
 
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
@@ -15,10 +17,12 @@ type SharedState struct {
 	Handle framework.Handle
 	// Kubernetes client
 	Client kubernetes.Interface
-	// Whether a plan is active
-	Active atomic.Bool
+	// Whether a plan is in progress
+	ActivePlanInProgress atomic.Bool
 	// Currently active plan (if any)
 	ActivePlan atomic.Pointer[ActivePlan]
+	// Whether optimization is in progress
+	OptimizationInProgress atomic.Bool
 	// Set of blocked pods
 	BlockedWhileActive *PodSet
 	// Whether the plugin is ready (caches warmed up and usable node found)
@@ -30,7 +34,7 @@ type ActivePlan struct {
 	// Unique plan ID
 	ID string
 	// Workload quotas for moved or new pods that are part of a workload
-	WorkloadPerNodeCnts WorkloadQuotasAtomics
+	WorkloadQuotas WorkloadQuotasAtomics
 	// Placements by name for standalone pods that is either moved or new: ns/name -> node
 	PlacementByName map[string]string // pod ns/name -> targetNode
 	// Context to cancel the plan
@@ -42,3 +46,13 @@ type ActivePlan struct {
 // WorkloadQuotasAtomics is a map of workloadKey -> node -> remaining count
 // The atomic.Int32 allows concurrent safe decrement during plan execution.
 type WorkloadQuotasAtomics map[string]map[string]*atomic.Int32
+
+// HandleDeps is a minimal subset of framework.Handle that New/newFromHandle
+// actually depend on. This lets tests provide a tiny fake without implementing
+// the whole framework.Handle interface.
+type HandleDeps interface {
+	// KubeConfig returns the Kubernetes REST configuration.
+	KubeConfig() *rest.Config
+	// SharedInformerFactory returns the shared informer factory.
+	SharedInformerFactory() informers.SharedInformerFactory
+}

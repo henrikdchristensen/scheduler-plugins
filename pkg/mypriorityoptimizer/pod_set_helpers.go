@@ -8,10 +8,20 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// newPodSet creates a new PodSet.
-func newPodSet(name string) *PodSet { return &PodSet{Name: name, m: make(map[types.UID]PodKey)} }
+// -------------------------
+// newPodSet
+// -------------------------
 
-// doesPodSetExist returns true if the pod set is non-nil and has at least one pod.
+// newPodSet creates a new PodSet.
+func newPodSet(name string) *PodSet {
+	return &PodSet{Name: name, m: make(map[types.UID]SolverPod)}
+}
+
+// -------------------------
+// doesPodSetExist
+// -------------------------
+
+// doesPodSetExist returns true if pod set is non-nil and has at least one pod.s
 func doesPodSetExist(podSet *PodSet) bool {
 	if podSet == nil {
 		return false
@@ -19,9 +29,13 @@ func doesPodSetExist(podSet *PodSet) bool {
 	return podSet.Size() > 0
 }
 
-// prunePending removes from `set` any pod that is no longer pending.
-// It returns the number of removed pods.
-func (pl *SharedState) pruneSet(podSet *PodSet) int {
+// -------------------------
+// prunePodSet
+// -------------------------
+
+// prunePending removes from `set` any pod that is no longer pending. It returns
+// the number of removed pods.
+func (pl *SharedState) prunePodSet(podSet *PodSet) int {
 	if !doesPodSetExist(podSet) {
 		return 0
 	}
@@ -49,27 +63,39 @@ func (pl *SharedState) pruneSet(podSet *PodSet) int {
 	return removed
 }
 
-// AddPod adds a pod to the set.
-// Use mutex to protect the map such that only one goroutine can modify the map at a time.
+// -------------------------
+// AddPod
+// -------------------------
+
+// AddPod adds a pod to the set. Use mutex to protect the map such that only one
+// goroutine can modify the map at a time.
 func (s *PodSet) AddPod(p *v1.Pod) {
 	if p == nil {
 		return
 	}
 	s.mu.Lock()
-	s.m[p.UID] = PodKey{UID: p.UID, Namespace: p.Namespace, Name: p.Name}
+	s.m[p.UID] = SolverPod{UID: p.UID, Namespace: p.Namespace, Name: p.Name}
 	s.mu.Unlock()
 }
 
-// RemovePod removes a pod from the set.
-// Use mutex to protect the map such that only one goroutine can modify the map at a time.
+// -------------------------
+// RemovePod
+// -------------------------
+
+// RemovePod removes a pod from the set. Use mutex to protect the map such that
+// only one goroutine can modify the map at a time.
 func (s *PodSet) RemovePod(uid types.UID) {
 	s.mu.Lock()
 	delete(s.m, uid)
 	s.mu.Unlock()
 }
 
-// Size returns the number of pods in the set.
-// Use mutex so that we can read the map safely.
+// -------------------------
+// Size
+// -------------------------
+
+// Size returns the number of pods in the set. Use mutex so that we can read the
+// map safely.
 func (s *PodSet) Size() int {
 	s.mu.RLock()
 	n := len(s.m)
@@ -77,11 +103,15 @@ func (s *PodSet) Size() int {
 	return n
 }
 
-// Snapshot returns a snapshot of the current pods in the set.
-// Use mutex so that we can read the map safely.
-func (s *PodSet) Snapshot() map[types.UID]PodKey {
+// -------------------------
+// Snapshot
+// -------------------------
+
+// Snapshot returns a snapshot of the current pods in the set. Use mutex so that
+// we can read the map safely.
+func (s *PodSet) Snapshot() map[types.UID]SolverPod {
 	s.mu.RLock()
-	out := make(map[types.UID]PodKey, len(s.m))
+	out := make(map[types.UID]SolverPod, len(s.m))
 	for k, v := range s.m {
 		out[k] = v
 	}
