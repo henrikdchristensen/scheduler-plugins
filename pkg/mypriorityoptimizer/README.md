@@ -4,84 +4,92 @@
 - [Kubernetes Plugin for Optimized Scheduling](#kubernetes-plugin-for-optimized-scheduling)
   - [Overview](#overview)
   - [Code Structure](#code-structure)
-  - [Integrating with the scheduler](#integrating-with-the-scheduler)
-  - [Building](#building)
-  - [Requirements for Execution on a KWOK Cluster](#requirements-for-execution-on-a-kwok-cluster)
+  - [Scheduler Integration](#scheduler-integration)
+  - [Building the Scheduler and the Plugin](#building-the-scheduler-and-the-plugin)
+  - [Requirements for Running on a KWOK Cluster](#requirements-for-running-on-a-kwok-cluster)
   - [Evaluation of the Plugin on a KWOK Cluster](#evaluation-of-the-plugin-on-a-kwok-cluster)
-    - [Experimental Setup Used](#experimental-setup-used)
+    - [Experimental Setup Used for This Analysis](#experimental-setup-used-for-this-analysis)
     - [Workload Once Generator](#workload-once-generator)
-      - [Structuring Workload Once Generator Results](#structuring-workload-once-generator-results)
+      - [Scheduler setups](#scheduler-setups)
+      - [Test runner and configuration precedence](#test-runner-and-configuration-precedence)
+      - [Running the generator](#running-the-generator)
+      - [Gathering seeds for evaluation](#gathering-seeds-for-evaluation)
+      - [Organizing workload once results](#organizing-workload-once-results)
     - [Trace Replayer](#trace-replayer)
-      - [Structuring Trace Replayer Results](#structuring-trace-replayer-results)
-    - [Bootstrapping for parallel evaluation](#bootstrapping-for-parallel-evaluation)
-      - [Using Vagrant for bootstrap script development](#using-vagrant-for-bootstrap-script-development)
+      - [Generating traces](#generating-traces)
+        - [Distribution families used for trace generation](#distribution-families-used-for-trace-generation)
+      - [Replaying traces](#replaying-traces)
+      - [Organizing Trace Replayer Results](#organizing-trace-replayer-results)
+    - [Faster Evaluation Through Parallelization](#faster-evaluation-through-parallelization)
     - [Analysis of Results](#analysis-of-results)
   - [Unit and Integration Tests](#unit-and-integration-tests)
   - [GitHub Actions](#github-actions)
-  - [Useful kubectl/kwokctl commands](#useful-kubectlkwokctl-commands)
-  - [Upstream version](#upstream-version)
+  - [Useful kubectl/kwokctl Commands](#useful-kubectlkwokctl-commands)
+  - [Upstream Version](#upstream-version)
 
 ## Overview
 
-This project introduces an **priority-based** approach for improving (ideally **optimal**) placements of pods onto nodes via the **MyPriorityOptimizer** plugin for the Kubernetes scheduler. The project is a fork of the Kubernetes-sigs project [scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) and extends it with a new plugin. For background see description of the [Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/).
+This project introduces **MyPriorityOptimizer**, a new Kubernetes scheduler plugin that improves pod-node placements by delegating placement planning to an external **solver**, aiming for optimal placements when feasible. Given a solver-produced plan, the plugin applies it by *evicting* and *relocating* pods, potentially across multiple nodes (*cross-node preemption*). This differs from the default Kubernetes scheduler, whose built-in preemption is limited to a *single node* and can therefore cause more preemptions than necessary.
 
-<center><img src="./images/scheduling-framework.png" alt="Scheduling Framework" width="60%"/></center>
+The project is a fork of the Kubernetes-sigs project [scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) (see [Kubernetes Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) for background).
 
-The goal is to schedule as many *high-priority* pods as possible (with improved resource utilization as a possible side effect). To support this, the plugin integrates an *external* solver to compute an improved—ideally optimal—placement plan that maximizes the number of scheduled high-priority pods while *minimizing disruption* (i.e., reducing reallocations and evictions).
+The Scheduling Framework and its extension points (also called **hooks**) are illustrated in the following figure.
 
-In this work, we provide two solver implementations: a Python-based **CP-SAT** solver using [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and a **Gurobi**-based solver [Gurobi](https://www.gurobi.com/). Given a solver-produced plan, the plugin applies it by evicting and relocating pods, potentially across multiple nodes. This is an important difference from the default Kubernetes scheduler, whose built-in preemption is limited to a *single node*, which can lead to more preemptions than necessary.
+![Scheduling Framework](./images/scheduling-framework.png)
 
-The plugin can invoke optimization using three different **trigger modes**:
+Specifically, the plugin implements the following **hooks**:
 
-- *SchedulingFailure* – for every failed scheduling attempt by the default scheduler (not recommended for large clusters).
-- *Periodic* – optimize pods (running and pending) at fixed intervals.
-- *StableQueue* – optimize pods during stable queue windows (i.e. when no pods are arriving).
-<!-- - *Manual* – runs normal scheduling like the ones above, but optimization is only triggered manually (via HTTP). Used for testing and evaluation.
-- *ManualBlocking* – same as *Manual*, but all pods are blocked from entering the cluster until the solver is triggered via HTTP and completes. Used for testing and evaluation. -->
+- **PreEnqueue** – temporarily blocks new pods from entering the scheduling queue while a placement plan is being applied.
+- **PreFilter** – steers a pod to the node selected by the solver.
+- **PostFilter** – triggers optimization after a scheduling failure (i.e., when the default scheduler cannot place a pod).
+- **Reserve/Unreserve** – reserves and releases node resources according to the solver plan.
+
+Beyond these hooks, the plugin also includes a **background loop** that can trigger optimization in two additional ways: periodically at fixed time intervals, or during stable-queue windows (i.e., when no new pods are arriving). Together, this provides three **trigger modes**, all of which execute the same optimization flow.
+
+- **SchedulingFailure** – optimize after each failed scheduling attempt (generally not recommended for large clusters).
+- **Periodic** – optimize running and pending pods at fixed time intervals.
+- **StableQueue** – optimize during stable-queue windows (i.e., when no new pods are arriving for a certain time).
 
 Moreover, the solver can run in either **blocking** or **non-blocking** mode:
 
-- *Blocking* – regular scheduling of new pods is blocked while the solver is  running and while the plan is being applied.
-- *Non-Blocking* – regular scheduling of new pods is not blocked while the solver is running, only while the plan is being applied.
+- **Blocking** – regular scheduling of new pods is paused while the solver runs and while the resulting plan is applied.
+- **Non-blocking** – regular scheduling continues while the solver runs and is paused only during plan application.
 
-In both cases, when the solver completes, the cluster state is re-checked to ensure the plan is still valid before applying it; otherwise, the plan is discarded.
+In both modes, once the solver finishes, the plugin re-checks the cluster state before applying the plan. If the state has changed and the plan is no longer valid, it is discarded.
 
-The following sections describe how to **build, run, and test** the scheduler with the plugin.
+In this work, we provide two solver implementations based on the same priority-aware optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions):
 
-For [result replication](#result-replication-and-running-test-jobs) from the paper, read the provided instructions.
+- a **CP-SAT** solver implemented with the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and
+- a **Mixed-Integer Programming (MIP)** solver implemented with the Python API of [Gurobi](https://docs.gurobi.com/current/).
 
 ## Code Structure
 
-The source code for the **MyPriorityOptimizer** plugin is located under `pkg/mypriorityoptimizer/`.
+The source code for the **MyPriorityOptimizer** plugin is located in `pkg/mypriorityoptimizer/`. The main files and their roles are:
 
-Some of the main files and their purpose are described below:
+- `plugin.go` – main plugin entry point and setup.
+- `args.go` and `constants.go` – plugin configuration arguments and constants (e.g., trigger mode, solver timeout).
+- `optimization_flow.go` – core *optimization flow*, including solver invocation and plan application.
+- `loop_helpers.go`, `loop_periodic.go`, `loop_stable_queue.go` – *background-loop* logic for *Periodic* and *StableQueue* triggering.
+- `solver_external.go` and `solver_python.go` – external solver invocation and parsing of solver output.
+- `hook_preenqueue.go` – implementation of the *PreEnqueue* hook, mainly used to block new pods while optimization is running or a plan is being applied.
+- `hook_prefilter.go` – implementation of the *PreFilter* hook, used to steer a pod to the node assigned by the solver plan.
+- `hook_postfilter.go` – implementation of the *PostFilter* hook, used to detect failed scheduling attempts; in *SchedulingFailure* mode, it also triggers optimization.
+- `hook_reserve_unreserve.go` – implementation of the *Reserve/Unreserve* hooks, used to reserve/release resources according to the plan.
+- `plan_completion_watch.go` – background watcher that tracks plan completion and verifies that pods end up on the intended nodes.
 
-- `plugin.go`: Main entry point for the plugin that sets up the plugin.
-- `args.go` and `constants.go`: Contains the configuration arguments for the plugin (e.g. trigger mode, solver timeout, etc.).
-- `optimization_flow.go`: Contains the main logic for running the optimization flow, including triggering the solver, applying the plan, etc.
-- `loop_helpers.go`, `loop_periodic.go`, `loop_stable_queue.go`: Contains the logic for triggering the optimization flow based either fixed intervals (periodic) or during stable queue windows (stable_queue).
-- `solver_external.go` and `solver_python.go`: Contains the logic for invoking the external solver and parsing its output.
-- `hook_preenqueue.go`: Implements the PreEnqueue hook. This is mainly used for blocking new pods while an optimization is running or a plan is being applied.
-- `hook_prefilter.go`: Implements the PreFilter hook. Its main purpose is targeting the pod onto the node assigned by the solver in the plan (if any).
-- `hook_postfilter.go`: Implements the PostFilter hook. This is mainly used to mark a pod as unschedulable as the default scheduler failed to place it. If in mode *SchedulingFailure*, it also triggers the optimization for every new pod that arrives.
-- `hook_reserve_unreserve.go`: Implements the Reserve/Unreserve hooks. It is used as we cannot rely on specific pod names (e.g. pods from a ReplicaSets), instead we count how many of each that should be placed on each node.
-- `plan_completion_watch.go`: A background watcher for plan completion, checking that all pods in the plan are assigned to the correct nodes.
+The two solver implementations are located in `scripts/python_solver/` and can also serve as templates for adding other solvers.
 
-Finally, the solver code is located under `scripts/python_solver/` and can be used as a template for implementing other solvers. Two solvers are provided, one using the CP-SAT constraint programming solver and one using the Gurobi mixed integer programming solver, both using the same priority-based optimization approach.
+## Scheduler Integration
 
-## Integrating with the scheduler
+Plugins in the Kubernetes scheduler are enabled through a **scheduler configuration manifest** that selects the plugin and its settings. The manifests for the plugin are located in `manifests/mypriorityoptimizer/` (see also [Scheduler Configuration](https://kubernetes.io/docs/reference/scheduling/config/) for background).
 
-To enable and use plugins in the Kubernetes scheduler, you must apply a **scheduler configuration manifest** that selects the plugins and their settings; the manifests used for this plugin is located in `manifests/mypriorityoptimizer/` (see also [Scheduler Configuration](https://kubernetes.io/docs/reference/scheduling/config/) for background).
+The plugin is registered in `cmd/scheduler/main.go`, which ensures it is included in the scheduler binary at build time.
 
-This file enables the **MyPriorityOptimizer** plugin and the hooks, described above, that it implements.
+## Building the Scheduler and the Plugin
 
-The plugin is referenced and registered in `cmd/scheduler/main.go` such that the scheduler will include it at build time.
+The scheduler and the plugin can be built into a **binary** and then run in a cluster (e.g., with [KWOK](https://kwok.sigs.k8s.io/)).
 
-## Building
-
-The scheduler and the plugin can be built as a **binary** and can then be run in a cluster (e.g. using KWOK).
-
-The following tools are required (if Windows host, use WSL2 w/ e.g. Ubuntu) to build the scheduler+plugin:
+The following tools are required to build the scheduler and the plugin:
 
 - `git` (tested with 2.43.0)
 - `make` (tested with 4.3)
@@ -89,26 +97,24 @@ The following tools are required (if Windows host, use WSL2 w/ e.g. Ubuntu) to b
 - `pip` (tested with 24.0)
 - `Go` (tested with 1.24.3)
 
-Currently, it is only tested on **amd64** architecture and some code may need to be modified to run on other architectures (should not be a problem).
+Currently, the project has only been tested on **amd64**. Running on other architectures may require small code changes, but no major issues are expected.
 
-To build the binary, run the following bash script in the root of the repo:
+To **build** the binary, run the following script from the repo root:
 
 ```bash
 ./build.sh
 ```
 
-The built binary will be located in `bin/kube-scheduler`. We also download the `kube-apiserver`, `kube-controller-manager` binaries to `bin/`, as they are needed when running in KWOK clusters and to prevent them from downloading on each cluster creation we store them in the `bin/` folder.
+The resulting scheduler binary is written to `bin/kube-scheduler`. The build process also downloads `kube-apiserver` and `kube-controller-manager` into `bin/`, since they are required for running KWOK clusters; keeping them there avoids re-downloading them for each cluster creation.
 
-## Requirements for Execution on a KWOK Cluster
+## Requirements for Running on a KWOK Cluster
 
-To run the scheduler with the plugin on a **KWOK** cluster.
+To run the scheduler with the plugin on a **KWOK** cluster, a few additional tools are required (tools already listed in [Building the Scheduler and the Plugin](#building-the-scheduler-and-the-plugin) are omitted):
 
-The following tools are required (tools already mentioned in [Building](#building) are omitted):
+- `kubectl` (tested with client v1.32.7)
+- `kwok` and `kwokctl` (tested with v0.7.0)
 
-- `kubectl` (tested with client v.1.32.7)
-- `kwok`+`kwokctl` (tested with v0.7.0)
-
-To set up a KWOK cluster with the scheduler+plugin one needs to provide a configuration file to KWOK. An example of a configuration file is `data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml`.
+Running the scheduler and the plugin on KWOK also requires a **KWOK cluster configuration file**. An example is `data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml`:
 
 ```yaml
 kind: KwokctlConfiguration
@@ -125,18 +131,20 @@ componentsPatches:
     #     value: "10"
     extraEnvs:
       - name: OPTIMIZE_MODE
-        value: "periodic" # choices: scheduling_failure, periodic, stable_queue, manual, manual_blocking
-      - name: OPTIMIZE_BLOCKING_SOLVING
-        value: "true" # choices: true, false
-      - name: OPTIMIZE_PERIODIC_INTERVAL
-        value: 30s # e.g. 10s, 30s, 60s
+        value: "periodic" # choices: scheduling_failure, periodic, stable_queue
+      - name: OPTIMIZE_BLOCKING_SOLVING # whether to block scheduling while the solver is running
+        value: "false"
+      - name: OPTIMIZE_PERIODIC_INTERVAL # interval for 'Periodic' mode
+        value: 8s
+      - name: OPTIMIZE_STABLE_QUEUE_DELAY # stable-queue window for 'StableQueue' mode
+        value: 8s
       - name: SOLVER_PYTHON_ENABLED
         value: "true"
-      - name: SOLVER_PYTHON_TIMEOUT
-        value: 10s # e.g. 1s, 10s, 20s
+      - name: SOLVER_PYTHON_TIMEOUT # timeout for the solver before it is killed and the plan is discarded
+        value: 10s
 ```
 
-**Note:** There may be version mismatches between `scheduler-plugins` and KWOK. If so, set a specific `VERSION` value when building the scheduler binary (sometimes this must be forced for a given `scheduler-plugins` release). For example, KWOK may report …
+**Note:** There may be version mismatches between `scheduler-plugins` and KWOK. If so, set a specific `VERSION` value when building the scheduler binary (sometimes this must be forced for a given `scheduler-plugins` release). For example, KWOK may report:
 
 ```bash
 # Running the command
@@ -147,103 +155,154 @@ E1210 13:54:11.815001   22220 run.go:72] "command failed" err="[emulation versio
 
 ## Evaluation of the Plugin on a KWOK Cluster
 
-Two different approaches for evaluating have been made:
+Two evaluation approaches are provided:
 
-1) **Workload Once Generator** (solver evaluation): A script that generates an initial workload for the scheduler and the plugin to place and optimize, and then evaluates the resulting placement.
-2) **Trace Replayer** (plugin evaluation): A script that simulates workload arrivals and removals in a cluster and continuously evaluates the scheduler and the plugin including different optimization modes.
+1. **Workload-Once Generator** (*solver evaluation*) – generates an initial workload, lets the scheduler (and plugin) schedule the pods, and then evaluates the resulting placement quality.
+2. **Trace Replayer** (*plugin evaluation*) – simulates workload arrivals and removals over time in a cluster and continuously evaluates the scheduler (and plugin).
 
-### Experimental Setup Used
+### Experimental Setup Used for This Analysis
 
-The evaluation is done using machines having the following specifications:
+Besides the tool versions listed above, the evaluations in this analysis were executed on virtual machines with the following specifications:
 
-- TODO: HARDWARE
-- Ubuntu v22.04
+- **CPU:** 8 vCPUs (Intel Xeon Gold 6130)
+- **Memory:** 48 GB RAM
+- **Operating system:** Ubuntu 24.04
+- **Optimizer libraries:** OR-Tools 9.14.6206 and GurobiPy 13.0.1
 
 ### Workload Once Generator
 
-For the **Workload Once Generator**, we first run the default scheduler (deterministically) to find 100 seeds where not all pods are running using another plugin called **MyDeterministicScore**, located under `pkg/mydeterministicscore/`. This plugin breaks scoring ties by name, disables `DefaultPreemption` plugin and sets `parallelism=1`.
+The **Workload Once Generator** creates a single workload instance and evaluates it with both the **default scheduler** and the scheduler with the plugin.
 
-The scheduler configuration file for using this plugin is `data/configs-kwokctl/default-deterministic.yaml`. Hereafter, we run the default scheduler (as-is) using the configuration file `data/configs-kwokctl/default.yaml`, and the scheduler with the `MyPriorityOptimizer` plugin on these seeds.
+For the lower utilization levels (90% and 95%), we first perform a deterministic seed pre-filtering step to avoid trivial cases where all pods are schedulable.
 
-The evaluation script for generating a initial workload and running the tests is `scripts/kwok_workload_once/test_runner.py`. The script can be setup by reading settings from three types of sources, with later ones overriding earlier ones:
+#### Scheduler setups
 
-1) a workload configuration file (e.g. `data/configs-workload/base.yaml`), containing the general configuration for the workload to generate;
-2) a test job file (e.g. `data/jobs/kwok_workload_once/<job_file>.yaml`), containing the specific configuration for a job; and
-3) command-line arguments to the script (highest priority)
+Two scheduler configurations are used:
 
-After choosing one of more of these source, the script can be run to generate the workload and run the tests. An example of how to run the script from the root of the repo is:
+- **Deterministic default scheduler (seed pre-filtering only)**
+  Uses `data/configs-kwokctl/default-deterministic.yaml`, which enables
+  `MyDeterministicScore` (`pkg/mydeterministicscore/`), breaks scoring ties by
+  name, disables `DefaultPreemption`, and sets `parallelism=1`.
+
+- **Evaluation schedulers (actual experiments)**
+  The selected seeds are then evaluated with:
+
+  - the default scheduler (as-is) using `data/configs-kwokctl/default.yaml`, and
+  - the scheduler with the plugin.
+
+#### Test runner and configuration precedence
+
+The evaluation script is `scripts/kwok_workload_once/test_runner.py`.
+
+It can read configuration from three sources (later overrides earlier):
+
+1. workload config file (e.g., `data/configs-workload/base.yaml`)
+2. job file (e.g., `data/jobs/kwok_workload_once/<job_file>.yaml`)
+3. command-line arguments
+
+#### Running the generator
+
+From the repo root:
 
 ```bash
 python -m scripts.kwok_workload_once.test_runner \
---cluster-name my-cluster \
---kwok-runtime binary \
---job-file data/jobs/kwok_workload_once/<job_file>.yaml \
---workload-config-file data/configs-workload/<workload_config_file>.yaml \
---kwokctl-config-file data/configs-kwokctl/<kwokctl_config_file>.yaml
+  --job-file data/jobs/kwok_workload_once/<job_file>.yaml
 ```
 
-TODO: SKAL VÆRE klart at vi specificerer seeds fra deterministic plugin here, og at job files specify which seeds to use.
+#### Gathering seeds for evaluation
 
-#### Structuring Workload Once Generator Results
+Seed selection is done in two steps:
 
-Having downloaded the results folder containing results from all jobs - the job files ensures that the results is organized by job type, as follows:
+1. **Deterministic pre-filtering**
+   Run the deterministic default scheduler with:
+
+   - `seed-file: data/seeds/kwok_workload_once/seeds_all.txt`
+
+   This produces `seeds-not-all-running.txt` with up to 100 seeds where **not all pods are running**.
+
+2. **Evaluation on selected seeds**
+   These seeds are saved as configuration-specific files (e.g.,
+   `nodes4_pods16_prio1_util095.txt`) under `data/seeds/kwok_workload_once/` and used for both the default scheduler and the plugin runs.
+
+This filtering is only used for **90% and 95% utilization**. For higher utilization levels (e.g., `util=1.00` and `util=1.05`), the shared file `data/seeds/kwok_workload_once/seeds_100.txt` is used directly.
+
+#### Organizing workload once results
+
+Once all jobs have completed, the results should be downloaded and organized as follows for later analysis.
 
 ```text
 analysis/kwok_workload_once/
 ├── default/
 │   ├── nodes4_pods16_prio1_util090/
 │   │   ├── results.csv
-│   │   ├── info.yaml
-│   │   ├── seeds-all-running.txt        (if applicable)
-│   │   └── seeds-not-all-running.txt    (if applicable)
+│   │   └── info.yaml
 │   ├── ...
 │   └── nodes32_pods256_prio4_util105/
 └── plugin-cp_sat/
     ├── nodes4_pods16_prio1_util090_timeout01/
     │   ├── results.csv
-    │   ├── info.yaml
-    │   ├── seeds-all-running.txt        (if applicable)
-    │   ├── seeds-not-all-running.txt    (if applicable)
-    │   ├── scheduler-logs/
-    │   └── solver-stats/
+    │   └── info.yaml
     ├── nodes4_pods16_prio1_util090_timeout10/
     ├── nodes4_pods16_prio1_util090_timeout20/
-    ├── nodes4_pods16_prio1_util095_timeout01/
-    ├── nodes4_pods16_prio1_util095_timeout10/
-    ├── nodes4_pods16_prio1_util095_timeout20/
-    ├── nodes4_pods16_prio1_util100_timeout01/
-    ├── nodes4_pods16_prio1_util100_timeout10/
-    ├── nodes4_pods16_prio1_util100_timeout20/
-    ├── nodes4_pods16_prio1_util105_timeout01/
-    ├── nodes4_pods16_prio1_util105_timeout10/
-    ├── nodes4_pods16_prio1_util105_timeout20/
     ├── ...
     └── nodes32_pods256_prio4_util105_timeout20/
 ```
 
-The `results.csv` file contains the scheduling results for the job, while the `info.yaml` file contains the job configuration used. If applicable, the `seeds-all-running.txt` and `seeds-not-all-running.txt` files contain the seeds where all pods were running and where not all pods were running, respectively. For the plugin jobs, the `scheduler-logs/` folder contains the saved kube-scheduler logs for each seed, while the `solver-stats/` folder contains the saved solver statistics for each seed.
-
 ### Trace Replayer
 
-For the **Trace Replayer**, we first generate traces, and then replay them in both the default scheduler and the scheduler with the plugin.
+For the **Trace Replayer**, the workflow consists of two steps: **trace generation** and **trace replay**. We first generate traces, and then replay them with both the default scheduler and the scheduler with the plugin.
 
-The generated traces are stored under `data/traces/` and can be generated using the `scripts/kwok_trace_replayer/trace_generator.py` script. Using job files specifying  number of nodes, inter-arrival times, and other parameters, located under `data/jobs/kwok_trace_generator/`, the script generates traces of workload arrivals and removals in a cluster. Using the job files, the script generate them using: 
+#### Generating traces
+
+Traces are generated with `scripts/kwok_trace_replayer/trace_generator.py` and stored under `data/traces/`.
+
+The generator reads job files from `data/jobs/kwok_trace_generator/`, where each job file defines parameters such as the number of nodes, inter-arrival times, and other workload settings. From these job files, the script produces traces of workload arrivals and removals over time.
+
+To generate traces from the job files, run:
 
 ```bash
 python -m scripts.kwok_trace_replayer.trace_generator \
 --job-dir data/jobs/kwok_trace_generator/
 ```
 
-Having generated the traces, they can be replayed using the `scripts/kwok_trace_replayer/trace_replayer.py` script. Using job files specifying which traces to replay, and how the plugin should be configured, located under `data/jobs/kwok_trace_replayer/`, the script replays the traces in a cluster. To run the trace replayer, run:
+##### Distribution families used for trace generation
+
+The distribution families used by the trace generator are chosen based on publicly available cluster traces, specifically the [Google cluster-usage traces v3](https://github.com/google/cluster-data) and the [Alibaba cluster-trace-gpu-v2025](https://github.com/alibaba/clusterdata).
+
+To extract and save the relevant data from these sources for local analysis, run:
+
+```bash
+python -m scripts.public_trace_analysis.save_data
+```
+
+This stores the processed data under `data/public_trace_data/`.
+
+For the Google cluster-usage traces, a Google Cloud account is required, and `GOOGLE_PROJECT_ID` must be set in the script. Note that collecting this data from Google Cloud is **not free**.
+
+Once the data has been saved, the plotting script can be used to visualize how well the chosen distribution families fit the traces. In particular, Pareto distributions are used for inter-arrival times, lifetimes, and resource requests, while Geometric distributions are used for replica counts and priorities.
+
+Run the plotting script with:
+
+```bash
+python -m scripts.public_trace_analysis.plots
+```
+
+#### Replaying traces
+
+After the traces have been generated, they can be replayed with `scripts/kwok_trace_replayer/trace_replayer.py`.
+
+The replayer uses job files in `data/jobs/kwok_trace_replayer/`, which specify which trace to replay, and how the plugin should be configured for that run.
+
+To replay a trace, run:
 
 ```bash
 python -m scripts.kwok_trace_replayer.trace_replayer \
---job-file data/jobs/kwok_trace_replayer/<job_file>.yaml \
+--job-file data/jobs/kwok_trace_replayer/<job_file>.yaml
 ```
 
-#### Structuring Trace Replayer Results
+#### Organizing Trace Replayer Results
 
-Having downloaded the results folder containing results from all jobs - the job files ensures that the results is organized by job type, as follows:
+After all jobs have finished, download the results folder containing the outputs from all runs.
 
 ```text
 analysis/kwok_trace_replayer/
@@ -269,72 +328,64 @@ analysis/kwok_trace_replayer/
     └── ...
 ```
 
-### Bootstrapping for parallel evaluation
+### Faster Evaluation Through Parallelization
 
-As there is many jobs to run, it is beneficial to parallelize the evaluation using HPC resources.
-To create a bootstrap folder used for a job worker containing all content needed to run tests on a KWOK cluster, including built binaries, solver code, and test jobs and configuration files. From the root of the repo, run:
+Because the evaluation includes many jobs, it is useful to run them in parallel on HPC or VM resources.
+
+To prepare this, first create a `bootstrap` folder containing everything needed to run experiments on a KWOK cluster (built binaries, solver code, job files, and configuration files). From the repo root, run:
 
 ```bash
 ./make_bootstrap_folder.sh
 ```
 
-The idea is then to upload the created `bootstrap` folder to the HPC/VM provider, and then run the tests using a `bootstrap.sh` script, located under `scripts/bootstrap/` that sets up a job runner and runs the tests. The script will ensure all prerequisites are installed and the tests are run.
+The generated `bootstrap` folder can then be uploaded to the HPC/VM provider. There, use the `bootstrap.sh` script (located in `scripts/bootstrap/`) to set up a job runner and execute the experiments. The script installs required prerequisites and runs the selected jobs.
 
-The bootstrap script accepts parameters that both the `test_runner.py` and `trace_replayer.py` scripts accepts, but the two main parameters to provide are:
+The bootstrap script supports the same parameters as `test_runner.py` and `trace_replayer.py`, but the main ones are:
 
-- `--runner`: the runner to use, either `test_runner` or `trace_replayer`.
-- `--content-dir`: path to the `bootstrap` folder created using the `make_bootstrap_folder.sh` script.
-- `--job-file`: path to the job file to run (e.g. see jobs under `data/jobs/`).
-
-#### Using Vagrant for bootstrap script development
-
-To develop and test the bootstrap script it can be beneficial to run it in a VM on a local machine. For that reason, a `Vagrantfile` is provided in the root of the repo. Ensure the `bootstrap` folder is created first by running the `make_bootstrap_folder.sh` script.
-Using Vagrant, it will create an Ubuntu 22.04 VM with all prerequisites installed. To use it, install `Vagrant` (tested with v2.4.7) and `VirtualBox` (tested with v7.1.10), then run:
-
-```bash
-vagrant up
-```
-
-This will create a VM named `scheduler-plugins` that you can SSH into using:
-
-```bash
-vagrant ssh
-```
-
-To delete the VM, run:
-
-```bash
-vagrant destroy -f
-```
+- `--runner`: which runner to use (`test_runner` or `trace_replayer`)
+- `--content-dir`: path to the generated `bootstrap` folder
+- `--job-file`: path to the job file to run (see `data/jobs/`)
 
 ### Analysis of Results
 
-Analyzed results are placed under the `analysis` folder. They assume the layout shown in  [Expected folder structure after running all tests for Workload Once Generator](#expected-folder-structure-after-running-all-tests-for-workload-once-generator) and [Expected folder structure after running all tests for Trace Replayer](#expected-folder-structure-after-running-all-tests-for-trace-replayer) if yours differs, code changes may be needed.
+Analyzed outputs are stored in the `analysis/` folder. The analysis scripts assume the directory layouts described in [Organizing workload once results](#organizing-workload-once-results) and [Organizing trace replayer results](#organizing-trace-replayer-results). If your layout differs, minor code changes may be required.
 
-For the **Workload Once Generator**, the analysis code is located under `scripts/kwok_workload_once/` and for the **Trace Replayer**, the analysis code is located under `scripts/kwok_trace_replayer/`. To run the analysis, follow these steps.
+Analysis code is split by evaluation type:
 
-For the both there is a `seal_results.py` script that merge all results into CSV file(s), and a `plots_and_tables.py` script that produces all the figures and tables used in the report.
+- **Workload Once Generator**: `scripts/kwok_workload_once/`
+- **Trace Replayer**: `scripts/kwok_trace_replayer/`
 
-1. First, merge the output files using `python scripts/<workload_once_or_trace_replayer>/seal_results.py`.
-2. Then run `python scripts/<workload_once_or_trace_replayer>/plots_and_tables.py` to produce every figure and table used in the paper.
+For both, the workflow is the same:
+
+- `seal_results.py` merges raw outputs into one CSV file
+- `plots_and_tables.py` generates the figures and tables used in the paper
+
+To run the analysis:
+
+1. Merge results:
+   `python scripts/<workload_once_or_trace_replayer>/seal_results.py`
+2. Generate figures and tables:
+   `python scripts/<workload_once_or_trace_replayer>/plots_and_tables.py`
 
 ## Unit and Integration Tests
 
-To make running tests easier, a `run_tests.sh` script has been provided in the root of the repo that can be used to run all tests (both Python and Go tests), simply run:
+Unit and integration tests are provided for both the plugin and the solvers. The tests are located in `scripts/tests/` and can be run with `pytest` (tested with version `9.0.1`).
+
+For convenience, the repository also includes a `run_tests.sh` script in the root directory that runs both Python and Go tests:
 
 ```bash
 ./run_tests.sh
-# or to run only unit tests, run:
+# or run only unit tests
 ./run_tests.sh unit
-# or to run only integration tests, run:
+# or run only integration tests
 ./run_tests.sh int
 ```
 
 ## GitHub Actions
 
-A GitHub Actions workflow is provided in `.github/workflows/opt-prio-ci.yml` that runs on every push and pull request to the default branch `opt-prio-main` branch. The workflow runs the unit and integration tests.
+A GitHub Actions workflow is provided in `.github/workflows/opt-prio-ci.yml`. It runs on every push and pull request targeting the default branch (`opt-prio-main`) and executes the unit and integration test suites.
 
-## Useful kubectl/kwokctl commands
+## Useful kubectl/kwokctl Commands
 
 - Get pods
 
@@ -403,7 +454,7 @@ A GitHub Actions workflow is provided in `.github/workflows/opt-prio-ci.yml` tha
   kubectl --context <ctx> -n <namespace> get events --field-selector involvedObject.kind=Pod -o json | jq '.items[] | {name: .involvedObject.name, reason: .reason, message: .message}'
   ```
 
-## Upstream version
+## Upstream Version
 
-Latest upstream version are listed in the [Releases](https://github.com/kubernetes-sigs/scheduler-plugins/releases), it should follow the [Kubernetes versioning](https://kubernetes.io/releases).
-After merging with upstream, always verify that all works as intended, e.g. by running a small smoke test with the `test_runner.py` script (see below).
+Latest upstream version are listed in the [scheduler-plugins releases](https://github.com/kubernetes-sigs/scheduler-plugins/releases), it should follow the [Kubernetes versioning](https://kubernetes.io/releases).
+After merging with upstream, always verify that all works as intended, e.g. by running a integration tests (see [Unit and Integration Tests](#unit-and-integration-tests)).
