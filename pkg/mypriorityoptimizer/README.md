@@ -8,14 +8,14 @@
   - [Building](#building)
   - [Requirements for Execution on a KWOK Cluster](#requirements-for-execution-on-a-kwok-cluster)
   - [Evaluation of the Plugin on a KWOK Cluster](#evaluation-of-the-plugin-on-a-kwok-cluster)
+    - [Experimental Setup Used](#experimental-setup-used)
     - [Workload Once Generator](#workload-once-generator)
       - [Structuring Workload Once Generator Results](#structuring-workload-once-generator-results)
     - [Trace Replayer](#trace-replayer)
       - [Structuring Trace Replayer Results](#structuring-trace-replayer-results)
     - [Bootstrapping for parallel evaluation](#bootstrapping-for-parallel-evaluation)
       - [Using Vagrant for bootstrap script development](#using-vagrant-for-bootstrap-script-development)
-    - [Result replication and running test jobs](#result-replication-and-running-test-jobs)
-      - [Analysis](#analysis)
+    - [Analysis of Results](#analysis-of-results)
   - [Unit and Integration Tests](#unit-and-integration-tests)
   - [GitHub Actions](#github-actions)
   - [Useful kubectl/kwokctl commands](#useful-kubectlkwokctl-commands)
@@ -151,6 +151,13 @@ Two different approaches for evaluating have been made:
 
 1) **Workload Once Generator** (solver evaluation): A script that generates an initial workload for the scheduler and the plugin to place and optimize, and then evaluates the resulting placement.
 2) **Trace Replayer** (plugin evaluation): A script that simulates workload arrivals and removals in a cluster and continuously evaluates the scheduler and the plugin including different optimization modes.
+
+### Experimental Setup Used
+
+The evaluation is done using machines having the following specifications:
+
+- TODO: HARDWARE
+- Ubuntu v22.04
 
 ### Workload Once Generator
 
@@ -300,24 +307,7 @@ To delete the VM, run:
 vagrant destroy -f
 ```
 
-### Result replication and running test jobs
-
-After generating the jobs, they are ready to run. For faster evaluation, run them in parallel via the bootstrap script on HPC or VM resources.
-
-To run a test jobs, follow these steps:
-
-  1) Run the provided `make_bootstrap_folder.sh` script from the root of the repo to create the `bootstrap` folder containing the bootstrap script, the built binary, the Python solver code, and all content needed to run the tests (incl. the job files and configuration files, etc.):
-  
-      ```bash
-      ./make_bootstrap_folder.sh
-      ```
-  
-  2) Upload the `bootstrap` folder to HPC/VM provider where it can be found (can be renamed if needed). This folder contains the bootstrap script, the built binary, the Python solver code, and all content needed to run the tests (incl. the job files and configuration files, etc.).
-  3) (Optional) Enable SSH access, by adding your public SSH key.
-  4) Create an Ubuntu 22.04 instance (no GUI needed) for every job
-  5) Once all jobs are done, download the folder containing the results to your local machine.
-
-#### Analysis
+### Analysis of Results
 
 Analyzed results are placed under the `analysis` folder. They assume the layout shown in  [Expected folder structure after running all tests for Workload Once Generator](#expected-folder-structure-after-running-all-tests-for-workload-once-generator) and [Expected folder structure after running all tests for Trace Replayer](#expected-folder-structure-after-running-all-tests-for-trace-replayer) if yours differs, code changes may be needed.
 
