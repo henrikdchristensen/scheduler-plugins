@@ -826,7 +826,7 @@ def latex_metric_table(
 
     prio_note = ""
     if priorities > 1 and metric.name in {"latency", "deletions"}:
-        prio_note = " For per-priority entries, p1 denotes the lowest priority."
+        prio_note = f" For per-priority entries, p1 denotes the lowest priority level, p{priorities} denotes the highest priority level, and total denotes the sum across all priority levels."
 
     caption = (
         f"Mean paired differences in {metric_long} between the plugin and the default scheduler "

@@ -88,7 +88,7 @@ GRID_2D_CELL_FIGSIZE_DISRUPT = (1.5, 1.0)
 GRID_2D_LEFT_DISRUPT = 0.15
 GRID_2D_YLABEL_XPOS_DISRUPT = 0.01
 GRID_2D_TOP_DISRUPT = 0.80
-GRID_2D_LEGEND_PAD_DISRUPT = 0.11
+GRID_2D_LEGEND_PAD_DISRUPT = 0.33
 GRID_2D_LEGEND_GAP_DISRUPT = 0.012
 GRID_2D_ROWLABEL_PAD_DISRUPT = 8.0
 HATCH_MOVES = "xxxxxxxxxx"
@@ -96,6 +96,9 @@ HATCH_MOVES_LEGEND = "xxxxxx"
 HATCH_LINEWIDTH = 0.25
 DISRUPT_YLIM = (0.0, 40.0)
 DISRUPT_YTICKS = [0, 10, 20, 30, 40]
+GRID_2D_WSPACE_DISRUPT = 0.10   # horizontal gap between panels
+GRID_2D_HSPACE_DISRUPT = 0.15   # vertical gap between panels
+
 
 # 2D grid sizes
 GRID_2D_CELL_FIGSIZE = (2.6, 1.6)
@@ -129,8 +132,8 @@ DOT_YLIM_DIFF_USAGE: Optional[Tuple[float, float]] = (-5.0, 15.0)
 DOT_YLIM_SOLVER_DUR: Optional[Tuple[float, float]] = (0.0, 25.0)
 DOT_NTICKS_DIFF_USAGE: Optional[int] = 5
 DOT_NTICKS_SOLVER_DUR: Optional[int] = 6
-DOT_YLABEL_X_DIFF: float = 0.03
-DOT_YLABEL_PAD_DIFF: float = 10.0
+DOT_YLABEL_X_DIFF: float = 0.026
+DOT_YLABEL_PAD_DIFF: float = 7.0
 
 # Colors
 set2 = plt.get_cmap("Set2").colors
@@ -909,8 +912,8 @@ def plot_2d_grid_moves_evictions_better_vs_optimal(
         right=GRID_2D_RIGHT,
         bottom=GRID_2D_BOTTOM,
         top=GRID_2D_TOP_DISRUPT,
-        wspace=GRID_2D_WSPACE,
-        hspace=GRID_2D_HSPACE,
+        wspace=GRID_2D_WSPACE_DISRUPT,
+        hspace=GRID_2D_HSPACE_DISRUPT,
     )
 
     LEGEND_BORDER_LW = 0.4
@@ -1414,7 +1417,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
                 f"(optimizer vs.\\ default scheduler) for each parameter configuration. "
                 f"Rows are grouped by target usage levels, with outcome categories listed "
                 f"within each usage block. Columns are grouped by number of "
-                f"priority levels, then pods per node, and finally number of nodes."
+                f"priority levels, pods per node, and number of nodes."
             ),
             label=f"tab:outcomes-timeout{t}",
         )
@@ -1436,11 +1439,11 @@ def _run_solver(solver: str, results_root: Path) -> None:
             caption=(
                 f"Performance metrics at {t}\\,s optimizer timeout. "
                 f"Values are reported for the 100 paired instances (optimizer vs.\\ default scheduler) "
-                f"for each parameter configuration. Diff. eff. usage is reported as the mean paired difference "
-                f"(optimizer minus default scheduler), while Optimizer duration is the mean optimizer runtime "
+                f"for each parameter configuration. diff. eff. usage is reported as the mean paired difference "
+                f"(optimizer minus default scheduler), while optimizer duration is the mean optimizer runtime "
                 f"over instances where the optimizer is called (not a paired difference). "
                 f"Rows are grouped by target usage levels, with metrics listed within each usage block. "
-                f"Columns are grouped by number of priority levels, then pods per node, and finally number of nodes. "
+                f"Columns are grouped by number of priority levels, pods per node, and number of nodes. "
                 f"Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; "
                 f"the reported time also includes solution extraction and I/O."
             ),
@@ -1464,7 +1467,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
             "where the Better rows are averaged over Better instances and the Better\\&Optimal rows are averaged "
             "over Better\\&Optimal instances. These values are not paired differences relative to the default scheduler. "
             "Rows list disruption metrics (moves and evictions) for the two improvement categories. "
-            "Columns are grouped by number of priority levels, then pods per node, and finally number of nodes."
+            "Columns are grouped by number of priority levels, pods per node, and number of nodes."
         ),
         label="tab:disruptions-agg-util-timeout",
     )
