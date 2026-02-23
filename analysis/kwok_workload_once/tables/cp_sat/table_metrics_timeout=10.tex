@@ -1,6 +1,6 @@
-\begin{table}[htbp]
+\begin{table}[H]
 \centering
-\caption{Optimizer performance metrics with different cluster sizes and target usage levels for a 10\,s optimizer timeout. \emph{Diff. eff. usage} is reported as the mean paired difference (optimizer minus default scheduler) over 100 instances, while \emph{Optimizer duration} is the optimizer runtime (not a paired difference). Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; the reported time also includes solution extraction and I/O.}
+\caption[Optimizer Results: Performance Metrics at 10\,s Optimizer Timeout]{Performance metrics at 10\,s optimizer timeout. Values are reported for the 100 paired instances (optimizer vs.\ default scheduler) for each parameter configuration. Diff. eff. usage is reported as the mean paired difference (optimizer minus default scheduler), while Optimizer duration is the mean optimizer runtime over instances where the optimizer is called (not a paired difference). Rows are grouped by target usage levels, with metrics listed within each usage block. Columns are grouped by number of priority levels, then pods per node, and finally number of nodes. Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; the reported time also includes solution extraction and I/O.}
 \label{tab:metrics-timeout10}
 \adjustbox{max width=\linewidth}{%
 \begin{tabular}{c l c c c c c c c c c c c c c c c c c c c c c c c c}
