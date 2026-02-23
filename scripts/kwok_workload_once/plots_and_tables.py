@@ -16,6 +16,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.ticker as mtick
+from matplotlib.legend_handler import HandlerTuple
 
 from matplotlib.lines import Line2D
 
@@ -98,7 +99,6 @@ GRID_2D_ROWLABEL_PAD_DISRUPT = 13.0  # smaller -> moves "pods/node=..." to the r
 HATCH_MOVES = "xxxxxxxxxx"                  # lighter density than xxxxxx
 HATCH_MOVES_LEGEND = "xxxxxx"       # lighter/less dense in legend only
 HATCH_LINEWIDTH = 0.25              # thinner hatch strokes
-DISRUPT_NTICKS = 6
 DISRUPT_YLIM = (0.0, 40.0)
 DISRUPT_YTICKS = [0, 10, 20, 30, 40]
 
@@ -617,7 +617,132 @@ def write_outcome_table_tex(
 
     write_latex_table(out_path, lines, caption=caption, label=label)
 
+DISRUPTION_ROWS: List[Tuple[str, str, float, int]] = [
+    # (label, column, scale, decimals)
+    (r"Better: moves (\%)",          "moves_pct_mean_per_better",  1.0, 1),
+    (r"Better: evictions (\%)",      "evictions_pct_mean_per_better", 1.0, 1),
+    (r"Better\&Optimal: moves (\%)", "moves_pct_mean_per_optimal", 1.0, 1),
+    (r"Better\&Optimal: evictions (\%)", "evictions_pct_mean_per_optimal", 1.0, 1),
+]
 
+
+def write_disruption_table_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    ppns: List[int],
+    nodes: List[int],
+    priorities_list: List[int],
+    caption: str = "",
+    label: str = "",
+) -> None:
+    """
+    Disruption breakdown table.
+
+    Values are the average disruption percentages (of total pods) conditioned on
+    improved instances:
+      - Better rows are averaged over 'better' instances
+      - Better&Optimal rows are averaged over 'better&optimal' instances
+
+    This is NOT a paired difference relative to the default scheduler.
+    """
+    from scripts.helpers.table_helpers import nan_str
+
+    dff = df_table.copy()
+    dff = dff[dff["priorities"].astype(int).isin(priorities_list)]
+
+    # infer orders (respect requested fixed order)
+    nodes_present = set(int(x) for x in dff["nodes"].dropna().unique())
+    nodes_order = [n for n in nodes if n in nodes_present]
+
+    ppn_present = set(int(x) for x in dff["pods_per_node"].dropna().unique())
+    ppn_order = [p for p in ppns if p in ppn_present]
+
+    prio_present = set(dff["priorities"].astype(int).unique())
+    prio_order = [p for p in priorities_list if p in prio_present]
+
+    if not nodes_order or not ppn_order or not prio_order:
+        out_path.write_text("% empty: no data after filters\n", encoding="utf-8")
+        print(f"[warn] disruption table empty -> {out_path}")
+        return
+
+    # index for lookup
+    idx_cols = ["priorities", "pods_per_node", "nodes"]
+    for c in idx_cols:
+        dff[c] = dff[c].astype(int)
+
+    keep_cols = idx_cols + [c for _, c, _, _ in DISRUPTION_ROWS]
+    dff = dff[keep_cols].drop_duplicates(subset=idx_cols, keep="last")
+    dff = dff.set_index(idx_cols).sort_index()
+
+    def get_val(prio: int, ppn: int, node: int, col: str) -> float:
+        try:
+            return float(dff.at[(int(prio), int(ppn), int(node)), col])
+        except Exception:
+            return float("nan")
+
+    # layout
+    n_nodes = len(nodes_order)
+    n_ppn = len(ppn_order)
+    n_prio = len(prio_order)
+    cols_per_prio = n_ppn * n_nodes
+    data_cols = n_prio * cols_per_prio
+
+    lines: List[str] = []
+    lines.append(r"\begin{tabular}{" + "l" + " c" * data_cols + "}")
+    lines.append(r"\toprule")
+
+    # header row 1: priorities
+    lines.append(
+        rf"\multirow{{3}}{{*}}{{\textbf{{Disruption metric}}}} & "
+        + " & ".join(
+            rf"\multicolumn{{{cols_per_prio}}}{{c}}{{{PRIORITIES_TABLE_LABEL} =\,{prio}}}"
+            for prio in prio_order
+        )
+        + r" \\"
+    )
+    lines.append(latex_cmidrules(n_prio, cols_per_prio, start_col=2))
+
+    # header row 2: pods/node
+    ppn_cells: List[str] = []
+    for _ in prio_order:
+        for ppn in ppn_order:
+            ppn_cells.append(rf"\multicolumn{{{n_nodes}}}{{c}}{{{PODS_PER_NODE_TABLE_LABEL} =\,{ppn}}}")
+    lines.append(" & " + " & ".join(ppn_cells) + r" \\")
+    lines.append(latex_cmidrules(n_prio * n_ppn, n_nodes, start_col=2))
+
+    # header row 3: nodes
+    node_cells: List[str] = []
+    is_first = True
+    for _ in prio_order:
+        for _ in ppn_order:
+            for n in nodes_order:
+                if is_first:
+                    node_cells.append(rf"\llap{{{NODES_TABLE_LABEL} =\,}}{n}")
+                    is_first = False
+                else:
+                    node_cells.append(rf"{n}")
+    lines.append(" & " + " & ".join(node_cells) + r" \\")
+    lines.append(r"\midrule")
+
+    # rows
+    for row_label, col, scale, decimals in DISRUPTION_ROWS:
+        cells: List[str] = []
+        for prio in prio_order:
+            for ppn in ppn_order:
+                for n in nodes_order:
+                    raw = get_val(prio, ppn, n, col)
+                    if is_finite(raw):
+                        cells.append(f"{raw * scale:.{decimals}f}")
+                    else:
+                        cells.append(nan_str())  # no improved instances in that category
+        lines.append(f"{row_label} & " + " & ".join(cells) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    write_latex_table(out_path, lines, caption=caption, label=label)
+    
 #################################################################
 # Plots
 #################################################################
@@ -796,15 +921,22 @@ def plot_2d_grid_moves_evictions_better_vs_optimal(
     # For the hatched entry, overlay two patches:
     #   1) base patch gives the black border
     #   2) transparent patch gives the white hatch
-    hatched_base = mpatches.Rectangle((0, 0), 1, 1, fc="0.75", ec="black", linewidth=0.4)
-    hatched_overlay = mpatches.Rectangle((0, 0), 1, 1, fc="none", ec="white", linewidth=0.0, hatch=HATCH_MOVES_LEGEND)
+    LEGEND_BORDER_LW = 0.4
+
+    color_handles = [
+        mpatches.Rectangle((0, 0), 1, 1, fc=cat_color["solver_feasible"], ec="black", linewidth=LEGEND_BORDER_LW),
+        mpatches.Rectangle((0, 0), 1, 1, fc=cat_color["solver_optimal"], ec="black", linewidth=LEGEND_BORDER_LW),
+    ]
+
+    hatched_fill = mpatches.Rectangle((0, 0), 1, 1, fc="0.75", ec="none")
+    hatched_hatch = mpatches.Rectangle((0, 0), 1, 1, fc="none", ec="white", linewidth=0.0, hatch=HATCH_MOVES_LEGEND)
+    hatched_outline = mpatches.Rectangle((0, 0), 1, 1, fc="none", ec="black", linewidth=LEGEND_BORDER_LW)
 
     fill_handles = [
-        (hatched_base, hatched_overlay),  # composite handle
-        mpatches.Rectangle((0, 0), 1, 1, fc="0.75", ec="black", linewidth=0.4),
+        (hatched_fill, hatched_hatch, hatched_outline),
+        mpatches.Rectangle((0, 0), 1, 1, fc="0.75", ec="black", linewidth=LEGEND_BORDER_LW),
     ]
     fill_labels = ["Hatched = moves", "Solid = evictions"]
-
     legend_kwargs = dict(
         fontsize=PLOT_LEGEND_FONTSIZE,
         handlelength=PLOT_LEGEND_HANDLE_LENGTH,
@@ -1434,7 +1566,6 @@ def _run_solver(solver: str, results_root: Path) -> None:
         produced_tables.append(out_tex)
 
     # --- METRIC TABLES (per timeout, all priorities side-by-side)
-    ppn_str = " and ".join(str(p) for p in PLOT_PPNS)
     df_metric_keep_util = aggregate_keep_util(df_per_combo)
     for t in PLOT_TIMEOUTS:
         out_tex_metric_util = out_tables_dir / f"table_metrics_timeout={int(t)}.tex"
@@ -1447,15 +1578,34 @@ def _run_solver(solver: str, results_root: Path) -> None:
             priorities_list=prio_list,
             breaker_col="util",
             caption=(
-                f"Optimizer performance metrics with different cluster sizes and different target usage levels "
-                f"with {t}\\,s optimizer timeout. "
-                f"Values show the mean paired differences between the optimizer and default scheduler over 100 instances. "
+                f"Optimizer performance metrics with different cluster sizes and target usage levels "
+                f"for a {t}\\,s optimizer timeout. "
+                f"\\emph{{Diff. eff. usage}} is reported as the mean paired difference (optimizer minus default scheduler) "
+                f"over 100 instances, while \\emph{{Optimizer duration}} is the optimizer runtime (not a paired difference). "
                 f"Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; "
                 f"the reported time also includes solution extraction and I/O."
             ),
             label=f"tab:metrics-timeout{t}",
         )
         produced_tables.append(out_tex_metric_util)
+
+    # --- DISRUPTION TABLE (aggregated over util and timeout; not a comparison to default)
+    df_disrupt_table = aggregate_over_util_and_timeout(df_per_combo)
+    out_tex_disrupt = out_tables_dir / "table_disruptions_agg_util_timeout.tex"
+    write_disruption_table_tex(
+        df_table=df_disrupt_table,
+        out_path=out_tex_disrupt,
+        ppns=PLOT_PPNS,
+        nodes=PLOT_NODES,
+        priorities_list=prio_list,
+        caption=(
+            "Disruption breakdown aggregated over target usage levels and optimizer timeouts. "
+            "Values are average disruptions (\\% of total pods) conditioned on improved instances "
+            "(Better or Better\\&Optimal) and are not paired differences relative to the default scheduler."
+        ),
+        label="tab:disruptions-agg-util-timeout",
+    )
+    produced_tables.append(out_tex_disrupt)
 
     # --- PLOTS
     df_util_agg = aggregate_over_util(df_per_combo)
