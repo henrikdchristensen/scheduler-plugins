@@ -53,13 +53,17 @@ DEFAULT_SOLVER = "cp_sat"
 ALL_SOLVERS = ["cp_sat", "gurobi"]
 
 REQUIRED_DISRUPTION_COLUMNS = {
+    "n_default_optimal",
     "n_solver_optimal",
     "n_solver_feasible",
+    "moves_pct_sum_default_optimal",
+    "evictions_pct_sum_default_optimal",
     "moves_pct_sum_solver_optimal",
     "evictions_pct_sum_solver_optimal",
     "moves_pct_sum_solver_feasible",
     "evictions_pct_sum_solver_feasible",
 }
+OPTIMAL_PURPLE = "#9467bd"
 
 # Fixed plot/table dimensions
 PLOT_PPNS = [4, 8]
@@ -172,9 +176,9 @@ OUTCOME_ROWS: List[Tuple[str, str]] = [
 
 DISRUPTION_ROWS: List[Tuple[str, str, float, int]] = [
     (r"Better: moves (\%)", "moves_pct_mean_per_better", 1.0, 1),
-    (r"Better\&Optimal: moves (\%)", "moves_pct_mean_per_optimal", 1.0, 1),
+    (r"Optimal: moves (\%)", "moves_pct_mean_per_optimal", 1.0, 1),
     (r"Better: evictions (\%)", "evictions_pct_mean_per_better", 1.0, 1),
-    (r"Better\&Optimal: evictions (\%)", "evictions_pct_mean_per_optimal", 1.0, 1),
+    (r"Optimal: evictions (\%)", "evictions_pct_mean_per_optimal", 1.0, 1),
 ]
 
 #################################################################
@@ -450,6 +454,8 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
                 "cpu_delta_sum": "sum",
                 "mem_delta_sum": "sum",
                 "eff_delta_sum": "sum",
+                "moves_pct_sum_default_optimal": "sum",
+                "evictions_pct_sum_default_optimal": "sum",
                 "moves_pct_sum_solver_optimal": "sum",
                 "evictions_pct_sum_solver_optimal": "sum",
                 "moves_pct_sum_solver_feasible": "sum",
@@ -472,10 +478,28 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
     g["eff_delta_mean"] = safe_div(g["eff_delta_sum"], g["n_seeds"])
 
-    g["moves_pct_mean_per_better"] = safe_div(g["moves_pct_sum_solver_feasible"], g["n_solver_feasible"])
-    g["evictions_pct_mean_per_better"] = safe_div(g["evictions_pct_sum_solver_feasible"], g["n_solver_feasible"])
-    g["moves_pct_mean_per_optimal"] = safe_div(g["moves_pct_sum_solver_optimal"], g["n_solver_optimal"])
-    g["evictions_pct_mean_per_optimal"] = safe_div(g["evictions_pct_sum_solver_optimal"], g["n_solver_optimal"])
+    g["moves_pct_mean_per_better"] = safe_div(
+        g["moves_pct_sum_solver_feasible"], g["n_solver_feasible"]
+    )
+    g["evictions_pct_mean_per_better"] = safe_div(
+        g["evictions_pct_sum_solver_feasible"], g["n_solver_feasible"]
+    )
+
+    # Combined Optimal = KWOK Optimal + Better&Optimal
+    g["n_optimal_combined"] = g["n_default_optimal"] + g["n_solver_optimal"]
+    g["moves_pct_sum_optimal_combined"] = (
+        g["moves_pct_sum_default_optimal"] + g["moves_pct_sum_solver_optimal"]
+    )
+    g["evictions_pct_sum_optimal_combined"] = (
+        g["evictions_pct_sum_default_optimal"] + g["evictions_pct_sum_solver_optimal"]
+    )
+
+    g["moves_pct_mean_per_optimal"] = safe_div(
+        g["moves_pct_sum_optimal_combined"], g["n_optimal_combined"]
+    )
+    g["evictions_pct_mean_per_optimal"] = safe_div(
+        g["evictions_pct_sum_optimal_combined"], g["n_optimal_combined"]
+    )
     return g.copy()
 
 
@@ -826,9 +850,9 @@ def plot_2d_grid_moves_evictions_better_vs_optimal(
             "evictions_col": "evictions_pct_mean_per_better",
         },
         {
-            "label": "Better&Optimal",
-            "key": "solver_optimal",
-            "color": cat_color["solver_optimal"],
+            "label": "Optimal",
+            "key": "optimal_combined",
+            "color": OPTIMAL_PURPLE,
             "moves_col": "moves_pct_mean_per_optimal",
             "evictions_col": "evictions_pct_mean_per_optimal",
         },
@@ -1463,11 +1487,11 @@ def _run_solver(solver: str, results_root: Path) -> None:
         caption_short="Optimizer Results: Disruption Breakdown",
         caption=(
             "Disruption breakdown aggregated over target usage levels and optimizer timeouts. "
-            "Values are average disruption percentages (\\% of total pods) conditioned on improved instances, "
-            "where the Better rows are averaged over Better instances and the Better\\&Optimal rows are averaged "
-            "over Better\\&Optimal instances. These values are not paired differences relative to the default scheduler. "
-            "Rows list disruption metrics (moves and evictions) for the two improvement categories. "
-            "Columns are grouped by number of priority levels, pods per node, and number of nodes."
+            "Values are average disruption percentages (\\% of total pods) conditioned on outcome category. "
+            "The Better rows are averaged over Better instances, while the Optimal rows are averaged over "
+            "combined Optimal instances (KWOK Optimal + Better\\&Optimal). These values are not paired "
+            "differences relative to the default scheduler. Rows list disruption metrics (moves and evictions) "
+            "for the two categories. Columns are grouped by number of priority levels, pods per node, and number of nodes."
         ),
         label="tab:disruptions-agg-util-timeout",
     )
