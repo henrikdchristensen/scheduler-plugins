@@ -1468,6 +1468,8 @@ def _run_solver(solver: str, results_root: Path) -> None:
                 f"over instances where the optimizer is called (not a paired difference). "
                 f"Rows are grouped by target usage levels, with metrics listed within each usage block. "
                 f"Columns are grouped by number of priority levels, pods per node, and number of nodes. "
+                f"For configurations with 32 nodes, 8 pods/node, and 90\\% target usage, no values are reported "
+                f"because all outcomes were \\emph{{No Calls}}. "
                 f"Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; "
                 f"the reported time also includes solution extraction and I/O."
             ),
