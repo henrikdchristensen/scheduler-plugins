@@ -6,6 +6,7 @@ from typing import Any, List
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 
 from scripts.kwok_trace_replayer.trace_helpers import (
     estimate_pareto_params,
@@ -58,7 +59,7 @@ def plot_utilization_and_num_pods(
         return
 
     t_s = np.asarray(times, dtype=float)
-    util = np.asarray(u_req_hist, dtype=float)
+    util = np.asarray(u_req_hist, dtype=float)   # still stored as fractions, e.g. 0.90
     pods = np.asarray(pods_hist, dtype=float)
 
     max_time_s = float(np.nanmax(t_s)) if t_s.size else 0.0
@@ -75,9 +76,10 @@ def plot_utilization_and_num_pods(
     c_util = colors[0] if len(colors) > 0 else "C0"
     c_pods = colors[1] if len(colors) > 1 else "C1"
 
-    l1, = ax1.plot(x, util, label="effective utilization, max(cpu, mem)", linewidth=0.9, color=c_util)
+    l1, = ax1.plot(x, util, label="effective utilization", linewidth=0.9, color=c_util)
     ax1.set_xlabel(x_label, labelpad=20)
-    ax1.set_ylabel("effective utilization, max(cpu, mem)", color=c_util)
+    ax1.set_ylabel("effective utilization (%)", color=c_util)
+    ax1.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0, decimals=0))
     ax1.tick_params(axis="y", colors=c_util)
     ax1.grid(True, linestyle="--", alpha=0.4)
 
@@ -86,7 +88,7 @@ def plot_utilization_and_num_pods(
     ax2.set_ylabel("number of pods", color=c_pods)
     ax2.tick_params(axis="y", colors=c_pods)
 
-    ax1.legend([l1, l2], ["effective utilization, max(cpu, mem)", "number of pods"], loc="lower right", frameon=False)
+    ax1.legend([l1, l2], ["effective utilization", "number of pods"], loc="lower right", frameon=False)
 
     # Build event stream in seconds (for counting)
     events: List[tuple[float, str]] = []
