@@ -2,10 +2,10 @@
 # scripts/kwok_workload_once/seal_results.py
 """
 CP-SAT:
-- python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-cp_sat
+python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-cp_sat
 
 Gurobi:
-- python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-guro
+python -m scripts.kwok_workload_once.seal_results --solver-dir plugin-gurobi
 """
 
 import argparse, json, re
@@ -435,13 +435,32 @@ class CombineResultsAnalyzer:
         def _sum_num(mask: pd.Series, col: str) -> float:
             return float(pd.to_numeric(not_all_running.loc[mask, col], errors="coerce").fillna(0).sum())
 
-        # Split by improvement outcome category
-        is_optimal_better = not_all_running["solver_status"].eq("OPTIMAL") & not_all_running["placed_cmp"].gt(0)
-        is_feasible_better = not_all_running["solver_status"].eq("FEASIBLE") & not_all_running["placed_cmp"].gt(0)
+        # Split by outcome category (for disruption accounting)
+        # - default_optimal  := solver found OPTIMAL and placement is equal to default (KWOK Optimal)
+        # - solver_optimal   := solver found OPTIMAL and placement is better than default (Better&Optimal)
+        # - solver_feasible  := solver found FEASIBLE and placement is better than default (Better)
+        is_optimal_equal = (
+            not_all_running["solver_status"].eq("OPTIMAL")
+            & not_all_running["placed_cmp"].eq(0)
+        )
+        is_optimal_better = (
+            not_all_running["solver_status"].eq("OPTIMAL")
+            & not_all_running["placed_cmp"].gt(0)
+        )
+        is_feasible_better = (
+            not_all_running["solver_status"].eq("FEASIBLE")
+            & not_all_running["placed_cmp"].gt(0)
+        )
 
+        # KWOK Optimal (equal placement, solver status OPTIMAL)
+        moves_sum_default_optimal = _sum_num(is_optimal_equal, "moves")
+        evictions_sum_default_optimal = _sum_num(is_optimal_equal, "evictions")
+
+        # Better&Optimal
         moves_sum_solver_optimal = _sum_num(is_optimal_better, "moves")
         evictions_sum_solver_optimal = _sum_num(is_optimal_better, "evictions")
 
+        # Better
         moves_sum_solver_feasible = _sum_num(is_feasible_better, "moves")
         evictions_sum_solver_feasible = _sum_num(is_feasible_better, "evictions")
 
@@ -494,6 +513,9 @@ class CombineResultsAnalyzer:
             "n_solver_solution": n_solver_solution,
 
             # Normalized disruption sums (sum over seeds of % of total pods)
+            "moves_pct_sum_default_optimal": format_num(_pct_sum_of_total_pods(moves_sum_default_optimal), decimals),
+            "evictions_pct_sum_default_optimal": format_num(_pct_sum_of_total_pods(evictions_sum_default_optimal), decimals),
+
             "moves_pct_sum_solver_optimal": format_num(_pct_sum_of_total_pods(moves_sum_solver_optimal), decimals),
             "evictions_pct_sum_solver_optimal": format_num(_pct_sum_of_total_pods(evictions_sum_solver_optimal), decimals),
             "moves_pct_sum_solver_feasible": format_num(_pct_sum_of_total_pods(moves_sum_solver_feasible), decimals),
@@ -542,6 +564,8 @@ class CombineResultsAnalyzer:
             "mem_delta_sum",
             "solver_duration_ms_sum",
             "solver_duration_ms_mean",
+            "moves_pct_sum_default_optimal",
+            "evictions_pct_sum_default_optimal",
             "moves_pct_sum_solver_optimal",
             "evictions_pct_sum_solver_optimal",
             "moves_pct_sum_solver_feasible",

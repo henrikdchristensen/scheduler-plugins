@@ -1,6 +1,6 @@
 \begin{table}[H]
 \centering
-\caption[Optimizer Results: Disruption Breakdown]{Disruption breakdown aggregated over target usage levels and optimizer timeouts. Values are average disruption percentages (\% of total pods) conditioned on improved instances, where the Better rows are averaged over Better instances and the Better\&Optimal rows are averaged over Better\&Optimal instances. These values are not paired differences relative to the default scheduler. Rows list disruption metrics (moves and evictions) for the two improvement categories. Columns are grouped by number of priority levels, pods per node, and number of nodes.}
+\caption[Optimizer Results: Disruption Breakdown]{Disruption breakdown aggregated over target usage levels and optimizer timeouts. Values are average disruption percentages (\% of total pods) conditioned on outcome category. The Better rows are averaged over Better instances, while the Optimal rows are averaged over combined Optimal instances (KWOK Optimal + Better\&Optimal). These values are not paired differences relative to the default scheduler. Rows list disruption metrics (moves and evictions) for the two categories. Columns are grouped by number of priority levels, pods per node, and number of nodes.}
 \label{tab:disruptions-agg-util-timeout}
 \adjustbox{max width=\linewidth}{%
 \begin{tabular}{l c c c c c c c c c c c c c c c c c c c c c c c c}
@@ -12,9 +12,9 @@
  & \llap{\# Nodes =\,}4 & 8 & 16 & 32 & 4 & 8 & 16 & 32 & 4 & 8 & 16 & 32 & 4 & 8 & 16 & 32 & 4 & 8 & 16 & 32 & 4 & 8 & 16 & 32 \\
 \midrule
 Better: moves (\%) & 20.5 & 21.6 & 40.1 & 44.7 & 5.3 & 17.5 & 34.7 & 15.2 & 18.8 & 18.2 & 19.0 & 24.1 & 7.2 & 11.4 & 17.7 & 14.8 & 0.0 & 11.0 & 11.2 & 11.8 & 12.5 & 8.1 & 8.5 & 11.1 \\
-Better\&Optimal: moves (\%) & 11.9 & 12.0 & 6.3 & 4.8 & 4.3 & 3.2 & 2.4 & 2.3 & 9.9 & 10.5 & 9.4 & 5.5 & 5.2 & 4.9 & 2.6 & 2.5 & 8.2 & 7.8 & 7.1 & 7.4 & 5.3 & 4.5 & 3.7 & 2.9 \\
+Optimal: moves (\%) & 11.9 & 12.0 & 6.3 & 4.8 & 4.3 & 3.1 & 2.2 & 2.3 & 7.7 & 9.7 & 9.4 & 5.5 & 4.9 & 4.4 & 2.4 & 2.5 & 4.5 & 6.2 & 6.6 & 7.4 & 3.9 & 4.1 & 3.2 & 2.9 \\
 Better: evictions (\%) & 4.5 & 2.1 & 2.0 & 1.8 & 1.5 & 2.0 & 1.5 & 1.0 & 12.5 & 3.1 & 2.7 & 2.2 & 3.3 & 2.6 & 2.1 & 1.5 & 0.0 & 5.1 & 5.5 & 3.9 & 6.2 & 3.6 & 2.8 & 2.6 \\
-Better\&Optimal: evictions (\%) & 2.0 & 0.7 & 0.0 & 0.0 & 1.0 & 0.1 & 0.0 & 0.0 & 4.5 & 2.7 & 1.0 & 0.0 & 2.0 & 0.7 & 0.0 & 0.0 & 7.5 & 5.4 & 4.2 & 2.8 & 3.5 & 2.6 & 1.0 & 0.0 \\
+Optimal: evictions (\%) & 2.0 & 0.7 & 0.0 & 0.0 & 1.0 & 0.1 & 0.0 & 0.0 & 5.5 & 3.1 & 1.0 & 0.0 & 2.1 & 0.6 & 0.0 & 0.0 & 8.2 & 5.7 & 4.3 & 2.8 & 4.0 & 2.4 & 0.8 & 0.0 \\
 \bottomrule
 \end{tabular}%
 }
