@@ -426,6 +426,12 @@ def _render_timeout_breakdown_table(
 # Aggregation helpers
 #################################################################
 
+def aggregate_over_all_except_timeout(per_combo_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate over all configuration dimensions except optimizer timeout.
+    Keeps only timeout_s.
+    """
+    return _aggregate_counts_to_rates(per_combo_df, ["timeout_s"])
 
 def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> pd.DataFrame:
     """
@@ -698,6 +704,132 @@ def write_outcome_table_by_usage_tex(
     lines.extend([r"\bottomrule", r"\end{tabular}"])
     write_latex_table(out_path, lines, caption=caption, caption_short=caption_short, label=label)
 
+
+def write_outcome_table_by_timeout_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    timeouts: List[int] = PLOT_TIMEOUTS,
+    decimals: int = 1,
+    caption: str = "",
+    caption_short: Optional[str] = None,
+    label: str = "",
+) -> None:
+    dff = df_table.copy()
+    if "timeout_s" not in dff.columns:
+        out_path.write_text("% empty: missing timeout_s column\n", encoding="utf-8")
+        print(f"[warn] timeout outcomes table empty -> {out_path}")
+        return
+
+    dff["timeout_s"] = pd.to_numeric(dff["timeout_s"], errors="coerce").round().astype("Int64")
+    dff = dff.dropna(subset=["timeout_s"]).copy()
+    dff["timeout_s"] = dff["timeout_s"].astype(int)
+
+    keep_cols = ["timeout_s"] + [c for _, c in OUTCOME_ROWS]
+    dff = dff[[c for c in keep_cols if c in dff.columns]].drop_duplicates(subset=["timeout_s"], keep="last")
+    dff = dff.set_index("timeout_s").sort_index()
+
+    timeout_order = [int(t) for t in timeouts]
+
+    def get_rate(timeout_val: int, col: str) -> float:
+        try:
+            return float(dff.at[int(timeout_val), col])
+        except Exception:
+            return float("nan")
+
+    n_t = len(timeout_order)
+    lines: List[str] = [
+        r"\begin{tabular}{" + "l" + " c" * n_t + "}",
+        r"\toprule",
+    ]
+
+    lines.append(
+        rf"\multirow{{2}}{{*}}{{\textbf{{Outcome}}}} & "
+        rf"\multicolumn{{{n_t}}}{{c}}{{\textbf{{Optimizer timeout (s)}}}} \\"
+    )
+    lines.append(latex_cmidrules(1, n_t, start_col=2))
+    lines.append(" & " + " & ".join([f"{t}" for t in timeout_order]) + r" \\")
+    lines.append(r"\midrule")
+
+    for row_label, col in OUTCOME_ROWS:
+        cells = []
+        for t in timeout_order:
+            r_ = get_rate(t, col)
+            cells.append(fmt_pct(100.0 * r_, decimals=decimals) if is_finite(r_) else nan_str())
+        lines.append(f"{row_label} & " + " & ".join(cells) + r" \\")
+
+    lines.extend([r"\bottomrule", r"\end{tabular}"])
+    write_latex_table(out_path, lines, caption=caption, caption_short=caption_short, label=label)
+
+
+def write_metric_table_by_timeout_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    timeouts: List[int] = PLOT_TIMEOUTS,
+    caption: str = "",
+    caption_short: Optional[str] = None,
+    label: str = "",
+) -> None:
+    dff = df_table.copy()
+    if "timeout_s" not in dff.columns:
+        out_path.write_text("% empty: missing timeout_s column\n", encoding="utf-8")
+        print(f"[warn] timeout metrics table empty -> {out_path}")
+        return
+
+    dff["timeout_s"] = pd.to_numeric(dff["timeout_s"], errors="coerce").round().astype("Int64")
+    dff = dff.dropna(subset=["timeout_s"]).copy()
+    dff["timeout_s"] = dff["timeout_s"].astype(int)
+
+    metric_cols = [col for _, col, _, _, _ in METRIC_ROWS]
+    keep_cols = ["timeout_s"] + metric_cols
+    dff = dff[[c for c in keep_cols if c in dff.columns]].drop_duplicates(subset=["timeout_s"], keep="last")
+    dff = dff.set_index("timeout_s").sort_index()
+
+    timeout_order = [int(t) for t in timeouts]
+    n_t = len(timeout_order)
+
+    metric_meta = {
+        col: (scale, decimals, signed)
+        for _, col, scale, decimals, signed in METRIC_ROWS
+    }
+
+    def get_val(timeout_val: int, col: str) -> float:
+        try:
+            return float(dff.at[int(timeout_val), col])
+        except Exception:
+            return float("nan")
+
+    def fmt_metric(col: str, raw: float) -> str:
+        scale, decimals, signed = metric_meta[col]
+        if not is_finite(raw):
+            return nan_str()
+        v = float(raw) * float(scale)
+        if signed:
+            if abs(v) < 5e-13:
+                v = 0.0
+            return f"{v:+.{decimals}f}"
+        return f"{v:.{decimals}f}"
+
+    lines: List[str] = [
+        r"\begin{tabular}{" + "l" + " c" * n_t + "}",
+        r"\toprule",
+    ]
+
+    lines.append(
+        rf"\multirow{{2}}{{*}}{{\textbf{{Metric}}}} & "
+        rf"\multicolumn{{{n_t}}}{{c}}{{\textbf{{Optimizer timeout (s)}}}} \\"
+    )
+    lines.append(latex_cmidrules(1, n_t, start_col=2))
+    lines.append(" & " + " & ".join([f"{t}" for t in timeout_order]) + r" \\")
+    lines.append(r"\midrule")
+
+    for row_label, col, _, _, _ in METRIC_ROWS:
+        cells = [fmt_metric(col, get_val(t, col)) for t in timeout_order]
+        lines.append(f"{row_label} & " + " & ".join(cells) + r" \\")
+
+    lines.extend([r"\bottomrule", r"\end{tabular}"])
+    write_latex_table(out_path, lines, caption=caption, caption_short=caption_short, label=label)
 
 def write_disruption_table_tex(
     *,
@@ -1418,6 +1550,45 @@ def _run_solver(solver: str, results_root: Path) -> None:
 
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
+
+
+    # --- TABLES: aggregated over all dimensions except optimizer timeout
+    df_timeout_only = aggregate_over_all_except_timeout(df_per_combo)
+
+    out_tex_timeout_outcomes = paths.tables_dir / "table_outcomes_by_timeout.tex"
+    write_outcome_table_by_timeout_tex(
+        df_table=df_timeout_only,
+        out_path=out_tex_timeout_outcomes,
+        timeouts=PLOT_TIMEOUTS,
+        decimals=1,
+        caption_short="Optimizer Results: Outcome Breakdown by Optimizer Timeout",
+        caption=(
+            "Outcome breakdown by optimizer timeout, aggregated over target usage levels, "
+            "number of nodes, pods per node, and priority levels. Values are reported as "
+            "percentages of paired instances after aggregation across those dimensions. "
+            "Rows list outcome categories, and columns correspond to optimizer timeouts."
+        ),
+        label="tab:outcomes-by-timeout",
+    )
+    produced_tables.append(out_tex_timeout_outcomes)
+
+    out_tex_timeout_metrics = paths.tables_dir / "table_metrics_by_timeout.tex"
+    write_metric_table_by_timeout_tex(
+        df_table=df_timeout_only,
+        out_path=out_tex_timeout_metrics,
+        timeouts=PLOT_TIMEOUTS,
+        caption_short="Optimizer Results: Performance Metrics by Optimizer Timeout",
+        caption=(
+            "Performance metrics by optimizer timeout, aggregated over target usage levels, "
+            "number of nodes, pods per node, and priority levels. Diff. eff. usage is reported "
+            "as the mean paired difference (optimizer minus default scheduler), while optimizer "
+            "duration is the mean optimizer runtime over instances where the optimizer is called "
+            "(not a paired difference). Optimizer duration can slightly exceed the timeout because "
+            "the timeout applies to solving only; the reported time also includes solution extraction and I/O."
+        ),
+        label="tab:metrics-by-timeout",
+    )
+    produced_tables.append(out_tex_timeout_metrics)
 
     # --- TABLES: outcomes (per timeout, priorities side-by-side)
     df_table = aggregate_keep_util(df_per_combo)

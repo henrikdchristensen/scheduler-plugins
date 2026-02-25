@@ -1,0 +1,17 @@
+\begin{table}[H]
+\centering
+\caption[Optimizer Results: Performance Metrics by Optimizer Timeout]{Performance metrics by optimizer timeout, aggregated over target usage levels, number of nodes, pods per node, and priority levels. Diff. eff. usage is reported as the mean paired difference (optimizer minus default scheduler), while optimizer duration is the mean optimizer runtime over instances where the optimizer is called (not a paired difference). Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; the reported time also includes solution extraction and I/O.}
+\label{tab:metrics-by-timeout}
+\adjustbox{max width=\linewidth}{%
+\begin{tabular}{l c c c}
+\toprule
+\multirow{2}{*}{\textbf{Metric}} & \multicolumn{3}{c}{\textbf{Optimizer timeout (s)}} \\
+\cmidrule(lr){2-4}
+ & 1 & 10 & 20 \\
+\midrule
+Optimizer\,duration\,(s) & 0.6 & 3.9 & 7.1 \\
+Diff.\,eff.\,usage\,(\%) & +3.2 & +3.8 & +3.9 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
