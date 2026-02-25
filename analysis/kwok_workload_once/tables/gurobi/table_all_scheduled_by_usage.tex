@@ -1,0 +1,17 @@
+\begin{table}[H]
+\centering
+\caption[Optimizer Results: All-Scheduled Share by Usage Level]{Share of cases where all pods are scheduled (i.e., zero unscheduled pods in the optimizer result), reported conditionally within the Better and Better\&Optimal outcome categories. Values are aggregated over number of nodes, pods per node, priority levels, and optimizer timeouts, and shown by target usage level. Values are percentages within each category (not percentages of all instances).}
+\label{tab:all-scheduled-by-usage}
+\adjustbox{max width=\linewidth}{%
+\begin{tabular}{l c c c c}
+\toprule
+\multirow{2}{*}{\textbf{Metric}} & \multicolumn{4}{c}{\textbf{Target usage (\%)}} \\
+\cmidrule(lr){2-5}
+ & 90\% & 95\% & 100\% & 105\% \\
+\midrule
+Better: all scheduled (\%) & 83.8 & 41.0 & 0.0 & 0.0 \\
+Better\&Optimal: all scheduled (\%) & 89.1 & 70.6 & 0.0 & 0.0 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
