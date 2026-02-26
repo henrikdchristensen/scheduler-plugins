@@ -76,8 +76,8 @@ EPS = 1e-9
 ANNOT_FS = 5.0
 
 # Labels
-TARGET_UTIL_LABEL = "target usage (%)"
-TARGET_UTIL_TABLE_LABEL = r"Target usage (\%)"
+TARGET_UTIL_LABEL = "target load (%)"
+TARGET_UTIL_TABLE_LABEL = r"Target load (\%)"
 NODES_PLOT_LABEL = "#nodes"
 NODES_TABLE_LABEL = r"\# Nodes"
 INSTANCES_LABEL = "% of instances"
@@ -586,7 +586,7 @@ def write_metric_table_tex(
         nodes_order=nodes_order,
         row_specs=row_specs,
         cell_formatter=fmt_metric,
-        lead_left_label="Usage",
+        lead_left_label="Load",
         lead_row_label="Metric",
         caption=caption,
         caption_short=caption_short,
@@ -640,7 +640,7 @@ def write_outcome_table_tex(
         nodes_order=nodes_order,
         row_specs=OUTCOME_ROWS,
         cell_formatter=fmt_outcome,
-        lead_left_label="Usage",
+        lead_left_label="Load",
         lead_row_label="Outcome",
         caption=caption,
         caption_short=caption_short,
@@ -1563,7 +1563,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
         decimals=1,
         caption_short="Optimizer Results: Outcome Breakdown by Optimizer Timeout",
         caption=(
-            "Outcome breakdown by optimizer timeout, aggregated over target usage levels, "
+            "Outcome breakdown by optimizer timeout, aggregated over target load levels, "
             "number of nodes, pods per node, and priority levels. Values are reported as "
             "percentages of paired instances after aggregation across those dimensions. "
             "Rows list outcome categories, and columns correspond to optimizer timeouts."
@@ -1579,7 +1579,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
         timeouts=PLOT_TIMEOUTS,
         caption_short="Optimizer Results: Performance Metrics by Optimizer Timeout",
         caption=(
-            "Performance metrics by optimizer timeout, aggregated over target usage levels, "
+            "Performance metrics by optimizer timeout, aggregated over target load levels, "
             "number of nodes, pods per node, and priority levels. Diff. eff. usage is reported "
             "as the mean paired difference (optimizer minus default scheduler), while optimizer "
             "duration is the mean optimizer runtime over instances where the optimizer is called "
@@ -1610,8 +1610,8 @@ def _run_solver(solver: str, results_root: Path) -> None:
                 f"Outcome breakdown at {t}\\,s optimizer timeout. "
                 f"Values are reported as percentages of the 100 paired instances "
                 f"(optimizer vs.\\ default scheduler) for each parameter configuration. "
-                f"Rows are grouped by target usage levels, with outcome categories listed "
-                f"within each usage block. Columns are grouped by number of "
+                f"Rows are grouped by target load levels, with outcome categories listed "
+                f"within each load block. Columns are grouped by number of "
                 f"priority levels, pods per node, and number of nodes."
             ),
             label=f"tab:outcomes-timeout{t}",
@@ -1637,9 +1637,9 @@ def _run_solver(solver: str, results_root: Path) -> None:
                 f"for each parameter configuration. diff. eff. usage is reported as the mean paired difference "
                 f"(optimizer minus default scheduler), while optimizer duration is the mean optimizer runtime "
                 f"over instances where the optimizer is called (not a paired difference). "
-                f"Rows are grouped by target usage levels, with metrics listed within each usage block. "
+                f"Rows are grouped by target load levels, with metrics listed within each load block. "
                 f"Columns are grouped by number of priority levels, pods per node, and number of nodes. "
-                f"For configurations with 32 nodes, 8 pods/node, and 90\\% target usage, no values are reported "
+                f"For configurations with 32 nodes, 8 pods/node, and 90\\% target load, no values are reported "
                 f"because all outcomes were \\emph{{No Calls}}. "
                 f"Optimizer duration can slightly exceed the timeout because the timeout applies to solving only; "
                 f"the reported time also includes solution extraction and I/O."
@@ -1659,7 +1659,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
         priorities_list=prio_list,
         caption_short="Optimizer Results: Disruption Breakdown",
         caption=(
-            "Disruption breakdown aggregated over target usage levels and optimizer timeouts. "
+            "Disruption breakdown aggregated over target load levels and optimizer timeouts. "
             "Values are average disruption percentages (\\% of total pods) conditioned on outcome category. "
             "The Better rows are averaged over Better instances, while the Optimal rows are averaged over "
             "combined Optimal instances (KWOK Optimal + Better\\&Optimal). These values are not paired "
@@ -1697,12 +1697,12 @@ def _run_solver(solver: str, results_root: Path) -> None:
         out_path=out_tex_usage,
         utils=PLOT_UTILS,
         decimals=1,
-        caption_short="Optimizer Results: Outcome Breakdown by Usage Levels",
+        caption_short="Optimizer Results: Outcome Breakdown by Load Levels",
         caption=(
-            "Outcome breakdown by target usage levels, aggregated over number of nodes, pods per node, "
+            "Outcome breakdown by target load levels, aggregated over number of nodes, pods per node, "
             "priority levels, and optimizer timeouts. Values are reported as percentages of instances "
             "in each outcome category after aggregation across those dimensions. "
-            "Rows list the outcome categories, and columns correspond to target usage levels."
+            "Rows list the outcome categories, and columns correspond to target load levels."
         ),
         label="tab:outcomes-by-usage",
     )
