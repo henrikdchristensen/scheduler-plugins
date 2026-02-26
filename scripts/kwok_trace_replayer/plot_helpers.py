@@ -76,9 +76,9 @@ def plot_utilization_and_num_pods(
     c_util = colors[0] if len(colors) > 0 else "C0"
     c_pods = colors[1] if len(colors) > 1 else "C1"
 
-    l1, = ax1.plot(x, util, label="usage", linewidth=0.9, color=c_util)
+    l1, = ax1.plot(x, util, label="load", linewidth=0.9, color=c_util)
     ax1.set_xlabel(x_label, labelpad=20)
-    ax1.set_ylabel("usage (%)", color=c_util)
+    ax1.set_ylabel("load (%)", color=c_util)
     ax1.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0, decimals=0))
     ax1.tick_params(axis="y", colors=c_util)
     ax1.grid(True, linestyle="--", alpha=0.4)
@@ -88,7 +88,7 @@ def plot_utilization_and_num_pods(
     ax2.set_ylabel("number of pods", color=c_pods)
     ax2.tick_params(axis="y", colors=c_pods)
 
-    ax1.legend([l1, l2], ["usage", "number of pods"], loc="upper right", frameon=True)
+    ax1.legend([l1, l2], ["load", "number of pods"], loc="upper right", frameon=True)
 
     # Build event stream in seconds (weighted by replicas, so counts are pods)
     events: List[tuple[float, str, int]] = []
