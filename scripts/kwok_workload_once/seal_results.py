@@ -82,7 +82,10 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
         "util_run_cpu_now": "util_run_cpu",
         "util_run_mem_now": "util_run_mem",
         "running_placed_by_prio_now": "placed_by_prio_running",
+
         "unscheduled_count_before": "unscheduled_cnt",
+        "unscheduled_count_now": "unscheduled_cnt_now",
+
         "error": "error",
         "best_solver_status": "solver_status",
         "best_solver_name": "solver_name",
@@ -93,7 +96,10 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
     df = df.rename(columns={cols[k]: v for k, v in rename_map.items() if k in cols and cols[k] != v})
 
     # Ensure optional solver columns exist
-    for c in ["solver_status", "solver_name", "solver_duration_ms", "solver_score"]:
+    for c in [
+        "solver_status", "solver_name", "solver_duration_ms", "solver_score",
+        "unscheduled_cnt", "unscheduled_cnt_now",
+    ]:
         if c not in df.columns:
             df[c] = ""
 
@@ -155,6 +161,7 @@ def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: st
             "util_run_mem",
             "placed_by_prio",
             "unscheduled_cnt",
+            "unscheduled_cnt_now",
             "error",
             "solver_status",
             "solver_name",
@@ -169,14 +176,18 @@ def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: st
             "util_run_mem": "util_mem_solver",
             "placed_by_prio": "placed_by_prio_solver",
             "unscheduled_cnt": "unscheduled_cnt_solver",
+            "unscheduled_cnt_now": "unscheduled_cnt_now_solver",
         }
     ).merge(
-        df_d[["seed", "util_run_cpu", "util_run_mem", "placed_by_prio", "unscheduled_cnt"]].rename(
+        df_d[
+            ["seed", "util_run_cpu", "util_run_mem", "placed_by_prio", "unscheduled_cnt", "unscheduled_cnt_now"]
+        ].rename(
             columns={
                 "util_run_cpu": "util_cpu_default",
                 "util_run_mem": "util_mem_default",
                 "placed_by_prio": "placed_by_prio_default",
                 "unscheduled_cnt": "unscheduled_cnt_default",
+                "unscheduled_cnt_now": "unscheduled_cnt_now_default",
             }
         ),
         on="seed",
@@ -184,10 +195,13 @@ def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: st
         validate="one_to_one",
     )
 
-    # default_all_scheduled: both have 0 unscheduled
     no_pending_default = pd.to_numeric(joined["unscheduled_cnt_default"], errors="coerce").eq(0)
     no_pending_solver = pd.to_numeric(joined["unscheduled_cnt_solver"], errors="coerce").eq(0)
     joined["default_all_running"] = no_pending_default & no_pending_solver
+
+    joined["solver_all_running_after_opt"] = pd.to_numeric(
+        joined["unscheduled_cnt_now_solver"], errors="coerce"
+    ).eq(0)
 
     # solver_called: any of status/name/duration present
     joined["solver_called"] = (
@@ -451,6 +465,23 @@ class CombineResultsAnalyzer:
             not_all_running["solver_status"].eq("FEASIBLE")
             & not_all_running["placed_cmp"].gt(0)
         )
+        
+        # "All pods scheduled" means solver leaves no pods unscheduled after optimization
+        solver_all_running_mask = not_all_running["solver_all_running_after_opt"].astype(bool)
+
+        # Counts within outcome categories
+        n_solver_optimal_all_running = int((is_optimal_better & solver_all_running_mask).sum())   # Better&Optimal
+        n_solver_feasible_all_running = int((is_feasible_better & solver_all_running_mask).sum()) # Better
+
+        def _safe_frac(num: int, den: int) -> float:
+            return float(num) / float(den) if den > 0 else float("nan")
+
+        solver_optimal_all_running_within_rate = _safe_frac(
+            n_solver_optimal_all_running, counts.n_solver_optimal
+        )
+        solver_feasible_all_running_within_rate = _safe_frac(
+            n_solver_feasible_all_running, counts.n_solver_feasible
+        )
 
         # KWOK Optimal (equal placement, solver status OPTIMAL)
         moves_sum_default_optimal = _sum_num(is_optimal_equal, "moves")
@@ -520,6 +551,13 @@ class CombineResultsAnalyzer:
             "evictions_pct_sum_solver_optimal": format_num(_pct_sum_of_total_pods(evictions_sum_solver_optimal), decimals),
             "moves_pct_sum_solver_feasible": format_num(_pct_sum_of_total_pods(moves_sum_solver_feasible), decimals),
             "evictions_pct_sum_solver_feasible": format_num(_pct_sum_of_total_pods(evictions_sum_solver_feasible), decimals),
+            
+            # All-pods-scheduled within optimal categories (conditional on category)
+            "n_solver_feasible_all_running": n_solver_feasible_all_running,
+            "solver_feasible_all_running_within_rate": format_num(solver_feasible_all_running_within_rate, decimals),
+
+            "n_solver_optimal_all_running": n_solver_optimal_all_running,
+            "solver_optimal_all_running_within_rate": format_num(solver_optimal_all_running_within_rate, decimals),
         }
 
     def run(self) -> None:
@@ -569,7 +607,11 @@ class CombineResultsAnalyzer:
             "moves_pct_sum_solver_optimal",
             "evictions_pct_sum_solver_optimal",
             "moves_pct_sum_solver_feasible",
-            "evictions_pct_sum_solver_feasible",
+            "evictions_pct_sum_solver_feasible",            
+            "n_solver_feasible_all_running",
+            "solver_feasible_all_running_within_rate",
+            "n_solver_optimal_all_running",
+            "solver_optimal_all_running_within_rate",
         ]
         for c in numeric_cols:
             if c in per_combo_df.columns:

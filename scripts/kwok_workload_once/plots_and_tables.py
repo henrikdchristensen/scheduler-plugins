@@ -466,6 +466,8 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
                 "evictions_pct_sum_solver_optimal": "sum",
                 "moves_pct_sum_solver_feasible": "sum",
                 "evictions_pct_sum_solver_feasible": "sum",
+                "n_solver_feasible_all_running": "sum",
+                "n_solver_optimal_all_running": "sum",
             }
         )
     )
@@ -506,6 +508,14 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     g["evictions_pct_mean_per_optimal"] = safe_div(
         g["evictions_pct_sum_optimal_combined"], g["n_optimal_combined"]
     )
+
+    # Conditional shares: among category instances, how many ended with all pods scheduled
+    g["solver_feasible_all_running_within_rate"] = safe_div(
+        g["n_solver_feasible_all_running"], g["n_solver_feasible"]
+    )
+    g["solver_optimal_all_running_within_rate"] = safe_div(
+        g["n_solver_optimal_all_running"], g["n_solver_optimal"]
+    )
     return g.copy()
 
 
@@ -528,6 +538,72 @@ def aggregate_over_all_except_util(per_combo_df: pd.DataFrame) -> pd.DataFrame:
 #################################################################
 # Tables
 #################################################################
+
+ALL_SCHEDULED_BY_USAGE_ROWS: List[Tuple[str, str, float, int]] = [
+    (r"Better: all scheduled (\%)", "solver_feasible_all_running_within_rate", 100.0, 1),
+    (r"Better\&Optimal: all scheduled (\%)", "solver_optimal_all_running_within_rate", 100.0, 1),
+]
+
+def write_all_scheduled_by_usage_table_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    utils: List[int] = PLOT_UTILS,
+    decimals: int = 1,
+    caption: str = "",
+    caption_short: Optional[str] = None,
+    label: str = "",
+) -> None:
+    required = {
+        "util",
+        "solver_feasible_all_running_within_rate",
+        "solver_optimal_all_running_within_rate",
+    }
+    _require_columns(df_table, required, context="all-scheduled-by-usage table input")
+
+    dff = df_table.copy()
+    dff["util"] = pd.to_numeric(dff["util"], errors="coerce").round().astype("Int64")
+    dff = dff.dropna(subset=["util"]).copy()
+    dff["util"] = dff["util"].astype(int)
+
+    keep_cols = ["util"] + [c for _, c, _, _ in ALL_SCHEDULED_BY_USAGE_ROWS]
+    dff = dff[[c for c in keep_cols if c in dff.columns]].drop_duplicates(subset=["util"], keep="last")
+    dff = dff.set_index("util").sort_index()
+
+    util_order = [int(u) for u in utils]
+    n_utils = len(util_order)
+
+    def get_val(util_val: int, col: str) -> float:
+        try:
+            return float(dff.at[int(util_val), col])
+        except Exception:
+            return float("nan")
+
+    lines: List[str] = [
+        r"\begin{tabular}{" + "l" + " c" * n_utils + "}",
+        r"\toprule",
+    ]
+
+    lines.append(
+        rf"\multirow{{2}}{{*}}{{\textbf{{Metric}}}} & "
+        rf"\multicolumn{{{n_utils}}}{{c}}{{\textbf{{{TARGET_UTIL_TABLE_LABEL}}}}} \\"
+    )
+    lines.append(latex_cmidrules(1, n_utils, start_col=2))
+    lines.append(" & " + " & ".join([rf"{u}\%" for u in util_order]) + r" \\")
+    lines.append(r"\midrule")
+
+    for row_label, col, scale, row_decimals in ALL_SCHEDULED_BY_USAGE_ROWS:
+        cells = []
+        for u in util_order:
+            raw = get_val(u, col)
+            if is_finite(raw):
+                cells.append(f"{raw * scale:.{row_decimals}f}")
+            else:
+                cells.append(nan_str())
+        lines.append(f"{row_label} & " + " & ".join(cells) + r" \\")
+
+    lines.extend([r"\bottomrule", r"\end{tabular}"])
+    write_latex_table(out_path, lines, caption=caption, caption_short=caption_short, label=label)
 
 
 def write_metric_table_tex(
@@ -1669,10 +1745,29 @@ def _run_solver(solver: str, results_root: Path) -> None:
         label="tab:disruptions-agg-util-timeout",
     )
     produced_tables.append(out_tex_disrupt)
-
+    
     # --- Aggregated datasets for plots
     df_util_agg = aggregate_over_util(df_per_combo)
     df_util_only = aggregate_over_all_except_util(df_per_combo)
+
+    # --- TABLE: all-scheduled share within Better / Better&Optimal by usage
+    out_tex_all_sched_usage = paths.tables_dir / "table_all_scheduled_by_usage.tex"
+    write_all_scheduled_by_usage_table_tex(
+        df_table=df_util_only,  # aggregated over nodes, pods/node, priorities, and timeouts; grouped by usage
+        out_path=out_tex_all_sched_usage,
+        utils=PLOT_UTILS,
+        decimals=1,
+        caption_short="Optimizer Results: All-Scheduled Share by Usage Level",
+        caption=(
+            "Share of cases where all pods are scheduled (i.e., zero unscheduled pods in the optimizer result), "
+            "reported conditionally within the Better and Better\\&Optimal outcome categories. "
+            "Values are aggregated over number of nodes, pods per node, priority levels, and optimizer timeouts, "
+            "and shown by target usage level. Values are percentages within each category "
+            "(not percentages of all instances)."
+        ),
+        label="tab:all-scheduled-by-usage",
+    )
+    produced_tables.append(out_tex_all_sched_usage)
 
     # --- PLOT: outcomes by usage (single panel)
     out_2d_util = paths.figures_dir / "2d_by_usage"
