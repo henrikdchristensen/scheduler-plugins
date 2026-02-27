@@ -52,18 +52,33 @@ DEFAULT_RESULTS_ROOT = Path("analysis/kwok_workload_once")
 DEFAULT_SOLVER = "cp_sat"
 ALL_SOLVERS = ["cp_sat", "gurobi"]
 
-REQUIRED_DISRUPTION_COLUMNS = {
+REQUIRED_SEALED_RESULTS_COLUMNS = {
+    # counts
+    "n_seeds",
+    "n_seeds_not_all_running",
+    "n_default_all_running",
+    "n_solver_called",
+    "n_solver_solution",
+    "n_solver_failed",
     "n_default_optimal",
     "n_solver_optimal",
     "n_solver_feasible",
-    "moves_pct_sum_default_optimal",
-    "evictions_pct_sum_default_optimal",
+    "n_solver_improve",
+    "n_other",
+    # sums used for means/deltas
+    "solver_duration_ms_sum",
+    "cpu_delta_sum",
+    "mem_delta_sum",
+    # disruption/admission sums (conditioned on category)
     "moves_pct_sum_solver_optimal",
     "evictions_pct_sum_solver_optimal",
     "moves_pct_sum_solver_feasible",
     "evictions_pct_sum_solver_feasible",
+    "n_solver_feasible_all_running",
+    "n_solver_optimal_all_running",
+    "admitted_pods_pct_sum_solver_optimal",
+    "admitted_pods_pct_sum_solver_feasible",
 }
-OPTIMAL_PURPLE = "#9467bd"
 
 # Fixed plot/table dimensions
 PLOT_PPNS = [4, 8]
@@ -176,9 +191,14 @@ OUTCOME_ROWS: List[Tuple[str, str]] = [
 
 DISRUPTION_ROWS: List[Tuple[str, str, float, int]] = [
     (r"Better: moves (\%)", "moves_pct_mean_per_better", 1.0, 1),
-    (r"Optimal: moves (\%)", "moves_pct_mean_per_optimal", 1.0, 1),
+    (r"Better\&Optimal: moves (\%)", "moves_pct_mean_per_bo", 1.0, 1),
     (r"Better: evictions (\%)", "evictions_pct_mean_per_better", 1.0, 1),
-    (r"Optimal: evictions (\%)", "evictions_pct_mean_per_optimal", 1.0, 1),
+    (r"Better\&Optimal: evictions (\%)", "evictions_pct_mean_per_bo", 1.0, 1),
+]
+
+ADMITTED_PODS_ROWS: List[Tuple[str, str, float, int]] = [
+    (r"Better: +pods (\%)", "admitted_pods_pct_mean_per_better", 1.0, 1),
+    (r"Better\&Optimal: +pods (\%)", "admitted_pods_pct_mean_per_bo", 1.0, 1),
 ]
 
 #################################################################
@@ -438,7 +458,7 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     Aggregate by `keys` (sum counts/sums) and compute rate columns.
     """
     df = per_combo_df.copy()
-    _require_columns(df, REQUIRED_DISRUPTION_COLUMNS, context="sealed results CSV")
+    _require_columns(df, REQUIRED_SEALED_RESULTS_COLUMNS, context="sealed results CSV")
 
     df["eff_delta_sum"] = np.maximum(df["cpu_delta_sum"], df["mem_delta_sum"])
 
@@ -460,14 +480,14 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
                 "cpu_delta_sum": "sum",
                 "mem_delta_sum": "sum",
                 "eff_delta_sum": "sum",
-                "moves_pct_sum_default_optimal": "sum",
-                "evictions_pct_sum_default_optimal": "sum",
                 "moves_pct_sum_solver_optimal": "sum",
                 "evictions_pct_sum_solver_optimal": "sum",
                 "moves_pct_sum_solver_feasible": "sum",
                 "evictions_pct_sum_solver_feasible": "sum",
                 "n_solver_feasible_all_running": "sum",
                 "n_solver_optimal_all_running": "sum",
+                "admitted_pods_pct_sum_solver_optimal": "sum",
+                "admitted_pods_pct_sum_solver_feasible": "sum",
             }
         )
     )
@@ -486,6 +506,7 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     g["mem_delta_mean"] = safe_div(g["mem_delta_sum"], g["n_seeds"])
     g["eff_delta_mean"] = safe_div(g["eff_delta_sum"], g["n_seeds"])
 
+    # Better (FEASIBLE & better)
     g["moves_pct_mean_per_better"] = safe_div(
         g["moves_pct_sum_solver_feasible"], g["n_solver_feasible"]
     )
@@ -493,20 +514,12 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
         g["evictions_pct_sum_solver_feasible"], g["n_solver_feasible"]
     )
 
-    # Combined Optimal = KWOK Optimal + Better&Optimal
-    g["n_optimal_combined"] = g["n_default_optimal"] + g["n_solver_optimal"]
-    g["moves_pct_sum_optimal_combined"] = (
-        g["moves_pct_sum_default_optimal"] + g["moves_pct_sum_solver_optimal"]
+    # Better&Optimal (OPTIMAL & better)  <-- NEW, replaces combined-optimal
+    g["moves_pct_mean_per_bo"] = safe_div(
+        g["moves_pct_sum_solver_optimal"], g["n_solver_optimal"]
     )
-    g["evictions_pct_sum_optimal_combined"] = (
-        g["evictions_pct_sum_default_optimal"] + g["evictions_pct_sum_solver_optimal"]
-    )
-
-    g["moves_pct_mean_per_optimal"] = safe_div(
-        g["moves_pct_sum_optimal_combined"], g["n_optimal_combined"]
-    )
-    g["evictions_pct_mean_per_optimal"] = safe_div(
-        g["evictions_pct_sum_optimal_combined"], g["n_optimal_combined"]
+    g["evictions_pct_mean_per_bo"] = safe_div(
+        g["evictions_pct_sum_solver_optimal"], g["n_solver_optimal"]
     )
 
     # Conditional shares: among category instances, how many ended with all pods scheduled
@@ -515,6 +528,13 @@ def _aggregate_counts_to_rates(per_combo_df: pd.DataFrame, keys: List[str]) -> p
     )
     g["solver_optimal_all_running_within_rate"] = safe_div(
         g["n_solver_optimal_all_running"], g["n_solver_optimal"]
+    )
+
+    g["admitted_pods_pct_mean_per_bo"] = safe_div(
+        g["admitted_pods_pct_sum_solver_optimal"], g["n_solver_optimal"]
+    )
+    g["admitted_pods_pct_mean_per_better"] = safe_div(
+        g["admitted_pods_pct_sum_solver_feasible"], g["n_solver_feasible"]
     )
     return g.copy()
 
@@ -973,6 +993,71 @@ def write_disruption_table_tex(
     lines.extend([r"\bottomrule", r"\end{tabular}"])
     write_latex_table(out_path, lines, caption=caption, caption_short=caption_short, label=label)
 
+def write_admitted_pods_table_tex(
+    *,
+    df_table: pd.DataFrame,
+    out_path: Path,
+    ppns: List[int],
+    nodes: List[int],
+    priorities_list: List[int],
+    caption: str = "",
+    caption_short: Optional[str] = None,
+    label: str = "",
+) -> None:
+    dff = df_table.copy()
+    dff = dff[dff["priorities"].astype(int).isin(priorities_list)]
+
+    nodes_order = _select_present_order(nodes, dff["nodes"].dropna().astype(int).unique().tolist())
+    ppn_order = _select_present_order(ppns, dff["pods_per_node"].dropna().astype(int).unique().tolist())
+    prio_order = _select_present_order(priorities_list, dff["priorities"].dropna().astype(int).unique().tolist())
+
+    if not nodes_order or not ppn_order or not prio_order:
+        out_path.write_text("% empty: no data after filters\n", encoding="utf-8")
+        print(f"[warn] admitted-pods table empty -> {out_path}")
+        return
+
+    idx_cols = ["priorities", "pods_per_node", "nodes"]
+    for c in idx_cols:
+        dff[c] = pd.to_numeric(dff[c], errors="coerce").round().astype("Int64")
+    dff = dff.dropna(subset=idx_cols).copy()
+    for c in idx_cols:
+        dff[c] = dff[c].astype(int)
+
+    keep_cols = idx_cols + [c for _, c, _, _ in ADMITTED_PODS_ROWS]
+    dff = dff[keep_cols].drop_duplicates(subset=idx_cols, keep="last").set_index(idx_cols).sort_index()
+
+    def get_val(prio: int, ppn: int, node: int, col: str) -> float:
+        try:
+            return float(dff.at[(int(prio), int(ppn), int(node)), col])
+        except Exception:
+            return float("nan")
+
+    n_nodes = len(nodes_order)
+    n_ppn = len(ppn_order)
+    cols_per_prio = n_nodes * n_ppn
+    data_cols = len(prio_order) * cols_per_prio
+
+    lines: List[str] = [r"\begin{tabular}{" + "l" + " c" * data_cols + "}", r"\toprule"]
+    _append_prio_ppn_nodes_header(
+        lines,
+        lead_header=rf"\multirow{{3}}{{*}}{{\textbf{{Admission metric}}}} & ",
+        lead_cols=1,
+        prio_order=prio_order,
+        ppn_order=ppn_order,
+        nodes_order=nodes_order,
+    )
+
+    for row_label, col, scale, decimals in ADMITTED_PODS_ROWS:
+        cells = []
+        for prio in prio_order:
+            for ppn in ppn_order:
+                for n in nodes_order:
+                    raw = get_val(prio, ppn, n, col)
+                    cells.append(f"{raw * scale:.{decimals}f}" if is_finite(raw) else nan_str())
+        lines.append(f"{row_label} & " + " & ".join(cells) + r" \\")
+
+    lines.extend([r"\bottomrule", r"\end{tabular}"])
+    write_latex_table(out_path, lines, caption=caption, caption_short=caption_short, label=label)
 
 #################################################################
 # Plots
@@ -1022,7 +1107,7 @@ def _draw_centered_dual_legend(
     )
 
 
-def plot_2d_grid_moves_evictions_better_vs_optimal(
+def plot_2d_grid_moves_evictions_better_vs_bo(
     df_agg: pd.DataFrame,
     ppns: List[int],
     priorities: List[int],
@@ -1058,11 +1143,11 @@ def plot_2d_grid_moves_evictions_better_vs_optimal(
             "evictions_col": "evictions_pct_mean_per_better",
         },
         {
-            "label": "Optimal",
-            "key": "optimal_combined",
-            "color": OPTIMAL_PURPLE,
-            "moves_col": "moves_pct_mean_per_optimal",
-            "evictions_col": "evictions_pct_mean_per_optimal",
+            "label": "Better&Optimal",
+            "key": "solver_optimal",
+            "color": cat_color["solver_optimal"],  # <-- green (same as main figure)
+            "moves_col": "moves_pct_mean_per_bo",
+            "evictions_col": "evictions_pct_mean_per_bo",
         },
     ]
 
@@ -1576,6 +1661,109 @@ def plot_grid(
     save_figure(fig, out_path)
 
 
+def plot_2d_grid_admitted_pods_better_vs_bo(
+    df_agg: pd.DataFrame,
+    ppns: List[int],
+    priorities: List[int],
+    out_path: Path,
+    cell_figsize: Tuple[float, float],
+    *,
+    fixed_nodes: List[int] = PLOT_NODES,
+) -> None:
+    nrows, ncols = len(ppns), len(priorities)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(ncols * cell_figsize[0], nrows * cell_figsize[1]),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+
+    fig.supylabel(
+        "more pods admitted (% of total pods)",
+        fontsize=PLOT_AXIS_LABEL_FONTSIZE,
+        x=GRID_2D_YLABEL_XPOS_DISRUPT,
+        y=(GRID_2D_BOTTOM + GRID_2D_TOP_DISRUPT) / 2,
+    )
+
+    cat_color = {c["key"]: c["color"] for c in CATEGORIES}
+    series = [
+        {
+            "label": "Better",
+            "color": cat_color["solver_feasible"],
+            "col": "admitted_pods_pct_mean_per_better",
+        },
+        {
+            "label": "Better&Optimal",
+            "color": cat_color["solver_optimal"],
+            "col": "admitted_pods_pct_mean_per_bo",
+        },
+    ]
+
+    # determine a shared y-limit from the data
+    vals = []
+    for s in series:
+        if s["col"] in df_agg.columns:
+            v = pd.to_numeric(df_agg[s["col"]], errors="coerce")
+            vals.append(v)
+    vmax = float(pd.concat(vals).max()) if vals else 0.0
+    vmax = 0.0 if not is_finite(vmax) else vmax
+    y_max = max(5.0, np.ceil(1.1 * vmax / 5.0) * 5.0)
+    y_max = min(100.0, y_max)
+    step = 5 if y_max <= 25 else 10
+    yticks = list(np.arange(0, y_max + 1e-9, step))
+
+    for r, ppn in enumerate(ppns):
+        for c, prio in enumerate(priorities):
+            ax = axes[r][c]
+            panel = df_agg[(df_agg["pods_per_node"] == ppn) & (df_agg["priorities"] == prio)].copy()
+            panel = panel.set_index("nodes") if not panel.empty else pd.DataFrame()
+
+            x = np.arange(len(fixed_nodes))
+            bars_per_group = 2
+            group_width = 0.60
+            width = group_width / bars_per_group
+            offsets = [(j - (bars_per_group - 1) / 2.0) * width for j in range(bars_per_group)]
+
+            for j, s in enumerate(series):
+                xj = x + offsets[j]
+                if not panel.empty and s["col"] in panel.columns:
+                    y = pd.to_numeric(panel[s["col"]], errors="coerce").reindex(fixed_nodes).fillna(0.0).values
+                else:
+                    y = np.zeros(len(fixed_nodes))
+                ax.bar(xj, y, width=width, color=s["color"], edgecolor="black", linewidth=0.35, zorder=2)
+
+            ax.set_xticks(x)
+            ax.set_xticklabels([str(n) for n in fixed_nodes], fontsize=PLOT_TICK_FONTSIZE)
+            ax.set_ylim(0.0, y_max)
+            ax.set_yticks(yticks)
+            ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
+            ax.tick_params(axis="y", labelsize=PLOT_TICK_FONTSIZE)
+            ax.grid(axis="y", linewidth=0.4, alpha=0.4)
+
+            if r == 0:
+                ax.set_title(rf"{PRIORITIES_PLOT_LABEL}={prio}", fontsize=PLOT_TITLE_FONTSIZE)
+            if c == 0:
+                _set_row_ylabel(ax, ppn, labelpad=GRID_2D_ROWLABEL_PAD_DISRUPT)
+            if r == nrows - 1:
+                ax.set_xlabel(NODES_PLOT_LABEL, fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+
+    fig.subplots_adjust(
+        left=GRID_2D_LEFT_DISRUPT,
+        right=GRID_2D_RIGHT,
+        bottom=GRID_2D_BOTTOM,
+        top=GRID_2D_TOP_DISRUPT,
+        wspace=GRID_2D_WSPACE_DISRUPT,
+        hspace=GRID_2D_HSPACE_DISRUPT,
+    )
+
+    handles = [mpatches.Patch(facecolor=s["color"], edgecolor="black", linewidth=0.4) for s in series]
+    labels = [s["label"] for s in series]
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.52, 1.02), ncol=len(labels), **_legend_kwargs())
+
+    save_figure(fig, out_path)
+
 #################################################################
 # Main
 #################################################################
@@ -1622,7 +1810,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
     paths.tables_dir.mkdir(parents=True, exist_ok=True)
 
     df_per_combo = pd.read_csv(paths.df_path)
-    _require_columns(df_per_combo, REQUIRED_DISRUPTION_COLUMNS, context=str(paths.df_path))
+    _require_columns(df_per_combo, REQUIRED_SEALED_RESULTS_COLUMNS, context=str(paths.df_path))
 
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
@@ -1737,14 +1925,34 @@ def _run_solver(solver: str, results_root: Path) -> None:
         caption=(
             "Disruption breakdown aggregated over target load levels and optimizer timeouts. "
             "Values are average disruption percentages (\\% of total pods) conditioned on outcome category. "
-            "The Better rows are averaged over Better instances, while the Optimal rows are averaged over "
-            "combined Optimal instances (KWOK Optimal + Better\\&Optimal). These values are not paired "
-            "differences relative to the default scheduler. Rows list disruption metrics (moves and evictions) "
-            "for the two categories. Columns are grouped by number of priority levels, pods per node, and number of nodes."
+            "The Better rows are averaged over Better instances, while the Better\\&Optimal rows are averaged over "
+            "Better\\&Optimal instances. "
+            "These values are not paired differences relative to the default scheduler. "
+            "Rows list disruption metrics (moves and evictions) for the two categories. "
+            "Columns are grouped by number of priority levels, pods per node, and number of nodes."
         ),
         label="tab:disruptions-agg-util-timeout",
     )
     produced_tables.append(out_tex_disrupt)
+    
+    
+    out_tex_admit = paths.tables_dir / "table_admitted_pods_agg_util_timeout.tex"
+    write_admitted_pods_table_tex(
+        df_table=df_disrupt_table,  # same aggregation: over util + timeout
+        out_path=out_tex_admit,
+        ppns=PLOT_PPNS,
+        nodes=PLOT_NODES,
+        priorities_list=prio_list,
+        caption_short="Optimizer Results: More Pods Admitted",
+        caption=(
+            "More pods admitted (solver minus default), expressed as \\% of total pods and "
+            "conditioned on outcome category. Values are aggregated over target load levels and "
+            "optimizer timeouts, and reported separately for the Better and Better\\&Optimal categories. "
+            "Columns are grouped by number of priority levels, pods per node, and number of nodes."
+        ),
+        label="tab:admitted-pods-agg-util-timeout",
+    )
+    produced_tables.append(out_tex_admit)
     
     # --- Aggregated datasets for plots
     df_util_agg = aggregate_over_util(df_per_combo)
@@ -1822,8 +2030,8 @@ def _run_solver(solver: str, results_root: Path) -> None:
 
     # --- PLOT: disruption composition (moves+evictions)
     df_disrupt_agg = aggregate_over_util_and_timeout(df_per_combo)
-    out_disrupt = paths.figures_dir / "moves_evictions_better_vs_optimal"
-    plot_2d_grid_moves_evictions_better_vs_optimal(
+    out_disrupt = paths.figures_dir / "moves_evictions_better_vs_bo"
+    plot_2d_grid_moves_evictions_better_vs_bo(
         df_agg=df_disrupt_agg,
         ppns=PLOT_PPNS,
         priorities=PLOT_PRIORITIES,
@@ -1831,6 +2039,16 @@ def _run_solver(solver: str, results_root: Path) -> None:
         cell_figsize=GRID_2D_CELL_FIGSIZE_DISRUPT,
     )
     produced_figs.extend([out_disrupt.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
+    
+    out_admit = paths.figures_dir / "admitted_pods_better_vs_bo"
+    plot_2d_grid_admitted_pods_better_vs_bo(
+        df_agg=df_disrupt_table,  # same aggregation
+        ppns=PLOT_PPNS,
+        priorities=PLOT_PRIORITIES,
+        out_path=out_admit,
+        cell_figsize=GRID_2D_CELL_FIGSIZE_DISRUPT,
+    )
+    produced_figs.extend([out_admit.with_suffix(f".{ext}") for ext in PLOT_FORMATS])
 
     # --- PLOT: optimizer duration (dot grid)
     out_dot_solver = paths.figures_dir / "optimizer_duration"

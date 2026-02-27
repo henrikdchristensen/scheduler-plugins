@@ -147,7 +147,25 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
     
     return df
 
-def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: str) -> pd.DataFrame:
+def _sum_placed_by_prio(cell: Any) -> int:
+    """
+    Sum total running pods from a placed_by_prio JSON cell.
+    Accepts dict values as int/float/str.
+    """
+    d = parse_json_cell(cell)
+    if not isinstance(d, dict):
+        return 0
+    total = 0
+    for v in d.values():
+        try:
+            if v is None or v == "":
+                continue
+            total += int(float(v))
+        except Exception:
+            continue
+    return int(total)
+
+def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path) -> pd.DataFrame:
     """
     Compare solver vs default per-seed results.
     """
@@ -212,6 +230,11 @@ def default_vs_solver_per_seed(solver_csv: Path, default_csv: Path, cfg_name: st
 
     # compare placements
     joined["placed_cmp"] = joined.apply(cmp_placed_by_prio_row, axis=1)
+
+    # total running pods (sum across priorities) and delta vs default
+    joined["running_pods_solver"] = joined["placed_by_prio_solver"].apply(_sum_placed_by_prio)
+    joined["running_pods_default"] = joined["placed_by_prio_default"].apply(_sum_placed_by_prio)
+    joined["running_pods_delta"] = joined["running_pods_solver"] - joined["running_pods_default"]
 
     # deltas for resource utilization
     joined["cpu_delta"] = joined["util_cpu_solver"] - joined["util_cpu_default"]
@@ -400,7 +423,7 @@ class CombineResultsAnalyzer:
             print(f"[skip] default results.csv missing: {default_csv}")
             return None
 
-        per_seed_df = default_vs_solver_per_seed(solver_csv, default_csv, solver_dir.name)
+        per_seed_df = default_vs_solver_per_seed(solver_csv, default_csv)
         _, not_all_running = self._split_default_all_running(per_seed_df)
         counts = self._compute_category_counts(per_seed_df)
 
@@ -453,10 +476,6 @@ class CombineResultsAnalyzer:
         # - default_optimal  := solver found OPTIMAL and placement is equal to default (KWOK Optimal)
         # - solver_optimal   := solver found OPTIMAL and placement is better than default (Better&Optimal)
         # - solver_feasible  := solver found FEASIBLE and placement is better than default (Better)
-        is_optimal_equal = (
-            not_all_running["solver_status"].eq("OPTIMAL")
-            & not_all_running["placed_cmp"].eq(0)
-        )
         is_optimal_better = (
             not_all_running["solver_status"].eq("OPTIMAL")
             & not_all_running["placed_cmp"].gt(0)
@@ -483,10 +502,6 @@ class CombineResultsAnalyzer:
             n_solver_feasible_all_running, counts.n_solver_feasible
         )
 
-        # KWOK Optimal (equal placement, solver status OPTIMAL)
-        moves_sum_default_optimal = _sum_num(is_optimal_equal, "moves")
-        evictions_sum_default_optimal = _sum_num(is_optimal_equal, "evictions")
-
         # Better&Optimal
         moves_sum_solver_optimal = _sum_num(is_optimal_better, "moves")
         evictions_sum_solver_optimal = _sum_num(is_optimal_better, "evictions")
@@ -502,6 +517,17 @@ class CombineResultsAnalyzer:
             if total_pods <= 0:
                 return float("nan")
             return 100.0 * float(x) / float(total_pods)
+
+        # --- Additional pods admitted (solver - default), split by category
+        pods_delta_sum_solver_optimal = float(
+            pd.to_numeric(not_all_running.loc[is_optimal_better, "running_pods_delta"], errors="coerce").fillna(0).sum()
+        )
+        pods_delta_sum_solver_feasible = float(
+            pd.to_numeric(not_all_running.loc[is_feasible_better, "running_pods_delta"], errors="coerce").fillna(0).sum()
+        )
+
+        pods_delta_pct_sum_solver_optimal = _pct_sum_of_total_pods(pods_delta_sum_solver_optimal)
+        pods_delta_pct_sum_solver_feasible = _pct_sum_of_total_pods(pods_delta_sum_solver_feasible)
 
         decimals = self.args.decimals
         return {
@@ -544,9 +570,6 @@ class CombineResultsAnalyzer:
             "n_solver_solution": n_solver_solution,
 
             # Normalized disruption sums (sum over seeds of % of total pods)
-            "moves_pct_sum_default_optimal": format_num(_pct_sum_of_total_pods(moves_sum_default_optimal), decimals),
-            "evictions_pct_sum_default_optimal": format_num(_pct_sum_of_total_pods(evictions_sum_default_optimal), decimals),
-
             "moves_pct_sum_solver_optimal": format_num(_pct_sum_of_total_pods(moves_sum_solver_optimal), decimals),
             "evictions_pct_sum_solver_optimal": format_num(_pct_sum_of_total_pods(evictions_sum_solver_optimal), decimals),
             "moves_pct_sum_solver_feasible": format_num(_pct_sum_of_total_pods(moves_sum_solver_feasible), decimals),
@@ -558,6 +581,10 @@ class CombineResultsAnalyzer:
 
             "n_solver_optimal_all_running": n_solver_optimal_all_running,
             "solver_optimal_all_running_within_rate": format_num(solver_optimal_all_running_within_rate, decimals),
+            
+            # Additional pods admitted (% of total pods), summed over seeds within category
+            "admitted_pods_pct_sum_solver_optimal": format_num(pods_delta_pct_sum_solver_optimal, decimals),  # Better&Optimal
+            "admitted_pods_pct_sum_solver_feasible": format_num(pods_delta_pct_sum_solver_feasible, decimals),  # Better
         }
 
     def run(self) -> None:
@@ -602,8 +629,6 @@ class CombineResultsAnalyzer:
             "mem_delta_sum",
             "solver_duration_ms_sum",
             "solver_duration_ms_mean",
-            "moves_pct_sum_default_optimal",
-            "evictions_pct_sum_default_optimal",
             "moves_pct_sum_solver_optimal",
             "evictions_pct_sum_solver_optimal",
             "moves_pct_sum_solver_feasible",
@@ -612,6 +637,8 @@ class CombineResultsAnalyzer:
             "solver_feasible_all_running_within_rate",
             "n_solver_optimal_all_running",
             "solver_optimal_all_running_within_rate",
+            "admitted_pods_pct_sum_solver_optimal",
+            "admitted_pods_pct_sum_solver_feasible",
         ]
         for c in numeric_cols:
             if c in per_combo_df.columns:
