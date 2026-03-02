@@ -1945,7 +1945,7 @@ def _run_solver(solver: str, results_root: Path) -> None:
         priorities_list=prio_list,
         caption_short="Optimizer Results: More Pods Admitted",
         caption=(
-            "More pods admitted (solver minus default), expressed as \\% of total pods and "
+            "More pods admitted (optimizer minus default scheduler), expressed as \\% of total pods and "
             "conditioned on outcome category. Values are aggregated over target load levels and "
             "optimizer timeouts, and reported separately for the Better and Better\\&Optimal categories. "
             "Columns are grouped by number of priority levels, pods per node, and number of nodes."
