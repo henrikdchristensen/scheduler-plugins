@@ -405,6 +405,180 @@ def lookup_main(lookup: pd.DataFrame, *, nodes: int, priorities: int, arrival_s:
     key = (int(nodes), int(priorities), float(arrival_s), rk.mode, int(rk.blocking), int(rk.defpreempt))
     return safe_at(lookup, key, col)
 
+# ---------------------------------------------------------------------------
+# Variant-diff seed datasets (to match the *diff* tables)
+# ---------------------------------------------------------------------------
+
+MODE_META: Dict[str, Tuple[str, str, int]] = {
+    mode: (base_label, detail, cidx) for (mode, base_label, detail, _rank, cidx) in BASE_MODES
+}
+
+def _mode_short_label(mode: str) -> str:
+    base_label, detail, _cidx = MODE_META.get(mode, (mode, "", 0))
+    return f"{base_label}, {detail}" if detail else base_label
+
+def _mode_base_color(mode: str):
+    _base_label, _detail, cidx = MODE_META.get(mode, (mode, "", 0))
+    return PLOT_COLORS[cidx % len(PLOT_COLORS)]
+
+BLOCKING_DIFF_SEED_COLS = ["nodes", "priorities", "arrival_s", "defpreempt", "mode", SEED_COL]
+DEFPREEMPT_DIFF_SEED_COLS = ["nodes", "priorities", "arrival_s", "blocking", "mode", SEED_COL]
+
+def build_blocking_diff_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per-seed differences between non-blocking and blocking variants:
+      diff = (non-blocking metric) - (blocking metric)
+    Matches table_blocking_diff_defpreempt=*.tex.
+    """
+    metric_cols = [m.col_total for m in DIFF_METRICS]
+    base_cols = ["nodes", "priorities", "arrival_s", "defpreempt", "mode", SEED_COL]
+
+    left = df_seeds[df_seeds["blocking"] == 1][base_cols + metric_cols]   # blocking
+    right = df_seeds[df_seeds["blocking"] == 0][base_cols + metric_cols]  # non-blocking
+
+    merged = right.merge(left, on=base_cols, how="inner", suffixes=("_NB", "_B"))
+    if merged.empty:
+        return pd.DataFrame(columns=BLOCKING_DIFF_SEED_COLS + metric_cols)
+
+    out = merged[base_cols].copy()
+    for c in metric_cols:
+        out[c] = merged[f"{c}_NB"] - merged[f"{c}_B"]
+    return out
+
+def build_defpreempt_diff_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per-seed differences between DefaultPreemption enabled and disabled:
+      diff = (enabled metric) - (disabled metric)
+    Computed within fixed blocking variant.
+    Matches table_defpreempt_diff_blocking=*.tex.
+    """
+    metric_cols = [m.col_total for m in DIFF_METRICS]
+    base_cols = ["nodes", "priorities", "arrival_s", "blocking", "mode", SEED_COL]
+
+    left = df_seeds[df_seeds["defpreempt"] == 0][base_cols + metric_cols]   # disabled
+    right = df_seeds[df_seeds["defpreempt"] == 1][base_cols + metric_cols]  # enabled
+
+    merged = right.merge(left, on=base_cols, how="inner", suffixes=("_EN", "_DIS"))
+    if merged.empty:
+        return pd.DataFrame(columns=DEFPREEMPT_DIFF_SEED_COLS + metric_cols)
+
+    out = merged[base_cols].copy()
+    for c in metric_cols:
+        out[c] = merged[f"{c}_EN"] - merged[f"{c}_DIS"]
+    return out
+
+# ---------------------------------------------------------------------------
+# Variant-diff plots (main-style grids)
+# ---------------------------------------------------------------------------
+
+def make_blocking_diff_grid(
+    *,
+    df_blockdiff_seeds: pd.DataFrame,
+    defpreempt: int,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    priorities_cols: List[int],
+) -> None:
+    """
+    Main-style grid for (non-blocking - blocking) deltas.
+    One color per mode (no blocking split, since it's already differenced).
+    """
+    if df_blockdiff_seeds.empty:
+        return
+
+    df = df_blockdiff_seeds[
+        (df_blockdiff_seeds["defpreempt"] == int(defpreempt))
+        & (df_blockdiff_seeds["mode"].isin(BLOCKING_DIFF_MODE_NAMES))
+    ].copy()
+    if df.empty:
+        return
+
+    series = list(BLOCKING_DIFF_MODE_NAMES)
+
+    def color_of(mode: str):
+        return _mode_base_color(mode)
+
+    def y_factory(col: str) -> YOfFn:
+        def _f(mode: str, n: int, a: float, p: int):
+            sub = df[
+                (df["mode"] == mode)
+                & (df["nodes"] == int(n))
+                & (df["priorities"] == int(p))
+                & (df["arrival_s"] == float(a))
+            ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
+            return [float(v) for v in sub[col].tolist() if is_finite(v)]
+        return _f
+
+    make_grid_figure(
+        y_factory=y_factory,
+        series=series,
+        legend_labels=[f"{_mode_short_label(m)} (non-blocking$-$blocking)" for m in series],
+        color_of=color_of,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        priorities_cols=priorities_cols,
+        axes_cfg=Y_DELTAS,
+        out_stem=f"blocking_diffs_defpreempt={defpreempt}",
+        mode_spacing=GRID["mode_spacing_delta"],
+        is_delta_grid=True,
+        symmetric_count_rows=True,
+    )
+
+def make_defpreempt_diff_grid(
+    *,
+    df_defpreemptdiff_seeds: pd.DataFrame,
+    blocking: int,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    priorities_cols: List[int],
+) -> None:
+    """
+    Main-style grid for (DefaultPreemption enabled - disabled) deltas.
+    One color per mode (no defpreempt split, since it's already differenced).
+    """
+    if df_defpreemptdiff_seeds.empty:
+        return
+
+    df = df_defpreemptdiff_seeds[
+        (df_defpreemptdiff_seeds["blocking"] == int(blocking))
+       & (df_defpreemptdiff_seeds["mode"].isin(BLOCKING_DIFF_MODE_NAMES))
+    ].copy()
+    if df.empty:
+        return
+
+    series = list(BLOCKING_DIFF_MODE_NAMES)
+
+    def color_of(mode: str):
+        return _mode_base_color(mode)
+
+    def y_factory(col: str) -> YOfFn:
+        def _f(mode: str, n: int, a: float, p: int):
+            sub = df[
+                (df["mode"] == mode)
+                & (df["nodes"] == int(n))
+                & (df["priorities"] == int(p))
+                & (df["arrival_s"] == float(a))
+            ][[SEED_COL, col]].sort_values(SEED_COL, kind="mergesort")
+            return [float(v) for v in sub[col].tolist() if is_finite(v)]
+        return _f
+
+    btxt = "blocking" if int(blocking) else "non-blocking"
+    make_grid_figure(
+        y_factory=y_factory,
+        series=series,
+        legend_labels=[f"{_mode_short_label(m)} (enabled$-$disabled, {btxt})" for m in series],
+        color_of=color_of,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        priorities_cols=priorities_cols,
+        axes_cfg=Y_DELTAS,
+        out_stem=f"defpreempt_diffs_blocking={blocking}",
+        mode_spacing=GRID["mode_spacing_delta"],
+        is_delta_grid=True,
+        symmetric_count_rows=True,
+    )
+
+
 def values_from_seeds(df_seeds: pd.DataFrame, *, nodes: int, priorities: int, arrival_s: float, rk: RowKey, col: str) -> List[float]:
     sub = df_seeds[
         (df_seeds["nodes"] == int(nodes))
@@ -696,6 +870,51 @@ def make_main_grid_combined(
         is_delta_grid=False,
         symmetric_count_rows=False,
     )
+
+def make_main_grid_single_blocking(
+    *,
+    df_seeds: pd.DataFrame,
+    defpreempt: int,
+    blocking: int,
+    nodes_order: List[int],
+    arrivals_order: List[float],
+    priorities_cols: List[int],
+) -> None:
+    """
+    Main-style grid but only for *one* blocking variant (blocking OR non-blocking),
+    keeping the original combined plots as-is.
+    """
+    b = int(blocking)
+    series = [RowKey(mode=m, blocking=b, defpreempt=defpreempt) for m in MAIN_PLOT_MODE_NAMES]
+
+    # Use the same color indices for blocking and non-blocking (no lightening).
+    cmap: Dict[str, Any] = {}
+    for m in MAIN_PLOT_MODE_NAMES:
+        cmap[m] = rowkey_color(RowKey(mode=m, blocking=1, defpreempt=defpreempt))
+
+    def color_of(rk: RowKey):
+        return cmap[rk.mode]
+
+    def y_factory(col: str) -> YOfFn:
+        return lambda rk, n, a, p: values_from_seeds(
+            df_seeds, nodes=n, priorities=p, arrival_s=a, rk=rk, col=col
+        )
+
+    make_grid_figure(
+        y_factory=y_factory,
+        series=series,
+        legend_labels=[rowkey_label(rk) for rk in series],
+        color_of=color_of,
+        nodes_order=nodes_order,
+        arrivals_order=arrivals_order,
+        priorities_cols=priorities_cols,
+        axes_cfg=Y_MAIN,
+        out_stem=f"main_defaultpreempt={defpreempt}_blocking={b}",
+        mode_spacing=GRID["mode_spacing_delta"],
+        is_delta_grid=True,
+        symmetric_count_rows=False,
+    )
+
 
 # Optional delta plots (kept available if you want them back)
 def make_timing_delta_grid(
@@ -1322,6 +1541,10 @@ def main() -> None:
     df_delta_seeds = build_delta_seeds(df_seeds)
     df_delta_mean_std = build_delta_mean_std(df_delta_seeds)
 
+    # variant-diff datasets (to match the diff tables)
+    df_blockdiff_seeds = build_blocking_diff_seeds(df_seeds)
+    df_defpreemptdiff_seeds = build_defpreempt_diff_seeds(df_seeds)
+
     produced_tables: List[Path] = []
     produced_figs: List[Path] = []
 
@@ -1382,6 +1605,59 @@ def main() -> None:
             priorities_cols=PRIORITIES_TO_SHOW,
         )
         produced_figs.append(OUT_FIGS_DIR / f"main_defaultpreempt={dp}.pdf")
+
+    # NEW: split main plots by blocking variant (keep combined plots too)
+    for dp in (1, 0):
+        for b in (1, 0):
+            make_main_grid_single_blocking(
+                df_seeds=df_seeds,
+                defpreempt=dp,
+                blocking=b,
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                priorities_cols=PRIORITIES_TO_SHOW,
+            )
+            produced_figs.append(OUT_FIGS_DIR / f"main_defaultpreempt={dp}_blocking={b}.pdf")
+
+    # ---------------------------------------------------------------------
+    # main plots for the diff results
+    # ---------------------------------------------------------------------
+
+    # (A) Non-blocking vs. blocking (non-blocking - blocking), per defpreempt
+    for dp in (0, 1):
+        make_blocking_diff_grid(
+            df_blockdiff_seeds=df_blockdiff_seeds,
+            defpreempt=dp,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            priorities_cols=PRIORITIES_TO_SHOW,
+        )
+        produced_figs.append(OUT_FIGS_DIR / f"blocking_diffs_defpreempt={dp}.pdf")
+
+    # (B) DefaultPreemption enabled vs disabled (enabled - disabled), per blocking
+    for b in (0, 1):
+        make_defpreempt_diff_grid(
+            df_defpreemptdiff_seeds=df_defpreemptdiff_seeds,
+            blocking=b,
+            nodes_order=nodes_order,
+            arrivals_order=arrivals_order,
+            priorities_cols=PRIORITIES_TO_SHOW,
+        )
+        produced_figs.append(OUT_FIGS_DIR / f"defpreempt_diffs_blocking={b}.pdf")
+
+    # (C) Timing diffs (variant - 8s baseline), per defpreempt and blocking
+    for dp in (0, 1):
+        for b in (0, 1):
+            make_timing_delta_grid(
+                df_delta_seeds=df_delta_seeds,
+                defpreempt=dp,
+                blocking=b,
+                nodes_order=nodes_order,
+                arrivals_order=arrivals_order,
+                priorities_cols=PRIORITIES_TO_SHOW,
+            )
+            produced_figs.append(OUT_FIGS_DIR / f"timing_deltas_defpreempt={dp}_blocking={b}.pdf")
+
 
     print("Tables:")
     for p in produced_tables:
