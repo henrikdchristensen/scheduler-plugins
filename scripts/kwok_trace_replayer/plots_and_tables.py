@@ -1419,7 +1419,7 @@ def latex_timing_diff_table(
 
     caption = (
         f"Mean differences between the 8\\,s baseline and alternative timing settings (4\\,s or 16\\,s) for periodic and stable-queue modes, "
-        f"computed as (alternative variant minus 8\\,s baseline), with {_preempt_title(defpreempt)} and {_blocking_title(blocking).lower()} variants. "
+        f"computed as (alternative setting minus 8\\,s baseline), with {_preempt_title(defpreempt)} and {_blocking_title(blocking).lower()} variants. "
         f"Results are aggregated over number of nodes and priorities."
     )
     cap_short = f"Plugin Results: Timing Settings Differences with {_preempt_title(defpreempt)} and {_blocking_title(blocking)}."
