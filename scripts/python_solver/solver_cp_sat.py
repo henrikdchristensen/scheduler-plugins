@@ -695,19 +695,6 @@ class CPSATSolver:
             # --- PLACEMENT stage ---
             # Objective:
             #   Maximize the number of placed pods among those with priority ≥ p.
-            # Term:
-            #   place := Σ_{i : prio(i) ≥ p} Σ_{j ∈ B} x_{i,j}
-            # Implementation detail:
-            #   We use `placed[i] ∈ {0,1}` with the constraint Σ_j assign[i][j] == placed[i],
-            #   so the objective is equivalent to:
-            #     placed_expr = Σ_{i : prio(i) ≥ p} placed[i]
-            #   After solving:
-            #     - If OPTIMAL:     Add( placed_expr == best_value )
-            #     - If FEASIBLE:    Add( placed_expr ≥  best_value )
-            #   This prevents later (lower) priorities from reducing the total number of
-            #   placed pods already achieved for ≥ p, while still allowing improvements.
-            # Warm start:
-            #   Apply the current assignment values as hints to help the next stage.
             placed_expr = sum(vars.placed[i] for i in idxs_ge)  # sum of placed pods (priority ≥ pr) both running and pending
             place_result = run_stage(placed_expr, "max", place_cap)
             st = place_result["status"]
@@ -736,36 +723,12 @@ class CPSATSolver:
             # --- DISRUPTION (evictions + moves) stage ---
             # Objective:
             #   Minimize total disruption for already-running pods with priority ≥ p.
-            # For a running pod i with original node orig(i), define:
-            #   x_orig(i) := 1 if pod i is assigned to orig(i), else 0
-            #   placed[i] := 1 if pod i is assigned anywhere, else 0
-            # Per-pod disruption:
-            #   disr_i = (eviction_term) + (move_term)
-            #          = (1 - x_orig(i)) + (placed[i] - x_orig(i))
-            #          = 1 + placed[i] - 2 * x_orig(i)
-            #          where we can remove the 1+ since it's constant across all pods, so
-            #          = placed[i] - 2 * x_orig(i)
-            # Therefore:
-            #   - stayed (placed on original node):   placed=1, x_orig=1 → disr_i = 0
-            #   - eviction (not placed anywhere):     placed=0, x_orig=0 → disr_i = 1
-            #   - move (placed on different node):    placed=1, x_orig=0 → disr_i = 2
-            # Term:
-            #   disr := Σ_{i ∈ running, prio(i) ≥ p} (1 + placed[i] - 2 * x_orig(i))
-            # Implementation detail:
-            #   x_orig(i) is computed as assign[i][pos] if the original node is eligible,
-            #   otherwise 0 (pod cannot stay on an ineligible node in this model).
-            #   After solving:
-            #     - If OPTIMAL:     Add( disr_expr == best_value )
-            #     - If FEASIBLE:    Add( disr_expr ≤  best_value )
-            #   This prevents later (lower) priorities from increasing the total disruption
-            #   already achieved for ≥ p, while still allowing improvements.
-            # Warm start:
-            #   Apply the current assignment values as hints to help subsequent tiers.
+            #   Preference: stay > move > evict
             rem_tiers = max(0.0, tier_cap - time_spent_place)
             if remaining_wall() > 1e-3 and rem_tiers > 1e-3:
                 running_ge = [i for i in problem.running_idxs if problem.pod_priority[i] >= p]  # running pods with priority ≥ p
                 if running_ge:
-                    disr_expr = sum(vars.placed[i] - 2 * orig_node(i) for i in running_ge)
+                    disr_expr = sum(vars.placed[i] - 2 * orig_node(i) for i in running_ge) # maybe replace by: disr_expr = sum(2 * (1 - vars.placed[i]) + (vars.placed[i] - orig_node(i)) for i in running_ge)
                     disr_result = run_stage(disr_expr, "min", min(rem_tiers, remaining_wall()))
                     st = disr_result["status"]
                     time_spent_disr = disr_result["time_spent"]
