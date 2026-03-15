@@ -193,9 +193,9 @@ python -m scripts.kwok_workload_once.test_runner \
 
 To **reproduce the full evaluation**, each job file under `data/jobs/kwok_workload_once/` must be executed. The jobs are organized into subdirectories:
 
-- `default/` – jobs for the default scheduler (96 jobs)
+- `default/` – jobs for the default scheduler
 - `default-deterministic/` – deterministic pre-filtering jobs for seed selection (see below)
-- `plugin/` – jobs for the scheduler with OPSche (384 jobs, covering multiple solver timeouts)
+- `plugin/` – jobs for the scheduler with OPSche (covering multiple solver timeouts)
 
 #### Gathering instances for evaluation
 
@@ -270,8 +270,8 @@ python -m scripts.kwok_trace_replayer.trace_replayer \
 
 To **reproduce the full evaluation**, each job file under `data/jobs/kwok_trace_replayer/` must be executed. The jobs are organized into subdirectories:
 
-- `default/` – jobs for the default scheduler (24 jobs)
-- `plugin/` – jobs for the scheduler with OPSche (1248 jobs, covering all mode/blocking/preemption combinations)
+- `default/` – jobs for the default scheduler
+- `plugin/` – jobs for the scheduler with OPSche (covering all mode/blocking/preemption combinations)
 
 #### Organizing trace replay results
 
