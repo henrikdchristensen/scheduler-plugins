@@ -333,15 +333,7 @@ To run the analysis:
 
 Unit and integration tests are provided for both OPSche and the solver. The tests are located in `scripts/tests/` and can be run with `pytest` (tested with version `9.0.1`).
 
-For convenience, the repository also includes a `run_tests.sh` script in the root directory that runs both Python and Go tests:
-
-```bash
-./run_tests.sh
-# or run only unit tests
-./run_tests.sh unit
-# or run only integration tests
-./run_tests.sh int
-```
+For convenience, the repository also includes a `run_tests.sh` script in the root directory that runs both Python and Go tests.
 
 Before running, install the required Python dependencies:
 
@@ -350,6 +342,16 @@ Before running, install the required Python dependencies:
 pip install -r scripts/kwok_integration_tests/requirements.txt
 # For unit tests
 pip install -r scripts/test/requirements.txt
+```
+
+Then run the tests with:
+
+```bash
+./run_tests.sh
+# or run only unit tests
+./run_tests.sh unit
+# or run only integration tests
+./run_tests.sh int
 ```
 
 ## Upstream Version
