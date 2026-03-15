@@ -325,7 +325,7 @@ def test_default_vs_solver_per_seed_and_category_counts(tmp_path: Path):
     _write_results_csv(solver_csv, solver_rows)
     _write_results_csv(default_csv, default_rows)
 
-    joined = cr.default_vs_solver_per_seed(solver_csv, default_csv, cfg_name="cfg")
+    joined = cr.default_vs_solver_per_seed(solver_csv, default_csv)
     assert len(joined) == 5
 
     # default_all_running path
