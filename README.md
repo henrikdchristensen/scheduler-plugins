@@ -27,14 +27,14 @@
 
 This project is a fork of the Kubernetes-sigs project [scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) (see [Kubernetes Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) for background).
 
-It introduces **OptPlugin** (denoted **MyPriorityOptimizer** in the code), a Kubernetes scheduler plugin that improves pod-node placements by delegating placement planning to an external **solver**, aiming for **optimal placements** when feasible. Given a solver-produced plan, OptPlugin enforces it by *evicting* and *relocating* pods, potentially across multiple nodes (**cross-node preemption**). This differs from the default Kubernetes scheduler, whose built-in preemption (*DefaultPreemption*) is limited to a *single node* and can therefore cause more preemptions than necessary and lead to *suboptimal* placements.
+It introduces **OptPlugin** (denoted **MyPriorityOptimizer** in the code), a Kubernetes scheduler plugin that improves pod-node placements by delegating placement planning to an external **optimizer**, aiming for **optimal placements** when feasible. Given an optimizer-produced plan, OptPlugin enforces it by *evicting* and *relocating* pods, potentially across multiple nodes (**cross-node preemption**). This differs from the default Kubernetes scheduler, whose built-in preemption (*DefaultPreemption*) is limited to a *single node* and can therefore cause more preemptions than necessary and lead to *suboptimal* placements.
 
 Specifically, OptPlugin implements the following extension points (also called **hooks**):
 
 - **PreEnqueue** – temporarily blocks new pods from entering the scheduling queue while a placement plan is being applied.
-- **PreFilter** – steers a pod to the node selected by the solver.
+- **PreFilter** – steers a pod to the node selected by the optimizer.
 - **PostFilter** – triggers optimization after a scheduling failure (i.e., when the default scheduler cannot place a pod).
-- **Reserve/Unreserve** – reserves and releases node resources according to the solver plan.
+- **Reserve/Unreserve** – reserves and releases node resources according to the optimizer plan.
 
 Beyond these hooks, OptPlugin also includes a **background loop** that can trigger optimization in two additional ways: periodically at fixed time intervals, or during stable-queue windows (i.e., when no new pods are arriving). Together, this provides three **trigger modes**, all of which execute the same optimization flow.
 
@@ -42,38 +42,38 @@ Beyond these hooks, OptPlugin also includes a **background loop** that can trigg
 - **Periodic** – optimize running and pending pods at fixed time intervals.
 - **StableQueue** – optimize during stable-queue windows (i.e., when no new pods are arriving for a certain time).
 
-Moreover, the solver can run in either **blocking** or **non-blocking** mode:
+Moreover, the optimizer can run in either **blocking** or **non-blocking** mode:
 
-- **Blocking** – regular scheduling of new pods is paused while the solver runs and while the resulting plan is enforced.
-- **Non-blocking** – regular scheduling continues while the solver runs and is paused only during plan enforcement.
+- **Blocking** – regular scheduling of new pods is paused while the optimizer runs and while the resulting plan is enforced.
+- **Non-blocking** – regular scheduling continues while the optimizer runs and is paused only during plan enforcement.
 
-In both modes, once the solver finishes, OptPlugin re-checks the cluster state before enforcing the plan. If the state has changed and the plan is no longer valid, it is discarded.
+In both modes, once the optimizer finishes, OptPlugin re-checks the cluster state before enforcing the plan. If the state has changed and the plan is no longer valid, it is discarded.
 
 To detect **plan completion** and verify that pods end up on the intended nodes, OptPlugin also includes a **background watcher** that tracks plan completion and checks for any discrepancies between the intended and actual placements.
 
-The project provides two solver implementations, both based on the same **priority-aware** optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions):
+The project provides two optimizer implementations, both based on the same **priority-aware** optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions):
 
-- a **CP-SAT** solver implemented with the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and
-- a **Mixed-Integer Programming (MIP)** solver implemented with the Python API of [Gurobi](https://docs.gurobi.com/current/).
+- a **CP-SAT** optimizer implemented with the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and
+- a **Mixed-Integer Programming (MIP)** optimizer implemented with the Python API of [Gurobi](https://docs.gurobi.com/current/).
 
 ## Code Structure
 
 The source code for OptPlugin is located in `pkg/mypriorityoptimizer/`. The main files and their roles are:
 
 - `plugin.go` – main OptPlugin entry point and setup.
-- `args.go` and `constants.go` – OptPlugin configuration arguments and constants (e.g., trigger mode, solver timeout).
-- `optimization_flow.go` – core *optimization flow*, including solver invocation and plan application.
+- `args.go` and `constants.go` – OptPlugin configuration arguments and constants (e.g., trigger mode, optimizer timeout).
+- `optimization_flow.go` – core *optimization flow*, including optimizer invocation and plan application.
 - `loop_helpers.go`, `loop_periodic.go`, `loop_stable_queue.go` – *background-loop* logic for *Periodic* and *StableQueue* triggering.
-- `solver_external.go` and `solver_python.go` – external solver invocation and parsing of solver output.
+- `solver_external.go` and `solver_python.go` – external optimizer invocation and parsing of optimizer output.
 - `hook_preenqueue.go` – implementation of the *PreEnqueue* hook, mainly used to block new pods while optimization is running or a plan is being enforced.
-- `hook_prefilter.go` – implementation of the *PreFilter* hook, used to steer a pod to the node assigned by the solver plan.
+- `hook_prefilter.go` – implementation of the *PreFilter* hook, used to steer a pod to the node assigned by the optimizer plan.
 - `hook_postfilter.go` – implementation of the *PostFilter* hook, used to detect failed scheduling attempts; in *SchedulingFailure* mode, it also triggers optimization.
 - `hook_reserve_unreserve.go` – implementation of the *Reserve/Unreserve* hooks, used to reserve/release resources according to the plan.
 - `plan_completion_watch.go` – background watcher that tracks plan completion and verifies that pods end up on the intended nodes.
 
-The two solver implementations are located in `scripts/python_solver/` and can also serve as templates for adding other solvers.
+The two optimizer implementations are located in `scripts/python_solver/` and can also serve as templates for adding other optimizers.
 
-**Note:** Since Gurobi is a commercial solver, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID`—which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
+**Note:** Since Gurobi is a commercial optimizer, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID`—which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
 
 ## Scheduler Integration
 
@@ -125,7 +125,7 @@ componentsPatches:
     extraEnvs:
       - name: OPTIMIZE_MODE
         value: "periodic" # choices: scheduling_failure, periodic, stable_queue
-      - name: OPTIMIZE_BLOCKING_SOLVING # whether to block scheduling while the solver is running
+      - name: OPTIMIZE_BLOCKING_SOLVING # whether to block scheduling while the optimizer is running
         value: "false"
       - name: OPTIMIZE_PERIODIC_INTERVAL # interval for 'Periodic' mode
         value: 8s
@@ -133,7 +133,7 @@ componentsPatches:
         value: 8s
       - name: SOLVER_PYTHON_ENABLED
         value: "true"
-      - name: SOLVER_PYTHON_TIMEOUT # timeout for the solver before it is killed and the plan is discarded
+      - name: SOLVER_PYTHON_TIMEOUT # timeout for the optimizer before it is killed and the plan is discarded
         value: 10s
 ```
 
@@ -150,7 +150,7 @@ E1210 13:54:11.815001   22220 run.go:72] "command failed" err="[emulation versio
 
 Two evaluation approaches are provided:
 
-1. **Workload-Once Generator** (*solver evaluation*) – generates an initial workload, invokes the solver once, and evaluates the quality of the resulting placement plan.
+1. **Workload-Once Generator** (*optimizer evaluation*) – generates an initial workload, invokes the optimizer once, and evaluates the quality of the resulting placement plan.
 2. **Trace Replayer** (*OptPlugin evaluation*) – simulates workload arrivals and removals over time in a cluster and continuously evaluates the scheduler with OptPlugin.
 
 ### Experimental Setup Used for This Analysis
@@ -195,7 +195,7 @@ To **reproduce the full evaluation**, each job file under `data/jobs/kwok_worklo
 
 - `default/` – jobs for the default scheduler
 - `default-deterministic/` – deterministic pre-filtering jobs for seed selection (see below)
-- `plugin/` – jobs for the scheduler with OPSche (covering multiple solver timeouts)
+- `plugin/` – jobs for the scheduler with OptPlugin (covering multiple optimizer timeouts)
 
 ```bash
 python -m scripts.kwok_workload_once.test_runner \
@@ -271,7 +271,7 @@ To replay a trace, run:
 To **reproduce the full evaluation**, each job file under `data/jobs/kwok_trace_replayer/` must be executed. The jobs are organized into subdirectories:
 
 - `default/` – jobs for the default scheduler
-- `plugin/` – jobs for the scheduler with OPSche (covering all mode/blocking/preemption combinations)
+- `plugin/` – jobs for the scheduler with OptPlugin (covering all mode/blocking/preemption combinations)
 
 ```bash
 python -m scripts.kwok_trace_replayer.trace_replayer \
@@ -310,7 +310,7 @@ analysis/kwok_trace_replayer/
 
 Because the evaluation includes many jobs, it is useful to run them in parallel on HPC or VM resources.
 
-To prepare this, first create a `bootstrap` folder containing everything needed to run experiments on a KWOK cluster (built binaries, solver code, job files, and configuration files). From the repo root, run:
+To prepare this, first create a `bootstrap` folder containing everything needed to run experiments on a KWOK cluster (built binaries, optimizer code, job files, and configuration files). From the repo root, run:
 
 ```bash
 ./make_bootstrap_folder.sh
@@ -347,7 +347,7 @@ To run the analysis:
 
 ## Unit and Integration Tests
 
-Unit and integration tests are provided for both OptPlugin and the solvers. The tests are located in `scripts/tests/` and can be run with `pytest` (tested with version `9.0.1`).
+Unit and integration tests are provided for both OptPlugin and the optimizers. The tests are located in `scripts/tests/` and can be run with `pytest` (tested with version `9.0.1`).
 
 For convenience, the repository also includes a `run_tests.sh` script in the root directory that runs both Python and Go tests.
 
