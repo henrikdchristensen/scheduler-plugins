@@ -51,6 +51,11 @@ In both modes, once the solver finishes, OPSche re-checks the cluster state befo
 
 To detect **plan completion** and verify that pods end up on the intended nodes, OPSche also includes a **background watcher** that tracks plan completion and checks for any discrepancies between the intended and actual placements.
 
+<!-- TODO: uncomment when Gurobi solver is included -->
+<!-- The project provides two solver implementations, both based on the same priority-aware optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions): -->
+<!-- - a **CP-SAT** solver implemented with the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and -->
+<!-- - a **Mixed-Integer Programming (MIP)** solver implemented with the Python API of [Gurobi](https://docs.gurobi.com/current/). -->
+
 The solver implementation uses a **priority-aware** optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions). It is implemented as a **CP-SAT** solver using the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver).
 
 ## Code Structure
@@ -69,6 +74,10 @@ The source code for OPSche is located in `pkg/mypriorityoptimizer/`. The main fi
 - `plan_completion_watch.go` – background watcher that tracks plan completion and verifies that pods end up on the intended nodes.
 
 The solver implementation is located in `scripts/python_solver/` and can also serve as a template for adding other solvers.
+
+<!-- TODO: uncomment when Gurobi solver is included -->
+<!-- The two solver implementations are located in `scripts/python_solver/` and can also serve as templates for adding other solvers. -->
+<!-- **Note:** Since Gurobi is a commercial solver, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID`—which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access. -->
 
 ## Scheduler Integration
 
@@ -156,6 +165,8 @@ The evaluations in this analysis were executed on machines with the following sp
 - **Memory:** 48 GB RAM
 - **Operating system:** Ubuntu 24.04
 - **Solver library:** OR-Tools 9.14.6206
+<!-- TODO: uncomment when Gurobi solver is included -->
+<!-- - **Optimizer libraries:** OR-Tools 9.14.6206 and GurobiPy 13.0.1 -->
 
 #### Scheduler setups
 
@@ -332,6 +343,9 @@ To run the analysis:
 ## Unit and Integration Tests
 
 Unit and integration tests are provided for both OPSche and the solver. The tests are located in `scripts/tests/` and can be run with `pytest` (tested with version `9.0.1`).
+
+<!-- TODO: uncomment when Gurobi solver is included -->
+<!-- Unit and integration tests are provided for both OptPlugin and the solvers. -->
 
 For convenience, the repository also includes a `run_tests.sh` script in the root directory that runs both Python and Go tests.
 
