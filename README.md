@@ -80,11 +80,10 @@ OPSche is registered in `cmd/scheduler/main.go`, which ensures it is included in
 
 The scheduler and OPSche can be built into a **binary** that can then be run in a cluster (e.g., with [KWOK](https://kwok.sigs.k8s.io/)). The following tools are required to build the scheduler and OPSche:
 
-- `git` (tested with 2.43.0)
 - `make` (tested with 4.3)
+- `Go` (tested with 1.24.3)
 - `python3` (tested with 3.10.12)
 - `pip` (tested with 24.0)
-- `Go` (tested with 1.24.3)
 
 Currently, the project has been tested on **amd64** and **arm64**. Running on other architectures should not be a problem but has not been verified.
 
