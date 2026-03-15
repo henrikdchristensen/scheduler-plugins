@@ -5,9 +5,9 @@
   - [Overview](#overview)
   - [Code Structure](#code-structure)
   - [Scheduler Integration](#scheduler-integration)
-  - [Building the Scheduler and OPSche](#building-the-scheduler-and-opsche)
+  - [Building the Scheduler and OptPlugin](#building-the-scheduler-and-optplugin)
   - [Requirements for Running on a KWOK Cluster](#requirements-for-running-on-a-kwok-cluster)
-  - [Evaluation of OPSche on a KWOK Cluster](#evaluation-of-opsche-on-a-kwok-cluster)
+  - [Evaluation of OptPlugin on a KWOK Cluster](#evaluation-of-optplugin-on-a-kwok-cluster)
     - [Experimental Setup Used for This Analysis](#experimental-setup-used-for-this-analysis)
       - [Scheduler setups](#scheduler-setups)
     - [Workload Once Generator](#workload-once-generator)
@@ -27,16 +27,16 @@
 
 This project is a fork of the Kubernetes-sigs project [scheduler-plugins](https://github.com/kubernetes-sigs/scheduler-plugins) (see [Kubernetes Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/) for background).
 
-It introduces **OPSche** (denoted **MyPriorityOptimizer** in the code), a Kubernetes scheduler plugin that improves pod-node placements by delegating placement planning to an external **solver**, aiming for **optimal placements** when feasible. Given a solver-produced plan, OPSche enforces it by *evicting* and *relocating* pods, potentially across multiple nodes (**cross-node preemption**). This differs from the default Kubernetes scheduler, whose built-in preemption (*DefaultPreemption*) is limited to a *single node* and can therefore cause more preemptions than necessary and lead to *suboptimal* placements.
+It introduces **OptPlugin** (denoted **MyPriorityOptimizer** in the code), a Kubernetes scheduler plugin that improves pod-node placements by delegating placement planning to an external **solver**, aiming for **optimal placements** when feasible. Given a solver-produced plan, OptPlugin enforces it by *evicting* and *relocating* pods, potentially across multiple nodes (**cross-node preemption**). This differs from the default Kubernetes scheduler, whose built-in preemption (*DefaultPreemption*) is limited to a *single node* and can therefore cause more preemptions than necessary and lead to *suboptimal* placements.
 
-Specifically, OPSche implements the following extension points (also called **hooks**):
+Specifically, OptPlugin implements the following extension points (also called **hooks**):
 
 - **PreEnqueue** – temporarily blocks new pods from entering the scheduling queue while a placement plan is being applied.
 - **PreFilter** – steers a pod to the node selected by the solver.
 - **PostFilter** – triggers optimization after a scheduling failure (i.e., when the default scheduler cannot place a pod).
 - **Reserve/Unreserve** – reserves and releases node resources according to the solver plan.
 
-Beyond these hooks, OPSche also includes a **background loop** that can trigger optimization in two additional ways: periodically at fixed time intervals, or during stable-queue windows (i.e., when no new pods are arriving). Together, this provides three **trigger modes**, all of which execute the same optimization flow.
+Beyond these hooks, OptPlugin also includes a **background loop** that can trigger optimization in two additional ways: periodically at fixed time intervals, or during stable-queue windows (i.e., when no new pods are arriving). Together, this provides three **trigger modes**, all of which execute the same optimization flow.
 
 - **SchedulingFailure** – optimize after each failed scheduling attempt (generally not recommended for large clusters).
 - **Periodic** – optimize running and pending pods at fixed time intervals.
@@ -47,23 +47,21 @@ Moreover, the solver can run in either **blocking** or **non-blocking** mode:
 - **Blocking** – regular scheduling of new pods is paused while the solver runs and while the resulting plan is enforced.
 - **Non-blocking** – regular scheduling continues while the solver runs and is paused only during plan enforcement.
 
-In both modes, once the solver finishes, OPSche re-checks the cluster state before enforcing the plan. If the state has changed and the plan is no longer valid, it is discarded.
+In both modes, once the solver finishes, OptPlugin re-checks the cluster state before enforcing the plan. If the state has changed and the plan is no longer valid, it is discarded.
 
-To detect **plan completion** and verify that pods end up on the intended nodes, OPSche also includes a **background watcher** that tracks plan completion and checks for any discrepancies between the intended and actual placements.
+To detect **plan completion** and verify that pods end up on the intended nodes, OptPlugin also includes a **background watcher** that tracks plan completion and checks for any discrepancies between the intended and actual placements.
 
-<!-- TODO: uncomment when Gurobi solver is included -->
-<!-- The project provides two solver implementations, both based on the same priority-aware optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions): -->
-<!-- - a **CP-SAT** solver implemented with the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and -->
-<!-- - a **Mixed-Integer Programming (MIP)** solver implemented with the Python API of [Gurobi](https://docs.gurobi.com/current/). -->
+The project provides two solver implementations, both based on the same **priority-aware** optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions):
 
-The solver implementation uses a **priority-aware** optimization model. The objective is to schedule as many *high-priority* pods as possible while *minimizing disruption* (i.e., reducing reallocations and evictions). It is implemented as a **CP-SAT** solver using the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver).
+- a **CP-SAT** solver implemented with the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and
+- a **Mixed-Integer Programming (MIP)** solver implemented with the Python API of [Gurobi](https://docs.gurobi.com/current/).
 
 ## Code Structure
 
-The source code for OPSche is located in `pkg/mypriorityoptimizer/`. The main files and their roles are:
+The source code for OptPlugin is located in `pkg/mypriorityoptimizer/`. The main files and their roles are:
 
-- `plugin.go` – main OPSche entry point and setup.
-- `args.go` and `constants.go` – OPSche configuration arguments and constants (e.g., trigger mode, solver timeout).
+- `plugin.go` – main OptPlugin entry point and setup.
+- `args.go` and `constants.go` – OptPlugin configuration arguments and constants (e.g., trigger mode, solver timeout).
 - `optimization_flow.go` – core *optimization flow*, including solver invocation and plan application.
 - `loop_helpers.go`, `loop_periodic.go`, `loop_stable_queue.go` – *background-loop* logic for *Periodic* and *StableQueue* triggering.
 - `solver_external.go` and `solver_python.go` – external solver invocation and parsing of solver output.
@@ -73,21 +71,19 @@ The source code for OPSche is located in `pkg/mypriorityoptimizer/`. The main fi
 - `hook_reserve_unreserve.go` – implementation of the *Reserve/Unreserve* hooks, used to reserve/release resources according to the plan.
 - `plan_completion_watch.go` – background watcher that tracks plan completion and verifies that pods end up on the intended nodes.
 
-The solver implementation is located in `scripts/python_solver/` and can also serve as a template for adding other solvers.
+The two solver implementations are located in `scripts/python_solver/` and can also serve as templates for adding other solvers.
 
-<!-- TODO: uncomment when Gurobi solver is included -->
-<!-- The two solver implementations are located in `scripts/python_solver/` and can also serve as templates for adding other solvers. -->
-<!-- **Note:** Since Gurobi is a commercial solver, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID`—which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access. -->
+**Note:** Since Gurobi is a commercial solver, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID`—which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
 
 ## Scheduler Integration
 
-Plugins in the Kubernetes scheduler are enabled through a **scheduler configuration manifest** that selects the plugin and its settings. The manifests for OPSche are located in `manifests/mypriorityoptimizer/` (see also [Scheduler Configuration](https://kubernetes.io/docs/reference/scheduling/config/) for background).
+Plugins in the Kubernetes scheduler are enabled through a **scheduler configuration manifest** that selects the plugin and its settings. The manifests for OptPlugin are located in `manifests/mypriorityoptimizer/` (see also [Scheduler Configuration](https://kubernetes.io/docs/reference/scheduling/config/) for background).
 
-OPSche is registered in `cmd/scheduler/main.go`, which ensures it is included in the scheduler binary at build time.
+OptPlugin is registered in `cmd/scheduler/main.go`, which ensures it is included in the scheduler binary at build time.
 
-## Building the Scheduler and OPSche
+## Building the Scheduler and OptPlugin
 
-The scheduler and OPSche can be built into a **binary** that can then be run in a cluster (e.g., with [KWOK](https://kwok.sigs.k8s.io/)). The following tools are required to build the scheduler and OPSche:
+The scheduler and OptPlugin can be built into a **binary** that can then be run in a cluster (e.g., with [KWOK](https://kwok.sigs.k8s.io/)). The following tools are required to build the scheduler and OptPlugin:
 
 - `make` (tested with 4.3)
 - `Go` (tested with 1.24.3)
@@ -106,12 +102,12 @@ The resulting scheduler binary is written to `bin/kube-scheduler`. The build pro
 
 ## Requirements for Running on a KWOK Cluster
 
-To run the scheduler with OPSche on a **KWOK** cluster, a few additional tools are required (tools already listed in [Building the Scheduler and OPSche](#building-the-scheduler-and-opsche) are omitted):
+To run the scheduler with OptPlugin on a **KWOK** cluster, a few additional tools are required (tools already listed in [Building the Scheduler and OptPlugin](#building-the-scheduler-and-optplugin) are omitted):
 
 - `kubectl` (tested with client v1.32.7)
 - `kwok` and `kwokctl` (tested with v0.7.0)
 
-Running the scheduler and OPSche on KWOK also requires a **KWOK cluster configuration file**. An example is `data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml`:
+Running the scheduler and OptPlugin on KWOK also requires a **KWOK cluster configuration file**. An example is `data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml`:
 
 ```yaml
 kind: KwokctlConfiguration
@@ -150,12 +146,12 @@ kwokctl logs kube-scheduler --name kwok1
 E1210 13:54:11.815001   22220 run.go:72] "command failed" err="[emulation version 0.33 is not between [1.31, 0.33.0], minCompatibilityVersion version 0.32 is not between [1.31, 0.33]]"
 ```
 
-## Evaluation of OPSche on a KWOK Cluster
+## Evaluation of OptPlugin on a KWOK Cluster
 
 Two evaluation approaches are provided:
 
 1. **Workload-Once Generator** (*solver evaluation*) – generates an initial workload, invokes the solver once, and evaluates the quality of the resulting placement plan.
-2. **Trace Replayer** (*OPSche evaluation*) – simulates workload arrivals and removals over time in a cluster and continuously evaluates the scheduler with OPSche.
+2. **Trace Replayer** (*OptPlugin evaluation*) – simulates workload arrivals and removals over time in a cluster and continuously evaluates the scheduler with OptPlugin.
 
 ### Experimental Setup Used for This Analysis
 
@@ -164,20 +160,18 @@ The evaluations in this analysis were executed on machines with the following sp
 - **CPU:** 8 vCPUs (Intel Xeon Gold 6130)
 - **Memory:** 48 GB RAM
 - **Operating system:** Ubuntu 24.04
-- **Solver library:** OR-Tools 9.14.6206
-<!-- TODO: uncomment when Gurobi solver is included -->
-<!-- - **Optimizer libraries:** OR-Tools 9.14.6206 and GurobiPy 13.0.1 -->
+- **Optimizer libraries:** OR-Tools 9.14.6206 and GurobiPy 13.0.1
 
 #### Scheduler setups
 
-To compare the default scheduler against the OPSche approach, two cluster configurations are used:
+To compare the default scheduler against the OptPlugin approach, two cluster configurations are used:
 
-1. **Default scheduler** – the default Kubernetes scheduler without OPSche, configured with `data/configs-kwokctl/default.yaml`.
-2. **Scheduler with OPSche** – the scheduler with OPSche enabled and configured with `data/configs-kwokctl/plugin-scheduler-defpreempt=<1|0>.yaml` (1=default preemption enabled, 0=default preemption disabled).
+1. **Default scheduler** – the default Kubernetes scheduler without OptPlugin, configured with `data/configs-kwokctl/default.yaml`.
+2. **Scheduler with OptPlugin** – the scheduler with OptPlugin enabled and configured with `data/configs-kwokctl/plugin-scheduler-defpreempt=<1|0>.yaml` (1=default preemption enabled, 0=default preemption disabled).
 
 ### Workload Once Generator
 
-The **Workload Once Generator** creates workload instances and evaluates them with both the default scheduler and the scheduler with OPSche.
+The **Workload Once Generator** creates workload instances and evaluates them with both the default scheduler and the scheduler with OptPlugin.
 
 For the lower utilization levels (90% and 95%), a deterministic seed pre-filtering step is first applied to exclude trivial cases where all pods are scheduled. This step uses `data/configs-kwokctl/default-deterministic.yaml`, which enables `MyDeterministicScore` (`pkg/mydeterministicscore/`) to break scoring ties by pod name, disables `DefaultPreemption`, and sets `parallelism=1` to make scheduling fully deterministic.
 
@@ -215,7 +209,7 @@ For **90% and 95% utilization**, seed selection is performed in two steps to fil
 
 2. **Evaluation on selected seeds**
    These seeds are saved as configuration-specific files (e.g.,
-   `nodes4_pods16_prio1_util095.txt`) under `data/seeds/kwok_workload_once/` and used for both the default scheduler and OPSche runs.
+   `nodes4_pods16_prio1_util095.txt`) under `data/seeds/kwok_workload_once/` and used for both the default scheduler and OptPlugin runs.
 
 #### Organizing workload once results
 
@@ -241,7 +235,7 @@ analysis/kwok_workload_once/
 
 ### Trace Replayer
 
-The **Trace Replayer** workflow consists of two steps: **trace generation** and **trace replay**. Traces are first generated, then replayed with both the default scheduler and the scheduler with OPSche.
+The **Trace Replayer** workflow consists of two steps: **trace generation** and **trace replay**. Traces are first generated, then replayed with both the default scheduler and the scheduler with OptPlugin.
 
 #### Generating traces
 
@@ -264,7 +258,7 @@ python -m scripts.kwok_trace_replayer.trace_generator \
 
 #### Replaying traces
 
-After traces have been generated, they can be replayed with `scripts/kwok_trace_replayer/trace_replayer.py`. The replayer uses job files in `data/jobs/kwok_trace_replayer/`, which specify the trace to replay and how OPSche should be configured for that run.
+After traces have been generated, they can be replayed with `scripts/kwok_trace_replayer/trace_replayer.py`. The replayer uses job files in `data/jobs/kwok_trace_replayer/`, which specify the trace to replay and how OptPlugin should be configured for that run.
 
 To replay a trace, run:
 
@@ -342,10 +336,7 @@ To run the analysis:
 
 ## Unit and Integration Tests
 
-Unit and integration tests are provided for both OPSche and the solver. The tests are located in `scripts/tests/` and can be run with `pytest` (tested with version `9.0.1`).
-
-<!-- TODO: uncomment when Gurobi solver is included -->
-<!-- Unit and integration tests are provided for both OptPlugin and the solvers. -->
+Unit and integration tests are provided for both OptPlugin and the solvers. The tests are located in `scripts/tests/` and can be run with `pytest` (tested with version `9.0.1`).
 
 For convenience, the repository also includes a `run_tests.sh` script in the root directory that runs both Python and Go tests.
 
