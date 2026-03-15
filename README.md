@@ -93,8 +93,6 @@ To **build** the binary, run the following script from the repo root:
 ./build.sh
 ```
 
-**Note:** You may get prompted to install some required Go dependencies, which can be done with `go get`.
-
 The resulting scheduler binary is written to `bin/kube-scheduler`. The build process also downloads `kube-apiserver` and `kube-controller-manager` into `bin/`, since they are required for running KWOK clusters; keeping them there avoids re-downloading them for each cluster creation.
 
 ## Requirements for Running on a KWOK Cluster
