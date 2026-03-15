@@ -16,9 +16,7 @@ def is_finite(x: object) -> bool:
         return False
 
 def safe_div(num: pd.Series, den: pd.Series) -> pd.Series:
-    """
-    Safely divide two pandas, returning 0.0 for division by zero.
-    """
+    """Element-wise division, returning 0.0 where den is zero."""
     return num.div(den.replace(0, np.nan)).fillna(0.0)
 
 def rate(num: float, den: float) -> float:

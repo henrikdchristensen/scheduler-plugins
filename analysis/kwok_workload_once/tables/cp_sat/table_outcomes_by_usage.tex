@@ -1,0 +1,20 @@
+\begin{table}[H]
+\centering
+\caption[Optimizer Results: Outcome Breakdown by Load Levels]{Outcome breakdown by target load levels, aggregated over number of nodes, pods per node, priority levels, and optimizer timeouts. Values are reported as percentages of instances in each outcome category after aggregation across those dimensions. Rows list the outcome categories, and columns correspond to target load levels.}
+\label{tab:outcomes-by-usage}
+\adjustbox{max width=\linewidth}{%
+\begin{tabular}{l c c c c}
+\toprule
+\multirow{2}{*}{\textbf{Outcome}} & \multicolumn{4}{c}{\textbf{Target load (\%)}} \\
+\cmidrule(lr){2-5}
+ & 90\% & 95\% & 100\% & 105\% \\
+\midrule
+Failures (\%) & 9.6 & 18.3 & 16.5 & 17.1 \\
+No Calls (\%) & 31.0 & 2.4 & 0.1 & 0.0 \\
+KWOK Optimal (\%) & 12.3 & 7.9 & 8.4 & 9.0 \\
+Better (\%) & 7.7 & 27.7 & 51.5 & 50.6 \\
+Better\&Optimal (\%) & 39.4 & 43.7 & 23.5 & 23.3 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

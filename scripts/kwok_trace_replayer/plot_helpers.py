@@ -6,6 +6,7 @@ from typing import Any, List
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 
 from scripts.kwok_trace_replayer.trace_helpers import (
     estimate_pareto_params,
@@ -52,13 +53,13 @@ def plot_utilization_and_num_pods(
     logger=None,
 ) -> None:
     """
-    Plot effective utilization (max(cpu, mem)) and pod-count time series.
+    Plot usage (max(cpu, mem)) and pod-count time series.
     """
     if not times:
         return
 
     t_s = np.asarray(times, dtype=float)
-    util = np.asarray(u_req_hist, dtype=float)
+    util = np.asarray(u_req_hist, dtype=float)   # still stored as fractions, e.g. 0.90
     pods = np.asarray(pods_hist, dtype=float)
 
     max_time_s = float(np.nanmax(t_s)) if t_s.size else 0.0
@@ -75,9 +76,10 @@ def plot_utilization_and_num_pods(
     c_util = colors[0] if len(colors) > 0 else "C0"
     c_pods = colors[1] if len(colors) > 1 else "C1"
 
-    l1, = ax1.plot(x, util, label="effective utilization, max(cpu, mem)", linewidth=0.9, color=c_util)
+    l1, = ax1.plot(x, util, label="load", linewidth=0.9, color=c_util)
     ax1.set_xlabel(x_label, labelpad=20)
-    ax1.set_ylabel("effective utilization, max(cpu, mem)", color=c_util)
+    ax1.set_ylabel("load (%)", color=c_util)
+    ax1.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0, decimals=0))
     ax1.tick_params(axis="y", colors=c_util)
     ax1.grid(True, linestyle="--", alpha=0.4)
 
@@ -86,61 +88,101 @@ def plot_utilization_and_num_pods(
     ax2.set_ylabel("number of pods", color=c_pods)
     ax2.tick_params(axis="y", colors=c_pods)
 
-    ax1.legend([l1, l2], ["effective utilization, max(cpu, mem)", "number of pods"], loc="lower right", frameon=False)
+    ax1.legend([l1, l2], ["load", "number of pods"], loc="upper right", frameon=True)
 
-    # Build event stream in seconds (for counting)
-    events: List[tuple[float, str]] = []
+    # Build event stream in seconds (weighted by replicas, so counts are pods)
+    events: List[tuple[float, str, int]] = []
     for p in all_pods:
-        events.append((float(p.start_time), "C"))
-        events.append((float(p.end_time), "D"))
+        w = int(getattr(p, "replicas", 1))
+        events.append((float(p.start_time), "C", w))  # created
+        events.append((float(p.end_time), "D", w))    # deleted
     events.sort(key=lambda e: e[0])
 
     # Annotate initial snapshot at time 0
-    ax1.text(
-        0.0,
-        -0.10,
+    ax1.annotate(
         f"+{int(initial_pods_count)}",
-        transform=ax1.get_xaxis_transform(),
+        xy=(0.0, -0.10),
+        xycoords=ax1.get_xaxis_transform(),
+        xytext=(-10, 0),              # move left by 10 points
+        textcoords="offset points",
         ha="left",
         va="top",
         fontsize=8,
+        color="gray",
+        clip_on=False,
     )
 
     # Annotate per-tick creation/deletion counts.
-    xticks_x = [v for v in ax1.get_xticks() if 0.0 <= v <= max_x]
+    # Important: include the final trace boundary (max_x), because matplotlib ticks
+    # often stop before the exact endpoint.
+    xticks_x = sorted(float(v) for v in ax1.get_xticks() if 0.0 <= float(v) <= max_x)
+
+    if not xticks_x:
+        xticks_x = [0.0]
+
+    # Append explicit final boundary if it is not already a tick
+    atol = max(1e-9, 1e-6 * max(1.0, max_x))
+    if max_x > 0.0 and not np.isclose(xticks_x[-1], max_x, atol=atol, rtol=0.0):
+        xticks_x.append(max_x)
+
     if events and xticks_x:
         idx = 0
         n_events = len(events)
+        shown_interval_labels = 0  # add this before the for-loop
+
         for i, tick_x in enumerate(xticks_x):
             left_x = 0.0 if i == 0 else xticks_x[i - 1]
             right_x = tick_x
 
-            # Convert tick window back to seconds for comparisons
+            # Convert tick window back to seconds
             left_s = left_x / x_scale if x_scale > 0 else 0.0
             right_s = right_x / x_scale if x_scale > 0 else 0.0
 
             c_count = 0
             d_count = 0
 
-            while idx < n_events and events[idx][0] <= right_s:
-                t_event_s, kind = events[idx]
+            # Consume all events up to the right boundary
+            while idx < n_events and events[idx][0] <= right_s + 1e-12:
+                t_event_s, kind, weight = events[idx]
                 idx += 1
-                if t_event_s > left_s:
-                    if kind == "C":
-                        c_count += 1
-                    else:
-                        d_count += 1
 
-            if c_count or d_count:
-                ax1.text(
-                    tick_x,
-                    -0.10,
+                # Keep initial t=0 events out of interval labels (shown separately above)
+                if t_event_s > left_s + 1e-12:
+                    if kind == "C":
+                        c_count += weight
+                    else:
+                        d_count += weight
+
+            is_final_boundary = np.isclose(right_x, max_x, atol=atol, rtol=0.0)
+
+            if c_count or d_count or is_final_boundary:
+                # Default placement for middle labels
+                x_offset_pts = 0
+                ha = "center"
+
+                # First shown interval label: nudge a bit left
+                if shown_interval_labels == 0 and not is_final_boundary:
+                    x_offset_pts = -6
+                    ha = "center"
+
+                # Final label: nudge a bit right
+                if is_final_boundary:
+                    x_offset_pts = +16
+                    ha = "right"
+
+                ax1.annotate(
                     f"+{c_count} -{d_count}",
-                    transform=ax1.get_xaxis_transform(),
-                    ha="center",
+                    xy=(tick_x, -0.10),
+                    xycoords=ax1.get_xaxis_transform(),
+                    xytext=(x_offset_pts, 0),
+                    textcoords="offset points",
+                    ha=ha,
                     va="top",
                     fontsize=8,
+                    color="gray",
+                    clip_on=False,
                 )
+                shown_interval_labels += 1
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.22)

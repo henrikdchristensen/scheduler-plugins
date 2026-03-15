@@ -430,7 +430,7 @@ class GurobiSolver:
         running_idxs = [i for i in range(num_pods) if pod_node_j[i] is not None]
         pending_idxs = [i for i in range(num_pods) if pod_node_j[i] is None]
 
-        # Eligible nodes (all for now - affinity TODO)
+        # Eligible nodes
         eligible_nodes = [list(range(num_nodes)) for _ in range(num_pods)]
         eligible_pos = [{j: local for local, j in enumerate(enl)} for enl in eligible_nodes]
 

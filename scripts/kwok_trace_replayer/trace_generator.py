@@ -169,8 +169,8 @@ class TraceGenerator:
         self.initial_path = self.output_dir / "initial.json"
         self.trace_path = self.output_dir / "trace.json"
         self.info_path = self.output_dir / "info_generate.yaml"
-        self.util_plot_path = self.figures_dir / "utilization.png"
-        self.hist_plot_path = self.figures_dir / "histograms.png"
+        self.util_plot_path = self.figures_dir / "utilization.pdf"
+        self.hist_plot_path = self.figures_dir / "histograms.pdf"
 
         # Fitted Pareto alphas
         self.alpha_arrival = None

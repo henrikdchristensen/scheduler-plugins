@@ -14,10 +14,9 @@ import (
 // -------------------------
 
 // Reserve is called at the end of scheduling cycle to reserve resources for a
-// pod on a specific node. If it fails, the Unreserve function is called to
-// release any reserved resources. It is used, here, to place workload pods on
-// the appropriate nodes as when they are rescheduled they are automatically
-// created, therefore, placement by name cannot be done.
+// pod on a specific node. For workload-owned pods (e.g. ReplicaSets), exact
+// name-based placement is not possible because rescheduled pods get new names,
+// so we track per-workload per-node quotas instead.
 func (pl *SharedState) Reserve(ctx context.Context, st fwk.CycleState, pending *v1.Pod, node string) *fwk.Status {
 
 	stage := "Reserve"
@@ -76,9 +75,7 @@ func (pl *SharedState) Reserve(ctx context.Context, st fwk.CycleState, pending *
 // Unreserve
 // -------------------------
 
-// Unreserve is called to release any reserved resources for a pod on a specific
-// node. It is used, here, to return workload quota if the pod could not be
-// scheduled.
+// Unreserve returns workload quota when a pod's scheduling cycle is rejected.
 func (pl *SharedState) Unreserve(ctx context.Context, st fwk.CycleState, pending *v1.Pod, _ string) {
 	stage := "Unreserve"
 

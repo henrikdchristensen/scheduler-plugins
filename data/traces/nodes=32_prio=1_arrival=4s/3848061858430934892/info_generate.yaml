@@ -1,15 +1,15 @@
 meta:
-  timestamp: 2026/02/03/09:24:47
+  timestamp: 2026/02/26/16:40:09
   git:
-    commit: c8f7068c13ad0a3d2ed628cdf39d3ba7a93d75ec
-    branch: opt-prio-refactor
+    commit: 980ff16190ff6d920af2539d1df4f9f9cacfe21f
+    branch: opt-prio-patches
 inputs:
-  cli-cmd: python /mnt/c/projects/master/scheduler-plugins/scripts/kwok_trace_replayer/trace_generator.py
+  cli-cmd: python /mnt/d/projects/master/scheduler-plugins/scripts/kwok_trace_replayer/trace_generator.py
     --job-dir data/jobs/kwok_trace_generator/
   args:
-    job_file: /mnt/c/projects/master/scheduler-plugins/data/jobs/kwok_trace_generator/nodes=32_prio=1_arrival=4s.yaml
+    job_file: /mnt/d/projects/master/scheduler-plugins/data/jobs/kwok_trace_generator/nodes=32_prio=1_arrival=4s.yaml
     job_dir: null
-    output_dir: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892
+    output_dir: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892
     seed: 3848061858430934892
     seed_file: data/seeds/kwok_trace_generator/seeds.txt
     log_level: INFO
@@ -93,7 +93,7 @@ inputs:
       trace_replicas_total: 3486
     max_priority_seen: 1
     files:
-      initial_json: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/initial.json
-      trace_json: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/trace.json
-      utilization_plot: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/figures/utilization.png
-      histograms_plot: /mnt/c/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/figures/histograms.png
+      initial_json: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/initial.json
+      trace_json: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/trace.json
+      utilization_plot: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/figures/utilization.pdf
+      histograms_plot: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=1_arrival=4s/3848061858430934892/figures/histograms.pdf

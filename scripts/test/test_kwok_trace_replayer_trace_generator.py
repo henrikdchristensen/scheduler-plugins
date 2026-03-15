@@ -141,8 +141,8 @@ def test_init_from_args_creates_figures_dir(tmp_path: Path):
     )
     assert gen.output_dir.exists()
     assert gen.figures_dir.exists()
-    assert gen.util_plot_path.name == "utilization.png"
-    assert gen.hist_plot_path.name == "histograms.png"
+    assert gen.util_plot_path.name == "utilization.pdf"
+    assert gen.hist_plot_path.name == "histograms.pdf"
     assert gen.times == []
     assert gen.u_eff_hist == []
     assert gen.pods_hist == []
@@ -1041,11 +1041,11 @@ def test_run_seed_infers_mean_life_writes_and_plots(tmp_path: Path, monkeypatch)
 
     def fake_util(**kwargs):
         called["util"] += 1
-        assert kwargs["out_path"].endswith("utilization.png")
+        assert kwargs["out_path"].endswith("utilization.pdf")
 
     def fake_hist(**kwargs):
         called["hist"] += 1
-        assert kwargs["out_path"].endswith("histograms.png")
+        assert kwargs["out_path"].endswith("histograms.pdf")
 
     monkeypatch.setattr(tg, "plot_utilization_and_num_pods", fake_util)
     monkeypatch.setattr(tg, "plot_generator_histograms", fake_hist)

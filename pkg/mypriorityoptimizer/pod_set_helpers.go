@@ -67,8 +67,7 @@ func (pl *SharedState) prunePodSet(podSet *PodSet) int {
 // AddPod
 // -------------------------
 
-// AddPod adds a pod to the set. Use mutex to protect the map such that only one
-// goroutine can modify the map at a time.
+// AddPod adds a pod to the set.
 func (s *PodSet) AddPod(p *v1.Pod) {
 	if p == nil {
 		return
@@ -82,8 +81,7 @@ func (s *PodSet) AddPod(p *v1.Pod) {
 // RemovePod
 // -------------------------
 
-// RemovePod removes a pod from the set. Use mutex to protect the map such that
-// only one goroutine can modify the map at a time.
+// RemovePod removes a pod from the set.
 func (s *PodSet) RemovePod(uid types.UID) {
 	s.mu.Lock()
 	delete(s.m, uid)
@@ -94,8 +92,7 @@ func (s *PodSet) RemovePod(uid types.UID) {
 // Size
 // -------------------------
 
-// Size returns the number of pods in the set. Use mutex so that we can read the
-// map safely.
+// Size returns the number of pods in the set.
 func (s *PodSet) Size() int {
 	s.mu.RLock()
 	n := len(s.m)
@@ -107,8 +104,7 @@ func (s *PodSet) Size() int {
 // Snapshot
 // -------------------------
 
-// Snapshot returns a snapshot of the current pods in the set. Use mutex so that
-// we can read the map safely.
+// Snapshot returns a copy of the current pods in the set.
 func (s *PodSet) Snapshot() map[types.UID]SolverPod {
 	s.mu.RLock()
 	out := make(map[types.UID]SolverPod, len(s.m))

@@ -6,7 +6,7 @@ import (
 )
 
 // PluginConfigSnapshot captures a single snapshot of the plugin's configuration
-// (constants + env/args). Add new fields here as needed.
+// (constants + env/args).
 type PluginConfigSnapshot struct {
 	Timestamp time.Time `json:"timestamp"`
 
@@ -53,5 +53,5 @@ type PluginConfigSnapshot struct {
 	PlanCompletionCheckInterval string `json:"planCompletionCheckInterval"`
 	PlanActivationTimeout       string `json:"planActivationTimeout"`
 	WaitPodsGoneInterval        string `json:"waitPodsGoneInterval"`
-	EvictParallelism    		int    `json:"evictParallelism"`
+	EvictParallelism            int    `json:"evictParallelism"`
 }

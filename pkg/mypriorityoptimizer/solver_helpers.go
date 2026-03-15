@@ -116,8 +116,8 @@ func buildBaselineScore(pods []*v1.Pod) SolverScore {
 // solverConfigArgs
 // -------------------------
 
-// solverConfigArgs builds a list of key-value pairs representing the active
-// solver configuration. Add new config flags here as needed.
+// solverConfigArgs builds a list of key-value pairs for logging the active
+// solver configuration.
 func solverConfigArgs() []any {
 	args := make([]any, 0, 12)
 	if SolverPythonEnabled {
