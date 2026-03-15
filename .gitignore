@@ -27,7 +27,6 @@ vendor
 *pytest_cache/
 __pycache__/
 .VSCodeCounter
-.vagrant/
 /bootstrap/
 output/
 results/

@@ -1,10 +1,9 @@
 [run]
-# Don’t count test code towards coverage.
+# Don’t count test and plotting code towards coverage.
 omit =
     scripts/test/*
     scripts/test/**
     scripts/helpers/job_helpers.py
-    scripts/helpers/list_filenames.py 
     scripts/helpers/plot_config.py
     scripts/helpers/plot_helpers.py
     scripts/helpers/table_helpers.py

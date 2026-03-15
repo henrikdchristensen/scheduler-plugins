@@ -15,7 +15,7 @@ echo "Environment variables loaded."
 MODE="${1:-all}"
 
 # Parse optional --solver argument (for integration tests)
-INT_SOLVER_FILTER="all"  # default: run all solvers (cp_sat, gurobi)
+INT_SOLVER_FILTER="cp_sat"  # default: run cp_sat only (use --solver all to include gurobi)
 shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -165,7 +165,13 @@ if "$RUN_INT_KWOK"; then
   echo "=== Running Integration tests with KWOK ==="
 
   echo "Building kube-scheduler with mypriorityoptimizer plugin..."
-  make build-scheduler GO_BUILD_ENV='CGO_ENABLED=0 GOOS=linux GOARCH=amd64' VERSION=${SCHEDULER_VERSION}
+  HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$(uname -m)" in
+    x86_64)  HOST_ARCH="amd64" ;;
+    aarch64|arm64) HOST_ARCH="arm64" ;;
+    *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+  esac
+  make build-scheduler GO_BUILD_ENV="CGO_ENABLED=0 GOOS=${HOST_OS} GOARCH=${HOST_ARCH}" VERSION=${SCHEDULER_VERSION}
 
   ensure_python_solver_env
 
