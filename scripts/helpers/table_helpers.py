@@ -43,9 +43,6 @@ def fmt_signed(x: object, decimals: int) -> str:
     return f"{(0.0 if v == 0.0 else v):+.{decimals}f}"
 
 def fmt_unsigned_int(x: object) -> str:
-    """
-    Format an unsigned integer value.
-    """
     if not is_finite(x):
         return nan_str()
     return f"{int(round(float(x))):d}"

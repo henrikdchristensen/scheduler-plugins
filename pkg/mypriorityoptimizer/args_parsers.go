@@ -26,7 +26,7 @@ func getEnv(key, def string) string {
 // parseBool
 // -------------------------
 
-// parseBool parses a boolean string and returns a corresponding bool value.
+// parseBool parses a boolean string.
 func parseBool(s string) bool {
 	v, err := strconv.ParseBool(s)
 	if err != nil { // we are okay with returning false on invalid input
@@ -40,7 +40,7 @@ func parseBool(s string) bool {
 // parseInt
 // -------------------------
 
-// parseInt parses an integer string and returns a corresponding int value.
+// parseInt parses an integer string.
 func parseInt(s string) int {
 	v, err := strconv.Atoi(s)
 	if err != nil { // we are okay with returning 0 on invalid input
@@ -54,7 +54,7 @@ func parseInt(s string) int {
 // parseFloat
 // -------------------------
 
-// parseFloat parses a float string and returns a corresponding float64 value
+// parseFloat parses a float string, clamped to [lLimit, uLimit].
 func parseFloat(s string, lLimit float64, uLimit float64) float64 {
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil { // we are okay with returning 0 on invalid input
@@ -74,7 +74,7 @@ func parseFloat(s string, lLimit float64, uLimit float64) float64 {
 // parseTime
 // -------------------------
 
-// parseTime parses a duration string and returns a corresponding time.Duration
+// parseTime parses a duration string.
 func parseTime(s string) time.Duration {
 	d, err := time.ParseDuration(s)
 	if err != nil {

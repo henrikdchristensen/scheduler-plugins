@@ -22,9 +22,7 @@ import (
 // Active plan / optimization flags
 // -------------------------
 
-// tryEnterActivePlan attempts to enter the active plan state. Use
-// CompareAndSwap to ensure only one goroutine can enter the active state by
-// checking that the previous value is false before setting it to true.
+// tryEnterActivePlan atomically claims the active-plan lock (CAS false->true).
 func (pl *SharedState) tryEnterActivePlan() bool {
 	return pl.ActivePlanInProgress.CompareAndSwap(false, true)
 }

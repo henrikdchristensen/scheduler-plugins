@@ -180,7 +180,6 @@ func getNodeMemoryAllocatable(n *v1.Node) int64 {
 // -------------------------
 
 // isNodeControlPlane returns true if the node is a control plane node.
-// Additional labels can be added here as needed.
 func isNodeControlPlane(n *v1.Node) bool {
 	return n.Labels["node-role.kubernetes.io/control-plane"] != "" ||
 		n.Labels["node-role.kubernetes.io/master"] != "" ||

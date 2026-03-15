@@ -56,7 +56,7 @@ func (pl *SharedState) pluginReadiness(ctx context.Context, informers ...cache.S
 }
 
 // -------------------------
-// pluginReadiness
+// isCacheReady
 // -------------------------
 
 // isCacheReady waits for all provided informers to sync.
