@@ -191,6 +191,12 @@ python -m scripts.kwok_workload_once.test_runner \
   --job-file data/jobs/kwok_workload_once/<job_file>.yaml
 ```
 
+To **reproduce the full evaluation**, each job file under `data/jobs/kwok_workload_once/` must be executed. The jobs are organized into subdirectories:
+
+- `default/` – jobs for the default scheduler (96 jobs)
+- `default-deterministic/` – deterministic pre-filtering jobs for seed selection (see below)
+- `plugin/` – jobs for the scheduler with OPSche (384 jobs, covering multiple solver timeouts)
+
 #### Gathering instances for evaluation
 
 For **90% and 95% utilization**, seed selection is performed in two steps to filter out instances where the default scheduler places all pods without any contention. At **100% and 105% utilization**, the cluster is most likely (always) oversubscribed, so all seeds from `data/seeds/kwok_workload_once/seeds_100.txt` are used directly.
@@ -261,6 +267,11 @@ To replay a trace, run:
 python -m scripts.kwok_trace_replayer.trace_replayer \
 --job-file data/jobs/kwok_trace_replayer/<job_file>.yaml
 ```
+
+To **reproduce the full evaluation**, each job file under `data/jobs/kwok_trace_replayer/` must be executed. The jobs are organized into subdirectories:
+
+- `default/` – jobs for the default scheduler (24 jobs)
+- `plugin/` – jobs for the scheduler with OPSche (1248 jobs, covering all mode/blocking/preemption combinations)
 
 #### Organizing trace replay results
 
