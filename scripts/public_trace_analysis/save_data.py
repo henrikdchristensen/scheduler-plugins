@@ -16,7 +16,7 @@ ALIBABA_IN = "alibaba-clusterdata/cluster-trace-gpu-v2025/disaggregated_DLRM_tra
 ALIBABA_OUT = "data/public_trace_data/alibaba-clusterdata/cluster-trace-gpu-v2025/data.csv"
 
 GOOGLE_OUT = "data/public_trace_data/google-cluster-data/ClusterData2019/data.csv"
-GOOGLE_PROJECT_ID = "master-thesis-479005"
+GOOGLE_PROJECT_ID = "<your-gcp-project-id>"  # TODO: set this to your GCP project ID
 GOOGLE_CELL_DATASETS = [
     "clusterdata_2019_a",
     "clusterdata_2019_b",
