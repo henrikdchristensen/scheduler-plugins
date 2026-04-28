@@ -9,17 +9,18 @@
   - [Requirements for Running on a KWOK Cluster](#requirements-for-running-on-a-kwok-cluster)
   - [Evaluation of OptPlugin on a KWOK Cluster](#evaluation-of-optplugin-on-a-kwok-cluster)
     - [Experimental Setup Used for This Analysis](#experimental-setup-used-for-this-analysis)
-      - [Scheduler setups](#scheduler-setups)
+      - [Scheduler Setups](#scheduler-setups)
     - [Workload Once Generator](#workload-once-generator)
-      - [Running the generator](#running-the-generator)
+      - [Running the Generator](#running-the-generator)
       - [Gathering instances for evaluation](#gathering-instances-for-evaluation)
-      - [Organizing workload once results](#organizing-workload-once-results)
     - [Trace Replayer](#trace-replayer)
-      - [Generating traces](#generating-traces)
-      - [Replaying traces](#replaying-traces)
-      - [Organizing trace replay results](#organizing-trace-replay-results)
-    - [Faster Evaluation Through Parallelization](#faster-evaluation-through-parallelization)
-    - [Analysis of Results](#analysis-of-results)
+      - [Generating Traces](#generating-traces)
+      - [Replaying Traces](#replaying-traces)
+    - [Reproducing Evaluation Results](#reproducing-evaluation-results)
+      - [Reproducing Workload Once Generator Results](#reproducing-workload-once-generator-results)
+      - [Reproducing Trace Replayer Results](#reproducing-trace-replayer-results)
+      - [Generating Figures and Tables](#generating-figures-and-tables)
+    - [Faster Evaluation Through Parallelization (HPC/VM)](#faster-evaluation-through-parallelization-hpcvm)
   - [Unit and Integration Tests](#unit-and-integration-tests)
   - [Upstream Version](#upstream-version)
 
@@ -42,7 +43,7 @@ Beyond these hooks, OptPlugin also includes a **background loop** that can trigg
 - **Periodic** – optimize running and pending pods at fixed time intervals.
 - **StableQueue** – optimize during stable-queue windows (i.e., when no new pods are arriving for a certain time).
 
-Moreover, the optimizer can run in either **blocking** or **non-blocking** mode:
+Moreover, optimization is done in either **blocking** or **non-blocking** mode depending on whether new pods are blocked while the optimizer runs and while the resulting plan is enforced.
 
 - **Blocking** – regular scheduling of new pods is paused while the optimizer runs and while the resulting plan is enforced.
 - **Non-blocking** – regular scheduling continues while the optimizer runs and is paused only during plan enforcement.
@@ -55,6 +56,8 @@ The project provides two optimizer implementations, both based on the same **pri
 
 - a **CP-SAT** optimizer implemented with the Python API of [Google OR-Tools CP-SAT](https://developers.google.com/optimization/cp/cp_solver), and
 - a **Mixed-Integer Programming (MIP)** optimizer implemented with the Python API of [Gurobi](https://docs.gurobi.com/current/).
+
+For instructions on **reproducing the evaluation results**, see [Reproducing Evaluation Results](#reproducing-evaluation-results) below.
 
 ## Code Structure
 
@@ -92,7 +95,7 @@ The scheduler and OptPlugin can be built into a **binary** that can then be run 
 
 Currently, the project has been tested on **amd64** and **arm64**. Running on other architectures should not be a problem but has not been verified.
 
-To **build** the binary, run the following script from the repo root:
+To **build** the binary, run the following script:
 
 ```bash
 ./build.sh
@@ -107,37 +110,9 @@ To run the scheduler with OptPlugin on a **KWOK** cluster, a few additional tool
 - `kubectl` (tested with client v1.32.7)
 - `kwok` and `kwokctl` (tested with v0.7.0)
 
-Running the scheduler and OptPlugin on KWOK also requires a **KWOK cluster configuration file**. An example is `data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml`:
+Running the scheduler and OptPlugin on KWOK also requires a **KWOK cluster configuration file**. An example can be found at `data/configs-kwokctl/plugin-scheduler-defpreempt=1.yaml`.
 
-```yaml
-kind: KwokctlConfiguration
-apiVersion: config.kwok.x-k8s.io/v1alpha1
-options:
-  kubeSchedulerConfig: manifests/mypriorityoptimizer/plugin-scheduler-config.yaml
-  kubeSchedulerBinary: bin/kube-scheduler
-  kubeSchedulerImage: localhost:5000/scheduler-plugins/kube-scheduler:dev
-componentsPatches:
-  - name: kube-scheduler
-    # uncomment for more verbose logging
-    # extraArgs:
-    #   - key: v
-    #     value: "10"
-    extraEnvs:
-      - name: OPTIMIZE_MODE
-        value: "periodic" # choices: scheduling_failure, periodic, stable_queue
-      - name: OPTIMIZE_BLOCKING_SOLVING # whether to block scheduling while the optimizer is running
-        value: "false"
-      - name: OPTIMIZE_PERIODIC_INTERVAL # interval for 'Periodic' mode
-        value: 8s
-      - name: OPTIMIZE_STABLE_QUEUE_DELAY # stable-queue window for 'StableQueue' mode
-        value: 8s
-      - name: SOLVER_PYTHON_ENABLED
-        value: "true"
-      - name: SOLVER_PYTHON_TIMEOUT # timeout for the optimizer before it is killed and the plan is discarded
-        value: 10s
-```
-
-**Note:** There may be version mismatches between `scheduler-plugins` and KWOK. If so, set a specific `VERSION` value when building the scheduler binary (sometimes this must be forced for a given `scheduler-plugins` release). For example, KWOK may report:
+**Note:** There may be version mismatches between the scheduler-plugins project and KWOK. If so, set a specific `VERSION` value when building the scheduler binary (sometimes this must be forced for a given scheduler-plugins release). For example, KWOK may report:
 
 ```bash
 # Running the command
@@ -155,14 +130,14 @@ Two evaluation approaches are provided:
 
 ### Experimental Setup Used for This Analysis
 
-The evaluations in this analysis were executed on machines with the following specifications:
+The evaluations in this analysis were conducted on machines with the following specifications:
 
 - **CPU:** 8 vCPUs (Intel Xeon Gold 6130)
 - **Memory:** 48 GB RAM
 - **Operating system:** Ubuntu 24.04
 - **Optimizer libraries:** OR-Tools 9.14.6206 and GurobiPy 13.0.1
 
-#### Scheduler setups
+#### Scheduler Setups
 
 To compare the default scheduler against the OptPlugin approach, two cluster configurations are used:
 
@@ -175,7 +150,7 @@ The **Workload Once Generator** creates workload instances and evaluates them wi
 
 For the lower utilization levels (90% and 95%), a deterministic seed pre-filtering step is first applied to exclude trivial cases where all pods are scheduled. This step uses `data/configs-kwokctl/default-deterministic.yaml`, which enables `MyDeterministicScore` (`pkg/mydeterministicscore/`) to break scoring ties by pod name, disables `DefaultPreemption`, and sets `parallelism=1` to make scheduling fully deterministic.
 
-#### Running the generator
+#### Running the Generator
 
 The evaluation script is `scripts/kwok_workload_once/test_runner.py`. It can read configuration from three sources (later overrides earlier):
 
@@ -190,12 +165,6 @@ pip install -r scripts/kwok_workload_once/requirements.txt
 ```
 
 Then run the generator:
-
-To **reproduce the full evaluation**, each job file under `data/jobs/kwok_workload_once/` must be executed. The jobs are organized into subdirectories:
-
-- `default/` – jobs for the default scheduler
-- `default-deterministic/` – deterministic pre-filtering jobs for seed selection (see below)
-- `plugin/` – jobs for the scheduler with OptPlugin (covering multiple optimizer timeouts)
 
 ```bash
 python -m scripts.kwok_workload_once.test_runner \
@@ -217,9 +186,58 @@ For **90% and 95% utilization**, seed selection is performed in two steps to fil
    These seeds are saved as configuration-specific files (e.g.,
    `nodes4_pods16_prio1_util095.txt`) under `data/seeds/kwok_workload_once/` and used for both the default scheduler and OptPlugin runs.
 
-#### Organizing workload once results
+### Trace Replayer
 
-Once all jobs have completed, organize the results as follows for later analysis.
+The **Trace Replayer** workflow consists of two steps: **trace generation** and **trace replay**. Traces are first generated, then replayed with both the default scheduler and the scheduler with OptPlugin.
+
+#### Generating Traces
+
+Traces are generated with `scripts/kwok_trace_replayer/trace_generator.py` and stored under `data/traces/`.
+
+The generator reads job files from `data/jobs/kwok_trace_generator/`, where each job file defines parameters such as the number of nodes, inter-arrival times, and other workload settings. From these job files, the script produces traces of workload arrivals and removals over time.
+
+First, install the required Python dependencies:
+
+```bash
+pip install -r scripts/kwok_trace_replayer/requirements.txt
+```
+
+Then generate traces from the job files:
+
+```bash
+python -m scripts.kwok_trace_replayer.trace_generator \
+--job-dir data/jobs/kwok_trace_generator/
+```
+
+#### Replaying Traces
+
+After traces have been generated, they can be replayed with `scripts/kwok_trace_replayer/trace_replayer.py`. The replayer uses job files in `data/jobs/kwok_trace_replayer/`, which specify the trace to replay and how OptPlugin should be configured for that run.
+
+To replay a trace, run:
+
+```bash
+python -m scripts.kwok_trace_replayer.trace_replayer \
+--job-file data/jobs/kwok_trace_replayer/<job_file>.yaml
+```
+
+### Reproducing Evaluation Results
+
+**Prerequisites:** Before proceeding, make sure you have completed the following steps:
+
+1. Installed all required tools (see [Building the Scheduler and OptPlugin](#building-the-scheduler-and-optplugin) and [Requirements for Running on a KWOK Cluster](#requirements-for-running-on-a-kwok-cluster)).
+2. Built the scheduler binary with `./build.sh` (see [Building the Scheduler and OptPlugin](#building-the-scheduler-and-optplugin)).
+
+The evaluation includes two complementary studies. To **reproduce all results**, complete the steps for each study below.
+
+#### Reproducing Workload Once Generator Results
+
+Execute each job file under `data/jobs/kwok_workload_once/` using the `test_runner.py` script (see [Running the Generator](#running-the-generator)). The job files are organized into subdirectories according to the scheduler configuration used for each run:
+
+- `default/` – jobs for the default scheduler
+- `default-deterministic/` – deterministic pre-filtering jobs for seed selection (see [Gathering instances for evaluation](#gathering-instances-for-evaluation))
+- `plugin/` – jobs for the scheduler with OptPlugin (covering multiple optimizer timeouts)
+
+After all jobs have completed, organize the results in the `analysis/kwok_workload_once/` folder as follows.
 
 ```text
 analysis/kwok_workload_once/
@@ -239,48 +257,14 @@ analysis/kwok_workload_once/
     └── nodes32_pods256_prio4_util105_timeout20/
 ```
 
-### Trace Replayer
+#### Reproducing Trace Replayer Results
 
-The **Trace Replayer** workflow consists of two steps: **trace generation** and **trace replay**. Traces are first generated, then replayed with both the default scheduler and the scheduler with OptPlugin.
-
-#### Generating traces
-
-Traces are generated with `scripts/kwok_trace_replayer/trace_generator.py` and stored under `data/traces/`.
-
-The generator reads job files from `data/jobs/kwok_trace_generator/`, where each job file defines parameters such as the number of nodes, inter-arrival times, and other workload settings. From these job files, the script produces traces of workload arrivals and removals over time.
-
-First, install the required Python dependencies:
-
-```bash
-pip install -r scripts/kwok_trace_replayer/requirements.txt
-```
-
-Then generate traces from the job files:
-
-```bash
-python -m scripts.kwok_trace_replayer.trace_generator \
---job-dir data/jobs/kwok_trace_generator/
-```
-
-#### Replaying traces
-
-After traces have been generated, they can be replayed with `scripts/kwok_trace_replayer/trace_replayer.py`. The replayer uses job files in `data/jobs/kwok_trace_replayer/`, which specify the trace to replay and how OptPlugin should be configured for that run.
-
-To replay a trace, run:
-
-To **reproduce the full evaluation**, each job file under `data/jobs/kwok_trace_replayer/` must be executed. The jobs are organized into subdirectories:
+First, generate all traces (see [Generating Traces](#generating-traces)). Then execute each job file under `data/jobs/kwok_trace_replayer/` using the `trace_replayer.py` script (see [Replaying Traces](#replaying-traces)). The job files are organized into subdirectories according to the scheduler configuration used for each run:
 
 - `default/` – jobs for the default scheduler
 - `plugin/` – jobs for the scheduler with OptPlugin (covering all mode/blocking/preemption combinations)
 
-```bash
-python -m scripts.kwok_trace_replayer.trace_replayer \
---job-file data/jobs/kwok_trace_replayer/<job_file>.yaml
-```
-
-#### Organizing trace replay results
-
-After all jobs have completed, organize the results as follows for later analysis.
+After all jobs have completed, organize the results in the `analysis/kwok_trace_replayer/` folder as follows.
 
 ```text
 analysis/kwok_trace_replayer/
@@ -306,7 +290,47 @@ analysis/kwok_trace_replayer/
     └── ...
 ```
 
-### Faster Evaluation Through Parallelization
+#### Generating Figures and Tables
+
+Use the following scripts to aggregate the results and generate the figures and tables used in the analysis.
+
+For the **Workload Once Generator**, first install the required Python dependencies:
+
+```bash
+pip install -r scripts/kwok_workload_once/requirements.txt
+```
+
+Next, combine the raw results into a single CSV file:
+
+```bash
+python -m scripts.kwok_workload_once.seal_results
+```
+
+Finally, generate the figures and tables:
+
+```bash
+python -m scripts.kwok_workload_once.plots_and_tables
+```
+
+For the **Trace Replayer**, first install the required Python dependencies:
+
+```bash
+pip install -r scripts/kwok_trace_replayer/requirements.txt
+```
+
+Next, combine the raw results into a single CSV file:
+
+```bash
+python -m scripts.kwok_trace_replayer.seal_results
+```
+
+Finally, generate the figures and tables:
+
+```bash
+python -m scripts.kwok_trace_replayer.plots_and_tables
+```
+
+### Faster Evaluation Through Parallelization (HPC/VM)
 
 Because the evaluation includes many jobs, it is useful to run them in parallel on HPC or VM resources.
 
@@ -323,27 +347,6 @@ The bootstrap script supports the same parameters as `test_runner.py` and `trace
 - `--runner`: which runner to use (`test_runner` or `trace_replayer`)
 - `--content-dir`: path to the generated `bootstrap` folder
 - `--job-file`: path to the job file to run (see `data/jobs/`)
-
-### Analysis of Results
-
-Analyzed outputs are stored in the `analysis/` folder. The analysis scripts assume the directory layouts described in [Organizing workload once results](#organizing-workload-once-results) and [Organizing trace replay results](#organizing-trace-replay-results).
-
-Analysis code is split by evaluation type:
-
-- **Workload Once Generator**: `scripts/kwok_workload_once/`
-- **Trace Replayer**: `scripts/kwok_trace_replayer/`
-
-For both, the workflow is the same:
-
-- `seal_results.py` merges raw outputs into one CSV file
-- `plots_and_tables.py` generates the figures and tables used in the paper
-
-To run the analysis:
-
-1. Seal results:
-   `python scripts/<workload_once_or_trace_replayer>/seal_results.py`
-2. Generate figures and tables:
-   `python scripts/<workload_once_or_trace_replayer>/plots_and_tables.py`
 
 ## Unit and Integration Tests
 
