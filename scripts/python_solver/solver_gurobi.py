@@ -179,7 +179,7 @@ class GurobiSolver:
         Returns a dict with keys:
             - placements: list of placements (dicts with pod {uid, namespace, name}, from_node, to_node)
             - evictions: list of evictions (dicts with pod {uid, namespace, name}, node)
-            - phases: list of phases (dicts with tier, stage ("place" or "moves"), status, duration_ms, relative_gap)
+            - phases: list of phases (dicts with tier, stage ("place" or "disruption"), status, duration_ms, relative_gap)
             - duration_ms: total duration in milliseconds
             - status: overall status string
         """
@@ -762,24 +762,27 @@ class GurobiSolver:
                 apply_warm_start()
 
             ########################################
-            # Stage 2: Minimize moves for running pods
+            # Stage 2: Minimize disruption for running pods
             ########################################
             if tier_running:
-                # Minimize number of pods that move (not staying on original node)
+                # Maximize placed + 2*orig_node for running pods
+                # stay: 1+2=3, move: 1+0=1, evict: 0+0=0
+                # Matches LaTeX formulation: sum(x_{i,·} + 2*x_{i,where})
                 move_vars = []
                 move_coeffs = []
                 for i in tier_running:
+                    move_vars.append(dvars.placed[i])
+                    move_coeffs.append(1.0)
                     stay_var = orig_node(i)
                     if stay_var is not None:
-                        # Minimize (1 - stay): effectively minimize moves
                         move_vars.append(stay_var)
-                        move_coeffs.append(1.0)  # Maximize staying = minimize moving
+                        move_coeffs.append(2.0)
 
                 if move_vars:
                     move_result = run_stage(move_vars, move_coeffs, "max", move_budget)
                     phases.append({
                         "tier": tier,
-                        "stage": "moves",
+                        "stage": "disruption",
                         **move_result,
                     })
                     final_status = model.Status
@@ -787,17 +790,19 @@ class GurobiSolver:
                     if model.SolCount > 0:
                         capture_solution()
                         
-                        # Lock in stay count
-                        achieved_stay = sum(
-                            1 for i in tier_running
-                            if orig_node(i) is not None and solution["assign"].get(i, {}).get(
-                                problem.eligible_pos[i].get(problem.pod_node_j[i]), 0
-                            ) >= BINARY_THRESHOLD
-                        )
-                        if achieved_stay > 0 and move_vars:
+                        # Lock in disruption level (placed + 2*stayed)
+                        achieved_score = 0
+                        for i in tier_running:
+                            if solution["placed"].get(i, 0) >= BINARY_THRESHOLD:
+                                achieved_score += 1
+                            if orig_node(i) is not None:
+                                orig_pos = problem.eligible_pos[i].get(problem.pod_node_j[i])
+                                if solution["assign"].get(i, {}).get(orig_pos, 0) >= BINARY_THRESHOLD:
+                                    achieved_score += 2
+                        if achieved_score > 0 and move_vars:
                             model.addConstr(
-                                gp.quicksum(move_vars) >= achieved_stay,
-                                name=f"lock_stay_tier_{tier}"
+                                gp.quicksum(move_vars) >= achieved_score,
+                                name=f"lock_disr_tier_{tier}"
                             )
                             model.update()
 
