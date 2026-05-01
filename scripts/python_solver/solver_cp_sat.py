@@ -143,7 +143,7 @@ class CPSATSolver:
         Returns a dict with keys:
             - placements: list of placements (dicts with pod {uid, namespace, name}, from_node, to_node)
             - evictions: list of evictions (dicts with pod {uid, namespace, name}, node)
-            - phases: list of phases (dicts with tier, stage ("place" or "moves"), status, duration_ms, relative_gap)
+            - phases: list of phases (dicts with tier, stage ("place" or "disruption"), status, duration_ms, relative_gap)
             - duration_ms: total duration in milliseconds
             - status: overall status string
         """
@@ -728,7 +728,10 @@ class CPSATSolver:
             if remaining_wall() > 1e-3 and rem_tiers > 1e-3:
                 running_ge = [i for i in problem.running_idxs if problem.pod_priority[i] >= p]  # running pods with priority ≥ p
                 if running_ge:
-                    disr_expr = sum(vars.placed[i] - 2 * orig_node(i) for i in running_ge) # maybe replace by: disr_expr = sum(2 * (1 - vars.placed[i]) + (vars.placed[i] - orig_node(i)) for i in running_ge)
+                    # Minimize: (1 - placed) + 2*(1 - orig_node)
+                    # stay: 0+0=0, move: 0+2=2, evict: 1+2=3
+                    # Equivalent to maximizing: placed + 2*orig_node (LaTeX formulation)
+                    disr_expr = sum((1 - vars.placed[i]) + 2 * (1 - orig_node(i)) for i in running_ge)
                     disr_result = run_stage(disr_expr, "min", min(rem_tiers, remaining_wall()))
                     st = disr_result["status"]
                     time_spent_disr = disr_result["time_spent"]
