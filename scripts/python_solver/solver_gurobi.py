@@ -328,9 +328,9 @@ class GurobiSolver:
 
             # WLS license credentials (academic Web License Service)
             # Override via env vars GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID if needed. Parameters can be found in the license file.
-            wls_access_id = os.environ.get('GRB_WLSACCESSID', '<your_access_id_here>')
-            wls_secret = os.environ.get('GRB_WLSSECRET', '<your_secret_here>')
-            wls_license_id = os.environ.get('GRB_LICENSEID', '<your_license_id_here>')
+            wls_access_id = os.environ.get('GRB_WLSACCESSID', '')
+            wls_secret = os.environ.get('GRB_WLSSECRET', '')
+            wls_license_id = os.environ.get('GRB_LICENSEID', '')
             if wls_access_id and wls_secret and wls_license_id:
                 env.setParam('WLSACCESSID', wls_access_id)
                 env.setParam('WLSSECRET', wls_secret)
@@ -345,7 +345,7 @@ class GurobiSolver:
             # Enable warm starts
             model.Params.StartNodeLimit = -1  # Use all MIP starts
             return model, None
-        except gp.GurobiError as e:
+        except (gp.GurobiError, ValueError) as e:
             # License or other Gurobi error - capture the message
             return None, f"Gurobi error: {e}"
 
@@ -430,8 +430,15 @@ class GurobiSolver:
         running_idxs = [i for i in range(num_pods) if pod_node_j[i] is not None]
         pending_idxs = [i for i in range(num_pods) if pod_node_j[i] is None]
 
-        # Eligible nodes
-        eligible_nodes = [list(range(num_nodes)) for _ in range(num_pods)]
+        # Eligible nodes — only nodes whose capacity can host the pod alone
+        eligible_nodes: list[list[int]] = []
+        for i in range(num_pods):
+            cpu_i, mem_i = pod_req_cpu_m[i], pod_req_mem_bytes[i]
+            lst: list[int] = []
+            for j in range(num_nodes):
+                if node_cap_cpu_m[j] >= cpu_i and node_cap_mem_bytes[j] >= mem_i:
+                    lst.append(j)
+            eligible_nodes.append(lst)
         eligible_pos = [{j: local for local, j in enumerate(enl)} for enl in eligible_nodes]
 
         preemptor_idx: Optional[int] = None
@@ -546,12 +553,18 @@ class GurobiSolver:
         return None
 
     def _add_mode_specific_constraints(self, model, problem: Problem, dvars: DecisionVars):
-        """Add preemptor-mode specific constraints if applicable."""
-        if not problem.single_preemptor_mode or problem.preemptor_idx is None:
-            return
-        pi = problem.preemptor_idx
-        # Preemptor must be placed
-        model.addConstr(dvars.placed[pi] == 1, name="preemptor_must_place")
+        """Add preemptor-mode or background-mode specific constraints."""
+        if problem.single_preemptor_mode and problem.preemptor_idx is not None:
+            # Preemptor must be placed
+            model.addConstr(dvars.placed[problem.preemptor_idx] == 1, name="preemptor_must_place")
+        else:
+            # Background mode: at least one pending pod must be placed
+            # (avoids trivial empty solutions that only move/evict running pods)
+            if problem.pending_idxs:
+                model.addConstr(
+                    gp.quicksum(dvars.placed[i] for i in problem.pending_idxs) >= 1,
+                    name="at_least_one_pending"
+                )
 
     def _solve_lexicographically(
         self,
@@ -744,19 +757,27 @@ class GurobiSolver:
             final_status = model.Status
 
             # Capture solution and apply as warm start for next stage
+            is_optimal_place = (model.Status == GRB.OPTIMAL) if GUROBI_AVAILABLE else False
             if model.SolCount > 0:
                 capture_solution()
                 
-                # Lock in placements: sum(placed[i] for i in tier) >= achieved
+                # Lock in placements: == if OPTIMAL, >= if FEASIBLE
                 achieved_place = sum(
                     1 for i in tier_pod_idxs
                     if solution["placed"].get(i, 0) >= BINARY_THRESHOLD
                 )
                 if achieved_place > 0:
-                    model.addConstr(
-                        gp.quicksum(dvars.placed[i] for i in tier_pod_idxs) >= achieved_place,
-                        name=f"lock_place_tier_{tier}"
-                    )
+                    place_expr = gp.quicksum(dvars.placed[i] for i in tier_pod_idxs)
+                    if is_optimal_place:
+                        model.addConstr(
+                            place_expr == achieved_place,
+                            name=f"lock_place_tier_{tier}"
+                        )
+                    else:
+                        model.addConstr(
+                            place_expr >= achieved_place,
+                            name=f"lock_place_tier_{tier}"
+                        )
                     model.update()
 
                 apply_warm_start()
@@ -787,10 +808,12 @@ class GurobiSolver:
                     })
                     final_status = model.Status
 
+                    is_optimal_disr = (model.Status == GRB.OPTIMAL) if GUROBI_AVAILABLE else False
                     if model.SolCount > 0:
                         capture_solution()
                         
-                        # Lock in disruption level (placed + 2*stayed)
+                        # Lock in disruption level using weighted sum (must match objective coefficients)
+                        disr_expr = gp.quicksum(c * v for c, v in zip(move_coeffs, move_vars))
                         achieved_score = 0
                         for i in tier_running:
                             if solution["placed"].get(i, 0) >= BINARY_THRESHOLD:
@@ -799,11 +822,17 @@ class GurobiSolver:
                                 orig_pos = problem.eligible_pos[i].get(problem.pod_node_j[i])
                                 if solution["assign"].get(i, {}).get(orig_pos, 0) >= BINARY_THRESHOLD:
                                     achieved_score += 2
-                        if achieved_score > 0 and move_vars:
-                            model.addConstr(
-                                gp.quicksum(move_vars) >= achieved_score,
-                                name=f"lock_disr_tier_{tier}"
-                            )
+                        if achieved_score > 0:
+                            if is_optimal_disr:
+                                model.addConstr(
+                                    disr_expr == achieved_score,
+                                    name=f"lock_disr_tier_{tier}"
+                                )
+                            else:
+                                model.addConstr(
+                                    disr_expr >= achieved_score,
+                                    name=f"lock_disr_tier_{tier}"
+                                )
                             model.update()
 
                         apply_warm_start()
