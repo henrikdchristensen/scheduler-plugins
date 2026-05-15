@@ -328,9 +328,9 @@ class GurobiSolver:
 
             # WLS license credentials (academic Web License Service)
             # Override via env vars GRB_WLSACCESSID, GRB_WLSSECRET, GRB_LICENSEID if needed. Parameters can be found in the license file.
-            wls_access_id = os.environ.get('GRB_WLSACCESSID', '<your_access_id_here>')
-            wls_secret = os.environ.get('GRB_WLSSECRET', '<your_secret_here>')
-            wls_license_id = os.environ.get('GRB_LICENSEID', '<your_license_id_here>')
+            wls_access_id = os.environ.get('GRB_WLSACCESSID', '')
+            wls_secret = os.environ.get('GRB_WLSSECRET', '')
+            wls_license_id = os.environ.get('GRB_LICENSEID', '')
             if wls_access_id and wls_secret and wls_license_id:
                 env.setParam('WLSACCESSID', wls_access_id)
                 env.setParam('WLSSECRET', wls_secret)
@@ -345,7 +345,7 @@ class GurobiSolver:
             # Enable warm starts
             model.Params.StartNodeLimit = -1  # Use all MIP starts
             return model, None
-        except gp.GurobiError as e:
+        except (gp.GurobiError, ValueError) as e:
             # License or other Gurobi error - capture the message
             return None, f"Gurobi error: {e}"
 
