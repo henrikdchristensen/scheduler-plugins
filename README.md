@@ -76,7 +76,7 @@ The source code for OptPlugin is located in `pkg/mypriorityoptimizer/`. The main
 
 The two optimizer implementations are located in `scripts/python_solver/` and can also serve as templates for adding other optimizers.
 
-**Note:** Since Gurobi is a commercial optimizer, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID`—which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
+**Note:** Since Gurobi is a commercial optimizer, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID` — which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
 
 ## Scheduler Integration
 
@@ -88,6 +88,7 @@ OptPlugin is registered in `cmd/scheduler/main.go`, which ensures it is included
 
 The scheduler and OptPlugin can be built into a **binary** that can then be run in a cluster (e.g., with [KWOK](https://kwok.sigs.k8s.io/)). The following tools are required to build the scheduler and OptPlugin:
 
+- `git`
 - `make` (tested with 4.3)
 - `Go` (tested with 1.24.3)
 - `python3` (tested with 3.10.12)
