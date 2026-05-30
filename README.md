@@ -104,6 +104,8 @@ To **build** the binary, run the following script:
 
 The resulting scheduler binary is written to `bin/kube-scheduler`. The build process also downloads `kube-apiserver` and `kube-controller-manager` into `bin/`, since they are required for running KWOK clusters; keeping them there avoids re-downloading them for each cluster creation.
 
+**Note:** These two binaries are only published for Linux. On non-Linux systems, the download is skipped with a warning; this does not affect the scheduler build.
+
 ## Requirements for Running on a KWOK Cluster
 
 To run the scheduler with OptPlugin on a **KWOK** cluster, a few additional tools are required (tools already listed in [Building the Scheduler and OptPlugin](#building-the-scheduler-and-optplugin) are omitted):
