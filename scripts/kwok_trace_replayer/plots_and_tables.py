@@ -266,7 +266,7 @@ GRID_ROWS = [
         "proven_optimal_plan_pct_mean",
         "certified",
         "optimal among improving (%)",
-        delta_ylabel="diff. optimal-plan share (%)",
+        delta_ylabel="diff. optimal plans (%)",
         tick_strategy="percent",
         bottom=True,
     ),
@@ -1063,7 +1063,7 @@ def latex_metric_table(
         "deletions": r"number of pod deletions",
         "optimizer_runs": f"number of {SOLVER_DISPLAY_NAME} runs",
         "plan_activations": r"number of plan activations",
-        "proven_optimal_plans": r"optimal plans among improving plans (\%)",
+        "proven_optimal_plans": r"optimal plans (\%)",
     }[metric.name]
     metric_short = {
         "usage": "Resource Usage",
@@ -1071,21 +1071,30 @@ def latex_metric_table(
         "deletions": "Pod Deletions",
         "optimizer_runs": f"{SOLVER_DISPLAY_NAME.capitalize()} Runs",
         "plan_activations": "Plan Activations",
-        "proven_optimal_plans": "Optimal Plans Among Improving Plans",
+        "proven_optimal_plans": "Optimal Plans",
     }[metric.name]
 
     prio_note = ""
     if priorities > 1 and metric.name in {"latency", "deletions"}:
         prio_note = f" For per-priority entries, p1 denotes the lowest priority level, p{priorities} denotes the highest priority level, and total denotes the sum across all priority levels."
 
-    caption = (
-        f"Mean paired differences in {metric_long} between the plugin and the default scheduler "
-        f"(plugin minus default scheduler), with {_preempt_title(defpreempt)} and {_prio_desc(priorities)}. "
-        f"Values are reported as mean $\\pm$ standard deviation. "
-        f"Each row corresponds to a plugin mode in either blocking or non-blocking variant. "
-        f"Columns are grouped by number of nodes and inter-arrival time."
-        f"{prio_note}"
-    )
+    if metric.name == "proven_optimal_plans":
+        caption = (
+            f"Percentage of improving plans that are optimal, with "
+            f"{_preempt_title(defpreempt)} and {_prio_desc(priorities)}. "
+            f"Values are reported as mean $\\pm$ standard deviation. "
+            f"Each row corresponds to a plugin mode in either blocking or non-blocking variant. "
+            f"Columns are grouped by number of nodes and inter-arrival time."
+        )
+    else:
+        caption = (
+            f"Mean paired differences in {metric_long} between the plugin and the default scheduler "
+            f"(plugin minus default scheduler), with {_preempt_title(defpreempt)} and {_prio_desc(priorities)}. "
+            f"Values are reported as mean $\\pm$ standard deviation. "
+            f"Each row corresponds to a plugin mode in either blocking or non-blocking variant. "
+            f"Columns are grouped by number of nodes and inter-arrival time."
+            f"{prio_note}"
+        )
     caption_short = f"Plugin Results: {metric_short} with {_preempt_title(defpreempt)} and {_prio_desc_title(priorities)}."
     label = f"tab:{metric.name}-defpreempt{defpreempt}-prio{priorities}"
 
@@ -1167,7 +1176,7 @@ def latex_overview_table(
         ("deletions", r"Diff. pod deletions"),
         ("optimizer_runs", rf"Diff. {SOLVER_DISPLAY_NAME} runs"),
         ("plan_activations", r"Diff. plan activations"),
-        ("proven_optimal_plans", r"Optimal plans among improving plans (\%)"),
+        ("proven_optimal_plans", r"Optimal plans (\%)"),
         ("acceptance_rate", r"Acceptance rate (\%)"),
     ]
     for key, label in rows:
@@ -1273,7 +1282,7 @@ def _build_generic_diff_table(
         "deletions": r"Diff. pod deletions",
         "optimizer_runs": rf"Diff. {SOLVER_DISPLAY_NAME} runs",
         "plan_activations": r"Diff. plan activations",
-        "proven_optimal_plans": r"Diff. optimal-plan share (\%)",
+        "proven_optimal_plans": r"Diff. optimal plans (\%)",
     }
 
     for ms in DIFF_METRICS:
@@ -1440,7 +1449,7 @@ def latex_timing_diff_table(
         "deletions": r"Diff. pod deletions",
         "optimizer_runs": rf"Diff. {SOLVER_DISPLAY_NAME} runs",
         "plan_activations": r"Diff. plan activations",
-        "proven_optimal_plans": r"Diff. optimal-plan share (\%)",
+        "proven_optimal_plans": r"Diff. optimal plans (\%)",
     }
     for ms in DIFF_METRICS:
         row = [row_labels[ms.name]]
