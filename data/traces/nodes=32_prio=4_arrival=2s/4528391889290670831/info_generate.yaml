@@ -1,0 +1,99 @@
+meta:
+  timestamp: 2026/02/26/16:40:56
+  git:
+    commit: 980ff16190ff6d920af2539d1df4f9f9cacfe21f
+    branch: opt-prio-patches
+inputs:
+  cli-cmd: python /mnt/d/projects/master/scheduler-plugins/scripts/kwok_trace_replayer/trace_generator.py
+    --job-dir data/jobs/kwok_trace_generator/
+  args:
+    job_file: /mnt/d/projects/master/scheduler-plugins/data/jobs/kwok_trace_generator/nodes=32_prio=4_arrival=2s.yaml
+    job_dir: null
+    output_dir: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=4_arrival=2s/4528391889290670831
+    seed: 4528391889290670831
+    seed_file: data/seeds/kwok_trace_generator/seeds.txt
+    log_level: INFO
+    show_plots: false
+    num_nodes: 32
+    trace_time: 2h
+    target_util: 0.9
+    xmin_arrival: 0.0001
+    xmax_arrival: 32.0
+    mean_arrival: 2.0
+    xmin_life: 2.0
+    xmax_life: 86400.0
+    mean_life: 250.06938320848403
+    xmin_cpu: 0.05
+    xmax_cpu: 0.5
+    mean_cpu: 0.125
+    xmin_mem: 0.05
+    xmax_mem: 0.5
+    mean_mem: 0.125
+    priority_min: 1
+    priority_max: 4
+    priority_ratio: 0.8
+    replicas_min: 1
+    replicas_max: 3
+    replicas_ratio: 0.8
+    alpha_arrival: 0.041623
+    alpha_life: 0.575202
+    alpha_cpu: 1.057142
+    alpha_mem: 1.057142
+  generated:
+    num_nodes: 32
+    trace_time_s: 7200.0
+    seed: 4528391889290670831
+    rng:
+      iter_seed: 196300325993411142378009259440482596865
+      derived:
+        initial_pods: 55936648361101678801475429756856327832
+        trace_pods: 319541285449099832948037587982210556969
+    measured_cpu_util_time_mean: 0.8186587215851171
+    measured_mem_util_time_mean: 0.8907202561590225
+    measured_util_time_mean: 0.8911709111860989
+    target_util_time_mean: 0.9
+    calibration:
+      util_tol: 0.01
+      calib_max_iter: 20
+      initial_max_pods: 200000
+    derived_mean_lifetime_s: 250.069383
+    pareto:
+      cpu:
+        alpha: 1.057142
+        xmin: 0.05
+        xmax: 0.5
+        mean: 0.125
+      mem:
+        alpha: 1.057142
+        xmin: 0.05
+        xmax: 0.5
+        mean: 0.125
+      arrival:
+        alpha: 0.041623
+        xmin: 0.0001
+        xmax: 32.0
+        mean: 2.0
+      life:
+        alpha: 0.575202
+        xmin: 2.0
+        xmax: 86400.0
+        mean: 250.06938320848403
+    priority:
+      min: 1
+      max: 4
+      ratio: 0.8
+    replicas:
+      min: 1
+      max: 3
+      ratio: 0.8
+    counts:
+      initial_pods: 128
+      trace_pods: 3570
+      initial_replicas_total: 237
+      trace_replicas_total: 6614
+    max_priority_seen: 4
+    files:
+      initial_json: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=4_arrival=2s/4528391889290670831/initial.json
+      trace_json: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=4_arrival=2s/4528391889290670831/trace.json
+      utilization_plot: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=4_arrival=2s/4528391889290670831/figures/utilization.pdf
+      histograms_plot: /mnt/d/projects/master/scheduler-plugins/data/traces/nodes=32_prio=4_arrival=2s/4528391889290670831/figures/histograms.pdf
