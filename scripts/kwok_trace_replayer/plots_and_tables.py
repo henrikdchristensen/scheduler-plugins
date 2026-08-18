@@ -265,7 +265,7 @@ GRID_ROWS = [
     GridRowSpec(
         "proven_optimal_plan_pct_mean",
         "certified",
-        "optimal among improving (%)",
+        "optimal plans (%)",
         delta_ylabel="diff. optimal plans (%)",
         tick_strategy="percent",
         bottom=True,
