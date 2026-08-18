@@ -79,6 +79,8 @@ YLIM_SOLVER_MAIN = (0.0, 300.0)
 YLIM_PLANS_MAIN = (0.0, 300.0)
 YLIM_SOLVER_DELTAS = (-150.0, 150.0)
 YLIM_PLANS_DELTAS = (-60.0, 60.0)
+YLIM_CERTIFIED_MAIN = (0.0, 105.0)
+YLIM_CERTIFIED_DELTAS = (-40.0, 40.0)
 
 BASE_MODES: List[Tuple[str, str, str, int, int]] = [
     ("schedulingfailure",  "Scheduling-failure", "",             0,  1),
@@ -198,7 +200,8 @@ class GridRowSpec:
     col: str
     axis_key: str
     ylabel: str
-    tick_strategy: str = "auto"   # auto | count | count_symmetric
+    delta_ylabel: Optional[str] = None
+    tick_strategy: str = "auto"   # auto | count | count_symmetric | percent | percent_symmetric
     bottom: bool = False
 
 
@@ -242,6 +245,7 @@ Y_MAIN = {
     "deletions": AxisCfg("symlog", (-1e4 - 1.0, 1e4 + 1.0)),
     "solver": AxisCfg("linear", YLIM_SOLVER_MAIN),
     "plans": AxisCfg("linear", YLIM_PLANS_MAIN),
+    "certified": AxisCfg("linear", YLIM_CERTIFIED_MAIN),
 }
 Y_DELTAS = {
     "util": AxisCfg("linear", (-0.5, 0.5)),
@@ -249,6 +253,7 @@ Y_DELTAS = {
     "deletions": AxisCfg("symlog", (-1e3 - 1.0, 1e3 + 1.0)),
     "solver": AxisCfg("linear", YLIM_SOLVER_DELTAS),
     "plans": AxisCfg("linear", YLIM_PLANS_DELTAS),
+    "certified": AxisCfg("linear", YLIM_CERTIFIED_DELTAS),
 }
 
 GRID_ROWS = [
@@ -256,7 +261,15 @@ GRID_ROWS = [
     GridRowSpec("delta_L_ms_total_mean", "latency", "diff. latency (ms)"),
     GridRowSpec("delta_D_num_total_mean", "deletions", "diff. pod deletions"),
     GridRowSpec("solver_attempts_mean", "solver", f"{SOLVER_DISPLAY_NAME} runs", tick_strategy="count"),
-    GridRowSpec("plan_activated_mean", "plans", "plan activations", tick_strategy="count", bottom=True),
+    GridRowSpec("plan_activated_mean", "plans", "plan activations", tick_strategy="count"),
+    GridRowSpec(
+        "proven_optimal_plan_pct_mean",
+        "certified",
+        "optimal among improving (%)",
+        delta_ylabel="diff. optimal-plan share (%)",
+        tick_strategy="percent",
+        bottom=True,
+    ),
 ]
 
 METRICS_ALL = [
@@ -265,6 +278,7 @@ METRICS_ALL = [
     MetricSpec("deletions", "delta_D_num_total_mean", "delta_D_num_p{p}_mean", True, 1, 1),
     MetricSpec("optimizer_runs", "solver_attempts_mean", None, False, 0, 1),
     MetricSpec("plan_activations", "plan_activated_mean", None, False, 0, 1),
+    MetricSpec("proven_optimal_plans", "proven_optimal_plan_pct_mean", None, False, 1, 1),
 ]
 
 DIFF_METRICS = METRICS_ALL
@@ -285,7 +299,7 @@ DELTA_PLOT_SPECS = [
 ]
 DELTA_METRIC_COLS = [
     "delta_U_pct_eff_mean", "delta_L_ms_total_mean", "delta_D_num_total_mean",
-    "solver_attempts_mean", "plan_activated_mean",
+    "solver_attempts_mean", "plan_activated_mean", "proven_optimal_plan_pct_mean",
 ]
 
 # ---------------------------------------------------------------------------
@@ -381,6 +395,10 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
     df[["mode", "blocking", "defpreempt"]] = pd.DataFrame(
         [(r.mode, r.blocking, r.defpreempt) for r in parsed_cfg], index=df.index
     )
+    improving_plans = df["solver_optimal_mean"] + df["solver_feasible_mean"]
+    df["proven_optimal_plan_pct_mean"] = (
+        100.0 * df["solver_optimal_mean"] / improving_plans
+    ).where(improving_plans > 0)
     return df
 
 def select_arrivals(all_arrivals: Iterable[float]) -> List[float]:
@@ -704,6 +722,10 @@ def _draw_points_axis(
             set_count_ticks(ax, axis_cfg.ylim, max_ticks=7)
         elif tick_strategy == "count_symmetric":
             set_symmetric_count_ticks(ax, axis_cfg.ylim, max_ticks_total=8)
+        elif tick_strategy == "percent":
+            ax.set_yticks([0, 25, 50, 75, 100])
+        elif tick_strategy == "percent_symmetric":
+            ax.set_yticks([-40, -30, -20, -10, 0, 10, 20, 30, 40])
         else:
             set_linear_ticks(ax, axis_cfg.ylim, min_ticks=5)
 
@@ -748,8 +770,11 @@ def make_grid_figure(
     out_stem: str,
     mode_spacing: float,
     is_delta_grid: bool,
+    values_are_differences: Optional[bool] = None,
     symmetric_count_rows: bool = False,
 ) -> None:
+    if values_are_differences is None:
+        values_are_differences = is_delta_grid
     figsize = GRID["delta_figsize"] if is_delta_grid else GRID["main_figsize"]
     left = GRID["delta_left"] if is_delta_grid else GRID["main_left"]
     top = GRID["delta_top"] if is_delta_grid else GRID["main_top"]
@@ -758,7 +783,7 @@ def make_grid_figure(
     legend_xoff = GRID["legend_xoff_delta"] if is_delta_grid else GRID["legend_xoff_main"]
     legend_ncol_colors = GRID["legend_ncol_colors_delta"] if is_delta_grid else GRID["legend_ncol_colors_main"]
 
-    fig, axes = plt.subplots(nrows=5, ncols=2, figsize=figsize, sharex=True)
+    fig, axes = plt.subplots(nrows=len(GRID_ROWS), ncols=2, figsize=figsize, sharex=True)
     axes[0, 0].set_title(f"#priorities={priorities_cols[0]}", fontsize=PLOT_TITLE_FONTSIZE)
     axes[0, 1].set_title(f"#priorities={priorities_cols[1]}", fontsize=PLOT_TITLE_FONTSIZE)
 
@@ -768,6 +793,8 @@ def make_grid_figure(
             tick_strategy = row.tick_strategy
             if symmetric_count_rows and tick_strategy == "count":
                 tick_strategy = "count_symmetric"
+            elif values_are_differences and tick_strategy == "percent":
+                tick_strategy = "percent_symmetric"
 
             _draw_points_axis(
                 ax=axes[r, c],
@@ -828,7 +855,8 @@ def make_grid_figure(
     for r, row in enumerate(GRID_ROWS):
         bb = axes[r, 0].get_position()
         y = 0.5 * (bb.y0 + bb.y1)
-        fig.text(x_text, y, row.ylabel, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+        ylabel = row.delta_ylabel if values_are_differences and row.delta_ylabel else row.ylabel
+        fig.text(x_text, y, ylabel, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
 
     save_figure(fig, OUT_FIGS_DIR / out_stem)
 
@@ -912,6 +940,7 @@ def make_main_grid_single_blocking(
         out_stem=f"main_defaultpreempt={defpreempt}_blocking={b}",
         mode_spacing=GRID["mode_spacing_delta"],
         is_delta_grid=True,
+        values_are_differences=False,
         symmetric_count_rows=False,
     )
 
@@ -1034,6 +1063,7 @@ def latex_metric_table(
         "deletions": r"number of pod deletions",
         "optimizer_runs": f"number of {SOLVER_DISPLAY_NAME} runs",
         "plan_activations": r"number of plan activations",
+        "proven_optimal_plans": r"optimal plans among improving plans (\%)",
     }[metric.name]
     metric_short = {
         "usage": "Resource Usage",
@@ -1041,6 +1071,7 @@ def latex_metric_table(
         "deletions": "Pod Deletions",
         "optimizer_runs": f"{SOLVER_DISPLAY_NAME.capitalize()} Runs",
         "plan_activations": "Plan Activations",
+        "proven_optimal_plans": "Optimal Plans Among Improving Plans",
     }[metric.name]
 
     prio_note = ""
@@ -1136,6 +1167,7 @@ def latex_overview_table(
         ("deletions", r"Diff. pod deletions"),
         ("optimizer_runs", rf"Diff. {SOLVER_DISPLAY_NAME} runs"),
         ("plan_activations", r"Diff. plan activations"),
+        ("proven_optimal_plans", r"Optimal plans among improving plans (\%)"),
         ("acceptance_rate", r"Acceptance rate (\%)"),
     ]
     for key, label in rows:
@@ -1241,6 +1273,7 @@ def _build_generic_diff_table(
         "deletions": r"Diff. pod deletions",
         "optimizer_runs": rf"Diff. {SOLVER_DISPLAY_NAME} runs",
         "plan_activations": r"Diff. plan activations",
+        "proven_optimal_plans": r"Diff. optimal-plan share (\%)",
     }
 
     for ms in DIFF_METRICS:
@@ -1407,6 +1440,7 @@ def latex_timing_diff_table(
         "deletions": r"Diff. pod deletions",
         "optimizer_runs": rf"Diff. {SOLVER_DISPLAY_NAME} runs",
         "plan_activations": r"Diff. plan activations",
+        "proven_optimal_plans": r"Diff. optimal-plan share (\%)",
     }
     for ms in DIFF_METRICS:
         row = [row_labels[ms.name]]
