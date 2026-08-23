@@ -43,8 +43,6 @@ from scripts.helpers.plot_helpers import (
 )
 from scripts.helpers.plot_config import (
     PLOT_TITLE_FONTSIZE,
-    PLOT_AXIS_LABEL_FONTSIZE,
-    PLOT_TICK_FONTSIZE,
     PLOT_LEGEND_FONTSIZE,
     PLOT_LEGEND_HANDLE_LENGTH,
     PLOT_LEGEND_COLUMN_SPACING,
@@ -63,9 +61,12 @@ OUT_TABLES_DIR = OUT_DIR / "tables"
 OUT_FIGS_DIR = OUT_DIR / "figures"
 
 SEED_COL = "seed"
-SOLVER_DISPLAY_NAME = "optimizer"
+SOLVER_DISPLAY_NAME = "solver"
+AXIS_LABEL_FONTSIZE = 6.0
+TICK_LABEL_FONTSIZE = 5.5
 MAX_PRIORITIES = 4
-TABLE_METRIC_ENVIRONMENT = "table"
+TABLE_METRIC_ENVIRONMENT = "table*"
+TABLE_PLACEMENT = "htbp"
 TABLE_METRIC_MAX_HEIGHT = r"0.9\textheight"
 
 PRIORITIES_TO_SHOW = [1, 4]
@@ -147,7 +148,7 @@ GRID = {
     "legend_gap_delta": 0.01,
     "legend_xoff_main": -0.04,
     "legend_xoff_delta": -0.012,
-    "ylabel_pad_pt": 25.0,
+    "ylabel_pad_pt": 30.0,
     "legend_ncol_colors_main": 3,
     "legend_ncol_colors_delta": 1,
 }
@@ -257,16 +258,23 @@ Y_DELTAS = {
 }
 
 GRID_ROWS = [
-    GridRowSpec("delta_U_pct_eff_mean", "util", "diff. usage (%)"),
-    GridRowSpec("delta_L_ms_total_mean", "latency", "diff. latency (ms)"),
-    GridRowSpec("delta_D_num_total_mean", "deletions", "diff. pod deletions"),
+    GridRowSpec("delta_U_pct_eff_mean", "util", "diff.\nusage (%)"),
+    GridRowSpec("delta_L_ms_total_mean", "latency", "diff.\nlatency (ms)"),
+    GridRowSpec("delta_D_num_total_mean", "deletions", "diff. pod\ndeletions"),
     GridRowSpec("solver_attempts_mean", "solver", f"{SOLVER_DISPLAY_NAME} runs", tick_strategy="count"),
-    GridRowSpec("plan_activated_mean", "plans", "plan activations", tick_strategy="count"),
+    GridRowSpec("plan_activated_mean", "plans", "activated\nimproving plans", tick_strategy="count"),
+    GridRowSpec(
+        "optimal_solver_run_pct_mean",
+        "certified",
+        "runs certified\noptimal (%)",
+        delta_ylabel="diff. runs certified\noptimal (%)",
+        tick_strategy="percent",
+    ),
     GridRowSpec(
         "proven_optimal_plan_pct_mean",
         "certified",
-        "optimal plans (%)",
-        delta_ylabel="diff. optimal plans (%)",
+        "optimal among\nimproving plans (%)",
+        delta_ylabel="diff. optimal among\nimproving plans (%)",
         tick_strategy="percent",
         bottom=True,
     ),
@@ -278,6 +286,7 @@ METRICS_ALL = [
     MetricSpec("deletions", "delta_D_num_total_mean", "delta_D_num_p{p}_mean", True, 1, 1),
     MetricSpec("optimizer_runs", "solver_attempts_mean", None, False, 0, 1),
     MetricSpec("plan_activations", "plan_activated_mean", None, False, 0, 1),
+    MetricSpec("optimal_solver_runs", "optimal_solver_run_pct_mean", None, False, 1, 1),
     MetricSpec("proven_optimal_plans", "proven_optimal_plan_pct_mean", None, False, 1, 1),
 ]
 
@@ -299,7 +308,8 @@ DELTA_PLOT_SPECS = [
 ]
 DELTA_METRIC_COLS = [
     "delta_U_pct_eff_mean", "delta_L_ms_total_mean", "delta_D_num_total_mean",
-    "solver_attempts_mean", "plan_activated_mean", "proven_optimal_plan_pct_mean",
+    "solver_attempts_mean", "plan_activated_mean", "optimal_solver_run_pct_mean",
+    "proven_optimal_plan_pct_mean",
 ]
 
 # ---------------------------------------------------------------------------
@@ -395,6 +405,9 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
     df[["mode", "blocking", "defpreempt"]] = pd.DataFrame(
         [(r.mode, r.blocking, r.defpreempt) for r in parsed_cfg], index=df.index
     )
+    df["optimal_solver_run_pct_mean"] = (
+        100.0 * df["solver_optimal_mean"] / df["solver_attempts_mean"]
+    ).where(df["solver_attempts_mean"] > 0)
     improving_plans = df["solver_optimal_mean"] + df["solver_feasible_mean"]
     df["proven_optimal_plan_pct_mean"] = (
         100.0 * df["solver_optimal_mean"] / improving_plans
@@ -735,14 +748,14 @@ def _draw_points_axis(
         ax.axvline(bx, lw=0.8, ls="--", color="black", alpha=0.7, zorder=0)
 
     ax.set_xticks(boundaries)
-    ax.tick_params(axis="both", which="major", labelsize=PLOT_TICK_FONTSIZE, pad=GRID["tick_pad"])
+    ax.tick_params(axis="both", which="major", labelsize=TICK_LABEL_FONTSIZE, pad=GRID["tick_pad"])
 
     if show_xlabels:
         ax.set_xticklabels([""] * len(boundaries))
         for xi, arr in enumerate(arrivals_order):
-            ax.text(x_base[xi], -0.03, fmt_arrival(arr), transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=PLOT_TICK_FONTSIZE)
+            ax.text(x_base[xi], -0.03, fmt_arrival(arr), transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=TICK_LABEL_FONTSIZE)
         x_mid = 0.5 * (boundaries[0] + boundaries[-1])
-        ax.text(x_mid, -0.12, "inter-arrival (s)", transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+        ax.text(x_mid, -0.12, "inter-arrival (s)", transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=AXIS_LABEL_FONTSIZE)
     else:
         ax.tick_params(labelbottom=False)
 
@@ -856,7 +869,17 @@ def make_grid_figure(
         bb = axes[r, 0].get_position()
         y = 0.5 * (bb.y0 + bb.y1)
         ylabel = row.delta_ylabel if values_are_differences and row.delta_ylabel else row.ylabel
-        fig.text(x_text, y, ylabel, rotation=90, va="center", ha="right", fontsize=PLOT_AXIS_LABEL_FONTSIZE)
+        fig.text(
+            x_text,
+            y,
+            ylabel,
+            rotation=90,
+            rotation_mode="anchor",
+            multialignment="center",
+            va="center",
+            ha="center",
+            fontsize=AXIS_LABEL_FONTSIZE,
+        )
 
     save_figure(fig, OUT_FIGS_DIR / out_stem)
 
@@ -1062,45 +1085,38 @@ def latex_metric_table(
         "latency": r"scheduling latency (ms)",
         "deletions": r"number of pod deletions",
         "optimizer_runs": f"number of {SOLVER_DISPLAY_NAME} runs",
-        "plan_activations": r"number of plan activations",
-        "proven_optimal_plans": r"optimal plans (\%)",
+        "plan_activations": r"number of activated improving plans",
+        "optimal_solver_runs": r"solver runs certified as optimal (\%)",
+        "proven_optimal_plans": r"improving plans certified as optimal (\%)",
     }[metric.name]
-    metric_short = {
-        "usage": "Resource Usage",
-        "latency": "Scheduling Latency",
-        "deletions": "Pod Deletions",
-        "optimizer_runs": f"{SOLVER_DISPLAY_NAME.capitalize()} Runs",
-        "plan_activations": "Plan Activations",
-        "proven_optimal_plans": "Optimal Plans",
-    }[metric.name]
-
+    priority_desc = "one priority" if priorities == 1 else f"{priorities} priorities"
     prio_note = ""
     if priorities > 1 and metric.name in {"latency", "deletions"}:
-        prio_note = f" For per-priority entries, p1 denotes the lowest priority level, p{priorities} denotes the highest priority level, and total denotes the sum across all priority levels."
+        prio_note = " p1 is the lowest priority."
 
-    if metric.name == "proven_optimal_plans":
+    if metric.name == "optimal_solver_runs":
         caption = (
-            f"Percentage of improving plans that are optimal, with "
-            f"{_preempt_title(defpreempt)} and {_prio_desc(priorities)}. "
-            f"Values are reported as mean $\\pm$ standard deviation. "
-            f"Each row corresponds to a plugin mode in either blocking or non-blocking variant. "
-            f"Columns are grouped by number of nodes and inter-arrival time."
+            f"Solver runs certified optimal (\\% of all solver runs), with "
+            f"{_preempt_title(defpreempt)} and {priority_desc} (mean $\\pm$ std)."
+        )
+    elif metric.name == "proven_optimal_plans":
+        caption = (
+            f"Optimal among improving plans (\\%), with "
+            f"{_preempt_title(defpreempt)} and {priority_desc} (mean $\\pm$ std)."
         )
     else:
         caption = (
-            f"Mean paired differences in {metric_long} between the plugin and the default scheduler "
-            f"(plugin minus default scheduler), with {_preempt_title(defpreempt)} and {_prio_desc(priorities)}. "
-            f"Values are reported as mean $\\pm$ standard deviation. "
-            f"Each row corresponds to a plugin mode in either blocking or non-blocking variant. "
-            f"Columns are grouped by number of nodes and inter-arrival time."
+            f"Mean paired differences in {metric_long} between the plugin with "
+            f"{_preempt_title(defpreempt)} and the default scheduler for runs with "
+            f"{priority_desc} (mean $\\pm$ std)."
             f"{prio_note}"
         )
-    caption_short = f"Plugin Results: {metric_short} with {_preempt_title(defpreempt)} and {_prio_desc_title(priorities)}."
     label = f"tab:{metric.name}-defpreempt{defpreempt}-prio{priorities}"
 
     write_latex_table(
         out_path, lines,
-        caption=caption, caption_short=caption_short, label=label,
+        caption=caption, label=label,
+        placement=TABLE_PLACEMENT,
         environment=TABLE_METRIC_ENVIRONMENT,
         max_height=TABLE_METRIC_MAX_HEIGHT,
     )
@@ -1175,8 +1191,9 @@ def latex_overview_table(
         ("latency", r"Diff. latency (ms)"),
         ("deletions", r"Diff. pod deletions"),
         ("optimizer_runs", rf"Diff. {SOLVER_DISPLAY_NAME} runs"),
-        ("plan_activations", r"Diff. plan activations"),
-        ("proven_optimal_plans", r"Optimal plans (\%)"),
+        ("plan_activations", r"Diff. activated improving plans"),
+        ("optimal_solver_runs", r"Runs certified optimal (\%)"),
+        ("proven_optimal_plans", r"Optimal among improving plans (\%)"),
         ("acceptance_rate", r"Acceptance rate (\%)"),
     ]
     for key, label in rows:
@@ -1190,13 +1207,14 @@ def latex_overview_table(
     lines += [r"\bottomrule", r"\end{tabular}"]
 
     cap = (
-        f"Mean paired differences in metrics between the plugin and the default scheduler (plugin minus default scheduler), "
-        f"for blocking and non-blocking variants with {_preempt_title(defpreempt).lower()}. "
-        f"Rows correspond to metrics, and columns are grouped by trigger mode, blocking/non-blocking variant, and inter-arrival time. "
-        f"Results are aggregated over number of nodes and priorities."
+        f"Overview of mean paired differences and plan acceptance rate per inter-arrival time, "
+        f"aggregated over node counts and all priority configurations, for blocking and "
+        f"non-blocking runs with {_preempt_title(defpreempt)}."
     )
-    cap_short = f"Plugin Results: Overview with {_preempt_title(defpreempt)}."
-    write_latex_table(out_path, lines, caption=cap, caption_short=cap_short, label=f"tab:overview-defpreempt{defpreempt}")
+    write_latex_table(
+        out_path, lines, caption=cap, label=f"tab:overview-defpreempt{defpreempt}",
+        placement=TABLE_PLACEMENT, environment=TABLE_METRIC_ENVIRONMENT,
+    )
 
 def _build_generic_diff_table(
     *,
@@ -1281,8 +1299,9 @@ def _build_generic_diff_table(
         "latency": r"Diff. latency (ms)",
         "deletions": r"Diff. pod deletions",
         "optimizer_runs": rf"Diff. {SOLVER_DISPLAY_NAME} runs",
-        "plan_activations": r"Diff. plan activations",
-        "proven_optimal_plans": r"Diff. optimal plans (\%)",
+        "plan_activations": r"Diff. activated improving plans",
+        "optimal_solver_runs": r"Diff. runs certified optimal (\%)",
+        "proven_optimal_plans": r"Diff. optimal among improving plans (\%)",
     }
 
     for ms in DIFF_METRICS:
@@ -1293,7 +1312,10 @@ def _build_generic_diff_table(
         lines.append(" & ".join(row) + r" \\")
 
     lines += [r"\bottomrule", r"\end{tabular}"]
-    write_latex_table(out_path, lines, caption=caption, caption_short=caption_short, label=label)
+    write_latex_table(
+        out_path, lines, caption=caption, label=label,
+        placement=TABLE_PLACEMENT, environment=TABLE_METRIC_ENVIRONMENT,
+    )
 
 def latex_blocking_diff_table(
     *,
@@ -1308,10 +1330,9 @@ def latex_blocking_diff_table(
         df = df[df["priorities"] == int(priorities)]
 
     caption = (
-        f"Mean differences between non-blocking and blocking variant (non-blocking minus blocking), "
-        f"with {_preempt_title(defpreempt)}. "
-        f"Rows correspond to metrics and columns are grouped by plugin mode and inter-arrival time. "
-        f"Results are aggregated over number of nodes and priorities."
+        f"Mean difference (non-blocking $-$ blocking) per inter-arrival time, "
+        f"aggregated over node counts and all priority configurations, with "
+        f"{_preempt_title(defpreempt)}."
     )
     cap_short = f"Plugin Results: Non-blocking vs. Blocking with {_preempt_title(defpreempt)}."
 
@@ -1343,10 +1364,9 @@ def latex_defpreempt_diff_table(
         df = df[df["priorities"] == int(priorities)]
 
     caption = (
-        f"Mean differences between plugin runs with DefaultPreemption enabled and disabled "
-        f"(enabled minus disabled), for {_blocking_title(blocking).lower()} variants. "
-        f"Rows correspond to metrics and columns are grouped by plugin mode and inter-arrival time. "
-        f"Results are aggregated over number of nodes and priorities."
+        f"Mean difference (DefaultPreemption enabled $-$ disabled) per inter-arrival time, "
+        f"aggregated over node counts and all priority configurations, for "
+        f"{_blocking_title(blocking).lower()} runs."
     )
     cap_short = f"Plugin Results: DefaultPreemption Enabled vs. Disabled with {_blocking_title(blocking)}."
 
@@ -1448,8 +1468,9 @@ def latex_timing_diff_table(
         "latency": r"Diff. latency (ms)",
         "deletions": r"Diff. pod deletions",
         "optimizer_runs": rf"Diff. {SOLVER_DISPLAY_NAME} runs",
-        "plan_activations": r"Diff. plan activations",
-        "proven_optimal_plans": r"Diff. optimal plans (\%)",
+        "plan_activations": r"Diff. activated improving plans",
+        "optimal_solver_runs": r"Diff. runs certified optimal (\%)",
+        "proven_optimal_plans": r"Diff. optimal among improving plans (\%)",
     }
     for ms in DIFF_METRICS:
         row = [row_labels[ms.name]]
@@ -1461,16 +1482,16 @@ def latex_timing_diff_table(
     lines += [r"\bottomrule", r"\end{tabular}"]
 
     caption = (
-        f"Mean differences between the 8\\,s baseline and alternative timing settings (4\\,s or 16\\,s) for periodic and stable-queue modes, "
-        f"computed as (alternative setting minus 8\\,s baseline), with {_preempt_title(defpreempt)} and {_blocking_title(blocking).lower()} variants. "
-        f"Results are aggregated over number of nodes and priorities."
+        f"Mean difference between 8s baseline and other timing variants per inter-arrival time, "
+        f"aggregated over node counts and priority configurations, for "
+        f"{_blocking_title(blocking).lower()} runs with {_preempt_title(defpreempt)}."
     )
-    cap_short = f"Plugin Results: Timing Settings Differences with {_preempt_title(defpreempt)} and {_blocking_title(blocking)}."
 
     write_latex_table(
         out_path, lines,
-        caption=caption, caption_short=cap_short,
+        caption=caption,
         label=f"tab:timing-diff-defpreempt{defpreempt}-blocking{blocking}",
+        placement=TABLE_PLACEMENT, environment=TABLE_METRIC_ENVIRONMENT,
     )
 
 # Mean lifetime table (trace generator)
