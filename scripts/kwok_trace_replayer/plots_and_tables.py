@@ -118,6 +118,11 @@ SEED_COLS_NEEDED = [
     "plan_not_applicable_mean","plan_activated_mean",
 ]
 
+OPTIMIZER_STAT_COLS = [
+    "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean",
+    "solver_failed_mean", "plan_not_applicable_mean", "plan_activated_mean",
+]
+
 KEY_COLS_MAIN = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
 
 # Grid / plot styling
@@ -245,7 +250,6 @@ Y_MAIN = {
     "latency": AxisCfg("symlog", (-1e5 - 1.0, 1e5 + 1.0)),
     "deletions": AxisCfg("symlog", (-1e4 - 1.0, 1e4 + 1.0)),
     "solver": AxisCfg("linear", YLIM_SOLVER_MAIN),
-    "plans": AxisCfg("linear", YLIM_PLANS_MAIN),
     "certified": AxisCfg("linear", YLIM_CERTIFIED_MAIN),
 }
 Y_DELTAS = {
@@ -253,7 +257,6 @@ Y_DELTAS = {
     "latency": AxisCfg("symlog", (-1e4 - 1.0, 1e4 + 1.0)),
     "deletions": AxisCfg("symlog", (-1e3 - 1.0, 1e3 + 1.0)),
     "solver": AxisCfg("linear", YLIM_SOLVER_DELTAS),
-    "plans": AxisCfg("linear", YLIM_PLANS_DELTAS),
     "certified": AxisCfg("linear", YLIM_CERTIFIED_DELTAS),
 }
 
@@ -262,7 +265,13 @@ GRID_ROWS = [
     GridRowSpec("delta_L_ms_total_mean", "latency", "diff.\nlatency (ms)"),
     GridRowSpec("delta_D_num_total_mean", "deletions", "diff. pod\ndeletions"),
     GridRowSpec("solver_attempts_mean", "solver", f"{SOLVER_DISPLAY_NAME} runs", tick_strategy="count"),
-    GridRowSpec("plan_activated_mean", "plans", "activated\nimproving plans", tick_strategy="count"),
+    GridRowSpec(
+        "plan_activation_pct_mean",
+        "certified",
+        "runs yielding\nactivated improving\nplans (%)",
+        delta_ylabel="diff. runs yielding\nactivated improving\nplans (%)",
+        tick_strategy="percent",
+    ),
     GridRowSpec(
         "optimal_solver_run_pct_mean",
         "certified",
@@ -308,7 +317,7 @@ DELTA_PLOT_SPECS = [
 ]
 DELTA_METRIC_COLS = [
     "delta_U_pct_eff_mean", "delta_L_ms_total_mean", "delta_D_num_total_mean",
-    "solver_attempts_mean", "plan_activated_mean", "optimal_solver_run_pct_mean",
+    "solver_attempts_mean", "plan_activation_pct_mean", "optimal_solver_run_pct_mean",
     "proven_optimal_plan_pct_mean",
 ]
 
@@ -398,6 +407,13 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
     if missing:
         raise SystemExit(f"Missing columns in {path}: {', '.join(missing)}")
 
+    incomplete_optimizer_stats = df[OPTIMIZER_STAT_COLS].isna().any(axis=1)
+    if incomplete_optimizer_stats.any():
+        invalid = df.loc[incomplete_optimizer_stats, ["job_name", "plugin_config", SEED_COL]]
+        for row in invalid.itertuples(index=False):
+            print(f"[warn] excluding run with incomplete optimizer stats: {row}")
+        df = df.loc[~incomplete_optimizer_stats].copy()
+
     parsed_jobs = df["job_name"].map(parse_job_name)
     df[["nodes", "priorities", "arrival_s"]] = pd.DataFrame(parsed_jobs.tolist(), index=df.index)
 
@@ -407,6 +423,9 @@ def load_results_seeds(path: Path) -> pd.DataFrame:
     )
     df["optimal_solver_run_pct_mean"] = (
         100.0 * df["solver_optimal_mean"] / df["solver_attempts_mean"]
+    ).where(df["solver_attempts_mean"] > 0)
+    df["plan_activation_pct_mean"] = (
+        100.0 * df["plan_activated_mean"] / df["solver_attempts_mean"]
     ).where(df["solver_attempts_mean"] > 0)
     improving_plans = df["solver_optimal_mean"] + df["solver_feasible_mean"]
     df["proven_optimal_plan_pct_mean"] = (
@@ -461,7 +480,7 @@ def build_blocking_diff_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
       diff = (non-blocking metric) - (blocking metric)
     Matches table_blocking_diff_defpreempt=*.tex.
     """
-    metric_cols = [m.col_total for m in DIFF_METRICS]
+    metric_cols = [m.col_total for m in DIFF_METRICS] + ["plan_activation_pct_mean"]
     base_cols = ["nodes", "priorities", "arrival_s", "defpreempt", "mode", SEED_COL]
 
     left = df_seeds[df_seeds["blocking"] == 1][base_cols + metric_cols]   # blocking
@@ -483,7 +502,7 @@ def build_defpreempt_diff_seeds(df_seeds: pd.DataFrame) -> pd.DataFrame:
     Computed within fixed blocking variant.
     Matches table_defpreempt_diff_blocking=*.tex.
     """
-    metric_cols = [m.col_total for m in DIFF_METRICS]
+    metric_cols = [m.col_total for m in DIFF_METRICS] + ["plan_activation_pct_mean"]
     base_cols = ["nodes", "priorities", "arrival_s", "blocking", "mode", SEED_COL]
 
     left = df_seeds[df_seeds["defpreempt"] == 0][base_cols + metric_cols]   # disabled
