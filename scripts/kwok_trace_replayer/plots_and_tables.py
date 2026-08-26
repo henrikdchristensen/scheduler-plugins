@@ -122,6 +122,7 @@ OPTIMIZER_STAT_COLS = [
     "solver_attempts_mean", "solver_optimal_mean", "solver_feasible_mean",
     "solver_failed_mean", "plan_not_applicable_mean", "plan_activated_mean",
 ]
+EXPECTED_SEEDS_PER_SETTING = 5
 
 KEY_COLS_MAIN = ["nodes", "priorities", "arrival_s", "mode", "blocking", "defpreempt"]
 
@@ -446,7 +447,15 @@ def select_arrivals(all_arrivals: Iterable[float]) -> List[float]:
 # ---------------------------------------------------------------------------
 
 def build_main_mean_std(df_seeds: pd.DataFrame) -> pd.DataFrame:
-    return aggregate_mean_std(df_seeds, ["job_name", "plugin_config"] + KEY_COLS_MAIN, seed_col=SEED_COL)
+    group_cols = ["job_name", "plugin_config"] + KEY_COLS_MAIN
+    result = aggregate_mean_std(df_seeds, group_cols, seed_col=SEED_COL)
+    seed_counts = (
+        df_seeds.groupby(group_cols, dropna=False)[SEED_COL]
+        .nunique()
+        .rename("seed_count")
+        .reset_index()
+    )
+    return result.merge(seed_counts, on=group_cols, how="left")
 
 def build_main_lookup(df_mean_std: pd.DataFrame) -> pd.DataFrame:
     return as_lookup(df_mean_std, KEY_COLS_MAIN)
@@ -1080,6 +1089,8 @@ def latex_metric_table(
                 m = lookup_main(lookup, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=metric.col_total)
                 s = lookup_main(lookup, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col=f"{metric.col_total}_std")
                 total = metric.fmt(m, s)
+                seed_count = lookup_main(lookup, nodes=n, priorities=priorities, arrival_s=a, rk=rk, col="seed_count")
+                reduced_seed_count = is_finite(seed_count) and int(seed_count) < EXPECTED_SEEDS_PER_SETTING
 
                 if metric.col_prio_pattern and priorities > 1:
                     parts = [rf"total & {total}"]
@@ -1092,6 +1103,8 @@ def latex_metric_table(
                     cell = rf"\begin{{tabular}}[t]{{@{{}}r@{{:\ }}l@{{}}}}{inner}\end{{tabular}}"
                 else:
                     cell = total
+                if reduced_seed_count:
+                    cell += r"\textsuperscript{\(\dagger\)}"
                 cells.append(cell)
 
         multiline = bool(metric.col_prio_pattern and priorities > 1)
