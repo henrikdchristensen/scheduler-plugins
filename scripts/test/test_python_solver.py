@@ -411,8 +411,8 @@ def test_add_assign_constraints_sets_placed_zero_when_no_eligible_nodes():
     assert st in (cp_model.OPTIMAL, cp_model.FEASIBLE)
     assert cp.Value(dv.placed[0]) == 0
 
-def test_add_mode_specific_constraints_requires_at_least_one_pending_placement_in_background_mode():
-    # one pending pod, but it cannot fit => with ">=1 placed pending" constraint the model becomes infeasible
+def test_add_mode_specific_constraints_adds_nothing_in_background_mode():
+    # one pending pod that cannot fit => the model stays feasible with the pod unplaced
     s, problem, model, dv = _make_small_model_for_constraints(
         nodes=[node("n1", cpu=50, mem=100_000_000)],
         pods=[pod("p1", cpu=200, mem=100_000_000, node="")],
@@ -423,7 +423,8 @@ def test_add_mode_specific_constraints_requires_at_least_one_pending_placement_i
 
     cp = cp_model.CpSolver()
     st = cp.Solve(model)
-    assert st == cp_model.INFEASIBLE
+    assert st in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert cp.Value(dv.placed[0]) == 0
 
 def test_add_mode_specific_constraints_requires_preemptor_placed_in_single_preemptor_mode():
     # preemptor fits => feasible with constraint sum(assign[pre])==1
@@ -516,7 +517,7 @@ def test_solve_single_pending_pod_is_placed_on_single_node():
     assert pl["node"] == "n1"
     assert out["evictions"] == []
 
-def test_solve_pending_pod_too_big_is_infeasible_in_background_mode():
+def test_solve_pending_pod_too_big_returns_empty_plan_in_background_mode():
     s = CPSATSolver()
     out = s.solve(
         go_payload(
@@ -528,7 +529,7 @@ def test_solve_pending_pod_too_big_is_infeasible_in_background_mode():
         )
     )
     assert_solver_output_schema(out, expect_full=True)
-    assert out["status"] == "INFEASIBLE"
+    assert out["status"] == "OPTIMAL"
     assert out["placements"] == []
     assert out["evictions"] == []
 

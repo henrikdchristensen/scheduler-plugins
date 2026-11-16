@@ -138,7 +138,7 @@ The evaluations in this analysis were conducted on machines with the following s
 - **CPU:** 8 vCPUs (Intel Xeon Gold 6130)
 - **Memory:** 48 GB RAM
 - **Operating system:** Ubuntu 24.04
-- **Optimizer libraries:** OR-Tools 9.14.6206 and GurobiPy 13.0.1
+- **Optimizer libraries:** OR-Tools 9.15.6755 and GurobiPy 14.0.0
 
 #### Scheduler Setups
 

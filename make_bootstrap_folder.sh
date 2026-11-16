@@ -25,6 +25,12 @@ echo "Cleaning and creating bootstrap directory..."
 rm -rf bootstrap
 mkdir -p bootstrap/content
 
+echo "Recording git commit in bootstrap/content/GIT_COMMIT..."
+# safe.directory: the repo is owned by another user when building in a container
+GIT_COMMIT="$(git -c safe.directory='*' rev-parse HEAD)"
+[[ -n "$(git -c safe.directory='*' status --porcelain)" ]] && GIT_COMMIT="${GIT_COMMIT}-dirty"
+echo "${GIT_COMMIT}" > bootstrap/content/GIT_COMMIT
+
 echo "Copying ${ENV_FILE} into bootstrap..."
 cp "${ENV_FILE}" bootstrap/opt-prio.env
 
@@ -37,7 +43,8 @@ rsync -a --exclude='__pycache__' scripts/ bootstrap/content/scripts/
 echo "Move bootstrap files to 'bootstrap' folder and set permissions..."
 mv bootstrap/content/scripts/bootstrap/* bootstrap/
 rmdir bootstrap/content/scripts/bootstrap
-sed -i 's/\r$//' bootstrap/*.sh
+sed -i.bak $'s/\r$//' bootstrap/*.sh
+rm bootstrap/*.sh.bak
 chmod +x bootstrap/*.sh
 
 echo "Copying manifests files into 'manifests' folder..."
