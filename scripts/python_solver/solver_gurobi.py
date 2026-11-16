@@ -7,7 +7,7 @@ It can be used by setting SOLVER_TYPE=gurobi or SOLVER_PATH to point to this scr
 Requirements:
     pip install gurobipy
     A valid Gurobi license (academic WLS, trial, or commercial)
-    We noted that the using the WLS license a maximum of 5 jobs can run concurrently, properly due to token and session limits.
+    We noted that with the WLS license a maximum of 2 jobs can run concurrently, due to token and session limits.
 """
 
 import os
