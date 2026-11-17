@@ -353,6 +353,24 @@ func TestSetActivePlan_ReplacesOldAndInitializesQuotas(t *testing.T) {
 	mustEq(t, ap.WorkloadQuotas["wk1"]["n2"].Load(), int32(0), "quota atomics n2 wrong")
 }
 
+func TestSetActivePlan_RecordsLivePodsPerWorkload(t *testing.T) {
+	pl := &SharedState{}
+
+	pRun := pod("ns", "run", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+	pPend := pod("ns", "pend", withOwner("ReplicaSet", "rs-1"))
+	pGone := pod("ns", "gone", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+	now := metav1.Now()
+	pGone.DeletionTimestamp = &now
+	wk, _ := getTopWorkload(pRun)
+
+	pl.setActivePlan(&Plan{}, "id", []*v1.Pod{pRun, pPend, pGone, pod("ns", "standalone")})
+
+	ap := pl.getActivePlan()
+	must(t, ap != nil, "active plan nil")
+	mustEq(t, len(ap.WorkloadLivePods), 1, "only owned pods are counted")
+	mustEq(t, ap.WorkloadLivePods[wk.String()], 2, "terminating pod must not be counted")
+}
+
 // -------------------------
 // buildWorkloadQuotas
 // -------------------------
@@ -819,6 +837,79 @@ func TestIsPlanCompleted_CoreCases(t *testing.T) {
 			WorkloadQuotas: buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 2}}),
 		}
 		withPodLister(&FakePodLister{Store: storeFromPods(pRun)}, func() {
+			ok, err := pl.isPlanCompleted(ap)
+			mustNoErr(t, err, "isPlanCompleted err")
+			must(t, ok, "expected completed")
+		})
+	})
+
+	t.Run("evicted pods not recreated yet => not completed", func(t *testing.T) {
+		pRun := pod("ns", "run", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+		wk, _ := getTopWorkload(pRun)
+		wkStr := wk.String()
+
+		ap := &ActivePlan{
+			ID:               "x",
+			WorkloadQuotas:   buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 2}}),
+			WorkloadLivePods: map[string]int{wkStr: 3},
+		}
+		withVar(t, &workloadDesiredPodsFor, func(*SharedState, string) (int, bool, error) { return 3, true, nil })
+		// one of three pods left, then none: both look "done" without the recorded count
+		for _, store := range []map[string]map[string]*v1.Pod{storeFromPods(pRun), {}} {
+			withPodLister(&FakePodLister{Store: store}, func() {
+				ok, err := pl.isPlanCompleted(ap)
+				mustNoErr(t, err, "isPlanCompleted err")
+				must(t, !ok, "expected not completed")
+			})
+		}
+	})
+
+	t.Run("workload changed during the plan", func(t *testing.T) {
+		pRun := pod("ns", "run", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+		wk, _ := getTopWorkload(pRun)
+		wkStr := wk.String()
+
+		ap := &ActivePlan{
+			ID:               "x",
+			WorkloadQuotas:   buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 2}}),
+			WorkloadLivePods: map[string]int{wkStr: 3},
+		}
+		for _, tc := range []struct {
+			name    string
+			desired int
+			exists  bool
+			err     error
+			store   map[string]map[string]*v1.Pod
+			wantOK  bool
+		}{
+			{"deleted, pods gone", 0, false, nil, map[string]map[string]*v1.Pod{}, true},
+			{"deleted, a pod not yet collected", 0, false, nil, storeFromPods(pRun), true},
+			{"scaled down to the live count", 1, true, nil, storeFromPods(pRun), true},
+			{"scaled down but still owed a pod", 2, true, nil, storeFromPods(pRun), false},
+			{"no replica count", -1, true, nil, storeFromPods(pRun), false},
+			{"lookup error", 0, false, errors.New("boom"), storeFromPods(pRun), false},
+		} {
+			withVar(t, &workloadDesiredPodsFor, func(*SharedState, string) (int, bool, error) { return tc.desired, tc.exists, tc.err })
+			withPodLister(&FakePodLister{Store: tc.store}, func() {
+				ok, err := pl.isPlanCompleted(ap)
+				must(t, (err != nil) == (tc.err != nil), "%s: err = %v", tc.name, err)
+				must(t, ok == tc.wantOK, "%s: completed = %v, want %v", tc.name, ok, tc.wantOK)
+			})
+		}
+	})
+
+	t.Run("all pods back and no pending => remaining treated satisfied", func(t *testing.T) {
+		p1 := pod("ns", "p1", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+		p2 := pod("ns", "p2", onNode("n2"), withOwner("ReplicaSet", "rs-1"))
+		wk, _ := getTopWorkload(p1)
+		wkStr := wk.String()
+
+		ap := &ActivePlan{
+			ID:               "x",
+			WorkloadQuotas:   buildWorkloadQuotas(WorkloadQuotas{wkStr: {"n1": 1}}),
+			WorkloadLivePods: map[string]int{wkStr: 2},
+		}
+		withPodLister(&FakePodLister{Store: storeFromPods(p1, p2)}, func() {
 			ok, err := pl.isPlanCompleted(ap)
 			mustNoErr(t, err, "isPlanCompleted err")
 			must(t, ok, "expected completed")
