@@ -54,7 +54,8 @@ cp -r manifests/mypriorityoptimizer/*  bootstrap/content/manifests/mypriorityopt
 cp -r manifests/mydeterministicscore/* bootstrap/content/manifests/mydeterministicscore/
 
 echo "Building scheduler binary + downloading kube-apiserver via build.sh..."
-bash ./build.sh
+# The bootstrap folder always targets linux/amd64, built with the pinned Go version
+TARGET_OS=linux TARGET_ARCH=amd64 GOTOOLCHAIN="go${GO_VERSION//$'\r'/}" bash ./build.sh
 chmod +x bin/kube-scheduler
 
 echo "Creating bootstrap/content/bin and shipping binaries..."
@@ -86,9 +87,13 @@ curl -fsSL -o bootstrap/content/bin/kwok \
   "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_TAG}/kwok-linux-amd64"
 chmod +x bootstrap/content/bin/kwokctl bootstrap/content/bin/kwok
 
-# Verify binaries
-bootstrap/content/bin/kubectl version --client=true >/dev/null
-bootstrap/content/bin/kwokctl --version >/dev/null
-bootstrap/content/bin/kwok --version >/dev/null
+echo "Verifying that all shipped binaries are linux/amd64..."
+for bin in bootstrap/content/bin/*; do
+  # ELF magic in bytes 0-3 and machine type x86-64 (0x3e) in bytes 18-19; works on any build host
+  if [[ "$(od -An -tx1 -N20 "${bin}" | tr -d ' \n')" != 7f454c46*3e00 ]]; then
+    echo "ERROR: ${bin} is not a linux/amd64 binary; delete bin/$(basename "${bin}") and rerun" >&2
+    exit 1
+  fi
+done
 
 echo "Done."
