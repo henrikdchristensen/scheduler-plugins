@@ -3,13 +3,17 @@ kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 seed-file: data/seeds/kwok_workload_once/seeds_100.txt
 output-dir: results/plugin/nodes32_pods256_prio4_util100_timeout60
 solver-trigger: true
+save-scheduler-logs: true
 override-workload-config:
   num_nodes: 32
   num_pods: 256
   num_priorities: 4
   util: 1.0
+  settle_timeout_max: 70s
 override-kwokctl-envs:
 - name: OPTIMIZE_MODE
   value: manual
 - name: SOLVER_PYTHON_TIMEOUT
+  value: 60s
+- name: PLAN_EXECUTION_TIMEOUT
   value: 60s
