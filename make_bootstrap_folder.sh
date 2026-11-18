@@ -37,6 +37,11 @@ cp "${ENV_FILE}" bootstrap/opt-prio.env
 echo "Copying data subfolder into bootstrap/content..."
 rsync -a --exclude='__pycache__' data/ bootstrap/content/data
 
+if [[ -f gurobi.lic ]]; then
+  echo "Copying gurobi.lic into bootstrap/content (git-ignored, needed for --solver-type gurobi)..."
+  cp gurobi.lic bootstrap/content/gurobi.lic
+fi
+
 echo "Copying scripts subfolder into bootstrap/content/scripts..."
 rsync -a --exclude='__pycache__' scripts/ bootstrap/content/scripts/
 

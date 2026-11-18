@@ -13,6 +13,8 @@ PYTHON_SOLVER_OUT_SCRIPT_DIR="/opt/solver"
 
 # Solver selection: cp_sat (default), gurobi
 SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
+# Gurobi licence file; defaults to <CONTENT_DIR>/gurobi.lic
+GUROBI_LICENSE_FILE="${GUROBI_LICENSE_FILE:-}"
 
 # Runner selection: test_runner (default) or trace_replayer
 RUNNER="${RUNNER:-test_runner}"
@@ -228,6 +230,30 @@ PY
   log ok "staged solver + venv"
 }
 
+ensure_gurobi_license() {
+  local lic="${GUROBI_LICENSE_FILE:-${CONTENT_DIR}/gurobi.lic}"
+  log init "installing Gurobi licence from ${lic}"
+  require_file "${lic}"
+
+  # /opt/gurobi is searched by Gurobi regardless of the solver process's HOME or environment
+  run_root "
+    set -euo pipefail
+    install -D -m 0600 '${lic}' /opt/gurobi/gurobi.lic
+    '${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python' - <<'PY'
+import gurobipy as gp
+env = gp.Env(empty=True)
+env.setParam('OutputFlag', 0)
+env.start()
+model = gp.Model(env=env)
+model.addVars(2001, vtype=gp.GRB.BINARY)  # one more than the size-limited licence allows
+model.optimize()
+print('gurobi licence ok, version', '.'.join(map(str, gp.gurobi.version())))
+PY
+  " || die "Gurobi licence check failed: ${lic} is invalid or size-limited"
+
+  log ok "Gurobi licence ready"
+}
+
 install_test_scripts_requirements() {
   log init "installing runner requirements (online pip)"
 
@@ -249,6 +275,9 @@ stage_setup() {
 
   ensure_shipped_k8s_tools
   stage_solver_and_venv
+  if [ "${SOLVER_TYPE}" = "gurobi" ]; then
+    ensure_gurobi_license
+  fi
 
   log ok "setup done"
 }

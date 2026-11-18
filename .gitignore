@@ -36,6 +36,7 @@ eta*
 /tmp/
 *.coverage
 /coverage/
+gurobi.lic
 /scripts/kwok_integration_tests/**/*.csv
 /scripts/kwok_integration_tests/**/*.json
 /.solver/
