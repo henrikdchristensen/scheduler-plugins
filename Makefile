@@ -60,7 +60,7 @@ build-scheduler:
 # Builds bootstrap/ with linux/amd64 binaries for HPC/VM runs; works on macOS and Linux
 .PHONY: bootstrap_folder
 bootstrap_folder:
-	bash ./make_bootstrap_folder.sh
+	bash ./make_bootstrap_folder.sh $(BOOTSTRAP_ARGS)
 
 .PHONY: build-images
 build-images:

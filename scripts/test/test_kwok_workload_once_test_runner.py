@@ -855,6 +855,7 @@ def test_prepare_output_dir(tmp_path):
 @pytest.mark.parametrize("solver_type, env, folder", [
     ("cp_sat", None, "cp-sat"),
     ("gurobi", None, "gurobi"),
+    ("cplex", None, "cplex"),
     (None, "gurobi", "gurobi"),
     (None, None, "cp-sat"),
 ])
@@ -868,6 +869,10 @@ def test_prepare_output_dir_puts_results_in_solver_folder(tmp_path, monkeypatch,
 
     assert runner._prepare_output_dir() == (tmp_path / "plugin" / folder / "job").resolve()
     assert (tmp_path / "plugin" / folder / "job").is_dir()
+
+
+def test_get_solver_cmd_selects_cplex():
+    assert tr.get_solver_cmd("cplex") == "python3 scripts/python_solver/solver_cplex.py"
 
 # ---------------------------------------------------------------------------
 # TestRunner._append_result_csv

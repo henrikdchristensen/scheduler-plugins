@@ -11,7 +11,7 @@ CONTENT_DIR_WAIT_INTERVAL_S="${CONTENT_DIR_WAIT_INTERVAL:-2}" # seconds
 PYTHON_SOLVER_OUT_VENV_DIR="/opt/venv"
 PYTHON_SOLVER_OUT_SCRIPT_DIR="/opt/solver"
 
-# Solver selection: cp_sat (default), gurobi
+# Solver selection: cp_sat (default), gurobi, cplex
 SOLVER_TYPE="${SOLVER_TYPE:-cp_sat}"
 # Gurobi licence file; defaults to <CONTENT_DIR>/gurobi.lic
 GUROBI_LICENSE_FILE="${GUROBI_LICENSE_FILE:-}"
@@ -197,6 +197,9 @@ stage_solver_and_venv() {
     gurobi)
       solver_script="solver_gurobi.py"
       ;;
+    cplex)
+      solver_script="solver_cplex.py"
+      ;;
     cp_sat|*)
       solver_script="solver_cp_sat.py"
       ;;
@@ -232,13 +235,16 @@ PY
 
 ensure_gurobi_license() {
   local lic="${GUROBI_LICENSE_FILE:-${CONTENT_DIR}/gurobi.lic}"
+  local quoted_lic
+  printf -v quoted_lic '%q' "${lic}"
   log init "installing Gurobi licence from ${lic}"
   require_file "${lic}"
 
   # /opt/gurobi is searched by Gurobi regardless of the solver process's HOME or environment
   run_root "
     set -euo pipefail
-    install -D -m 0600 '${lic}' /opt/gurobi/gurobi.lic
+    install -D -m 0600 -- ${quoted_lic} /opt/gurobi/gurobi.lic
+    export GRB_LICENSE_FILE=/opt/gurobi/gurobi.lic
     '${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python' - <<'PY'
 import gurobipy as gp
 env = gp.Env(empty=True)
@@ -252,6 +258,48 @@ PY
   " || die "Gurobi licence check failed: ${lic} is invalid or size-limited"
 
   log ok "Gurobi licence ready"
+}
+
+ensure_cplex() {
+  local installer="${CONTENT_DIR}/cplex_installer.bin"
+  local studio=/opt/ibm/cplex
+  local python="${PYTHON_SOLVER_OUT_VENV_DIR}/bin/python"
+  local install_cmd
+  require_file "${installer}"
+  log init "installing CPLEX Optimization Studio from ${installer}"
+
+  printf -v install_cmd 'installer=%q\nstudio=%q\npython=%q\n' "${installer}" "${studio}" "${python}"
+  run_root "${install_cmd}$(cat <<'SH'
+set -euo pipefail
+if ! command -v java >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openjdk-17-jre-headless unzip
+fi
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+cd "$work"
+response="$work/response.properties"
+printf '%s\n' INSTALLER_UI=silent LICENSE_ACCEPTED=true "USER_INSTALL_DIR=$studio" \
+  USER_INPUT_SEGMENT_FALSE=1 CPLEX_STUDIO_README=0 CPLEX_STUDIO_IDE=0 > "$response"
+bash "$installer" -f "$response" </dev/null
+
+engine="$studio/cplex/bin/x86-64_linux/cplex"
+if [[ ! -x "$engine" ]]; then
+  echo "CPLEX installer did not provide $engine" >&2
+  exit 1
+fi
+version=$("$engine" -c quit </dev/null | sed -nE 's/.*Interactive Optimizer ([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+.*/\1/p')
+if [[ -z "$version" ]]; then
+  echo "Could not determine the CPLEX version from $engine" >&2
+  exit 1
+fi
+"$python" -m pip install --no-cache-dir "cplex==$version.*" docplex
+"${python%/*}/docplex" config --upgrade "$studio"
+"$python" -c 'import cplex; print("CPLEX", cplex.__version__, "found at", cplex.__file__)'
+SH
+)" || die "CPLEX setup failed: check installer output, matching wheel, and Python import above"
+
+  log ok "CPLEX ready"
 }
 
 install_test_scripts_requirements() {
@@ -273,11 +321,17 @@ stage_setup() {
   resolve_paths_relative_to_folder
   print_cfg
 
+  if [ "${SOLVER_TYPE}" = "cplex" ]; then
+    require_file "${CONTENT_DIR}/cplex_installer.bin"
+  elif [ "${SOLVER_TYPE}" = "gurobi" ]; then
+    require_file "${GUROBI_LICENSE_FILE:-${CONTENT_DIR}/gurobi.lic}"
+  fi
   ensure_shipped_k8s_tools
   stage_solver_and_venv
-  if [ "${SOLVER_TYPE}" = "gurobi" ]; then
-    ensure_gurobi_license
-  fi
+  case "${SOLVER_TYPE}" in
+    gurobi) ensure_gurobi_license ;;
+    cplex) ensure_cplex ;;
+  esac
 
   log ok "setup done"
 }
@@ -370,6 +424,7 @@ FLAGS_SPEC=(
   "job-file|JOB_FILE|value|"
   "job-list|JOB_LIST|value|"
   "solver-type|SOLVER_TYPE|value|"
+  "gurobi-license-file|GUROBI_LICENSE_FILE|value|"
   "solver-trigger|SOLVER_TRIGGER|flag|--solver-trigger"
   "save-solver-stats|SAVE_SOLVER_STATS|flag|--save-solver-stats"
   "save-scheduler-logs|SAVE_SCHEDULER_LOGS|flag|--save-scheduler-logs"
