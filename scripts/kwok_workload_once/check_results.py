@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # scripts/kwok_workload_once/check_results.py
 """
-python -m scripts.kwok_workload_once.check_results results/plugin
-python -m scripts.kwok_workload_once.check_results results/plugin \
+python -m scripts.kwok_workload_once.check_results results/plugin/cp-sat
+python -m scripts.kwok_workload_once.check_results results/plugin/cp-sat \
     --job-list data/jobs/kwok_workload_once/lists/cp_sat/*.txt --commit <hash>
 """
 

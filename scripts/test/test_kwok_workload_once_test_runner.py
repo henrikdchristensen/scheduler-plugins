@@ -852,6 +852,23 @@ def test_prepare_output_dir(tmp_path):
     assert resolved.is_dir()
     assert not (resolved / "old.txt").exists()
 
+@pytest.mark.parametrize("solver_type, env, folder", [
+    ("cp_sat", None, "cp-sat"),
+    ("gurobi", None, "gurobi"),
+    (None, "gurobi", "gurobi"),
+    (None, None, "cp-sat"),
+])
+def test_prepare_output_dir_puts_results_in_solver_folder(tmp_path, monkeypatch, solver_type, env, folder):
+    monkeypatch.delenv("SOLVER_TYPE", raising=False)
+    if env:
+        monkeypatch.setenv("SOLVER_TYPE", env)
+
+    runner = tr.TestRunner(ns(), initialize=False)
+    runner.args = ns(output_dir=str(tmp_path / "plugin" / "{solver}" / "job"), clean_start=False, solver_type=solver_type)
+
+    assert runner._prepare_output_dir() == (tmp_path / "plugin" / folder / "job").resolve()
+    assert (tmp_path / "plugin" / folder / "job").is_dir()
+
 # ---------------------------------------------------------------------------
 # TestRunner._append_result_csv
 # ---------------------------------------------------------------------------

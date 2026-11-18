@@ -98,6 +98,10 @@ def get_solver_cmd(solver_type: str = DEFAULT_SOLVER_TYPE) -> str:
     script = SOLVER_SCRIPTS.get(solver_type, SOLVER_SCRIPTS[DEFAULT_SOLVER_TYPE])
     return f"python3 {script}"
 
+def resolve_solver_type(args: argparse.Namespace) -> str:
+    """Solver type from --solver-type, else the SOLVER_TYPE env var, else the default."""
+    return getattr(args, "solver_type", None) or os.environ.get("SOLVER_TYPE", DEFAULT_SOLVER_TYPE)
+
 # ===============================================================
 # Data classes
 # ===============================================================
@@ -1097,10 +1101,12 @@ class TestRunner:
     def _prepare_output_dir(self) -> Path:
         """
         Prepare the output directory for test results.
+        "{solver}" in the path becomes the solver folder (cp-sat, gurobi).
         If --clean-start is set, remove any existing contents.
         Return the resolved Path.
         """
-        resolved_dir = Path(self.args.output_dir).resolve()
+        solver_dir = resolve_solver_type(self.args).replace("_", "-")
+        resolved_dir = Path(self.args.output_dir.replace("{solver}", solver_dir)).resolve()
         if self.args.clean_start:
             if resolved_dir.exists():
                 shutil.rmtree(resolved_dir)
@@ -1585,7 +1591,7 @@ class TestRunner:
         _write_json(self.args.solver_input_export, instance)
 
         # Run solver
-        solver_type = getattr(self.args, "solver_type", None) or os.environ.get("SOLVER_TYPE", DEFAULT_SOLVER_TYPE)
+        solver_type = resolve_solver_type(self.args)
         solver_cmd = get_solver_cmd(solver_type)
         LOG.info("solving directly with %d nodes and %d pods (seed=%d, solver=%s)", len(nodes), len(pods), seed, solver_type)
         t0 = time.time()
