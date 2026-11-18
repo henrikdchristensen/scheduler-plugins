@@ -64,7 +64,6 @@ mkdir -- "${CONTENT_DIR}"
 echo "Recording git commit in bootstrap/content/GIT_COMMIT..."
 # safe.directory: the repo is owned by another user when building in a container
 GIT_COMMIT="$(git -c safe.directory='*' rev-parse HEAD)"
-[[ -n "$(git -c safe.directory='*' status --porcelain)" ]] && GIT_COMMIT="${GIT_COMMIT}-dirty"
 echo "${GIT_COMMIT}" > "${CONTENT_DIR}/GIT_COMMIT"
 
 echo "Copying ${ENV_FILE} into bootstrap..."
@@ -140,6 +139,3 @@ for bin in "${CONTENT_DIR}/bin/"*; do
 done
 
 echo "Done. Built from ${GIT_COMMIT}."
-if [[ "${GIT_COMMIT}" == *-dirty ]]; then
-  echo "WARNING: uncommitted changes; results will be labelled '-dirty'. Commit and rebuild before a real run." >&2
-fi
