@@ -96,4 +96,7 @@ for bin in bootstrap/content/bin/*; do
   fi
 done
 
-echo "Done."
+echo "Done. Built from ${GIT_COMMIT}."
+if [[ "${GIT_COMMIT}" == *-dirty ]]; then
+  echo "WARNING: uncommitted changes; results will be labelled '-dirty'. Commit and rebuild before a real run." >&2
+fi
