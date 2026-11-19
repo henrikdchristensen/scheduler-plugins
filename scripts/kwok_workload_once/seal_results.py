@@ -644,8 +644,12 @@ class CombineResultsAnalyzer:
             if c in per_combo_df.columns:
                 per_combo_df[c] = pd.to_numeric(per_combo_df[c], errors="coerce")
 
-        # Derive output filename from solver_dir (e.g., plugin -> cp_sat, plugin-gurobi -> gurobi)
-        solver_suffix = self.args.solver_dir.replace("plugin-", "").replace("plugin", "cp_sat")
+        # Support both flat names (plugin-cp_sat) and nested names (plugin/cp-sat).
+        solver_name = Path(self.args.solver_dir).name
+        solver_suffix = solver_name.removeprefix("plugin-")
+        if solver_suffix == solver_name and solver_name == "plugin":
+            solver_suffix = "cp_sat"
+        solver_suffix = solver_suffix.replace("-", "_")
         if not solver_suffix:
             solver_suffix = "cp_sat"
         out_filename = f"results_per_combo_{solver_suffix}.csv"
