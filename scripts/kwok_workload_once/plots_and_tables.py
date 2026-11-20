@@ -50,7 +50,7 @@ from scripts.helpers.table_helpers import (
 
 DEFAULT_RESULTS_ROOT = Path("analysis/kwok_workload_once")
 DEFAULT_SOLVER = "cp_sat"
-ALL_SOLVERS = ["cp_sat", "gurobi"]
+ALL_SOLVERS = ["cp_sat", "gurobi", "cplex"]
 
 REQUIRED_SEALED_RESULTS_COLUMNS = {
     # counts
