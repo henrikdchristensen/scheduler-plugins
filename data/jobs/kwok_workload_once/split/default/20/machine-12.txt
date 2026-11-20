@@ -1,0 +1,6 @@
+# default-scheduler, machine 12 of 20: 5 jobs
+../../../default/nodes4_pods16_prio2_util105.yaml
+../../../default/nodes4_pods16_prio4_util090.yaml
+../../../default/nodes4_pods16_prio4_util095.yaml
+../../../default/nodes4_pods16_prio4_util100.yaml
+../../../default/nodes4_pods16_prio4_util105.yaml
