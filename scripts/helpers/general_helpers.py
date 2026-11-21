@@ -118,6 +118,11 @@ def get_git_info(cwd: Optional[Path] = None, *, timeout_s: float = 0.5) -> Dict[
         return None
     commit = _run(["git", "rev-parse", "HEAD"])
     branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if commit is None:  # bootstrap folder has no .git; make_bootstrap_folder.sh records the commit
+        try:
+            commit = (Path(cwd or ".") / "GIT_COMMIT").read_text(encoding="utf-8").strip() or None
+        except OSError:
+            pass
     if commit is not None: info["commit"] = commit
     if branch is not None: info["branch"] = branch
     return info

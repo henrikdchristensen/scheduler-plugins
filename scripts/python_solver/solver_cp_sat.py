@@ -248,7 +248,10 @@ class CPSATSolver:
         #########################
         # Extract and return plan
         #########################
-        placements, evictions = self._extract_plan(problem, vars, solver)
+        try:
+            placements, evictions = self._extract_plan(problem, vars, solver)
+        except RuntimeError:  # no stage ran, so the solver holds no response
+            placements, evictions = [], []
         total_time = max(0.0, time.monotonic() - started_at)
 
         # Get overall status by checking all phases. Priority:
@@ -522,12 +525,6 @@ class CPSATSolver:
             # However, possibly, it cannot be placed anywhere.
             # In that case, the model is infeasible.
             model.Add(sum(vars.assign[problem.preemptor_idx]) == 1)
-        # Background modes
-        else:
-            # There must be at least one placement of pending pods
-            # (weak constraint to avoid trivial empty solution and solutions that only move running pods or evict.)
-            if problem.pending_idxs:
-                model.Add(sum(vars.placed[i] for i in problem.pending_idxs) >= 1)
 
     #################################################
     # --- Optimization ------------------------------

@@ -57,6 +57,11 @@ build-controller:
 build-scheduler:
 	$(GO_BUILD_ENV) go build -ldflags '-X k8s.io/component-base/version.gitVersion=$(VERSION) -w' -o bin/kube-scheduler cmd/scheduler/main.go
 
+# Builds bootstrap/ with linux/amd64 binaries for HPC/VM runs; works on macOS and Linux
+.PHONY: bootstrap_folder
+bootstrap_folder:
+	bash ./make_bootstrap_folder.sh $(BOOTSTRAP_ARGS)
+
 .PHONY: build-images
 build-images:
 	BUILDER=$(BUILDER) \

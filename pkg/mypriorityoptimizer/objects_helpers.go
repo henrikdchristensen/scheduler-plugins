@@ -9,6 +9,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -509,6 +510,61 @@ func getTopWorkload(p *v1.Pod) (WorkloadKey, bool) {
 }
 
 // -------------------------
+// workloadDesiredPods
+// -------------------------
+
+// workloadDesiredPods reports whether the workload behind key (see
+// WorkloadKey.String) still exists and how many pods its controller wants
+// (-1 if the kind has no replica count).
+func workloadDesiredPods(pl *SharedState, key string) (int, bool, error) {
+	kind, nsname, _ := strings.Cut(key, ":")
+	ns, name, err := splitNsName(nsname)
+	if err != nil {
+		return 0, false, err
+	}
+	gone := func(err error) (int, bool, error) {
+		if apierrors.IsNotFound(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	replicas := func(r *int32) int {
+		if r == nil {
+			return 1
+		}
+		return int(*r)
+	}
+	f := pl.Handle.SharedInformerFactory()
+	switch kind {
+	case "rs":
+		o, err := f.Apps().V1().ReplicaSets().Lister().ReplicaSets(ns).Get(name)
+		if err != nil {
+			return gone(err)
+		}
+		return replicas(o.Spec.Replicas), o.DeletionTimestamp == nil, nil
+	case "ss":
+		o, err := f.Apps().V1().StatefulSets().Lister().StatefulSets(ns).Get(name)
+		if err != nil {
+			return gone(err)
+		}
+		return replicas(o.Spec.Replicas), o.DeletionTimestamp == nil, nil
+	case "ds":
+		o, err := f.Apps().V1().DaemonSets().Lister().DaemonSets(ns).Get(name)
+		if err != nil {
+			return gone(err)
+		}
+		return -1, o.DeletionTimestamp == nil, nil
+	case "job":
+		o, err := f.Batch().V1().Jobs().Lister().Jobs(ns).Get(name)
+		if err != nil {
+			return gone(err)
+		}
+		return -1, o.DeletionTimestamp == nil, nil
+	}
+	return 0, false, fmt.Errorf("unknown workload key: %q", key)
+}
+
+// -------------------------
 // Test Hooks
 // -------------------------
 
@@ -522,4 +578,5 @@ var (
 	evictPodFor = func(pl *SharedState, ctx context.Context, pod *v1.Pod, ev *policyv1.Eviction) error {
 		return pl.Client.CoreV1().Pods(pod.Namespace).EvictV1(ctx, ev)
 	}
+	workloadDesiredPodsFor = workloadDesiredPods
 )

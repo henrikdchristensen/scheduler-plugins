@@ -85,11 +85,12 @@ SOLVER_TRIGGER_URL = "http://localhost:18080/solve"
 SOLVER_TRIGGER_TIMEOUT_S = 60
 SOLVER_ACTIVE_URL = "http://localhost:18080/active"
 
-# Solver type: cp_sat (default), or gurobi
+# Solver type: cp_sat (default), gurobi, or cplex
 # Can be overridden via --solver-type argument or SOLVER_TYPE env var
 SOLVER_SCRIPTS = {
     "cp_sat": "scripts/python_solver/solver_cp_sat.py",
     "gurobi": "scripts/python_solver/solver_gurobi.py",
+    "cplex": "scripts/python_solver/solver_cplex.py",
 }
 DEFAULT_SOLVER_TYPE = "cp_sat"
 
@@ -97,6 +98,10 @@ def get_solver_cmd(solver_type: str = DEFAULT_SOLVER_TYPE) -> str:
     """Get the solver command based on solver type."""
     script = SOLVER_SCRIPTS.get(solver_type, SOLVER_SCRIPTS[DEFAULT_SOLVER_TYPE])
     return f"python3 {script}"
+
+def resolve_solver_type(args: argparse.Namespace) -> str:
+    """Solver type from --solver-type, else the SOLVER_TYPE env var, else the default."""
+    return getattr(args, "solver_type", None) or os.environ.get("SOLVER_TYPE", DEFAULT_SOLVER_TYPE)
 
 # ===============================================================
 # Data classes
@@ -218,7 +223,7 @@ def build_argparser() -> argparse.ArgumentParser:
                     help="After applying all pods for a seed, POST the manual solver endpoint.")
 
     # Direct solver
-    ap.add_argument("--solver-type", dest="solver_type", default=None, choices=["cp_sat", "gurobi"],
+    ap.add_argument("--solver-type", dest="solver_type", default=None, choices=sorted(SOLVER_SCRIPTS),
                     help="Solver type: cp_sat (constraint programming), or gurobi.")
     ap.add_argument("--solver-directly", dest="solver_directly", action=BooleanOptionalAction, default=None,
                     help="Bypass cluster use; directly call the Python solver with generated nodes/pods.")
@@ -1097,10 +1102,12 @@ class TestRunner:
     def _prepare_output_dir(self) -> Path:
         """
         Prepare the output directory for test results.
+        "{solver}" in the path becomes the solver folder (cp-sat, gurobi).
         If --clean-start is set, remove any existing contents.
         Return the resolved Path.
         """
-        resolved_dir = Path(self.args.output_dir).resolve()
+        solver_dir = resolve_solver_type(self.args).replace("_", "-")
+        resolved_dir = Path(self.args.output_dir.replace("{solver}", solver_dir)).resolve()
         if self.args.clean_start:
             if resolved_dir.exists():
                 shutil.rmtree(resolved_dir)
@@ -1585,7 +1592,7 @@ class TestRunner:
         _write_json(self.args.solver_input_export, instance)
 
         # Run solver
-        solver_type = getattr(self.args, "solver_type", None) or os.environ.get("SOLVER_TYPE", DEFAULT_SOLVER_TYPE)
+        solver_type = resolve_solver_type(self.args)
         solver_cmd = get_solver_cmd(solver_type)
         LOG.info("solving directly with %d nodes and %d pods (seed=%d, solver=%s)", len(nodes), len(pods), seed, solver_type)
         t0 = time.time()

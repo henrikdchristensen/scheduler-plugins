@@ -7,7 +7,7 @@ It can be used by setting SOLVER_TYPE=gurobi or SOLVER_PATH to point to this scr
 Requirements:
     pip install gurobipy
     A valid Gurobi license (academic WLS, trial, or commercial)
-    We noted that the using the WLS license a maximum of 5 jobs can run concurrently, properly due to token and session limits.
+    We noted that with the WLS license a maximum of 2 jobs can run concurrently, due to token and session limits.
 """
 
 import os
@@ -528,6 +528,8 @@ class GurobiSolver:
                     gp.quicksum(dvars.assign[i]) == dvars.placed[i],
                     name=f"assign_link_{i}"
                 )
+            else:
+                model.addConstr(dvars.placed[i] == 0, name=f"unplaceable_{i}")
 
     def _add_protected_stay_constraints(
         self,
@@ -545,7 +547,7 @@ class GurobiSolver:
             pos = problem.eligible_pos[i].get(orig_j)
             if pos is None:
                 return {
-                    "status": "INFEASIBLE",
+                    "status": "MODEL_INVALID",
                     "error": f"protected pod {problem.pod_uid[i]} cannot stay on node {orig_j}",
                 }
             # Must stay
@@ -553,18 +555,10 @@ class GurobiSolver:
         return None
 
     def _add_mode_specific_constraints(self, model, problem: Problem, dvars: DecisionVars):
-        """Add preemptor-mode or background-mode specific constraints."""
+        """Add preemptor-mode specific constraints."""
         if problem.single_preemptor_mode and problem.preemptor_idx is not None:
             # Preemptor must be placed
             model.addConstr(dvars.placed[problem.preemptor_idx] == 1, name="preemptor_must_place")
-        else:
-            # Background mode: at least one pending pod must be placed
-            # (avoids trivial empty solutions that only move/evict running pods)
-            if problem.pending_idxs:
-                model.addConstr(
-                    gp.quicksum(dvars.placed[i] for i in problem.pending_idxs) >= 1,
-                    name="at_least_one_pending"
-                )
 
     def _solve_lexicographically(
         self,
@@ -658,10 +652,11 @@ class GurobiSolver:
             started = time.monotonic()
             wall_sec = min(cap_sec, remaining_wall())
             
-            if wall_sec <= 0:
+            if wall_sec <= 1e-3:
                 return {
                     "status": "UNKNOWN",
                     "duration_ms": 0,
+                    "time_spent": 0.0,
                     "objective": None,
                     "bound": None,
                     "relative_gap": None,
@@ -703,9 +698,14 @@ class GurobiSolver:
             def gap_str(g: Optional[float]) -> str:
                 return f"{g:.4f}" if isinstance(g, (int, float)) else ""
 
+            status = self._status_str(st)
+            if status == "FEASIBLE" and model.SolCount == 0:
+                status = "UNKNOWN"  # limit hit without an incumbent
+
             return {
-                "status": self._status_str(st),
+                "status": status,
                 "duration_ms": elapsed_ms,
+                "time_spent": min(wall_sec, elapsed_ms / 1000.0),
                 "objective": obj_val,
                 "bound": bound_val,
                 "relative_gap": gap_str(gap),
@@ -722,25 +722,31 @@ class GurobiSolver:
         if not tiers:
             tiers = [0]
 
-        num_tiers = len(tiers)
-        guaranteed_budget = options.guaranteed_tier_fraction * total_sec
-        per_tier_guaranteed = guaranteed_budget / num_tiers if num_tiers else 0
+        remaining_tiers = max(1, len(tiers))
+
+        # Time pools, same scheme as the CP-SAT solver
+        reserved_total = total_sec * max(0.0, min(1.0, options.guaranteed_tier_fraction))
+        unreserved_pool = max(0.0, total_sec - reserved_total)
+        floor_left = reserved_total
 
         # Apply initial warm start from current placements
         apply_current_placement_as_hint()
 
-        for tier_idx, tier in enumerate(tiers):
+        for tier in tiers:
             # Pods at or above this tier
             tier_pod_idxs = [i for i in range(problem.num_pods) if problem.pod_priority[i] >= tier]
             tier_running = [i for i in tier_pod_idxs if problem.pod_node_j[i] is not None]
 
             # Time budget for this tier
-            remaining = remaining_wall()
-            tiers_left = num_tiers - tier_idx
-            fair_share = remaining / tiers_left if tiers_left else remaining
-            tier_budget = max(per_tier_guaranteed, fair_share)
-            place_budget = tier_budget * (1.0 - options.move_fraction_of_tier)
-            move_budget = tier_budget * options.move_fraction_of_tier
+            rem_wall = remaining_wall()
+            if rem_wall <= 0.0:
+                break
+            tier_min = floor_left / max(1, remaining_tiers)
+            tier_cap = min(rem_wall, tier_min + unreserved_pool)
+            if tier_cap <= 1e-3:
+                remaining_tiers = max(0, remaining_tiers - 1)
+                continue
+            place_cap = tier_cap * (1.0 - options.move_fraction_of_tier)
 
             ########################################
             # Stage 1: Maximize placements for tier
@@ -748,13 +754,16 @@ class GurobiSolver:
             place_vars = [dvars.placed[i] for i in tier_pod_idxs]
             place_coeffs = [1.0] * len(place_vars)
 
-            place_result = run_stage(place_vars, place_coeffs, "max", place_budget)
+            place_result = run_stage(place_vars, place_coeffs, "max", place_cap)
+            time_spent_place = place_result.pop("time_spent")
             phases.append({
                 "tier": tier,
                 "stage": "place",
                 **place_result,
             })
             final_status = model.Status
+            if place_result["status"] not in ("OPTIMAL", "FEASIBLE"):
+                break
 
             # Capture solution and apply as warm start for next stage
             is_optimal_place = (model.Status == GRB.OPTIMAL) if GUROBI_AVAILABLE else False
@@ -782,10 +791,17 @@ class GurobiSolver:
 
                 apply_warm_start()
 
+            # Pools deduction for placement
+            use_unreserve = min(unreserved_pool, time_spent_place)
+            unreserved_pool -= use_unreserve
+            floor_left = max(0.0, floor_left - (time_spent_place - use_unreserve))
+
             ########################################
             # Stage 2: Minimize disruption for running pods
             ########################################
-            if tier_running:
+            # The stage gets whatever is left of this tier's budget
+            rem_tier = max(0.0, tier_cap - time_spent_place)
+            if tier_running and remaining_wall() > 1e-3 and rem_tier > 1e-3:
                 # Maximize placed + 2*orig_node for running pods
                 # stay: 1+2=3, move: 1+0=1, evict: 0+0=0
                 # Matches LaTeX formulation: sum(x_{i,·} + 2*x_{i,where})
@@ -800,13 +816,16 @@ class GurobiSolver:
                         move_coeffs.append(2.0)
 
                 if move_vars:
-                    move_result = run_stage(move_vars, move_coeffs, "max", move_budget)
+                    move_result = run_stage(move_vars, move_coeffs, "max", min(rem_tier, remaining_wall()))
+                    time_spent_disr = move_result.pop("time_spent")
                     phases.append({
                         "tier": tier,
                         "stage": "disruption",
                         **move_result,
                     })
                     final_status = model.Status
+                    if move_result["status"] not in ("OPTIMAL", "FEASIBLE"):
+                        break
 
                     is_optimal_disr = (model.Status == GRB.OPTIMAL) if GUROBI_AVAILABLE else False
                     if model.SolCount > 0:
@@ -837,6 +856,13 @@ class GurobiSolver:
 
                         apply_warm_start()
 
+                    # Pools deduction for disruption
+                    use_unreserve = min(unreserved_pool, time_spent_disr)
+                    unreserved_pool -= use_unreserve
+                    floor_left = max(0.0, floor_left - (time_spent_disr - use_unreserve))
+
+            remaining_tiers = max(0, remaining_tiers - 1)
+
         return final_status, phases, solution
 
     def _extract_plan(
@@ -846,6 +872,8 @@ class GurobiSolver:
         solution: dict,
     ) -> tuple[list[dict], list[dict]]:
         """Extract placements and evictions from the solution."""
+        if not solution.get("placed"):  # no stage produced a solution
+            return [], []
 
         def is_pod_placed(i: int) -> bool:
             return solution.get("placed", {}).get(i, 0) >= BINARY_THRESHOLD

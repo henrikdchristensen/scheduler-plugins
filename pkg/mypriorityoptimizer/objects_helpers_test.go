@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -587,6 +589,58 @@ func TestWorkloadKeyString(t *testing.T) {
 	for _, tt := range tests {
 		if got := tt.wk.String(); got != tt.want {
 			t.Fatalf("%s: got=%q want=%q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestWorkloadDesiredPods(t *testing.T) {
+	h := makeHandle("")
+	pl := &SharedState{Handle: h}
+
+	three := int32(3)
+	now := metav1.Now()
+	meta := func(name string) metav1.ObjectMeta { return metav1.ObjectMeta{Namespace: "ns", Name: name} }
+	dying := meta("dying")
+	dying.DeletionTimestamp = &now
+
+	apps := h.Factory.Apps().V1()
+	rs := apps.ReplicaSets().Informer().GetIndexer()
+	for _, err := range []error{
+		rs.Add(&appsv1.ReplicaSet{ObjectMeta: meta("three"), Spec: appsv1.ReplicaSetSpec{Replicas: &three}}),
+		rs.Add(&appsv1.ReplicaSet{ObjectMeta: meta("default")}),
+		rs.Add(&appsv1.ReplicaSet{ObjectMeta: dying}),
+		apps.StatefulSets().Informer().GetIndexer().Add(&appsv1.StatefulSet{ObjectMeta: meta("three"), Spec: appsv1.StatefulSetSpec{Replicas: &three}}),
+		apps.DaemonSets().Informer().GetIndexer().Add(&appsv1.DaemonSet{ObjectMeta: meta("foo")}),
+		h.Factory.Batch().V1().Jobs().Informer().GetIndexer().Add(&batchv1.Job{ObjectMeta: meta("foo")}),
+	} {
+		if err != nil {
+			t.Fatalf("indexer add: %v", err)
+		}
+	}
+
+	tests := []struct {
+		key     string
+		desired int
+		exists  bool
+		wantErr bool
+	}{
+		{"rs:ns/three", 3, true, false},
+		{"rs:ns/default", 1, true, false},
+		{"rs:ns/dying", 1, false, false},
+		{"rs:ns/gone", 0, false, false},
+		{"ss:ns/three", 3, true, false},
+		{"ss:ns/gone", 0, false, false},
+		{"ds:ns/foo", -1, true, false},
+		{"ds:ns/gone", 0, false, false},
+		{"job:ns/foo", -1, true, false},
+		{"job:ns/gone", 0, false, false},
+		{"ns/foo", 0, false, true},
+		{"rs:foo", 0, false, true},
+	}
+	for _, tt := range tests {
+		desired, exists, err := workloadDesiredPods(pl, tt.key)
+		if desired != tt.desired || exists != tt.exists || (err != nil) != tt.wantErr {
+			t.Fatalf("%s: got (%d, %v, %v), want (%d, %v, err=%v)", tt.key, desired, exists, err, tt.desired, tt.exists, tt.wantErr)
 		}
 	}
 }

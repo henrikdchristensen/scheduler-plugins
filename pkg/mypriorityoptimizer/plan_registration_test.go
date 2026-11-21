@@ -98,6 +98,7 @@ func TestPlanRegistration_ExportErrorIsIgnored(t *testing.T) {
 		buildPlanFn = origBuild
 		exportPlanToConfigMapFn = origExport
 	}()
+	withVar(t, &getPodsForActivePlan, func(*SharedState) ([]*v1.Pod, error) { return nil, nil })
 
 	// Stub buildPlan to return a simple plan.
 	dummyPlan := &Plan{}
@@ -189,5 +190,35 @@ func TestPlanRegistration_ExportErrorIsIgnored(t *testing.T) {
 	// Active plan should at least have the same ID used during export.
 	if ap.ID != gotID {
 		t.Fatalf("activePlan.ID = %q, want %q (same as stored plan id)", ap.ID, gotID)
+	}
+}
+
+func TestPlanRegistration_CountsWorkloadPodsFromLiveState(t *testing.T) {
+	withVar(t, &buildPlanFn, func(*SharedState, *SolverOutput, *v1.Pod, []*v1.Pod) (*Plan, error) { return &Plan{}, nil })
+	withVar(t, &exportPlanToConfigMapFn, func(*SharedState, context.Context, string, *StoredPlan) error { return nil })
+
+	snapshot := pod("ns", "a", onNode("n1"), withOwner("ReplicaSet", "rs-1"))
+	live := []*v1.Pod{snapshot, pod("ns", "b", onNode("n1"), withOwner("ReplicaSet", "rs-1"))}
+	wk, _ := getTopWorkload(snapshot)
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"live state is used", nil, 2},
+		{"list error falls back to the snapshot", errors.New("boom"), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withVar(t, &getPodsForActivePlan, func(*SharedState) ([]*v1.Pod, error) { return live, tc.err })
+			pl := &SharedState{}
+			_, ap, err := pl.planRegistration(context.Background(), SolverResult{}, &SolverOutput{}, nil, []*v1.Pod{snapshot})
+			if err != nil || ap == nil {
+				t.Fatalf("planRegistration() = (%v, %v), want an active plan", ap, err)
+			}
+			if got := ap.WorkloadLivePods[wk.String()]; got != tc.want {
+				t.Fatalf("WorkloadLivePods = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

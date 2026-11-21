@@ -76,7 +76,7 @@ The source code for OptPlugin is located in `pkg/mypriorityoptimizer/`. The main
 
 The two optimizer implementations are located in `scripts/python_solver/` and can also serve as templates for adding other optimizers.
 
-**Note:** Since Gurobi is a commercial optimizer, valid license credentials must be provided in the script—specifically `GRB_WLSACCESSID`, `GRB_WLSSECRET`, and `GRB_LICENSEID` — which can be obtained from the Gurobi license file. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
+**Note:** Since Gurobi is a commercial optimizer, a valid license file must be provided: place `gurobi.lic` (not tracked by git) in the repository root before running `make bootstrap_folder`, or in `bootstrap/content/` afterwards. The bootstrap script installs it and stops if the license is invalid or size-limited. In practice, the license setup allowed at most two parallel executions using the WLS (Web License Server) access.
 
 ## Scheduler Integration
 
@@ -138,7 +138,7 @@ The evaluations in this analysis were conducted on machines with the following s
 - **CPU:** 8 vCPUs (Intel Xeon Gold 6130)
 - **Memory:** 48 GB RAM
 - **Operating system:** Ubuntu 24.04
-- **Optimizer libraries:** OR-Tools 9.14.6206 and GurobiPy 13.0.1
+- **Optimizer libraries:** OR-Tools 9.15.6755 and GurobiPy 14.0.0
 
 #### Scheduler Setups
 

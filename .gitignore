@@ -28,6 +28,7 @@ vendor
 __pycache__/
 .VSCodeCounter
 /bootstrap/
+/bootstrap-*/
 output/
 results/
 /trace/
@@ -36,6 +37,9 @@ eta*
 /tmp/
 *.coverage
 /coverage/
+gurobi.lic
+gurobi[1-6].lic
+/cplex_installer.bin
 /scripts/kwok_integration_tests/**/*.csv
 /scripts/kwok_integration_tests/**/*.json
 /.solver/

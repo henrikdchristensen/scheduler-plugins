@@ -31,7 +31,12 @@ func (pl *SharedState) planRegistration(
 	}
 
 	id := getUniqueId(PlanConfigMapNamePrefix)
-	pl.setActivePlan(plan, id, pods)
+	// Count workload pods from the live state: the snapshot predates the solver run.
+	livePods, err := getPodsForActivePlan(pl)
+	if err != nil {
+		livePods = pods
+	}
+	pl.setActivePlan(plan, id, livePods)
 
 	storedPlan := &StoredPlan{
 		PluginVersion:        PluginVersion,
@@ -59,4 +64,5 @@ var (
 	exportPlanToConfigMapFn = func(pl *SharedState, ctx context.Context, id string, stored *StoredPlan) error {
 		return pl.exportPlanToConfigMap(ctx, id, stored)
 	}
+	getPodsForActivePlan = func(pl *SharedState) ([]*v1.Pod, error) { return pl.getPods() }
 )

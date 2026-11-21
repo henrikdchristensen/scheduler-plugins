@@ -1,0 +1,16 @@
+# cp_sat, machine 13 of 20: 15 jobs, estimated 17.2 h
+../../../plugin/nodes8_pods32_prio2_util090_timeout01.yaml
+../../../plugin/nodes8_pods32_prio2_util090_timeout10.yaml
+../../../plugin/nodes8_pods32_prio2_util090_timeout20.yaml
+../../../plugin/nodes8_pods32_prio2_util095_timeout01.yaml
+../../../plugin/nodes8_pods32_prio2_util095_timeout10.yaml
+../../../plugin/nodes8_pods32_prio2_util095_timeout20.yaml
+../../../plugin/nodes8_pods64_prio2_util100_timeout01.yaml
+../../../plugin/nodes8_pods64_prio2_util100_timeout10.yaml
+../../../plugin/nodes8_pods64_prio2_util100_timeout20.yaml
+../../../plugin/nodes32_pods128_prio1_util090_timeout01.yaml
+../../../plugin/nodes32_pods128_prio1_util090_timeout10.yaml
+../../../plugin/nodes32_pods128_prio1_util090_timeout20.yaml
+../../../plugin/nodes32_pods256_prio1_util090_timeout01.yaml
+../../../plugin/nodes32_pods256_prio1_util090_timeout10.yaml
+../../../plugin/nodes32_pods256_prio1_util090_timeout20.yaml

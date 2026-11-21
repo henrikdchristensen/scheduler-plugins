@@ -25,6 +25,14 @@ var OptimizeStableQueueCheckInterval = parseTime(getEnv("OPTIMIZE_STABLE_QUEUE_C
 
 // ===============================
 
+// ======= Plan settings =========
+
+// PlanRealizationTimeout is the maximum duration a plan may take to be realized
+// by scheduling pinning workers before being terminated and marked as failed.
+var PlanRealizationTimeout = parseTime(getEnv("PLAN_EXECUTION_TIMEOUT", "8s"))
+
+// ===============================
+
 // ======= Solver settings =======
 
 // Save failed attempts to config map (for debugging)
