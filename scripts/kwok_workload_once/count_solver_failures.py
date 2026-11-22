@@ -18,6 +18,8 @@ LOG_FAILURE = re.compile(
     r'err="(?P<error>(?:\\.|[^"\\])*)" durationMs=(?P<duration>[0-9]+)\b'
 )
 COLUMNS = ("calls", "UNKNOWN", "FAILED", "deadline", "stdout", "other", "unresolved")
+JOBS_DIR = Path("data", "jobs", "kwok_workload_once")
+RERUN_JOBS = JOBS_DIR / "rerun-stdout"
 
 
 def failure_category(error: str) -> str:
@@ -28,7 +30,8 @@ def failure_category(error: str) -> str:
     return "other"
 
 
-def audit_job(folder: Path, counts: Counter[str], issues: list[str]) -> None:
+def audit_job(folder: Path, counts: Counter[str], issues: list[str]) -> set[str]:
+    rerun_seeds: set[str] = set()
     with (folder / "results.csv").open(encoding="utf-8-sig", newline="") as stream:
         rows = csv.DictReader(stream)
         if not {"seed", "solver_attempts"}.issubset(rows.fieldnames or []):
@@ -75,7 +78,10 @@ def audit_job(folder: Path, counts: Counter[str], issues: list[str]) -> None:
             for (name, duration), attempt_count in failed.items():
                 errors = logged[name, duration]
                 if attempt_count == len(errors) == 1:
-                    counts[failure_category(errors[0])] += 1
+                    category = failure_category(errors[0])
+                    counts[category] += 1
+                    if category == "stdout" and errors[0].endswith("file already closed"):
+                        rerun_seeds.add(seed)
                 else:
                     counts["unresolved"] += attempt_count
                     issues.append(
@@ -85,15 +91,71 @@ def audit_job(folder: Path, counts: Counter[str], issues: list[str]) -> None:
 
         if not seeds:
             raise ValueError("results.csv has no seed rows")
+    return rerun_seeds
+
+
+def write_rerun_jobs(selected: dict[tuple[str, str], set[str]]) -> None:
+    import yaml
+
+    if not selected:
+        raise ValueError("no matched closed-stdout failures to rerun")
+    if RERUN_JOBS.exists():
+        raise ValueError(f"{RERUN_JOBS} already exists; move it aside before regenerating")
+
+    files: dict[Path, str] = {}
+    job_lists: dict[str, list[str]] = defaultdict(list)
+    seed_counts: Counter[str] = Counter()
+    for (solver, config), seeds in sorted(selected.items()):
+        template = JOBS_DIR / "plugin" / f"{config}.yaml"
+        try:
+            job = yaml.safe_load(template.read_text(encoding="utf-8-sig"))
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{template}: invalid YAML: {exc}") from exc
+        if not isinstance(job, dict) or not isinstance(job.get("seed-file"), str):
+            raise ValueError(f"{template}: expected a job with a seed-file")
+        if any(key in job for key in ("seed", "count", "repeats", "seeds-not-all-running")):
+            raise ValueError(f"{template}: expected one run per entry in the seed file")
+        original_seeds = Path(job["seed-file"]).read_text(encoding="utf-8-sig").split()
+        subset = [seed for seed in original_seeds if seed in seeds]
+        if len(subset) != len(seeds) or set(subset) != seeds:
+            raise ValueError(f"{template}: rerun seeds do not match the original seed file")
+
+        job_dir = RERUN_JOBS / solver
+        seed_file = job_dir / f"{config}.txt"
+        files[seed_file] = "\n".join(subset) + "\n"
+        job["seed-file"] = seed_file.as_posix()
+        job["output-dir"] = (Path("results", "rerun-stdout", "{solver}") / config).as_posix()
+        job_file = job_dir / f"{config}.yaml"
+        files[job_file] = yaml.safe_dump(job, sort_keys=False)
+        job_lists[solver].append(job_file.name)
+        seed_counts[solver] += len(seeds)
+
+    RERUN_JOBS.mkdir(parents=True, exist_ok=False)
+    for solver, jobs in job_lists.items():
+        job_list = RERUN_JOBS / solver / "jobs.txt"
+        job_list.parent.mkdir()
+        files[job_list] = "\n".join(jobs) + "\n"
+    for path, text in files.items():
+        path.write_text(text, encoding="utf-8", newline="\n")
+    for solver, jobs in job_lists.items():
+        print(f"{RERUN_JOBS / solver / 'jobs.txt'}: {len(jobs)} jobs, {seed_counts[solver]} seeds")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("solver_dirs", metavar="SOLVER_DIR", type=Path, nargs="+")
+    parser.add_argument("--write-stdout-reruns", action="store_true",
+                        help=f"write bootstrap job lists for closed-stdout failures to {RERUN_JOBS}")
     args = parser.parse_args()
+    root_names = [root.name for root in args.solver_dirs]
+    if args.write_stdout_reruns and (
+        not set(root_names) <= {"cp-sat", "cplex"} or len(set(root_names)) != len(root_names)
+    ):
+        parser.error("--write-stdout-reruns requires distinct solver directories named cp-sat or cplex")
     csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 
     issues: list[str] = []
+    selected: dict[tuple[str, str], set[str]] = {}
     print("\t".join(("solver", "budget_s", *COLUMNS)))
     for root in args.solver_dirs:
         by_budget: dict[int, Counter[str]] = defaultdict(Counter)
@@ -103,10 +165,12 @@ def main() -> int:
                 continue
             counts: Counter[str] = Counter()
             try:
-                audit_job(folder, counts, issues)
+                seeds = audit_job(folder, counts, issues)
             except (OSError, ValueError, csv.Error) as exc:
                 issues.append(f"{folder}: {exc}; job excluded from totals")
                 continue
+            if args.write_stdout_reruns and seeds:
+                selected[root.name, folder.name] = seeds
             by_budget[int(budget[1])].update(counts)
         if not by_budget:
             issues.append(f"{root}: no readable job results found")
@@ -119,6 +183,12 @@ def main() -> int:
 
     for issue in issues:
         print(issue, file=sys.stderr)
+    if args.write_stdout_reruns and not issues:
+        try:
+            write_rerun_jobs(selected)
+        except (OSError, ValueError, ImportError) as exc:
+            print(f"cannot write rerun jobs: {exc}", file=sys.stderr)
+            return 1
     return int(bool(issues))
 
 

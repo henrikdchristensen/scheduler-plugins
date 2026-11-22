@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -34,6 +34,55 @@ printf '{"status":"OPTIMAL"}'
 	}
 	if got := strings.TrimSpace(string(out)); got != `{"status":"OPTIMAL"}` {
 		t.Fatalf("out=%q, want %q", got, `{"status":"OPTIMAL"}`)
+	}
+}
+
+const fastSolverOutput = `{"status":"OPTIMAL"}`
+
+func TestFastSolverHelper(t *testing.T) {
+	switch os.Getenv("GO_TEST_FAST_SOLVER") {
+	case "stderr":
+		fmt.Fprint(os.Stderr, strings.Repeat("x", 2*1024*1024), "\n")
+	case "timeout":
+		time.Sleep(5 * time.Second)
+	case "stdout":
+	default:
+		return
+	}
+	fmt.Fprint(os.Stdout, fastSolverOutput)
+	os.Exit(0)
+}
+
+func useFastSolverHelper(t *testing.T, mode string) {
+	t.Helper()
+	withExecCommandContext(t, func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestFastSolverHelper$")
+		cmd.Env = append(os.Environ(), "GO_TEST_FAST_SOLVER="+mode, "GORACE=atexit_sleep_ms=0")
+		return cmd
+	})
+}
+
+func TestRunSolverExternal_CapturesOutputFromFastProcess(t *testing.T) {
+	useFastSolverHelper(t, "stdout")
+	pl := &SharedState{}
+	for i := 0; i < 8; i++ {
+		ctx, cancel := testCtx(t)
+		out, err := pl.runSolverExternal(ctx, nil, "", "")
+		cancel()
+		if err != nil || string(out) != fastSolverOutput {
+			t.Fatalf("run %d: output=%q, err=%v; want %q", i, out, err, fastSolverOutput)
+		}
+	}
+}
+
+func TestRunSolverExternal_DrainsStderrAfterScannerError(t *testing.T) {
+	useFastSolverHelper(t, "stderr")
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	out, err := (&SharedState{}).runSolverExternal(ctx, nil, "", "")
+	if err != nil || string(out) != fastSolverOutput {
+		t.Fatalf("output=%q, err=%v; want %q", out, err, fastSolverOutput)
 	}
 }
 
@@ -71,73 +120,6 @@ cat
 	}
 }
 
-func TestRunSolverExternal_ReadStdoutError(t *testing.T) {
-	requireBash(t)
-
-	withReadAllStdout(t, func(r io.Reader) ([]byte, error) {
-		return nil, fmt.Errorf("forced read error")
-	})
-
-	// The script is irrelevant since we force readAllStdout to fail.
-	script := `#!/usr/bin/env bash
-cat >/dev/null
-printf '{"status":"OPTIMAL"}'
-`
-	out, err := runBashSolver(t, script, []byte(`{}`))
-	if err == nil || !strings.Contains(err.Error(), "read solver stdout") {
-		t.Fatalf("err=%v, want contains %q", err, "read solver stdout")
-	}
-	if out != nil {
-		t.Fatalf("out=%q, want nil on error", string(out))
-	}
-}
-
-func TestRunSolverExternal_StdoutPipeError(t *testing.T) {
-	requireNonWindows(t)
-
-	// Force StdoutPipe() to fail by pre-setting cmd.Stdout.
-	withExecCommandContext(t, func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cmd := exec.CommandContext(ctx, name, args...)
-		cmd.Stdout = &bytes.Buffer{}
-		return cmd
-	})
-
-	pl := &SharedState{}
-	ctx, cancel := testCtx(t)
-	defer cancel()
-
-	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "bash", "/does/not/matter.sh")
-	if err == nil || !strings.Contains(err.Error(), "stdout pipe") {
-		t.Fatalf("err=%v, want contains %q", err, "stdout pipe")
-	}
-	if out != nil {
-		t.Fatalf("out=%q, want nil on error", string(out))
-	}
-}
-
-func TestRunSolverExternal_StderrPipeError(t *testing.T) {
-	requireNonWindows(t)
-
-	// Force StderrPipe() to fail by pre-setting cmd.Stderr.
-	withExecCommandContext(t, func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		cmd := exec.CommandContext(ctx, name, args...)
-		cmd.Stderr = &bytes.Buffer{}
-		return cmd
-	})
-
-	pl := &SharedState{}
-	ctx, cancel := testCtx(t)
-	defer cancel()
-
-	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "bash", "/does/not/matter.sh")
-	if err == nil || !strings.Contains(err.Error(), "stderr pipe") {
-		t.Fatalf("err=%v, want contains %q", err, "stderr pipe")
-	}
-	if out != nil {
-		t.Fatalf("out=%q, want nil on error", string(out))
-	}
-}
-
 func TestRunSolverExternal_StartError(t *testing.T) {
 	requireNonWindows(t)
 
@@ -156,18 +138,12 @@ func TestRunSolverExternal_StartError(t *testing.T) {
 }
 
 func TestRunSolverExternal_ContextDeadlineExceeded(t *testing.T) {
-	requireBash(t)
-
-	script := `#!/usr/bin/env bash
-cat >/dev/null
-sleep 5
-echo "never"
-`
+	useFastSolverHelper(t, "timeout")
 	pl := &SharedState{}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	out, err := pl.runSolverExternal(ctx, []byte(`{}`), "bash", writeFakeSolverScript(t, t.TempDir(), script))
+	out, err := pl.runSolverExternal(ctx, nil, "", "")
 	if err == nil {
 		t.Fatalf("expected error, got nil (out=%q)", string(out))
 	}
@@ -199,16 +175,4 @@ func TestStreamSolverStderr_TokenTooLong(t *testing.T) {
 	if !errors.Is(err, bufio.ErrTooLong) {
 		t.Fatalf("err=%v, want bufio.ErrTooLong", err)
 	}
-}
-
-// -------------------------
-// Test Helpers
-// -------------------------
-
-// withReadAllStdout temporarily replaces readAllStdout for the duration of the test.
-func withReadAllStdout(t *testing.T, f func(r io.Reader) ([]byte, error)) {
-	t.Helper()
-	orig := readAllStdout
-	readAllStdout = f
-	t.Cleanup(func() { readAllStdout = orig })
 }
