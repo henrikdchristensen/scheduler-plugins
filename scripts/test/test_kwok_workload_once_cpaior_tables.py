@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 
 import pytest
@@ -45,17 +46,55 @@ def write_results(path: Path, solver: str, *, missing: bool = False, duplicate: 
         writer.writerows(rows)
 
 
+def write_raw_results(root: Path, *, seed_mismatch: bool = False) -> None:
+    def write_raw(folder: Path, best: str, status: str, duration: int, running: int, offset: int = 0) -> None:
+        folder.mkdir(parents=True)
+        with (folder / "results.csv").open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(("seed", "running_placed_by_prio_now", "unscheduled_count_before",
+                             "best_solver_status", "solver_attempts"))
+            attempts = [{"status": status, "duration_ms": duration}] if status else []
+            for seed in range(offset, offset + 100):
+                writer.writerow((seed, json.dumps({"1": running}), 1, best, json.dumps(attempts)))
+
+    for config in tables.EXPECTED:
+        name = (f"nodes{config.nodes}_pods{config.nodes * config.pods_per_node}_"
+                f"prio{config.priorities}_util{int(config.load):03d}")
+        job = f"{name}_timeout{config.budget:02d}"
+        if config.budget == tables.BUDGETS[0]:
+            write_raw(root / "default" / name, "", "", 0, 14)
+        write_raw(root / "plugin" / "cp-sat" / job, "", "UNKNOWN", 20, 14)
+        write_raw(root / "plugin" / "cplex" / job, "OPTIMAL", "OPTIMAL", 10, 15, int(seed_mismatch))
+
+
 def test_generates_all_paper_tables_with_no_call_excluded(tmp_path: Path) -> None:
     for solver in tables.SOLVERS:
         write_results(tmp_path / f"results_per_combo_{solver}.csv", solver)
+    write_raw_results(tmp_path)
     out = tmp_path / "paper"
     tables.main(["--results-root", str(tmp_path), "--out-dir", str(out)])
-    assert {file.name for file in out.iterdir()} == {"tab_outcomes.tex", "tab_nodes.tex", "tab_load_ppn.tex"}
+    assert {file.name for file in out.iterdir()} == {
+        "tab_outcomes.tex", "tab_nodes.tex", "tab_load_ppn.tex", "tab_no_gain.tex", "tab_paired.tex",
+    }
     outcomes = (out / "tab_outcomes.tex").read_text(encoding="utf-8")
     assert "MIP (Gurobi)" not in outcomes
     assert r"Improved (total) & 25.0 & -- & -- & 18.8 & -- & -- \\" in outcomes
     nodes = (out / "tab_nodes.tex").read_text(encoding="utf-8")
     assert r"\multirow{3}{*}{4} & 1 & \textbf{25.0} & 18.8 & \textbf{25.0} & 18.8 & 0.50 & 0.50 & \textbf{1} & 0 \\" in nodes
+    assert r"\texttt{UNKNOWN} & 9\,600 & 9\,600 & 9\,600 & 0 & 0 & 0 \\" in (out / "tab_no_gain.tex").read_text(encoding="utf-8")
+    assert r"1 & All & 0 & 9\,600 & 0 & $9.47\times10^{-29}$ & 0 & 9\,600 \\" in (out / "tab_paired.tex").read_text(encoding="utf-8")
+
+
+def test_rejects_unmatched_appendix_seeds(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    for solver in tables.SOLVERS:
+        write_results(tmp_path / f"results_per_combo_{solver}.csv", solver)
+    write_raw_results(tmp_path, seed_mismatch=True)
+    out = tmp_path / "paper"
+    with pytest.raises(SystemExit) as exc:
+        tables.main(["--results-root", str(tmp_path), "--out-dir", str(out)])
+    assert exc.value.code == 1
+    assert "seed sets differ" in capsys.readouterr().err
+    assert not out.exists()
 
 
 @pytest.mark.parametrize("issue", ["missing", "duplicate"])
@@ -75,6 +114,7 @@ def test_automatically_generates_tables_and_figures_with_gurobi(tmp_path: Path) 
     pytest.importorskip("matplotlib")
     for solver in (*tables.SOLVERS, "gurobi"):
         write_results(tmp_path / f"results_per_combo_{solver}.csv", solver)
+    write_raw_results(tmp_path)
     figures = tmp_path / "figures"
     tables.main(["--results-root", str(tmp_path), "--figures", "--figures-dir", str(figures)])
 

@@ -1,11 +1,14 @@
-"""Generate the CPAIOR paper's LaTeX tables and optional figures from sealed CSVs."""
+"""Generate the CPAIOR paper's LaTeX tables and optional figures."""
 
 import argparse
 import csv
+import json
+import sys
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from fractions import Fraction
 from itertools import product
-from math import isfinite
+from math import comb, isfinite
 from pathlib import Path
 from typing import Iterable
 
@@ -248,12 +251,164 @@ def params_table(data: Dataset) -> list[str]:
     return rows
 
 
+NO_GAIN_ROWS = (
+    ("Not invoked", "", False),
+    (r"\texttt{FAILED}", "FAILED", False),
+    (r"\texttt{UNKNOWN}", "UNKNOWN", False),
+    ("Optimal, plan not enforced", "OPTIMAL", False),
+    ("Feasible, plan not enforced", "FEASIBLE", False),
+    ("Optimal, plan enforced", "OPTIMAL", True),
+    ("Feasible, plan enforced", "FEASIBLE", True),
+)
+
+
+@dataclass(frozen=True)
+class SeedResult:
+    placement: tuple[int, ...]
+    pending: int
+    best: str
+    status: str
+    duration_ms: int | None
+
+
+def load_seed_results(path: Path) -> dict[str, SeedResult]:
+    results = {}
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        for line, row in enumerate(csv.DictReader(stream), start=2):
+            try:
+                seed = row["seed"]
+                if not seed or seed in results:
+                    raise ValueError("empty or duplicate seed")
+                placement = {int(key.removeprefix("p")): int(count) for key, count in
+                             (json.loads(row["running_placed_by_prio_now"] or "{}") or {}).items()}
+                if placement.keys() - {1, 2, 3, 4}:
+                    raise ValueError("unexpected priority level")
+                attempts = json.loads(row["solver_attempts"] or "[]") or []
+                if not isinstance(attempts, list) or len(attempts) > 1:
+                    raise ValueError("expected at most one solver attempt per seed")
+                attempt = attempts[0] if attempts else {}
+                results[seed] = SeedResult(
+                    tuple(placement.get(priority, 0) for priority in (4, 3, 2, 1)),
+                    int(row["unscheduled_count_before"]), row["best_solver_status"],
+                    attempt["status"] if attempts else "", int(attempt["duration_ms"]) if attempts else None,
+                )
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"{path}:{line}: {exc}") from exc
+    if len(results) != 100:
+        raise ValueError(f"{path}: expected 100 distinct seeds, found {len(results)}")
+    return results
+
+
+def compare(left, right) -> int:
+    return (left > right) - (left < right)
+
+
+def holm_sign_tests(tests: dict) -> dict:
+    ranked = []
+    for key, by_seed in tests.items():
+        positive = sum(value > 0 for value in by_seed.values())
+        negative = sum(value < 0 for value in by_seed.values())
+        count = positive + negative
+        tail = sum(comb(count, wins) for wins in range(min(positive, negative) + 1))
+        ranked.append((min(1, 2 * tail / 2**count), key))
+    adjusted = {}
+    previous = 0.0
+    for index, (value, key) in enumerate(sorted(ranked)):
+        previous = max(previous, min(1, (len(ranked) - index) * value))
+        adjusted[key] = previous
+    return adjusted
+
+
+def tex_count(count: int) -> str:
+    return f"{count:,}".replace(",", r"\,")
+
+
+def tex_pvalue(value: float) -> str:
+    if value >= 0.001:
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+    mantissa, exponent = f"{value:.2e}".split("e")
+    return rf"${mantissa}\times10^{{{int(exponent)}}}$"
+
+
+def appendix_tables(root: Path) -> list[tuple[str, list[str]]]:
+    csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
+    gains = defaultdict(Counter)
+    placements = defaultdict(Counter)
+    improvements = defaultdict(Counter)
+    tests = defaultdict(Counter)
+    categories = {(status, enforced) for _, status, enforced in NO_GAIN_ROWS}
+    for nodes, density, priorities, load in product(NODES, PODS_PER_NODE, PRIORITIES, LOADS):
+        config = f"nodes{nodes}_pods{nodes * density}_prio{priorities}_util{load:03d}"
+        reference = load_seed_results(root / "default" / config / "results.csv")
+        for budget in BUDGETS:
+            job = f"{config}_timeout{budget:02d}"
+            cp, mip = (load_seed_results(root / "plugin" / solver.replace("_", "-") / job / "results.csv")
+                       for solver in SOLVERS)
+            if not cp.keys() == mip.keys() == reference.keys():
+                raise ValueError(f"{job}: seed sets differ between CP-SAT, CPLEX, and the default scheduler")
+            for seed, default in reference.items():
+                cp_run, mip_run = cp[seed], mip[seed]
+                improved = []
+                for solver, run in zip(SOLVERS, (cp_run, mip_run)):
+                    included = bool(default.pending or run.pending)
+                    better = included and run.best in {"OPTIMAL", "FEASIBLE"} and run.placement > default.placement
+                    improved.append(better)
+                    if included and not better and not (run.best == "OPTIMAL" and run.placement == default.placement):
+                        category = run.status, bool(run.best)
+                        if category not in categories:
+                            raise ValueError(f"{job}, {solver}, seed {seed}: unexpected no-gain outcome {category}")
+                        gains[solver, budget][category] += 1
+                directions = {
+                    "placement": compare(mip_run.placement, cp_run.placement),
+                    "improvement": compare(improved[1], improved[0]),
+                    "optimality": compare(mip_run.status == "OPTIMAL", cp_run.status == "OPTIMAL"),
+                }
+                if cp_run.duration_ms is not None and mip_run.duration_ms is not None:
+                    directions["time"] = compare(cp_run.duration_ms, mip_run.duration_ms)
+                for group in (0, nodes):
+                    placements[budget, group][directions["placement"]] += 1
+                    improvements[budget, group][directions["improvement"]] += 1
+                    for measure, direction in directions.items():
+                        tests[measure, budget, group][seed] += direction
+
+    if len(tests) != 4 * len(BUDGETS) * (1 + len(NODES)):
+        raise ValueError("incomplete sign-test family; check for missing paired call times")
+    adjusted = holm_sign_tests(tests)
+    columns = [gains[solver, budget] for solver in SOLVERS for budget in BUDGETS]
+    no_gain = [
+        r"\begin{tabular}{@{}l" + grouped_columns(len(SOLVERS), 3, 10) + r"@{}}",
+        r"\toprule",
+        tex_row("", *(rf"\multicolumn{{3}}{{c}}{{{LABELS[solver]}}}" for solver in SOLVERS)),
+        cmidrules(2, 3, len(SOLVERS)),
+        tex_row("Time budget (s)", *map(str, BUDGETS * len(SOLVERS))),
+        r"\midrule",
+    ]
+    no_gain.extend(tex_row(label, *(tex_count(column[status, enforced]) for column in columns))
+                   for label, status, enforced in NO_GAIN_ROWS)
+    no_gain.extend((r"\midrule", tex_row("Total", *(tex_count(sum(column.values())) for column in columns))))
+    paired = [
+        r"\begin{tabular}{@{}rr rrr r rr@{}}",
+        r"\toprule",
+        tex_row("Budget (s)", "Nodes", "CP wins", "MIP wins", "Ties", r"$p_{\rm H}$", "CP only", "MIP only"),
+    ]
+    for budget in BUDGETS:
+        paired.append(r"\midrule")
+        for group in (0, *NODES):
+            placement = placements[budget, group]
+            improvement = improvements[budget, group]
+            paired.append(tex_row(str(budget) if not group else "", str(group) if group else "All",
+                                  *(tex_count(placement[direction]) for direction in (-1, 1, 0)),
+                                  tex_pvalue(adjusted["placement", budget, group]),
+                                  tex_count(improvement[-1]), tex_count(improvement[1])))
+    return [("tab_no_gain", no_gain), ("tab_paired", paired)]
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog="Gurobi is included automatically when results_per_combo_gurobi.csv is present.",
     )
-    parser.add_argument("--results-root", type=Path, default=Path("results"), help="directory with the sealed CSVs")
+    parser.add_argument("--results-root", type=Path, default=Path("results"), help="directory with sealed and raw per-seed CSVs")
     parser.add_argument("--out-dir", type=Path, help="directory for the LaTeX tables (default: RESULTS_ROOT/tables/cpaior)")
     parser.add_argument("--figures", action="store_true", help="also generate the two paper figures (requires Matplotlib)")
     parser.add_argument("--figures-dir", type=Path, help="figure directory (default: RESULTS_ROOT/figures/cpaior)")
@@ -265,6 +420,7 @@ def main(argv: list[str] | None = None) -> None:
         gurobi_csv = args.results_root / "results_per_combo_gurobi.csv"
         if gurobi_csv.exists():
             data["gurobi"] = load_results(gurobi_csv)
+        appendix = appendix_tables(args.results_root)
         if args.figures:
             from scripts.kwok_workload_once import cpaior_figures
 
@@ -272,10 +428,10 @@ def main(argv: list[str] | None = None) -> None:
         out_dir = args.out_dir if args.out_dir is not None else args.results_root / "tables" / "cpaior"
         out_dir.mkdir(parents=True, exist_ok=True)
         for name, rows in (("tab_outcomes", outcomes_table(data)), ("tab_nodes", nodes_table(data)),
-                           ("tab_load_ppn", params_table(data))):
+                           ("tab_load_ppn", params_table(data)), *appendix):
             path = out_dir / f"{name}.tex"
             body = (*rows, *END)
-            if "gurobi" in data:
+            if "gurobi" in data and name not in {"tab_no_gain", "tab_paired"}:
                 body = (r"\resizebox{\linewidth}{!}{%", *body, "}")
             path.write_text("\n".join((COMMENT, *body, "")), encoding="utf-8")
             print(f"[ok] wrote {path}")
