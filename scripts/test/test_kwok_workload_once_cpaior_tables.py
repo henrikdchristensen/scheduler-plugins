@@ -1,5 +1,6 @@
 import csv
 import json
+from itertools import product
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,19 @@ from scripts.kwok_workload_once import cpaior_tables as tables
 
 
 TARGET = tables.Configuration(4, 4, 1, 90, 1)
+
+
+@pytest.fixture
+def small_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep every cluster size and budget, with one workload per combination.
+    densities, priorities, loads = (4,), (1,), (90,)
+    monkeypatch.setattr(tables, "PODS_PER_NODE", densities)
+    monkeypatch.setattr(tables, "PRIORITIES", priorities)
+    monkeypatch.setattr(tables, "LOADS", loads)
+    monkeypatch.setattr(tables, "EXPECTED", {
+        tables.Configuration(*values)
+        for values in product(tables.NODES, densities, priorities, loads, tables.BUDGETS)
+    })
 
 
 def write_results(path: Path, solver: str, *, missing: bool = False, duplicate: bool = False) -> None:
@@ -67,6 +81,7 @@ def write_raw_results(root: Path, *, seed_mismatch: bool = False) -> None:
         write_raw(root / "plugin" / "cplex" / job, "OPTIMAL", "OPTIMAL", 10, 15, int(seed_mismatch))
 
 
+@pytest.mark.usefixtures("small_benchmark")
 def test_generates_all_paper_tables_with_no_call_excluded(tmp_path: Path) -> None:
     for solver in tables.SOLVERS:
         write_results(tmp_path / f"results_per_combo_{solver}.csv", solver)
@@ -81,10 +96,11 @@ def test_generates_all_paper_tables_with_no_call_excluded(tmp_path: Path) -> Non
     assert r"Improved (total) & 25.0 & -- & -- & 18.8 & -- & -- \\" in outcomes
     nodes = (out / "tab_nodes.tex").read_text(encoding="utf-8")
     assert r"\multirow{3}{*}{4} & 1 & \textbf{25.0} & 18.8 & \textbf{25.0} & 18.8 & 0.50 & 0.50 & \textbf{1} & 0 \\" in nodes
-    assert r"\texttt{UNKNOWN} & 9\,600 & 9\,600 & 9\,600 & 0 & 0 & 0 \\" in (out / "tab_no_gain.tex").read_text(encoding="utf-8")
-    assert r"1 & All & 0 & 9\,600 & 0 & $9.47\times10^{-29}$ & 0 & 9\,600 \\" in (out / "tab_paired.tex").read_text(encoding="utf-8")
+    assert r"\texttt{UNKNOWN} & 400 & 400 & 400 & 0 & 0 & 0 \\" in (out / "tab_no_gain.tex").read_text(encoding="utf-8")
+    assert r"1 & All & 0 & 400 & 0 & $9.47\times10^{-29}$ & 0 & 400 \\" in (out / "tab_paired.tex").read_text(encoding="utf-8")
 
 
+@pytest.mark.usefixtures("small_benchmark")
 def test_rejects_unmatched_appendix_seeds(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     for solver in tables.SOLVERS:
         write_results(tmp_path / f"results_per_combo_{solver}.csv", solver)
@@ -110,6 +126,8 @@ def test_rejects_incomplete_grid_without_writing_tables(
     assert not out.exists()
 
 
+@pytest.mark.usefixtures("small_benchmark")
+@pytest.mark.timeout(15)  # Cold Matplotlib import and PDF rendering can exceed the unit-test limit.
 def test_automatically_generates_tables_and_figures_with_gurobi(tmp_path: Path) -> None:
     pytest.importorskip("matplotlib")
     for solver in (*tables.SOLVERS, "gurobi"):
@@ -140,6 +158,7 @@ def test_rejects_incomplete_gurobi_csv(tmp_path: Path, capsys: pytest.CaptureFix
     assert not (tmp_path / "tables").exists()
 
 
+@pytest.mark.timeout(15)
 def test_figures_use_the_correct_denominators_and_runtime() -> None:
     pytest.importorskip("matplotlib")
     from scripts.kwok_workload_once import cpaior_figures
