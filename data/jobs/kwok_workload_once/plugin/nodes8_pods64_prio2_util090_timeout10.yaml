@@ -1,15 +1,19 @@
 ﻿workload-config-file: data/configs-workload/base.yaml
 kwokctl-config-file: data/configs-kwokctl/plugin-scheduler-defpreempt=0.yaml
 seed-file: data/seeds/kwok_workload_once/nodes8_pods64_prio2_util090.txt
-output-dir: results/plugin/nodes8_pods64_prio2_util090_timeout10
+output-dir: results/plugin/{solver}/nodes8_pods64_prio2_util090_timeout10
 solver-trigger: true
+save-scheduler-logs: true
 override-workload-config:
   num_nodes: 8
   num_pods: 64
   num_priorities: 2
   util: 0.9
+  settle_timeout_max: 70s
 override-kwokctl-envs:
 - name: OPTIMIZE_MODE
   value: manual
 - name: SOLVER_PYTHON_TIMEOUT
   value: 10s
+- name: PLAN_EXECUTION_TIMEOUT
+  value: 60s

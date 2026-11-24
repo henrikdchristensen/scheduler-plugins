@@ -14,14 +14,14 @@ SCHEDULER_VERSION="${SCHEDULER_VERSION//$'\r'/}"
 
 echo "Environment variables loaded."
 
-# Detect OS and architecture for cross-platform support
-HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-case "$(uname -m)" in
-  x86_64)  HOST_ARCH="amd64" ;;
+# Build for the host platform unless TARGET_OS/TARGET_ARCH ask for a cross-build
+HOST_OS="${TARGET_OS:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
+case "${TARGET_ARCH:-$(uname -m)}" in
+  x86_64|amd64)  HOST_ARCH="amd64" ;;
   aarch64|arm64) HOST_ARCH="arm64" ;;
-  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+  *) echo "Unsupported architecture: ${TARGET_ARCH:-$(uname -m)}" >&2; exit 1 ;;
 esac
-echo "Detected platform: ${HOST_OS}/${HOST_ARCH}"
+echo "Target platform: ${HOST_OS}/${HOST_ARCH}"
 
 mkdir -p bin
 

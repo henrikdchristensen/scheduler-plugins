@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 
 	"k8s.io/klog/v2"
 )
@@ -26,56 +27,39 @@ func (pl *SharedState) runSolverExternal(
 	cmd := execCommandContext(ctx, binary, scriptPath)
 	cmd.Stdin = bytes.NewReader(payload)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stderr pipe: %w", err)
-	}
-
-	// Stream solver logs from stderr (best-effort).
-	go func() { _ = streamSolverStderrFn(stderr) }()
+	// Let os/exec finish reading stdout and stderr before closing the pipes.
+	var stdout bytes.Buffer
+	stderrReader, stderrWriter := io.Pipe()
+	defer stderrReader.Close()
+	defer stderrWriter.Close()
+	cmd.Stdout = &stdout
+	cmd.Stderr = stderrWriter
+	// Bound cleanup if a descendant keeps an output descriptor open.
+	cmd.WaitDelay = 250 * time.Millisecond
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("solver start: %w", err)
 	}
 
-	type readRes struct {
-		b   []byte
-		err error
-	}
-	stdoutCh := make(chan readRes, 1)
+	stderrDone := make(chan struct{})
 	go func() {
-		b, e := readAllStdout(stdout)
-		stdoutCh <- readRes{b: b, err: e}
+		defer close(stderrDone)
+		if err := streamSolverStderr(stderrReader); err != nil {
+			// A scanner error must not stop draining the child's stderr.
+			_, _ = io.Copy(io.Discard, stderrReader)
+		}
 	}()
 
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
-
-	select {
-	case <-ctx.Done():
-		// Ensure the process is gone quickly.
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+	waitErr := cmd.Wait()
+	_ = stderrWriter.Close()
+	<-stderrDone
+	if waitErr != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("solver context: %w", err)
 		}
-		// Wait for goroutines to finish.
-		<-waitCh
-		<-stdoutCh
-		return nil, fmt.Errorf("solver context: %w", ctx.Err())
-
-	case waitErr := <-waitCh:
-		r := <-stdoutCh
-		if r.err != nil {
-			return nil, fmt.Errorf("read solver stdout: %w", r.err)
-		}
-		if waitErr != nil {
-			return nil, fmt.Errorf("solver run: %w", waitErr)
-		}
-		return r.b, nil
+		return nil, fmt.Errorf("solver run: %w", waitErr)
 	}
+	return stdout.Bytes(), nil
 }
 
 // -------------------------
@@ -101,8 +85,4 @@ func streamSolverStderr(r io.Reader) error {
 // Test Hooks
 // -------------------------
 
-var (
-	execCommandContext   = exec.CommandContext
-	readAllStdout        = io.ReadAll
-	streamSolverStderrFn = streamSolverStderr
-)
+var execCommandContext = exec.CommandContext

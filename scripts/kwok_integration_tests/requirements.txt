@@ -1,5 +1,5 @@
 PyYAML==6.0.2
 pytest==9.0.1
 pytest-cov==7.0.0
-ortools==9.14.6206
-gurobipy==13.0.1
+ortools==9.15.6755
+gurobipy==14.0.0

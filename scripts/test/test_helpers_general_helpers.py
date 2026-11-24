@@ -86,6 +86,13 @@ def test_get_git_info(tmp_path: Path, monkeypatch):
     assert git_info.get("branch") == "main"
     assert "remote_url" not in git_info 
 
+def test_get_git_info_falls_back_to_git_commit_file(tmp_path: Path, monkeypatch):
+    (tmp_path / "GIT_COMMIT").write_text("abc123-dirty\n", encoding="utf-8")
+    failed = type("Run", (), {"returncode": 128, "stdout": b""})()
+    monkeypatch.setattr(gh.subprocess, "run", lambda *args, **kwargs: failed)
+
+    assert gh.get_git_info(cwd=tmp_path) == {"commit": "abc123-dirty"}
+
 def test_make_header_footer():
     header, footer = gh.make_header_footer("Running tests", width=20, border="=")
     assert isinstance(header, str) and isinstance(footer, str)

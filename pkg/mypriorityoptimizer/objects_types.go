@@ -31,4 +31,6 @@ type wkStatus struct {
 	HasLive bool
 	// HasPending means at least one live pending pod for this workload
 	HasPending bool
+	// Live is the number of live pods (not terminating) for this workload
+	Live int
 }

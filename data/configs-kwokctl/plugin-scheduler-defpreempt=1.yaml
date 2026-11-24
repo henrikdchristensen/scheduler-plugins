@@ -17,8 +17,6 @@ componentsPatches:
         value: "periodic" # choices: scheduling_failure, periodic, stable_queue, manual, manual_blocking
       - name: OPTIMIZE_PERIODIC_INTERVAL
         value: "10s" # for periodic mode
-      - name: PLAN_EXECUTION_TIMEOUT
-        value: "600h" # set high to determine any potential issues
       - name: SOLVER_PYTHON_ENABLED
         value: "true"
       - name: SOLVER_PYTHON_TIMEOUT

@@ -296,8 +296,9 @@ func (pl *SharedState) buildPlan(out *SolverOutput, preemptor *v1.Pod, pods []*v
 // setActivePlan sets the given stored plan as the active plan and initializes
 // its counters, deriving both WorkloadPerNodeCnts and PlacementByName solely
 // from NewPlacements. For controller-owned pods, quotas are keyed by the
-// controller (e.g., ReplicaSet) name.
-func (pl *SharedState) setActivePlan(plan *Plan, id string, _ []*v1.Pod) {
+// controller (e.g., ReplicaSet) name. pods is the cluster state just before the
+// plan's evictions.
+func (pl *SharedState) setActivePlan(plan *Plan, id string, pods []*v1.Pod) {
 	if plan == nil {
 		klog.V(MyV).ErrorS(ErrNoPlanProvided, InfoNoPlanProvided+" in setActivePlan", nil)
 		return
@@ -309,12 +310,17 @@ func (pl *SharedState) setActivePlan(plan *Plan, id string, _ []*v1.Pod) {
 	}
 
 	ctxPlan, cancel := context.WithTimeout(context.Background(), PlanRealizationTimeout)
+	livePods := make(map[string]int)
+	for wk, st := range pl.computeWorkloadStatus(pods) {
+		livePods[wk] = st.Live
+	}
 	ap := &ActivePlan{
-		ID:              id,
-		WorkloadQuotas:  buildWorkloadQuotas(plan.WorkloadQuotas),
-		PlacementByName: plan.PlacementByName,
-		Ctx:             ctxPlan,
-		Cancel:          cancel,
+		ID:               id,
+		WorkloadQuotas:   buildWorkloadQuotas(plan.WorkloadQuotas),
+		WorkloadLivePods: livePods,
+		PlacementByName:  plan.PlacementByName,
+		Ctx:              ctxPlan,
+		Cancel:           cancel,
 	}
 
 	pl.ActivePlan.Store(ap)
@@ -553,7 +559,7 @@ func (pl *SharedState) activatePlannedPods(plan *Plan, pods []*v1.Pod) {
 // -------------------------
 
 // computeWorkloadStatus computes the status of all workloads in the cluster,
-// returning a map from workload key to wkStatus (HasLive, HasPending).
+// returning a map from workload key to wkStatus (HasLive, HasPending, Live).
 func (pl *SharedState) computeWorkloadStatus(allPods []*v1.Pod) map[string]wkStatus {
 	workloadStatus := make(map[string]wkStatus)
 
@@ -565,6 +571,7 @@ func (pl *SharedState) computeWorkloadStatus(allPods []*v1.Pod) map[string]wkSta
 			key := wk.String()
 			st := workloadStatus[key]
 			st.HasLive = true
+			st.Live++
 			if !isPodAssigned(p) {
 				st.HasPending = true
 			}
@@ -628,6 +635,27 @@ func (pl *SharedState) checkQuotasSatisfied(ap *ActivePlan, workloadStatus map[s
 
 		st := workloadStatus[wk]
 
+		// Evicted pods are not visible again until their controller recreates them,
+		// so fewer live pods than the workload still owes means the plan is in flight.
+		if want := ap.WorkloadLivePods[wk]; st.Live < want {
+			desired, exists, err := workloadDesiredPodsFor(pl, wk)
+			if err != nil {
+				return false, err
+			}
+			if desired >= 0 && desired < want {
+				want = desired
+			}
+			if exists && st.Live < want {
+				klog.V(MyV).InfoS("plan incomplete: workload has fewer live pods than expected",
+					"workload", wk,
+					"live", st.Live,
+					"expected", want,
+					"remaining", totalRemaining,
+				)
+				return false, nil
+			}
+		}
+
 		// Workload gone => ignore remaining quota.
 		if !st.HasLive {
 			klog.V(MyV).InfoS("plan completion: workload scaled down or deleted; ignoring remaining quota",
@@ -662,6 +690,9 @@ func (pl *SharedState) checkQuotasSatisfied(ap *ActivePlan, workloadStatus map[s
 //	   if a pinned pod was deleted or is terminating, we treat it as "no longer required".
 //	B) all per-workload per-node quotas must be consumed, except for workloads that
 //	   have been scaled down / deleted (no live pods) or have no pending pods left.
+//	   While the workload exists, the exception applies only once its evicted pods
+//	   are recreated: live pods back at the count from plan start, capped by the
+//	   workload's current replica count.
 func (pl *SharedState) isPlanCompleted(ap *ActivePlan) (bool, error) {
 	if isPlanCompletedHook != nil {
 		return isPlanCompletedHook(pl, ap)
