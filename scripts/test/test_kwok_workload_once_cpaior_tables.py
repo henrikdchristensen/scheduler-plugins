@@ -60,7 +60,7 @@ def write_results(path: Path, solver: str, *, missing: bool = False, duplicate: 
         writer.writerows(rows)
 
 
-def write_raw_results(root: Path, *, seed_mismatch: bool = False) -> None:
+def write_raw_results(root: Path, *, seed_mismatch: bool = False, gurobi: bool = False) -> None:
     def write_raw(folder: Path, best: str, status: str, duration: int, running: int, offset: int = 0) -> None:
         folder.mkdir(parents=True)
         with (folder / "results.csv").open("w", encoding="utf-8", newline="") as stream:
@@ -79,6 +79,8 @@ def write_raw_results(root: Path, *, seed_mismatch: bool = False) -> None:
             write_raw(root / "default" / name, "", "", 0, 14)
         write_raw(root / "plugin" / "cp-sat" / job, "", "UNKNOWN", 20, 14)
         write_raw(root / "plugin" / "cplex" / job, "OPTIMAL", "OPTIMAL", 10, 15, int(seed_mismatch))
+        if gurobi:
+            write_raw(root / "plugin" / "gurobi" / job, "FEASIBLE", "FEASIBLE", 9, 16)
 
 
 @pytest.mark.usefixtures("small_benchmark")
@@ -156,6 +158,22 @@ def test_rejects_incomplete_gurobi_csv(tmp_path: Path, capsys: pytest.CaptureFix
     assert exc.value.code == 1
     assert "results_per_combo_gurobi.csv: 1 missing configurations" in capsys.readouterr().err
     assert not (tmp_path / "tables").exists()
+
+
+@pytest.mark.usefixtures("small_benchmark")
+def test_gurobi_primary_keeps_cplex_in_appendix(tmp_path: Path) -> None:
+    for solver in (*tables.SOLVERS, "gurobi"):
+        write_results(tmp_path / f"results_per_combo_{solver}.csv", solver)
+    write_raw_results(tmp_path, gurobi=True)
+    out = tmp_path / "paper"
+    tables.main(["--results-root", str(tmp_path), "--out-dir", str(out), "--mip", "gurobi"])
+    for name in ("tab_outcomes", "tab_no_gain"):
+        text = (out / f"{name}.tex").read_text(encoding="utf-8")
+        assert "Gurobi" in text and "CPLEX" not in text
+    paired = (out / "tab_paired.tex").read_text(encoding="utf-8")
+    assert r"1 & All & 0 & 400 & 0" in paired
+    appendix = (out / "tab_mip_comparison.tex").read_text(encoding="utf-8")
+    assert r"1 & 50.0 & 50.0 & 0.50 & 18.8 & 18.8 & 0.50 & 400 & 0 & 0 \\" in appendix
 
 
 @pytest.mark.timeout(15)

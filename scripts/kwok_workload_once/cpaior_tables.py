@@ -203,7 +203,8 @@ def nodes_table(data: Dataset) -> list[str]:
         tex_row("", "", *(rf"\multicolumn{{{count}}}{{c}}{{{label}}}" for label in
                           ("Improved", "Proven opt.", "Time (s)", r"More impr.$^\ddagger$"))),
         cmidrules(3, count, 4),
-        tex_row("Nodes", "Budget (s)", *(tuple(SHORT_LABELS[solver] for solver in data) * 4)),
+        tex_row("Nodes", "Budget (s)", *(("CP", "MIP") if count == 2 else
+                                         tuple(SHORT_LABELS[solver] for solver in data)) * 4),
     ]
     for nodes in NODES:
         rows.append(r"\midrule")
@@ -330,12 +331,15 @@ def tex_pvalue(value: float) -> str:
     return rf"${mantissa}\times10^{{{int(exponent)}}}$"
 
 
-def appendix_tables(root: Path) -> list[tuple[str, list[str]]]:
+def appendix_tables(root: Path, mip_solver: str = "cplex",
+                    cplex_comparison: Dataset | None = None) -> list[tuple[str, list[str]]]:
     csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
+    solvers = ("cp_sat", mip_solver)
     gains = defaultdict(Counter)
     placements = defaultdict(Counter)
     improvements = defaultdict(Counter)
     tests = defaultdict(Counter)
+    mip_placements: dict[int, Counter[int]] = defaultdict(Counter)
     categories = {(status, enforced) for _, status, enforced in NO_GAIN_ROWS}
     for nodes, density, priorities, load in product(NODES, PODS_PER_NODE, PRIORITIES, LOADS):
         config = f"nodes{nodes}_pods{nodes * density}_prio{priorities}_util{load:03d}"
@@ -343,13 +347,19 @@ def appendix_tables(root: Path) -> list[tuple[str, list[str]]]:
         for budget in BUDGETS:
             job = f"{config}_timeout{budget:02d}"
             cp, mip = (load_seed_results(root / "plugin" / solver.replace("_", "-") / job / "results.csv")
-                       for solver in SOLVERS)
+                       for solver in solvers)
             if not cp.keys() == mip.keys() == reference.keys():
-                raise ValueError(f"{job}: seed sets differ between CP-SAT, CPLEX, and the default scheduler")
+                raise ValueError(f"{job}: seed sets differ between CP-SAT, {LABELS[mip_solver]}, and the default scheduler")
+            if cplex_comparison is not None:
+                cplex = load_seed_results(root / "plugin" / "cplex" / job / "results.csv")
+                if cplex.keys() != mip.keys():
+                    raise ValueError(f"{job}: seed sets differ between CPLEX and Gurobi")
+                mip_placements[budget].update(compare(mip[seed].placement, run.placement)
+                                              for seed, run in cplex.items())
             for seed, default in reference.items():
                 cp_run, mip_run = cp[seed], mip[seed]
                 improved = []
-                for solver, run in zip(SOLVERS, (cp_run, mip_run)):
+                for solver, run in zip(solvers, (cp_run, mip_run)):
                     included = bool(default.pending or run.pending)
                     better = included and run.best in {"OPTIMAL", "FEASIBLE"} and run.placement > default.placement
                     improved.append(better)
@@ -374,13 +384,13 @@ def appendix_tables(root: Path) -> list[tuple[str, list[str]]]:
     if len(tests) != 4 * len(BUDGETS) * (1 + len(NODES)):
         raise ValueError("incomplete sign-test family; check for missing paired call times")
     adjusted = holm_sign_tests(tests)
-    columns = [gains[solver, budget] for solver in SOLVERS for budget in BUDGETS]
+    columns = [gains[solver, budget] for solver in solvers for budget in BUDGETS]
     no_gain = [
-        r"\begin{tabular}{@{}l" + grouped_columns(len(SOLVERS), 3, 10) + r"@{}}",
+        r"\begin{tabular}{@{}l" + grouped_columns(len(solvers), 3, 10) + r"@{}}",
         r"\toprule",
-        tex_row("", *(rf"\multicolumn{{3}}{{c}}{{{LABELS[solver]}}}" for solver in SOLVERS)),
-        cmidrules(2, 3, len(SOLVERS)),
-        tex_row("Time budget (s)", *map(str, BUDGETS * len(SOLVERS))),
+        tex_row("", *(rf"\multicolumn{{3}}{{c}}{{{LABELS[solver]}}}" for solver in solvers)),
+        cmidrules(2, 3, len(solvers)),
+        tex_row("Time budget (s)", *map(str, BUDGETS * len(solvers))),
         r"\midrule",
     ]
     no_gain.extend(tex_row(label, *(tex_count(column[status, enforced]) for column in columns))
@@ -400,7 +410,29 @@ def appendix_tables(root: Path) -> list[tuple[str, list[str]]]:
                                   *(tex_count(placement[direction]) for direction in (-1, 1, 0)),
                                   tex_pvalue(adjusted["placement", budget, group]),
                                   tex_count(improvement[-1]), tex_count(improvement[1])))
-    return [("tab_no_gain", no_gain), ("tab_paired", paired)]
+    output = [("tab_no_gain", no_gain), ("tab_paired", paired)]
+    if cplex_comparison is not None:
+        output.append(("tab_mip_comparison", mip_comparison_table(cplex_comparison, mip_placements)))
+    return output
+
+
+def mip_comparison_table(data: Dataset, placements: dict[int, Counter[int]]) -> list[str]:
+    rows = [
+        r"\begin{tabular}{@{}r rrr rrr rrr@{}}",
+        r"\toprule",
+        tex_row("", r"\multicolumn{3}{c}{Gurobi}", r"\multicolumn{3}{c}{CPLEX}",
+                r"\multicolumn{3}{c}{Paired placements}"),
+        cmidrules(2, 3, 3),
+        tex_row("Budget", *("Impr.", "Opt.", "Time") * 2, "Gurobi", "CPLEX", "Ties"),
+        r"\midrule",
+    ]
+    for budget in BUDGETS:
+        groups = [aggregate([row for config, row in data[solver].items() if config.budget == budget])
+                  for solver in ("gurobi", "cplex")]
+        summary = [cell for c in groups for cell in
+                   (pct(c.improved, c.included), pct(c.proven, c.included), seconds(c.mean_seconds))]
+        rows.append(tex_row(str(budget), *summary, *(tex_count(placements[budget][w]) for w in (1, -1, 0))))
+    return rows
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -412,15 +444,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--out-dir", type=Path, help="directory for the LaTeX tables (default: RESULTS_ROOT/tables/cpaior)")
     parser.add_argument("--figures", action="store_true", help="also generate the two paper figures (requires Matplotlib)")
     parser.add_argument("--figures-dir", type=Path, help="figure directory (default: RESULTS_ROOT/figures/cpaior)")
+    parser.add_argument("--mip", choices=("cplex", "gurobi"),
+                        help="select the sole MIP comparator for the paper; Gurobi also generates the CPLEX appendix")
     args = parser.parse_args(argv)
     if args.figures_dir is not None and not args.figures:
         parser.error("--figures-dir requires --figures")
     try:
-        data = {solver: load_results(args.results_root / f"results_per_combo_{solver}.csv") for solver in SOLVERS}
+        solvers = ("cp_sat", args.mip) if args.mip else SOLVERS
+        data = {solver: load_results(args.results_root / f"results_per_combo_{solver}.csv") for solver in solvers}
         gurobi_csv = args.results_root / "results_per_combo_gurobi.csv"
-        if gurobi_csv.exists():
+        if args.mip is None and gurobi_csv.exists():
             data["gurobi"] = load_results(gurobi_csv)
-        appendix = appendix_tables(args.results_root)
+        comparison = None
+        if args.mip == "gurobi":
+            comparison = {"gurobi": data["gurobi"],
+                          "cplex": load_results(args.results_root / "results_per_combo_cplex.csv")}
+        appendix = appendix_tables(args.results_root, args.mip or "cplex", comparison)
         if args.figures:
             from scripts.kwok_workload_once import cpaior_figures
 
@@ -431,7 +470,7 @@ def main(argv: list[str] | None = None) -> None:
                            ("tab_load_ppn", params_table(data)), *appendix):
             path = out_dir / f"{name}.tex"
             body = (*rows, *END)
-            if "gurobi" in data and name not in {"tab_no_gain", "tab_paired"}:
+            if len(data) == 3 and name not in {"tab_no_gain", "tab_paired"}:
                 body = (r"\resizebox{\linewidth}{!}{%", *body, "}")
             path.write_text("\n".join((COMMENT, *body, "")), encoding="utf-8")
             print(f"[ok] wrote {path}")
