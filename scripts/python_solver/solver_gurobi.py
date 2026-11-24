@@ -3,6 +3,7 @@
 """
 This solver uses Gurobi's Python API (gurobipy) for mixed-integer programming. It uses the same optimization approach as the CP-SAT solver.
 It can be used by setting SOLVER_TYPE=gurobi or SOLVER_PATH to point to this script.
+Unavailable or non-finite objective values and bounds are reported as JSON null.
 
 Requirements:
     pip install gurobipy
@@ -14,6 +15,7 @@ import os
 import time
 import sys
 import json
+from math import isfinite
 from dataclasses import dataclass
 from typing import Optional, Final
 
@@ -692,6 +694,10 @@ class GurobiSolver:
             except Exception:
                 bound_val = None
 
+            if obj_val is not None and not isfinite(obj_val):
+                obj_val = None
+            if bound_val is not None and not isfinite(bound_val):
+                bound_val = None
             gap = relative_gap(sense, obj_val, bound_val)
 
             # Convert gap to string to match expected JSON schema
@@ -967,7 +973,7 @@ def main():
         if out.get('error'):
             sys.stderr.write(f"[solver_gurobi] error: {out.get('error')}\n")
         sys.stderr.flush()
-        print(json.dumps(out))
+        print(json.dumps(out, allow_nan=False))
     except Exception as e:
         import traceback
         sys.stderr.write(f"[solver_gurobi] EXCEPTION: {e}\n")
